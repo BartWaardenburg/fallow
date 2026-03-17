@@ -499,10 +499,10 @@ fn export_matches(export: &ExportName, import: &ImportedName) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
     use crate::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
     use crate::extract::{ExportName, ImportInfo, ImportedName};
     use crate::resolve::{ResolveResult, ResolvedImport, ResolvedModule, ResolvedReExport};
+    use std::path::PathBuf;
 
     #[test]
     fn export_matches_named_same() {
@@ -565,8 +565,16 @@ mod tests {
     fn build_simple_graph() -> ModuleGraph {
         // Two files: entry.ts imports foo from utils.ts
         let files = vec![
-            DiscoveredFile { id: FileId(0), path: PathBuf::from("/project/src/entry.ts"), size_bytes: 100 },
-            DiscoveredFile { id: FileId(1), path: PathBuf::from("/project/src/utils.ts"), size_bytes: 50 },
+            DiscoveredFile {
+                id: FileId(0),
+                path: PathBuf::from("/project/src/entry.ts"),
+                size_bytes: 100,
+            },
+            DiscoveredFile {
+                id: FileId(1),
+                path: PathBuf::from("/project/src/utils.ts"),
+                size_bytes: 50,
+            },
         ];
 
         let entry_points = vec![EntryPoint {
@@ -654,16 +662,30 @@ mod tests {
     fn graph_export_has_reference() {
         let graph = build_simple_graph();
         let utils = &graph.modules[1];
-        let foo_export = utils.exports.iter().find(|e| e.name.to_string() == "foo").unwrap();
-        assert!(!foo_export.references.is_empty(), "foo should have references");
+        let foo_export = utils
+            .exports
+            .iter()
+            .find(|e| e.name.to_string() == "foo")
+            .unwrap();
+        assert!(
+            !foo_export.references.is_empty(),
+            "foo should have references"
+        );
     }
 
     #[test]
     fn graph_unused_export_no_reference() {
         let graph = build_simple_graph();
         let utils = &graph.modules[1];
-        let bar_export = utils.exports.iter().find(|e| e.name.to_string() == "bar").unwrap();
-        assert!(bar_export.references.is_empty(), "bar should have no references");
+        let bar_export = utils
+            .exports
+            .iter()
+            .find(|e| e.name.to_string() == "bar")
+            .unwrap();
+        assert!(
+            bar_export.references.is_empty(),
+            "bar should have no references"
+        );
     }
 
     #[test]
@@ -676,8 +698,16 @@ mod tests {
     #[test]
     fn graph_has_namespace_import() {
         let files = vec![
-            DiscoveredFile { id: FileId(0), path: PathBuf::from("/project/entry.ts"), size_bytes: 100 },
-            DiscoveredFile { id: FileId(1), path: PathBuf::from("/project/utils.ts"), size_bytes: 50 },
+            DiscoveredFile {
+                id: FileId(0),
+                path: PathBuf::from("/project/entry.ts"),
+                size_bytes: 100,
+            },
+            DiscoveredFile {
+                id: FileId(1),
+                path: PathBuf::from("/project/utils.ts"),
+                size_bytes: 50,
+            },
         ];
 
         let entry_points = vec![EntryPoint {
@@ -708,15 +738,13 @@ mod tests {
             ResolvedModule {
                 file_id: FileId(1),
                 path: PathBuf::from("/project/utils.ts"),
-                exports: vec![
-                    crate::extract::ExportInfo {
-                        name: ExportName::Named("foo".to_string()),
-                        local_name: Some("foo".to_string()),
-                        is_type_only: false,
-                        span: oxc_span::Span::new(0, 20),
-                        members: vec![],
-                    },
-                ],
+                exports: vec![crate::extract::ExportInfo {
+                    name: ExportName::Named("foo".to_string()),
+                    local_name: Some("foo".to_string()),
+                    is_type_only: false,
+                    span: oxc_span::Span::new(0, 20),
+                    members: vec![],
+                }],
                 re_exports: vec![],
                 resolved_imports: vec![],
                 resolved_dynamic_imports: vec![],
@@ -726,7 +754,10 @@ mod tests {
         ];
 
         let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
-        assert!(graph.has_namespace_import(FileId(1)), "utils should have namespace import");
+        assert!(
+            graph.has_namespace_import(FileId(1)),
+            "utils should have namespace import"
+        );
     }
 
     #[test]
@@ -739,9 +770,21 @@ mod tests {
     fn graph_unreachable_module() {
         // Three files: entry imports utils, orphan is not imported
         let files = vec![
-            DiscoveredFile { id: FileId(0), path: PathBuf::from("/project/entry.ts"), size_bytes: 100 },
-            DiscoveredFile { id: FileId(1), path: PathBuf::from("/project/utils.ts"), size_bytes: 50 },
-            DiscoveredFile { id: FileId(2), path: PathBuf::from("/project/orphan.ts"), size_bytes: 30 },
+            DiscoveredFile {
+                id: FileId(0),
+                path: PathBuf::from("/project/entry.ts"),
+                size_bytes: 100,
+            },
+            DiscoveredFile {
+                id: FileId(1),
+                path: PathBuf::from("/project/utils.ts"),
+                size_bytes: 50,
+            },
+            DiscoveredFile {
+                id: FileId(2),
+                path: PathBuf::from("/project/orphan.ts"),
+                size_bytes: 30,
+            },
         ];
 
         let entry_points = vec![EntryPoint {
@@ -807,53 +850,56 @@ mod tests {
 
         assert!(graph.modules[0].is_reachable, "entry should be reachable");
         assert!(graph.modules[1].is_reachable, "utils should be reachable");
-        assert!(!graph.modules[2].is_reachable, "orphan should NOT be reachable");
+        assert!(
+            !graph.modules[2].is_reachable,
+            "orphan should NOT be reachable"
+        );
     }
 
     #[test]
     fn graph_package_usage_tracked() {
-        let files = vec![
-            DiscoveredFile { id: FileId(0), path: PathBuf::from("/project/entry.ts"), size_bytes: 100 },
-        ];
+        let files = vec![DiscoveredFile {
+            id: FileId(0),
+            path: PathBuf::from("/project/entry.ts"),
+            size_bytes: 100,
+        }];
 
         let entry_points = vec![EntryPoint {
             path: PathBuf::from("/project/entry.ts"),
             source: EntryPointSource::PackageJsonMain,
         }];
 
-        let resolved_modules = vec![
-            ResolvedModule {
-                file_id: FileId(0),
-                path: PathBuf::from("/project/entry.ts"),
-                exports: vec![],
-                re_exports: vec![],
-                resolved_imports: vec![
-                    ResolvedImport {
-                        info: ImportInfo {
-                            source: "react".to_string(),
-                            imported_name: ImportedName::Default,
-                            local_name: "React".to_string(),
-                            is_type_only: false,
-                            span: oxc_span::Span::new(0, 10),
-                        },
-                        target: ResolveResult::NpmPackage("react".to_string()),
+        let resolved_modules = vec![ResolvedModule {
+            file_id: FileId(0),
+            path: PathBuf::from("/project/entry.ts"),
+            exports: vec![],
+            re_exports: vec![],
+            resolved_imports: vec![
+                ResolvedImport {
+                    info: ImportInfo {
+                        source: "react".to_string(),
+                        imported_name: ImportedName::Default,
+                        local_name: "React".to_string(),
+                        is_type_only: false,
+                        span: oxc_span::Span::new(0, 10),
                     },
-                    ResolvedImport {
-                        info: ImportInfo {
-                            source: "lodash".to_string(),
-                            imported_name: ImportedName::Named("merge".to_string()),
-                            local_name: "merge".to_string(),
-                            is_type_only: false,
-                            span: oxc_span::Span::new(15, 30),
-                        },
-                        target: ResolveResult::NpmPackage("lodash".to_string()),
+                    target: ResolveResult::NpmPackage("react".to_string()),
+                },
+                ResolvedImport {
+                    info: ImportInfo {
+                        source: "lodash".to_string(),
+                        imported_name: ImportedName::Named("merge".to_string()),
+                        local_name: "merge".to_string(),
+                        is_type_only: false,
+                        span: oxc_span::Span::new(15, 30),
                     },
-                ],
-                resolved_dynamic_imports: vec![],
-                member_accesses: vec![],
-                has_cjs_exports: false,
-            },
-        ];
+                    target: ResolveResult::NpmPackage("lodash".to_string()),
+                },
+            ],
+            resolved_dynamic_imports: vec![],
+            member_accesses: vec![],
+            has_cjs_exports: false,
+        }];
 
         let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
         assert!(graph.package_usage.contains_key("react"));
@@ -865,9 +911,21 @@ mod tests {
     fn graph_re_export_chain_propagates_references() {
         // entry.ts -> barrel.ts -re-exports-> source.ts
         let files = vec![
-            DiscoveredFile { id: FileId(0), path: PathBuf::from("/project/entry.ts"), size_bytes: 100 },
-            DiscoveredFile { id: FileId(1), path: PathBuf::from("/project/barrel.ts"), size_bytes: 50 },
-            DiscoveredFile { id: FileId(2), path: PathBuf::from("/project/source.ts"), size_bytes: 50 },
+            DiscoveredFile {
+                id: FileId(0),
+                path: PathBuf::from("/project/entry.ts"),
+                size_bytes: 100,
+            },
+            DiscoveredFile {
+                id: FileId(1),
+                path: PathBuf::from("/project/barrel.ts"),
+                size_bytes: 50,
+            },
+            DiscoveredFile {
+                id: FileId(2),
+                path: PathBuf::from("/project/source.ts"),
+                size_bytes: 50,
+            },
         ];
 
         let entry_points = vec![EntryPoint {
@@ -900,15 +958,13 @@ mod tests {
             ResolvedModule {
                 file_id: FileId(1),
                 path: PathBuf::from("/project/barrel.ts"),
-                exports: vec![
-                    crate::extract::ExportInfo {
-                        name: ExportName::Named("foo".to_string()),
-                        local_name: Some("foo".to_string()),
-                        is_type_only: false,
-                        span: oxc_span::Span::new(0, 20),
-                        members: vec![],
-                    },
-                ],
+                exports: vec![crate::extract::ExportInfo {
+                    name: ExportName::Named("foo".to_string()),
+                    local_name: Some("foo".to_string()),
+                    is_type_only: false,
+                    span: oxc_span::Span::new(0, 20),
+                    members: vec![],
+                }],
                 re_exports: vec![ResolvedReExport {
                     info: crate::extract::ReExportInfo {
                         source: "./source".to_string(),
@@ -927,15 +983,13 @@ mod tests {
             ResolvedModule {
                 file_id: FileId(2),
                 path: PathBuf::from("/project/source.ts"),
-                exports: vec![
-                    crate::extract::ExportInfo {
-                        name: ExportName::Named("foo".to_string()),
-                        local_name: Some("foo".to_string()),
-                        is_type_only: false,
-                        span: oxc_span::Span::new(0, 20),
-                        members: vec![],
-                    },
-                ],
+                exports: vec![crate::extract::ExportInfo {
+                    name: ExportName::Named("foo".to_string()),
+                    local_name: Some("foo".to_string()),
+                    is_type_only: false,
+                    span: oxc_span::Span::new(0, 20),
+                    members: vec![],
+                }],
                 re_exports: vec![],
                 resolved_imports: vec![],
                 resolved_dynamic_imports: vec![],
@@ -948,8 +1002,15 @@ mod tests {
 
         // The source module's "foo" export should have references propagated through the barrel
         let source_module = &graph.modules[2];
-        let foo_export = source_module.exports.iter().find(|e| e.name.to_string() == "foo").unwrap();
-        assert!(!foo_export.references.is_empty(), "source foo should have propagated references through barrel re-export chain");
+        let foo_export = source_module
+            .exports
+            .iter()
+            .find(|e| e.name.to_string() == "foo")
+            .unwrap();
+        assert!(
+            !foo_export.references.is_empty(),
+            "source foo should have propagated references through barrel re-export chain"
+        );
     }
 
     #[test]
@@ -961,27 +1022,27 @@ mod tests {
 
     #[test]
     fn graph_cjs_exports_tracked() {
-        let files = vec![
-            DiscoveredFile { id: FileId(0), path: PathBuf::from("/project/entry.ts"), size_bytes: 100 },
-        ];
+        let files = vec![DiscoveredFile {
+            id: FileId(0),
+            path: PathBuf::from("/project/entry.ts"),
+            size_bytes: 100,
+        }];
 
         let entry_points = vec![EntryPoint {
             path: PathBuf::from("/project/entry.ts"),
             source: EntryPointSource::PackageJsonMain,
         }];
 
-        let resolved_modules = vec![
-            ResolvedModule {
-                file_id: FileId(0),
-                path: PathBuf::from("/project/entry.ts"),
-                exports: vec![],
-                re_exports: vec![],
-                resolved_imports: vec![],
-                resolved_dynamic_imports: vec![],
-                member_accesses: vec![],
-                has_cjs_exports: true,
-            },
-        ];
+        let resolved_modules = vec![ResolvedModule {
+            file_id: FileId(0),
+            path: PathBuf::from("/project/entry.ts"),
+            exports: vec![],
+            re_exports: vec![],
+            resolved_imports: vec![],
+            resolved_dynamic_imports: vec![],
+            member_accesses: vec![],
+            has_cjs_exports: true,
+        }];
 
         let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
         assert!(graph.modules[0].has_cjs_exports);

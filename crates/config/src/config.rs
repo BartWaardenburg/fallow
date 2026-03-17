@@ -413,7 +413,9 @@ ignore_dependencies = ["autoprefixer", "postcss"]
 
     #[test]
     fn package_json_entry_points_bin_object() {
-        let pkg: PackageJson = serde_json::from_str(r#"{"bin": {"cli": "bin/cli.js", "serve": "bin/serve.js"}}"#).unwrap();
+        let pkg: PackageJson =
+            serde_json::from_str(r#"{"bin": {"cli": "bin/cli.js", "serve": "bin/serve.js"}}"#)
+                .unwrap();
         let entries = pkg.entry_points();
         assert!(entries.contains(&"bin/cli.js".to_string()));
         assert!(entries.contains(&"bin/serve.js".to_string()));
@@ -428,7 +430,10 @@ ignore_dependencies = ["autoprefixer", "postcss"]
 
     #[test]
     fn package_json_entry_points_exports_object() {
-        let pkg: PackageJson = serde_json::from_str(r#"{"exports": {".": {"import": "./dist/index.mjs", "require": "./dist/index.cjs"}}}"#).unwrap();
+        let pkg: PackageJson = serde_json::from_str(
+            r#"{"exports": {".": {"import": "./dist/index.mjs", "require": "./dist/index.cjs"}}}"#,
+        )
+        .unwrap();
         let entries = pkg.entry_points();
         assert!(entries.contains(&"./dist/index.mjs".to_string()));
         assert!(entries.contains(&"./dist/index.cjs".to_string()));
@@ -436,11 +441,14 @@ ignore_dependencies = ["autoprefixer", "postcss"]
 
     #[test]
     fn package_json_dependency_names() {
-        let pkg: PackageJson = serde_json::from_str(r#"{
+        let pkg: PackageJson = serde_json::from_str(
+            r#"{
             "dependencies": {"react": "^18", "lodash": "^4"},
             "devDependencies": {"typescript": "^5"},
             "peerDependencies": {"react-dom": "^18"}
-        }"#).unwrap();
+        }"#,
+        )
+        .unwrap();
 
         let all = pkg.all_dependency_names();
         assert!(all.contains(&"react".to_string()));

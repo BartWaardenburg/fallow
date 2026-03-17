@@ -141,16 +141,61 @@ mod tests {
     #[test]
     fn results_total_counts_all_types() {
         let mut results = AnalysisResults::default();
-        results.unused_files.push(UnusedFile { path: PathBuf::from("a.ts") });
-        results.unused_exports.push(UnusedExport { path: PathBuf::from("b.ts"), export_name: "x".to_string(), is_type_only: false, line: 1, col: 0 });
-        results.unused_types.push(UnusedExport { path: PathBuf::from("c.ts"), export_name: "T".to_string(), is_type_only: true, line: 1, col: 0 });
-        results.unused_dependencies.push(UnusedDependency { package_name: "dep".to_string(), location: DependencyLocation::Dependencies });
-        results.unused_dev_dependencies.push(UnusedDependency { package_name: "dev".to_string(), location: DependencyLocation::DevDependencies });
-        results.unused_enum_members.push(UnusedMember { path: PathBuf::from("d.ts"), parent_name: "E".to_string(), member_name: "A".to_string(), kind: "enum_member".to_string(), line: 1, col: 0 });
-        results.unused_class_members.push(UnusedMember { path: PathBuf::from("e.ts"), parent_name: "C".to_string(), member_name: "m".to_string(), kind: "class_method".to_string(), line: 1, col: 0 });
-        results.unresolved_imports.push(UnresolvedImport { path: PathBuf::from("f.ts"), specifier: "./missing".to_string(), line: 1, col: 0 });
-        results.unlisted_dependencies.push(UnlistedDependency { package_name: "unlisted".to_string(), imported_from: vec![PathBuf::from("g.ts")] });
-        results.duplicate_exports.push(DuplicateExport { export_name: "dup".to_string(), locations: vec![PathBuf::from("h.ts"), PathBuf::from("i.ts")] });
+        results.unused_files.push(UnusedFile {
+            path: PathBuf::from("a.ts"),
+        });
+        results.unused_exports.push(UnusedExport {
+            path: PathBuf::from("b.ts"),
+            export_name: "x".to_string(),
+            is_type_only: false,
+            line: 1,
+            col: 0,
+        });
+        results.unused_types.push(UnusedExport {
+            path: PathBuf::from("c.ts"),
+            export_name: "T".to_string(),
+            is_type_only: true,
+            line: 1,
+            col: 0,
+        });
+        results.unused_dependencies.push(UnusedDependency {
+            package_name: "dep".to_string(),
+            location: DependencyLocation::Dependencies,
+        });
+        results.unused_dev_dependencies.push(UnusedDependency {
+            package_name: "dev".to_string(),
+            location: DependencyLocation::DevDependencies,
+        });
+        results.unused_enum_members.push(UnusedMember {
+            path: PathBuf::from("d.ts"),
+            parent_name: "E".to_string(),
+            member_name: "A".to_string(),
+            kind: "enum_member".to_string(),
+            line: 1,
+            col: 0,
+        });
+        results.unused_class_members.push(UnusedMember {
+            path: PathBuf::from("e.ts"),
+            parent_name: "C".to_string(),
+            member_name: "m".to_string(),
+            kind: "class_method".to_string(),
+            line: 1,
+            col: 0,
+        });
+        results.unresolved_imports.push(UnresolvedImport {
+            path: PathBuf::from("f.ts"),
+            specifier: "./missing".to_string(),
+            line: 1,
+            col: 0,
+        });
+        results.unlisted_dependencies.push(UnlistedDependency {
+            package_name: "unlisted".to_string(),
+            imported_from: vec![PathBuf::from("g.ts")],
+        });
+        results.duplicate_exports.push(DuplicateExport {
+            export_name: "dup".to_string(),
+            locations: vec![PathBuf::from("h.ts"), PathBuf::from("i.ts")],
+        });
 
         assert_eq!(results.total_issues(), 10);
         assert!(results.has_issues());

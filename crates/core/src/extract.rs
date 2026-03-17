@@ -754,15 +754,24 @@ mod tests {
         // Oxc orders: named specifiers first, then default
         assert_eq!(info.imports[0].imported_name, ImportedName::Default);
         assert_eq!(info.imports[0].local_name, "React");
-        assert_eq!(info.imports[1].imported_name, ImportedName::Named("useState".to_string()));
-        assert_eq!(info.imports[2].imported_name, ImportedName::Named("useEffect".to_string()));
+        assert_eq!(
+            info.imports[1].imported_name,
+            ImportedName::Named("useState".to_string())
+        );
+        assert_eq!(
+            info.imports[2].imported_name,
+            ImportedName::Named("useEffect".to_string())
+        );
     }
 
     #[test]
     fn extracts_import_with_alias() {
         let info = parse_source("import { foo as bar } from './utils';");
         assert_eq!(info.imports.len(), 1);
-        assert_eq!(info.imports[0].imported_name, ImportedName::Named("foo".to_string()));
+        assert_eq!(
+            info.imports[0].imported_name,
+            ImportedName::Named("foo".to_string())
+        );
         assert_eq!(info.imports[0].local_name, "bar");
     }
 
@@ -793,7 +802,10 @@ mod tests {
     fn extracts_export_class_declaration() {
         let info = parse_source("export class MyService { name: string = ''; }");
         assert_eq!(info.exports.len(), 1);
-        assert_eq!(info.exports[0].name, ExportName::Named("MyService".to_string()));
+        assert_eq!(
+            info.exports[0].name,
+            ExportName::Named("MyService".to_string())
+        );
     }
 
     #[test]
@@ -801,8 +813,15 @@ mod tests {
         let info = parse_source("export class Foo { constructor() {} greet() {} }");
         assert_eq!(info.exports.len(), 1);
         // Members should NOT include constructor
-        let members: Vec<&str> = info.exports[0].members.iter().map(|m| m.name.as_str()).collect();
-        assert!(!members.contains(&"constructor"), "constructor should be excluded from members");
+        let members: Vec<&str> = info.exports[0]
+            .members
+            .iter()
+            .map(|m| m.name.as_str())
+            .collect();
+        assert!(
+            !members.contains(&"constructor"),
+            "constructor should be excluded from members"
+        );
         assert!(members.contains(&"greet"), "greet should be included");
     }
 
@@ -810,7 +829,10 @@ mod tests {
     fn extracts_ts_enum_declaration() {
         let info = parse_source("export enum Direction { Up, Down, Left, Right }");
         assert_eq!(info.exports.len(), 1);
-        assert_eq!(info.exports[0].name, ExportName::Named("Direction".to_string()));
+        assert_eq!(
+            info.exports[0].name,
+            ExportName::Named("Direction".to_string())
+        );
         assert_eq!(info.exports[0].members.len(), 4);
         assert_eq!(info.exports[0].members[0].kind, MemberKind::EnumMember);
     }
@@ -842,7 +864,10 @@ mod tests {
         let info = parse_source("export const [first, second] = [1, 2];");
         assert_eq!(info.exports.len(), 2);
         assert_eq!(info.exports[0].name, ExportName::Named("first".to_string()));
-        assert_eq!(info.exports[1].name, ExportName::Named("second".to_string()));
+        assert_eq!(
+            info.exports[1].name,
+            ExportName::Named("second".to_string())
+        );
     }
 
     #[test]
@@ -884,7 +909,8 @@ mod tests {
 
     #[test]
     fn multiple_require_calls() {
-        let info = parse_source("const a = require('a'); const b = require('b'); const c = require('c');");
+        let info =
+            parse_source("const a = require('a'); const b = require('b'); const c = require('c');");
         assert_eq!(info.require_calls.len(), 3);
     }
 

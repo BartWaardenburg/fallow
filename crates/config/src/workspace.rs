@@ -433,12 +433,14 @@ mod tests {
 
     #[test]
     fn package_json_entry_points_combined() {
-        let pkg: PackageJson = serde_json::from_str(r#"{
+        let pkg: PackageJson = serde_json::from_str(
+            r#"{
             "main": "dist/index.js",
             "module": "dist/index.mjs",
             "types": "dist/index.d.ts",
             "typings": "dist/types.d.ts"
-        }"#)
+        }"#,
+        )
         .unwrap();
         let entries = pkg.entry_points();
         assert_eq!(entries.len(), 4);
@@ -450,7 +452,8 @@ mod tests {
 
     #[test]
     fn package_json_exports_nested() {
-        let pkg: PackageJson = serde_json::from_str(r#"{
+        let pkg: PackageJson = serde_json::from_str(
+            r#"{
             "exports": {
                 ".": {
                     "import": "./dist/index.mjs",
@@ -460,7 +463,8 @@ mod tests {
                     "import": "./dist/utils.mjs"
                 }
             }
-        }"#)
+        }"#,
+        )
         .unwrap();
         let entries = pkg.entry_points();
         assert!(entries.contains(&"./dist/index.mjs".to_string()));
@@ -470,11 +474,13 @@ mod tests {
 
     #[test]
     fn package_json_exports_array() {
-        let pkg: PackageJson = serde_json::from_str(r#"{
+        let pkg: PackageJson = serde_json::from_str(
+            r#"{
             "exports": {
                 ".": ["./dist/index.mjs", "./dist/index.cjs"]
             }
-        }"#)
+        }"#,
+        )
         .unwrap();
         let entries = pkg.entry_points();
         assert!(entries.contains(&"./dist/index.mjs".to_string()));
@@ -483,11 +489,13 @@ mod tests {
 
     #[test]
     fn extract_exports_ignores_non_relative() {
-        let pkg: PackageJson = serde_json::from_str(r#"{
+        let pkg: PackageJson = serde_json::from_str(
+            r#"{
             "exports": {
                 ".": "not-a-relative-path"
             }
-        }"#)
+        }"#,
+        )
         .unwrap();
         let entries = pkg.entry_points();
         // "not-a-relative-path" doesn't start with "./" so should be excluded

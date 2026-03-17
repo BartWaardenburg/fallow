@@ -99,7 +99,13 @@ pub fn resolve_all_imports(
                         is_type_only: false,
                         span: imp.span,
                     },
-                    target: resolve_specifier_fast(specifier_kind(&imp.source), file_path, &imp.source, &path_to_id, &resolver),
+                    target: resolve_specifier_fast(
+                        specifier_kind(&imp.source),
+                        file_path,
+                        &imp.source,
+                        &path_to_id,
+                        &resolver,
+                    ),
                 })
                 .collect();
 
@@ -124,7 +130,13 @@ pub fn resolve_all_imports(
                         is_type_only: false,
                         span: req.span,
                     },
-                    target: resolve_specifier_fast(specifier_kind(&req.source), file_path, &req.source, &path_to_id, &resolver),
+                    target: resolve_specifier_fast(
+                        specifier_kind(&req.source),
+                        file_path,
+                        &req.source,
+                        &path_to_id,
+                        &resolver,
+                    ),
                 })
                 .collect();
 
@@ -217,9 +229,7 @@ fn resolve_specifier_fast(
             // Try resolver first for bare specifiers that might resolve to local files
             resolve_specifier(resolver, from_file, specifier, path_to_id)
         }
-        SpecifierKind::Relative => {
-            resolve_specifier(resolver, from_file, specifier, path_to_id)
-        }
+        SpecifierKind::Relative => resolve_specifier(resolver, from_file, specifier, path_to_id),
     }
 }
 

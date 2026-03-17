@@ -153,12 +153,15 @@ pub fn discover_entry_points(config: &ResolvedConfig, files: &[DiscoveredFile]) 
             .collect();
 
         for rule in &active_rules {
-
             // Pre-compile entry point matchers
             let entry_matchers: Vec<globset::GlobMatcher> = rule
                 .entry_points
                 .iter()
-                .filter_map(|ep| globset::Glob::new(&ep.pattern).ok().map(|g| g.compile_matcher()))
+                .filter_map(|ep| {
+                    globset::Glob::new(&ep.pattern)
+                        .ok()
+                        .map(|g| g.compile_matcher())
+                })
                 .collect();
 
             // Pre-compile always_used matchers

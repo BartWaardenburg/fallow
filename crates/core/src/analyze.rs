@@ -163,9 +163,10 @@ fn find_unused_exports(
                 let export_str = export.name.to_string();
 
                 // Check if this export is ignored by config
-                if matching_ignore.iter().any(|exports| {
-                    exports.iter().any(|e| e == "*" || e == &export_str)
-                }) {
+                if matching_ignore
+                    .iter()
+                    .any(|exports| exports.iter().any(|e| e == "*" || e == &export_str))
+                {
                     continue;
                 }
 

@@ -90,7 +90,10 @@ mod tests {
     fn fallow_error_display_parse() {
         let err = FallowError::ParseError {
             path: PathBuf::from("bad.ts"),
-            errors: vec!["unexpected token".to_string(), "missing semicolon".to_string()],
+            errors: vec![
+                "unexpected token".to_string(),
+                "missing semicolon".to_string(),
+            ],
         };
         let msg = format!("{err}");
         assert!(msg.contains("bad.ts"));

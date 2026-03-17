@@ -431,7 +431,10 @@ mod tests {
         let restored = cached_to_module(&cached, FileId(0));
 
         assert_eq!(restored.exports.len(), 1);
-        assert_eq!(restored.exports[0].name, ExportName::Named("foo".to_string()));
+        assert_eq!(
+            restored.exports[0].name,
+            ExportName::Named("foo".to_string())
+        );
         assert!(!restored.exports[0].is_type_only);
         assert_eq!(restored.exports[0].span.start, 10);
         assert_eq!(restored.exports[0].span.end, 20);
@@ -511,7 +514,10 @@ mod tests {
         let restored = cached_to_module(&cached, FileId(0));
 
         assert_eq!(restored.imports.len(), 4);
-        assert_eq!(restored.imports[0].imported_name, ImportedName::Named("foo".to_string()));
+        assert_eq!(
+            restored.imports[0].imported_name,
+            ImportedName::Named("foo".to_string())
+        );
         assert_eq!(restored.imports[1].imported_name, ImportedName::Default);
         assert_eq!(restored.imports[2].imported_name, ImportedName::Namespace);
         assert_eq!(restored.imports[3].imported_name, ImportedName::SideEffect);
@@ -592,9 +598,21 @@ mod tests {
                 is_type_only: false,
                 span: Span::new(0, 50),
                 members: vec![
-                    MemberInfo { name: "Red".to_string(), kind: MemberKind::EnumMember, span: Span::new(10, 15) },
-                    MemberInfo { name: "greet".to_string(), kind: MemberKind::ClassMethod, span: Span::new(20, 30) },
-                    MemberInfo { name: "name".to_string(), kind: MemberKind::ClassProperty, span: Span::new(35, 45) },
+                    MemberInfo {
+                        name: "Red".to_string(),
+                        kind: MemberKind::EnumMember,
+                        span: Span::new(10, 15),
+                    },
+                    MemberInfo {
+                        name: "greet".to_string(),
+                        kind: MemberKind::ClassMethod,
+                        span: Span::new(20, 30),
+                    },
+                    MemberInfo {
+                        name: "name".to_string(),
+                        kind: MemberKind::ClassProperty,
+                        span: Span::new(35, 45),
+                    },
                 ],
             }],
             imports: vec![],
@@ -612,7 +630,10 @@ mod tests {
         assert_eq!(restored.exports[0].members.len(), 3);
         assert_eq!(restored.exports[0].members[0].kind, MemberKind::EnumMember);
         assert_eq!(restored.exports[0].members[1].kind, MemberKind::ClassMethod);
-        assert_eq!(restored.exports[0].members[2].kind, MemberKind::ClassProperty);
+        assert_eq!(
+            restored.exports[0].members[2].kind,
+            MemberKind::ClassProperty
+        );
     }
 
     #[test]

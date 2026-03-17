@@ -608,28 +608,36 @@ mod tests {
     fn framework_detection_deserialize_dependency() {
         let json = r#"{"type": "dependency", "package": "next"}"#;
         let detection: FrameworkDetection = serde_json::from_str(json).unwrap();
-        assert!(matches!(detection, FrameworkDetection::Dependency { package } if package == "next"));
+        assert!(
+            matches!(detection, FrameworkDetection::Dependency { package } if package == "next")
+        );
     }
 
     #[test]
     fn framework_detection_deserialize_file_exists() {
         let json = r#"{"type": "file_exists", "pattern": "tsconfig.json"}"#;
         let detection: FrameworkDetection = serde_json::from_str(json).unwrap();
-        assert!(matches!(detection, FrameworkDetection::FileExists { pattern } if pattern == "tsconfig.json"));
+        assert!(
+            matches!(detection, FrameworkDetection::FileExists { pattern } if pattern == "tsconfig.json")
+        );
     }
 
     #[test]
     fn framework_detection_deserialize_all() {
         let json = r#"{"type": "all", "conditions": [{"type": "dependency", "package": "a"}, {"type": "dependency", "package": "b"}]}"#;
         let detection: FrameworkDetection = serde_json::from_str(json).unwrap();
-        assert!(matches!(detection, FrameworkDetection::All { conditions } if conditions.len() == 2));
+        assert!(
+            matches!(detection, FrameworkDetection::All { conditions } if conditions.len() == 2)
+        );
     }
 
     #[test]
     fn framework_detection_deserialize_any() {
         let json = r#"{"type": "any", "conditions": [{"type": "dependency", "package": "a"}]}"#;
         let detection: FrameworkDetection = serde_json::from_str(json).unwrap();
-        assert!(matches!(detection, FrameworkDetection::Any { conditions } if conditions.len() == 1));
+        assert!(
+            matches!(detection, FrameworkDetection::Any { conditions } if conditions.len() == 1)
+        );
     }
 
     #[test]
@@ -637,7 +645,11 @@ mod tests {
         let builtins = builtin_frameworks();
         let nextjs = builtins.iter().find(|r| r.name == "nextjs").unwrap();
         assert!(!nextjs.entry_points.is_empty());
-        let patterns: Vec<&str> = nextjs.entry_points.iter().map(|e| e.pattern.as_str()).collect();
+        let patterns: Vec<&str> = nextjs
+            .entry_points
+            .iter()
+            .map(|e| e.pattern.as_str())
+            .collect();
         assert!(patterns.iter().any(|p| p.contains("app/**/page")));
         assert!(patterns.iter().any(|p| p.contains("pages/")));
     }
@@ -653,7 +665,11 @@ mod tests {
     fn vitest_has_test_entry_points() {
         let builtins = builtin_frameworks();
         let vitest = builtins.iter().find(|r| r.name == "vitest").unwrap();
-        let patterns: Vec<&str> = vitest.entry_points.iter().map(|e| e.pattern.as_str()).collect();
+        let patterns: Vec<&str> = vitest
+            .entry_points
+            .iter()
+            .map(|e| e.pattern.as_str())
+            .collect();
         assert!(patterns.iter().any(|p| p.contains("*.test.")));
         assert!(patterns.iter().any(|p| p.contains("*.spec.")));
     }
