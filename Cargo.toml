@@ -64,7 +64,7 @@ notify = "8"
 notify-debouncer-mini = "0.6"
 
 # Testing
-criterion = { version = "0.5", features = ["html_reports"] }
+criterion = { version = "0.8", features = ["html_reports"] }
 
 [profile.release]
 lto = true
