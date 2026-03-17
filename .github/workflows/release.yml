@@ -124,6 +124,19 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Update stable action tags
+        env:
+          TAG_REF: ${{ github.ref }}
+        run: |
+          VERSION="${TAG_REF#refs/tags/v}"
+          MAJOR="v${VERSION%%.*}"
+
+          git tag -f v1 "${GITHUB_SHA}"
+          git push origin refs/tags/v1 --force
+
+          git tag -f "${MAJOR}" "${GITHUB_SHA}"
+          git push origin "refs/tags/${MAJOR}" --force
+
   npm-publish:
     name: Publish to npm
     needs: [build, release]
