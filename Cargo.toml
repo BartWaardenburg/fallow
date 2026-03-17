@@ -1,0 +1,68 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/nicholasgasior/fallow"
+
+[workspace.dependencies]
+fallow-core = { version = "0.1.0", path = "crates/core" }
+fallow-config = { version = "0.1.0", path = "crates/config" }
+
+# Parsing & analysis
+oxc_allocator = "0.120"
+oxc_ast = "0.120"
+oxc_ast_visit = "0.120"
+oxc_parser = "0.120"
+oxc_resolver = "6"
+oxc_span = "0.120"
+oxc_syntax = "0.120"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+
+# Parallelism
+rayon = "1"
+
+# File system
+ignore = "0.4"
+globset = { version = "0.4", features = ["serde1"] }
+
+# Hashing
+xxhash-rust = { version = "0.8", features = ["xxh3"] }
+
+# Caching
+bincode = "1"
+
+# Diagnostics & output
+codespan-reporting = "0.11"
+indicatif = "0.17"
+miette = { version = "7", features = ["fancy"] }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Graph
+fixedbitset = "0.5"
+
+# LSP
+tower-lsp = "0.20"
+tokio = { version = "1", features = ["full"] }
+
+# Testing
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = "symbols"
+opt-level = 3

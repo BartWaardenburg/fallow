@@ -1,0 +1,14 @@
+[package]
+name = "fallow-config"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Configuration types for the fallow dead code analyzer"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+globset = { workspace = true }
+miette = { workspace = true }
