@@ -1,0 +1,62 @@
+name: Bug Report
+description: Something isn't working as expected
+labels: ["bug"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: A clear description of the bug.
+      placeholder: "fallow reports `foo` as unused, but it's imported in `bar.ts`."
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Minimal steps or a link to a repo that reproduces the issue.
+      placeholder: |
+        1. Create a file `src/index.ts` with `export const foo = 1`
+        2. Create a file `src/bar.ts` with `import { foo } from './index'`
+        3. Run `fallow check`
+        4. `foo` is incorrectly reported as unused
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What did you expect to happen?
+    validations:
+      required: false
+
+  - type: input
+    id: version
+    attributes:
+      label: Fallow version
+      description: Output of `fallow --version`
+      placeholder: "0.1.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - macOS
+        - Linux
+        - Windows
+    validations:
+      required: true
+
+  - type: textarea
+    id: config
+    attributes:
+      label: Configuration
+      description: Contents of your `fallow.toml` (if any).
+      render: toml
+    validations:
+      required: false
