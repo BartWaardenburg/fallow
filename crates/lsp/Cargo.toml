@@ -1,0 +1,20 @@
+[package]
+name = "fallow-lsp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "LSP server for the fallow dead code analyzer"
+
+[[bin]]
+name = "fallow-lsp"
+path = "src/main.rs"
+
+[dependencies]
+fallow-core = { workspace = true }
+fallow-config = { workspace = true }
+tower-lsp = { workspace = true }
+tokio = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }

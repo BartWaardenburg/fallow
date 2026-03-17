@@ -1,0 +1,18 @@
+target/
+node_modules/
+.DS_Store
+
+# Reference repos (for development only)
+reference/
+
+# Coverage reports
+coverage/
+
+# Incremental cache
+.fallow/
+
+# npm pack artifacts
+*.tgz
+
+# Claude
+.claude/

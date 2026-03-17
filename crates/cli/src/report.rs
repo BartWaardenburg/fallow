@@ -1,0 +1,222 @@
+use std::time::Duration;
+
+use fallow_config::{OutputFormat, ResolvedConfig};
+use fallow_core::results::AnalysisResults;
+
+/// Print analysis results in the configured format.
+pub fn print_results(
+    results: &AnalysisResults,
+    config: &ResolvedConfig,
+    elapsed: Duration,
+    quiet: bool,
+) {
+    match config.output {
+        OutputFormat::Human => print_human(results, &config.root, elapsed, quiet),
+        OutputFormat::Json => print_json(results),
+        OutputFormat::Compact => print_compact(results, &config.root),
+        OutputFormat::Sarif => print_sarif(results, &config.root),
+    }
+}
+
+fn print_human(
+    results: &AnalysisResults,
+    root: &std::path::Path,
+    elapsed: Duration,
+    quiet: bool,
+) {
+    if !quiet {
+        eprintln!();
+    }
+
+    if !results.unused_files.is_empty() {
+        println!("Unused files ({})", results.unused_files.len());
+        println!("{}", "-".repeat(60));
+        for file in &results.unused_files {
+            let relative = file.path.strip_prefix(root).unwrap_or(&file.path);
+            println!("  {}", relative.display());
+        }
+        println!();
+    }
+
+    if !results.unused_exports.is_empty() {
+        println!("Unused exports ({})", results.unused_exports.len());
+        println!("{}", "-".repeat(60));
+        for export in &results.unused_exports {
+            let relative = export.path.strip_prefix(root).unwrap_or(&export.path);
+            println!("  {}  `{}`", relative.display(), export.export_name);
+        }
+        println!();
+    }
+
+    if !results.unused_types.is_empty() {
+        println!("Unused type exports ({})", results.unused_types.len());
+        println!("{}", "-".repeat(60));
+        for export in &results.unused_types {
+            let relative = export.path.strip_prefix(root).unwrap_or(&export.path);
+            println!("  {}  `{}`", relative.display(), export.export_name);
+        }
+        println!();
+    }
+
+    if !results.unused_dependencies.is_empty() {
+        println!(
+            "Unused dependencies ({})",
+            results.unused_dependencies.len()
+        );
+        println!("{}", "-".repeat(60));
+        for dep in &results.unused_dependencies {
+            println!("  {}", dep.package_name);
+        }
+        println!();
+    }
+
+    if !results.unused_dev_dependencies.is_empty() {
+        println!(
+            "Unused devDependencies ({})",
+            results.unused_dev_dependencies.len()
+        );
+        println!("{}", "-".repeat(60));
+        for dep in &results.unused_dev_dependencies {
+            println!("  {}", dep.package_name);
+        }
+        println!();
+    }
+
+    if !quiet {
+        let total = results.total_issues();
+        if total == 0 {
+            eprintln!("No issues found. ({:.2}s)", elapsed.as_secs_f64());
+        } else {
+            eprintln!(
+                "Found {} issue{} ({:.2}s)",
+                total,
+                if total == 1 { "" } else { "s" },
+                elapsed.as_secs_f64()
+            );
+        }
+    }
+}
+
+fn print_json(results: &AnalysisResults) {
+    let json = serde_json::to_string_pretty(results).expect("Failed to serialize results");
+    println!("{json}");
+}
+
+fn print_compact(results: &AnalysisResults, root: &std::path::Path) {
+    for file in &results.unused_files {
+        let relative = file.path.strip_prefix(root).unwrap_or(&file.path);
+        println!("unused-file:{}", relative.display());
+    }
+    for export in &results.unused_exports {
+        let relative = export.path.strip_prefix(root).unwrap_or(&export.path);
+        println!(
+            "unused-export:{}:{}:{}",
+            relative.display(),
+            export.line,
+            export.export_name
+        );
+    }
+    for export in &results.unused_types {
+        let relative = export.path.strip_prefix(root).unwrap_or(&export.path);
+        println!(
+            "unused-type:{}:{}:{}",
+            relative.display(),
+            export.line,
+            export.export_name
+        );
+    }
+    for dep in &results.unused_dependencies {
+        println!("unused-dep:{}", dep.package_name);
+    }
+    for dep in &results.unused_dev_dependencies {
+        println!("unused-devdep:{}", dep.package_name);
+    }
+}
+
+fn print_sarif(results: &AnalysisResults, root: &std::path::Path) {
+    let sarif = build_sarif(results, root);
+    let json = serde_json::to_string_pretty(&sarif).expect("Failed to serialize SARIF");
+    println!("{json}");
+}
+
+fn build_sarif(
+    results: &AnalysisResults,
+    root: &std::path::Path,
+) -> serde_json::Value {
+    let mut sarif_results = Vec::new();
+
+    for file in &results.unused_files {
+        let relative = file.path.strip_prefix(root).unwrap_or(&file.path);
+        sarif_results.push(serde_json::json!({
+            "ruleId": "fallow/unused-file",
+            "level": "warning",
+            "message": { "text": format!("File is not reachable from any entry point") },
+            "locations": [{
+                "physicalLocation": {
+                    "artifactLocation": { "uri": relative.display().to_string() }
+                }
+            }]
+        }));
+    }
+
+    for export in &results.unused_exports {
+        let relative = export.path.strip_prefix(root).unwrap_or(&export.path);
+        sarif_results.push(serde_json::json!({
+            "ruleId": "fallow/unused-export",
+            "level": "warning",
+            "message": {
+                "text": format!("Export '{}' is never imported by other modules", export.export_name)
+            },
+            "locations": [{
+                "physicalLocation": {
+                    "artifactLocation": { "uri": relative.display().to_string() },
+                    "region": { "startLine": export.line }
+                }
+            }]
+        }));
+    }
+
+    for dep in &results.unused_dependencies {
+        sarif_results.push(serde_json::json!({
+            "ruleId": "fallow/unused-dependency",
+            "level": "warning",
+            "message": {
+                "text": format!("Package '{}' is in dependencies but never imported", dep.package_name)
+            },
+            "locations": [{
+                "physicalLocation": {
+                    "artifactLocation": { "uri": "package.json" }
+                }
+            }]
+        }));
+    }
+
+    serde_json::json!({
+        "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+        "version": "2.1.0",
+        "runs": [{
+            "tool": {
+                "driver": {
+                    "name": "fallow",
+                    "version": env!("CARGO_PKG_VERSION"),
+                    "informationUri": "https://github.com/nicholasgasior/fallow",
+                    "rules": [
+                        {
+                            "id": "fallow/unused-file",
+                            "shortDescription": { "text": "File is not reachable from any entry point" }
+                        },
+                        {
+                            "id": "fallow/unused-export",
+                            "shortDescription": { "text": "Export is never imported" }
+                        },
+                        {
+                            "id": "fallow/unused-dependency",
+                            "shortDescription": { "text": "Dependency listed but never imported" }
+                        }
+                    ]
+                }
+            },
+            "results": sarif_results
+        }]
+    })
+}
