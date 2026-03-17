@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use fixedbitset::FixedBitSet;
 
 use crate::discover::{EntryPoint, DiscoveredFile, FileId};
-use crate::extract::{ExportInfo, ExportName, ImportedName};
+use crate::extract::{ExportInfo, ExportName, ImportedName, ReExportInfo};
 use crate::resolve::{ResolveResult, ResolvedModule};
 
 /// The core module dependency graph.
@@ -32,12 +32,27 @@ pub struct ModuleNode {
     pub edge_range: Range<usize>,
     /// Exports declared by this module.
     pub exports: Vec<ExportSymbol>,
+    /// Re-exports from this module (export { x } from './y', export * from './z').
+    pub re_exports: Vec<ReExportEdge>,
     /// Whether this module is an entry point.
     pub is_entry_point: bool,
     /// Whether this module is reachable from any entry point.
     pub is_reachable: bool,
     /// Whether this module has CJS exports (module.exports / exports.*).
     pub has_cjs_exports: bool,
+}
+
+/// A re-export edge, tracking which exports are forwarded from which module.
+#[derive(Debug)]
+pub struct ReExportEdge {
+    /// The module being re-exported from.
+    pub source_file: FileId,
+    /// The name imported from the source (or "*" for star re-exports).
+    pub imported_name: String,
+    /// The name exported from this module.
+    pub exported_name: String,
+    /// Whether this is a type-only re-export.
+    pub is_type_only: bool,
 }
 
 /// An export with reference tracking.
@@ -48,6 +63,8 @@ pub struct ExportSymbol {
     pub span: oxc_span::Span,
     /// Which files reference this export.
     pub references: Vec<SymbolReference>,
+    /// Members of this export (enum members, class members).
+    pub members: Vec<crate::extract::MemberInfo>,
 }
 
 /// A reference to an export from another file.
@@ -223,6 +240,7 @@ impl ModuleGraph {
                             is_type_only: e.is_type_only,
                             span: e.span,
                             references: Vec::new(),
+                            members: e.members.clone(),
                         })
                         .collect()
                 })
@@ -233,11 +251,34 @@ impl ModuleGraph {
                 .map(|m| m.has_cjs_exports)
                 .unwrap_or(false);
 
+            // Build re-export edges
+            let re_export_edges: Vec<ReExportEdge> = module_by_id
+                .get(&file.id)
+                .map(|m| {
+                    m.re_exports
+                        .iter()
+                        .filter_map(|re| {
+                            if let ResolveResult::InternalModule(target_id) = &re.target {
+                                Some(ReExportEdge {
+                                    source_file: *target_id,
+                                    imported_name: re.info.imported_name.clone(),
+                                    exported_name: re.info.exported_name.clone(),
+                                    is_type_only: re.info.is_type_only,
+                                })
+                            } else {
+                                None
+                            }
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+
             modules.push(ModuleNode {
                 file_id: file.id,
                 path: file.path.clone(),
                 edge_range: edge_start..edge_end,
                 exports,
+                re_exports: re_export_edges,
                 is_entry_point: entry_point_ids.contains(&file.id),
                 is_reachable: false,
                 has_cjs_exports,
@@ -317,12 +358,99 @@ impl ModuleGraph {
             module.is_reachable = visited.contains(idx);
         }
 
-        Self {
+        let mut graph = Self {
             modules,
             edges: all_edges,
             package_usage,
             entry_points: entry_point_ids,
             reverse_deps,
+        };
+
+        // Propagate references through re-export chains
+        graph.resolve_re_export_chains();
+
+        graph
+    }
+
+    /// Resolve re-export chains: when module A re-exports from B,
+    /// any reference to A's re-exported symbol should also count as a reference
+    /// to B's original export (and transitively through the chain).
+    fn resolve_re_export_chains(&mut self) {
+        // Collect re-export info: (barrel_file_id, source_file_id, imported_name, exported_name)
+        let re_export_info: Vec<(FileId, FileId, String, String)> = self
+            .modules
+            .iter()
+            .flat_map(|m| {
+                m.re_exports.iter().map(move |re| {
+                    (m.file_id, re.source_file, re.imported_name.clone(), re.exported_name.clone())
+                })
+            })
+            .collect();
+
+        // For each re-export, if the barrel's exported symbol has references,
+        // propagate those references to the source module's original export.
+        // We iterate until no new references are added (handles chains).
+        let mut changed = true;
+        let max_iterations = 20; // prevent infinite loops on cycles
+        let mut iteration = 0;
+
+        while changed && iteration < max_iterations {
+            changed = false;
+            iteration += 1;
+
+            for &(barrel_id, source_id, ref imported_name, ref exported_name) in &re_export_info {
+                let barrel_idx = barrel_id.0 as usize;
+                let source_idx = source_id.0 as usize;
+
+                if barrel_idx >= self.modules.len() || source_idx >= self.modules.len() {
+                    continue;
+                }
+
+                // Find references to the re-exported name on the barrel module
+                let refs_on_barrel: Vec<SymbolReference> = {
+                    let barrel = &self.modules[barrel_idx];
+                    barrel
+                        .exports
+                        .iter()
+                        .filter(|e| e.name.to_string() == *exported_name)
+                        .flat_map(|e| e.references.clone())
+                        .collect()
+                };
+
+                if refs_on_barrel.is_empty() {
+                    continue;
+                }
+
+                // Propagate to source module's export
+                let source = &mut self.modules[source_idx];
+                let target_exports: Vec<usize> = if imported_name == "*" {
+                    // Star re-export: all exports in source are candidates
+                    (0..source.exports.len()).collect()
+                } else {
+                    source
+                        .exports
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, e)| e.name.to_string() == *imported_name)
+                        .map(|(i, _)| i)
+                        .collect()
+                };
+
+                for export_idx in target_exports {
+                    for ref_item in &refs_on_barrel {
+                        let already_has = source.exports[export_idx]
+                            .references
+                            .iter()
+                            .any(|r| r.from_file == ref_item.from_file);
+                        if !already_has {
+                            source.exports[export_idx]
+                                .references
+                                .push(ref_item.clone());
+                            changed = true;
+                        }
+                    }
+                }
+            }
         }
     }
 

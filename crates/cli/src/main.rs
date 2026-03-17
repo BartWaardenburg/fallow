@@ -4,7 +4,6 @@ use std::time::Instant;
 
 use clap::{Parser, Subcommand};
 use fallow_config::{FallowConfig, OutputFormat};
-use fallow_core::results::AnalysisResults;
 
 mod report;
 

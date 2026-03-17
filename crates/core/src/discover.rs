@@ -240,6 +240,110 @@ fn check_detection(
     }
 }
 
+/// Discover files within a workspace directory, continuing FileId numbering.
+pub fn discover_workspace_files(
+    ws_root: &Path,
+    config: &ResolvedConfig,
+    start_id: usize,
+) -> Vec<DiscoveredFile> {
+    let mut types_builder = ignore::types::TypesBuilder::new();
+    for ext in SOURCE_EXTENSIONS {
+        types_builder
+            .add("source", &format!("*.{ext}"))
+            .expect("valid glob");
+    }
+    types_builder.select("source");
+    let types = types_builder.build().expect("valid types");
+
+    let walker = WalkBuilder::new(ws_root)
+        .hidden(true)
+        .git_ignore(true)
+        .git_global(true)
+        .git_exclude(true)
+        .types(types)
+        .threads(config.threads)
+        .build();
+
+    let mut files: Vec<DiscoveredFile> = walker
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.file_type().is_some_and(|ft| ft.is_file()))
+        .filter(|entry| !config.ignore_patterns.is_match(entry.path()))
+        .enumerate()
+        .map(|(idx, entry)| {
+            let size_bytes = entry.metadata().map(|m| m.len()).unwrap_or(0);
+            DiscoveredFile {
+                id: FileId((start_id + idx) as u32),
+                path: entry.into_path(),
+                size_bytes,
+            }
+        })
+        .collect();
+
+    files.sort_unstable_by(|a, b| b.size_bytes.cmp(&a.size_bytes));
+    for (i, file) in files.iter_mut().enumerate() {
+        file.id = FileId((start_id + i) as u32);
+    }
+
+    files
+}
+
+/// Discover entry points for a workspace package.
+pub fn discover_workspace_entry_points(
+    ws_root: &Path,
+    config: &ResolvedConfig,
+    all_files: &[DiscoveredFile],
+) -> Vec<EntryPoint> {
+    let mut entries = Vec::new();
+
+    let pkg_path = ws_root.join("package.json");
+    if let Ok(pkg) = PackageJson::load(&pkg_path) {
+        for entry_path in pkg.entry_points() {
+            let resolved = ws_root.join(&entry_path);
+            if resolved.exists() {
+                entries.push(EntryPoint {
+                    path: resolved,
+                    source: EntryPointSource::PackageJsonMain,
+                });
+            } else {
+                for ext in SOURCE_EXTENSIONS {
+                    let with_ext = resolved.with_extension(ext);
+                    if with_ext.exists() {
+                        entries.push(EntryPoint {
+                            path: with_ext,
+                            source: EntryPointSource::PackageJsonMain,
+                        });
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Apply framework rules to workspace
+        for rule in &config.framework_rules {
+            if !is_framework_active(rule, &pkg, ws_root) {
+                continue;
+            }
+
+            for entry_pat in &rule.entry_points {
+                for file in all_files {
+                    if glob_matches(&entry_pat.pattern, &file.path, ws_root) {
+                        entries.push(EntryPoint {
+                            path: file.path.clone(),
+                            source: EntryPointSource::FrameworkRule {
+                                name: rule.name.clone(),
+                            },
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    entries.sort_by(|a, b| a.path.cmp(&b.path));
+    entries.dedup_by(|a, b| a.path == b.path);
+    entries
+}
+
 /// Simple glob matching against a file path relative to root.
 fn glob_matches(pattern: &str, path: &Path, root: &Path) -> bool {
     let relative = path.strip_prefix(root).unwrap_or(path);

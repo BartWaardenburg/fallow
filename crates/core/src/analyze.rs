@@ -1,12 +1,23 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use fallow_config::{PackageJson, ResolvedConfig};
 
+use crate::extract::MemberKind;
 use crate::graph::ModuleGraph;
+use crate::resolve::ResolvedModule;
 use crate::results::*;
 
 /// Find all dead code in the project.
 pub fn find_dead_code(graph: &ModuleGraph, config: &ResolvedConfig) -> AnalysisResults {
+    find_dead_code_with_resolved(graph, config, &[])
+}
+
+/// Find all dead code, with optional resolved module data for additional analyses.
+pub fn find_dead_code_with_resolved(
+    graph: &ModuleGraph,
+    config: &ResolvedConfig,
+    resolved_modules: &[ResolvedModule],
+) -> AnalysisResults {
     let _span = tracing::info_span!("find_dead_code").entered();
 
     let mut results = AnalysisResults::default();
@@ -25,9 +36,19 @@ pub fn find_dead_code(graph: &ModuleGraph, config: &ResolvedConfig) -> AnalysisR
         }
     }
 
-    if config.detect.unused_dependencies || config.detect.unused_dev_dependencies {
-        let pkg_path = config.root.join("package.json");
-        if let Ok(pkg) = PackageJson::load(&pkg_path) {
+    if config.detect.unused_enum_members || config.detect.unused_class_members {
+        let (enum_members, class_members) = find_unused_members(graph, config);
+        if config.detect.unused_enum_members {
+            results.unused_enum_members = enum_members;
+        }
+        if config.detect.unused_class_members {
+            results.unused_class_members = class_members;
+        }
+    }
+
+    let pkg_path = config.root.join("package.json");
+    if let Ok(pkg) = PackageJson::load(&pkg_path) {
+        if config.detect.unused_dependencies || config.detect.unused_dev_dependencies {
             let (deps, dev_deps) = find_unused_dependencies(graph, &pkg, config);
             if config.detect.unused_dependencies {
                 results.unused_dependencies = deps;
@@ -36,6 +57,18 @@ pub fn find_dead_code(graph: &ModuleGraph, config: &ResolvedConfig) -> AnalysisR
                 results.unused_dev_dependencies = dev_deps;
             }
         }
+
+        if config.detect.unlisted_dependencies {
+            results.unlisted_dependencies = find_unlisted_dependencies(graph, &pkg);
+        }
+    }
+
+    if config.detect.unresolved_imports && !resolved_modules.is_empty() {
+        results.unresolved_imports = find_unresolved_imports(resolved_modules, config);
+    }
+
+    if config.detect.duplicate_exports {
+        results.duplicate_exports = find_duplicate_exports(graph, config);
     }
 
     results
@@ -206,6 +239,174 @@ fn is_framework_used_export(
         }
     }
     false
+}
+
+/// Find unused enum and class members in exported symbols.
+fn find_unused_members(
+    graph: &ModuleGraph,
+    config: &ResolvedConfig,
+) -> (Vec<UnusedMember>, Vec<UnusedMember>) {
+    let mut unused_enum_members = Vec::new();
+    let mut unused_class_members = Vec::new();
+
+    for module in &graph.modules {
+        if !module.is_reachable || module.is_entry_point {
+            continue;
+        }
+
+        for export in &module.exports {
+            if export.members.is_empty() {
+                continue;
+            }
+
+            // If the export itself is unused, skip member analysis (whole export is dead)
+            if export.references.is_empty() && !graph.has_namespace_import(module.file_id) {
+                continue;
+            }
+
+            let relative_path = module
+                .path
+                .strip_prefix(&config.root)
+                .unwrap_or(&module.path);
+
+            for member in &export.members {
+                // For now, report all members of used exports as potentially unused.
+                // A more sophisticated approach would track property access on the imported symbol.
+                // We use a heuristic: if the export is used but has many members,
+                // some may be unused.
+                let unused = UnusedMember {
+                    path: module.path.clone(),
+                    parent_name: export.name.to_string(),
+                    member_name: member.name.clone(),
+                    kind: match member.kind {
+                        MemberKind::EnumMember => "enum_member".to_string(),
+                        MemberKind::ClassMethod => "class_method".to_string(),
+                        MemberKind::ClassProperty => "class_property".to_string(),
+                    },
+                    line: member.span.start,
+                    col: 0,
+                };
+
+                match member.kind {
+                    MemberKind::EnumMember => unused_enum_members.push(unused),
+                    MemberKind::ClassMethod | MemberKind::ClassProperty => {
+                        unused_class_members.push(unused);
+                    }
+                }
+            }
+        }
+    }
+
+    // Note: Full member-level usage tracking requires property access analysis (e.g., `MyEnum.Foo`).
+    // This is a structural pass that identifies members for future refinement.
+    // For now, return empty to avoid false positives — member tracking requires
+    // property access analysis which we'll add incrementally.
+    let _ = (unused_enum_members, unused_class_members);
+    (Vec::new(), Vec::new())
+}
+
+/// Find dependencies used in imports but not listed in package.json.
+fn find_unlisted_dependencies(
+    graph: &ModuleGraph,
+    pkg: &PackageJson,
+) -> Vec<UnlistedDependency> {
+    let all_deps: HashSet<String> = pkg.all_dependency_names().into_iter().collect();
+
+    let mut unlisted: HashMap<String, Vec<std::path::PathBuf>> = HashMap::new();
+
+    for (package_name, file_ids) in &graph.package_usage {
+        if !all_deps.contains(package_name) && !is_builtin_module(package_name) {
+            let paths: Vec<std::path::PathBuf> = file_ids
+                .iter()
+                .filter_map(|id| {
+                    graph
+                        .modules
+                        .get(id.0 as usize)
+                        .map(|m| m.path.clone())
+                })
+                .collect();
+            unlisted.insert(package_name.clone(), paths);
+        }
+    }
+
+    unlisted
+        .into_iter()
+        .map(|(name, paths)| UnlistedDependency {
+            package_name: name,
+            imported_from: paths,
+        })
+        .collect()
+}
+
+/// Find imports that could not be resolved.
+fn find_unresolved_imports(
+    resolved_modules: &[ResolvedModule],
+    config: &ResolvedConfig,
+) -> Vec<UnresolvedImport> {
+    let mut unresolved = Vec::new();
+
+    for module in resolved_modules {
+        for import in &module.resolved_imports {
+            if let crate::resolve::ResolveResult::Unresolvable(spec) = &import.target {
+                unresolved.push(UnresolvedImport {
+                    path: module.path.clone(),
+                    specifier: spec.clone(),
+                    line: import.info.span.start,
+                    col: 0,
+                });
+            }
+        }
+    }
+
+    unresolved
+}
+
+/// Find exports that appear with the same name in multiple files (potential duplicates).
+fn find_duplicate_exports(
+    graph: &ModuleGraph,
+    config: &ResolvedConfig,
+) -> Vec<DuplicateExport> {
+    let mut export_locations: HashMap<String, Vec<std::path::PathBuf>> = HashMap::new();
+
+    for module in &graph.modules {
+        if !module.is_reachable || module.is_entry_point {
+            continue;
+        }
+
+        for export in &module.exports {
+            if matches!(export.name, crate::extract::ExportName::Default) {
+                continue; // Skip default exports
+            }
+            let name = export.name.to_string();
+            export_locations
+                .entry(name)
+                .or_default()
+                .push(module.path.clone());
+        }
+    }
+
+    export_locations
+        .into_iter()
+        .filter(|(_, locations)| locations.len() > 1)
+        .map(|(name, locations)| DuplicateExport {
+            export_name: name,
+            locations,
+        })
+        .collect()
+}
+
+/// Check if a package name is a Node.js built-in module.
+fn is_builtin_module(name: &str) -> bool {
+    let builtins = [
+        "assert", "buffer", "child_process", "cluster", "console", "constants",
+        "crypto", "dgram", "dns", "domain", "events", "fs", "http", "http2",
+        "https", "module", "net", "os", "path", "perf_hooks", "process",
+        "punycode", "querystring", "readline", "repl", "stream", "string_decoder",
+        "sys", "timers", "tls", "tty", "url", "util", "v8", "vm", "wasi",
+        "worker_threads", "zlib",
+    ];
+    let stripped = name.strip_prefix("node:").unwrap_or(name);
+    builtins.contains(&stripped)
 }
 
 /// Dependencies that are used implicitly (not via imports).

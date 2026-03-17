@@ -1,5 +1,6 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
+use globset::Glob;
 use serde::{Deserialize, Serialize};
 
 /// Workspace configuration for monorepo support.
@@ -19,6 +20,157 @@ pub struct WorkspaceInfo {
     pub name: String,
     /// Whether this workspace is depended on by other workspaces.
     pub is_internal_dependency: bool,
+}
+
+/// Discover all workspace packages in a monorepo.
+pub fn discover_workspaces(root: &Path) -> Vec<WorkspaceInfo> {
+    let mut patterns = Vec::new();
+
+    // 1. Check root package.json for workspace patterns
+    let pkg_path = root.join("package.json");
+    if let Ok(pkg) = PackageJson::load(&pkg_path) {
+        patterns.extend(pkg.workspace_patterns());
+    }
+
+    // 2. Check pnpm-workspace.yaml
+    let pnpm_workspace = root.join("pnpm-workspace.yaml");
+    if pnpm_workspace.exists() {
+        if let Ok(content) = std::fs::read_to_string(&pnpm_workspace) {
+            patterns.extend(parse_pnpm_workspace_yaml(&content));
+        }
+    }
+
+    if patterns.is_empty() {
+        return Vec::new();
+    }
+
+    // 3. Expand patterns to find workspace directories
+    let mut workspaces = Vec::new();
+    for pattern in &patterns {
+        let glob_pattern = if pattern.ends_with('/') || pattern.ends_with("/*") {
+            pattern.trim_end_matches('/').trim_end_matches("/*").to_string()
+        } else {
+            pattern.clone()
+        };
+
+        // Walk directories matching the glob
+        let matched_dirs = expand_workspace_glob(root, &glob_pattern);
+        for dir in matched_dirs {
+            let ws_pkg_path = dir.join("package.json");
+            if ws_pkg_path.exists() {
+                if let Ok(pkg) = PackageJson::load(&ws_pkg_path) {
+                    let name = pkg.name.unwrap_or_else(|| {
+                        dir.file_name()
+                            .map(|n| n.to_string_lossy().to_string())
+                            .unwrap_or_default()
+                    });
+                    workspaces.push(WorkspaceInfo {
+                        root: dir,
+                        name,
+                        is_internal_dependency: false,
+                    });
+                }
+            }
+        }
+    }
+
+    // 4. Mark workspaces that are internal dependencies
+    let all_names: Vec<String> = workspaces.iter().map(|w| w.name.clone()).collect();
+    for ws in &mut workspaces {
+        let ws_pkg_path = ws.root.join("package.json");
+        if let Ok(pkg) = PackageJson::load(&ws_pkg_path) {
+            for dep_name in pkg.all_dependency_names() {
+                if all_names.contains(&dep_name) {
+                    // Find the dependency workspace and mark it
+                    ws.is_internal_dependency = true;
+                }
+            }
+        }
+    }
+    // Re-pass: check if any workspace depends on another
+    let all_dep_names: Vec<String> = workspaces
+        .iter()
+        .flat_map(|ws| {
+            let ws_pkg_path = ws.root.join("package.json");
+            PackageJson::load(&ws_pkg_path)
+                .map(|pkg| pkg.all_dependency_names())
+                .unwrap_or_default()
+        })
+        .collect();
+    for ws in &mut workspaces {
+        ws.is_internal_dependency = all_dep_names.contains(&ws.name);
+    }
+
+    workspaces
+}
+
+/// Expand a workspace glob pattern to matching directories.
+fn expand_workspace_glob(root: &Path, pattern: &str) -> Vec<PathBuf> {
+    let mut results = Vec::new();
+
+    // Handle simple patterns like "packages/*" or "apps/*"
+    if let Some(parent) = pattern.rsplit_once('/') {
+        let (dir_prefix, _glob_part) = parent;
+        let search_dir = root.join(dir_prefix);
+        if search_dir.is_dir() {
+            if let Ok(entries) = std::fs::read_dir(&search_dir) {
+                for entry in entries.flatten() {
+                    if entry.path().is_dir() {
+                        let relative = entry
+                            .path()
+                            .strip_prefix(root)
+                            .unwrap_or(&entry.path())
+                            .to_string_lossy()
+                            .to_string();
+                        if let Ok(glob) = Glob::new(pattern) {
+                            if glob.compile_matcher().is_match(&relative) {
+                                results.push(entry.path());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        // Simple directory name
+        let dir = root.join(pattern);
+        if dir.is_dir() {
+            results.push(dir);
+        }
+    }
+
+    results
+}
+
+/// Parse pnpm-workspace.yaml to extract package patterns.
+fn parse_pnpm_workspace_yaml(content: &str) -> Vec<String> {
+    // Simple YAML parsing for the common format:
+    // packages:
+    //   - 'packages/*'
+    //   - 'apps/*'
+    let mut patterns = Vec::new();
+    let mut in_packages = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed == "packages:" {
+            in_packages = true;
+            continue;
+        }
+        if in_packages {
+            if trimmed.starts_with("- ") {
+                let value = trimmed
+                    .trim_start_matches("- ")
+                    .trim_matches('\'')
+                    .trim_matches('"');
+                patterns.push(value.to_string());
+            } else if !trimmed.is_empty() && !trimmed.starts_with('#') {
+                break; // New top-level key
+            }
+        }
+    }
+
+    patterns
 }
 
 /// Parsed package.json with fields relevant to fallow.

@@ -7,16 +7,27 @@ pub mod results;
 
 use std::path::Path;
 
-use fallow_config::ResolvedConfig;
+use fallow_config::{ResolvedConfig, discover_workspaces};
 use results::AnalysisResults;
 
 /// Run the full analysis pipeline.
 pub fn analyze(config: &ResolvedConfig) -> AnalysisResults {
     let _span = tracing::info_span!("fallow_analyze").entered();
 
-    // Stage 1: Discover all source files
+    // Discover workspaces if in a monorepo
+    let workspaces = discover_workspaces(&config.root);
+    if !workspaces.is_empty() {
+        tracing::info!(count = workspaces.len(), "workspaces discovered");
+    }
+
+    // Stage 1: Discover all source files (across all workspaces)
     tracing::info!("discovering files...");
-    let files = discover::discover_files(config);
+    let mut files = discover::discover_files(config);
+    // Also discover files in workspaces
+    for ws in &workspaces {
+        let ws_files = discover::discover_workspace_files(&ws.root, config, files.len());
+        files.extend(ws_files);
+    }
     tracing::info!(count = files.len(), "files discovered");
 
     // Stage 2: Parse all files in parallel and extract imports/exports
@@ -26,7 +37,12 @@ pub fn analyze(config: &ResolvedConfig) -> AnalysisResults {
 
     // Stage 3: Discover entry points
     tracing::info!("discovering entry points...");
-    let entry_points = discover::discover_entry_points(config, &files);
+    let mut entry_points = discover::discover_entry_points(config, &files);
+    // Also discover workspace entry points
+    for ws in &workspaces {
+        let ws_entries = discover::discover_workspace_entry_points(&ws.root, config, &files);
+        entry_points.extend(ws_entries);
+    }
     tracing::info!(count = entry_points.len(), "entry points found");
 
     // Stage 4: Resolve imports to file IDs
@@ -44,7 +60,7 @@ pub fn analyze(config: &ResolvedConfig) -> AnalysisResults {
 
     // Stage 6: Analyze for dead code
     tracing::info!("analyzing...");
-    let results = analyze::find_dead_code(&graph, config);
+    let results = analyze::find_dead_code_with_resolved(&graph, config, &resolved);
     tracing::info!(
         unused_files = results.unused_files.len(),
         unused_exports = results.unused_exports.len(),

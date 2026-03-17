@@ -73,6 +73,26 @@ pub struct DetectConfig {
     /// Detect unused type exports.
     #[serde(default = "default_true")]
     pub unused_types: bool,
+
+    /// Detect unused enum members.
+    #[serde(default = "default_true")]
+    pub unused_enum_members: bool,
+
+    /// Detect unused class members.
+    #[serde(default = "default_true")]
+    pub unused_class_members: bool,
+
+    /// Detect unresolved imports.
+    #[serde(default = "default_true")]
+    pub unresolved_imports: bool,
+
+    /// Detect unlisted dependencies (used but not in package.json).
+    #[serde(default = "default_true")]
+    pub unlisted_dependencies: bool,
+
+    /// Detect duplicate exports.
+    #[serde(default = "default_true")]
+    pub duplicate_exports: bool,
 }
 
 impl Default for DetectConfig {
@@ -83,6 +103,11 @@ impl Default for DetectConfig {
             unused_dependencies: true,
             unused_dev_dependencies: true,
             unused_types: true,
+            unused_enum_members: true,
+            unused_class_members: true,
+            unresolved_imports: true,
+            unlisted_dependencies: true,
+            duplicate_exports: true,
         }
     }
 }

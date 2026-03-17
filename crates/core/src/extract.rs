@@ -32,6 +32,26 @@ pub struct ExportInfo {
     pub is_type_only: bool,
     #[serde(serialize_with = "serialize_span")]
     pub span: Span,
+    /// Members of this export (for enums and classes).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub members: Vec<MemberInfo>,
+}
+
+/// A member of an enum or class.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct MemberInfo {
+    pub name: String,
+    pub kind: MemberKind,
+    #[serde(serialize_with = "serialize_span")]
+    pub span: Span,
+}
+
+/// The kind of member.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub enum MemberKind {
+    EnumMember,
+    ClassMethod,
+    ClassProperty,
 }
 
 fn serialize_span<S: serde::Serializer>(span: &Span, serializer: S) -> Result<S::Ok, S::Error> {
@@ -158,6 +178,39 @@ pub fn parse_from_content(file_id: FileId, path: &Path, content: &str) -> Module
     }
 }
 
+/// Extract class members (methods and properties) from a class declaration.
+fn extract_class_members(class: &Class<'_>) -> Vec<MemberInfo> {
+    let mut members = Vec::new();
+    for element in &class.body.body {
+        match element {
+            ClassElement::MethodDefinition(method) => {
+                if let Some(name) = method.key.static_name() {
+                    let name_str = name.to_string();
+                    // Skip constructor and private methods
+                    if name_str != "constructor" {
+                        members.push(MemberInfo {
+                            name: name_str,
+                            kind: MemberKind::ClassMethod,
+                            span: method.span,
+                        });
+                    }
+                }
+            }
+            ClassElement::PropertyDefinition(prop) => {
+                if let Some(name) = prop.key.static_name() {
+                    members.push(MemberInfo {
+                        name: name.to_string(),
+                        kind: MemberKind::ClassProperty,
+                        span: prop.span,
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+    members
+}
+
 /// AST visitor that extracts all import/export information in a single pass.
 struct ModuleInfoExtractor {
     exports: Vec<ExportInfo>,
@@ -194,16 +247,19 @@ impl ModuleInfoExtractor {
                         local_name: Some(id.name.to_string()),
                         is_type_only,
                         span: id.span,
+                        members: vec![],
                     });
                 }
             }
             Declaration::ClassDeclaration(class) => {
                 if let Some(id) = class.id.as_ref() {
+                    let members = extract_class_members(class);
                     self.exports.push(ExportInfo {
                         name: ExportName::Named(id.name.to_string()),
                         local_name: Some(id.name.to_string()),
                         is_type_only,
                         span: id.span,
+                        members,
                     });
                 }
             }
@@ -213,6 +269,7 @@ impl ModuleInfoExtractor {
                     local_name: Some(alias.id.name.to_string()),
                     is_type_only: true,
                     span: alias.id.span,
+                    members: vec![],
                 });
             }
             Declaration::TSInterfaceDeclaration(iface) => {
@@ -221,14 +278,35 @@ impl ModuleInfoExtractor {
                     local_name: Some(iface.id.name.to_string()),
                     is_type_only: true,
                     span: iface.id.span,
+                    members: vec![],
                 });
             }
             Declaration::TSEnumDeclaration(enumd) => {
+                let members: Vec<MemberInfo> = enumd
+                    .body
+                    .members
+                    .iter()
+                    .filter_map(|member| {
+                        let name = match &member.id {
+                            TSEnumMemberName::Identifier(id) => id.name.to_string(),
+                            TSEnumMemberName::String(s) | TSEnumMemberName::ComputedString(s) => {
+                                s.value.to_string()
+                            }
+                            TSEnumMemberName::ComputedTemplateString(_) => return None,
+                        };
+                        Some(MemberInfo {
+                            name,
+                            kind: MemberKind::EnumMember,
+                            span: member.span,
+                        })
+                    })
+                    .collect();
                 self.exports.push(ExportInfo {
                     name: ExportName::Named(enumd.id.name.to_string()),
                     local_name: Some(enumd.id.name.to_string()),
                     is_type_only,
                     span: enumd.id.span,
+                    members,
                 });
             }
             Declaration::TSModuleDeclaration(module) => {
@@ -239,6 +317,7 @@ impl ModuleInfoExtractor {
                             local_name: Some(id.name.to_string()),
                             is_type_only: true,
                             span: id.span,
+                            members: vec![],
                         });
                     }
                     TSModuleDeclarationName::StringLiteral(lit) => {
@@ -247,6 +326,7 @@ impl ModuleInfoExtractor {
                             local_name: Some(lit.value.to_string()),
                             is_type_only: true,
                             span: lit.span,
+                            members: vec![],
                         });
                     }
                 }
@@ -267,6 +347,7 @@ impl ModuleInfoExtractor {
                     local_name: Some(id.name.to_string()),
                     is_type_only,
                     span: id.span,
+                    members: vec![],
                 });
             }
             BindingPattern::ObjectPattern(obj) => {
@@ -361,6 +442,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                     local_name: Some(spec.local.name().to_string()),
                     is_type_only: is_type_only || spec.export_kind.is_type(),
                     span: spec.span,
+                    members: vec![],
                 });
             }
         }
@@ -372,6 +454,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             local_name: None,
             is_type_only: false,
             span: decl.span,
+            members: vec![],
         });
     }
 
@@ -432,6 +515,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                         local_name: None,
                         is_type_only: false,
                         span: expr.span,
+                        members: vec![],
                     });
                 }
             }

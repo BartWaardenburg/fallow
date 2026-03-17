@@ -10,6 +10,11 @@ pub struct AnalysisResults {
     pub unused_types: Vec<UnusedExport>,
     pub unused_dependencies: Vec<UnusedDependency>,
     pub unused_dev_dependencies: Vec<UnusedDependency>,
+    pub unused_enum_members: Vec<UnusedMember>,
+    pub unused_class_members: Vec<UnusedMember>,
+    pub unresolved_imports: Vec<UnresolvedImport>,
+    pub unlisted_dependencies: Vec<UnlistedDependency>,
+    pub duplicate_exports: Vec<DuplicateExport>,
 }
 
 impl AnalysisResults {
@@ -20,6 +25,11 @@ impl AnalysisResults {
             + self.unused_types.len()
             + self.unused_dependencies.len()
             + self.unused_dev_dependencies.len()
+            + self.unused_enum_members.len()
+            + self.unused_class_members.len()
+            + self.unresolved_imports.len()
+            + self.unlisted_dependencies.len()
+            + self.duplicate_exports.len()
     }
 
     /// Whether any issues were found.
@@ -57,4 +67,38 @@ pub struct UnusedDependency {
 pub enum DependencyLocation {
     Dependencies,
     DevDependencies,
+}
+
+/// An unused enum or class member.
+#[derive(Debug, Serialize)]
+pub struct UnusedMember {
+    pub path: PathBuf,
+    pub parent_name: String,
+    pub member_name: String,
+    pub kind: String,
+    pub line: u32,
+    pub col: u32,
+}
+
+/// An import that could not be resolved.
+#[derive(Debug, Serialize)]
+pub struct UnresolvedImport {
+    pub path: PathBuf,
+    pub specifier: String,
+    pub line: u32,
+    pub col: u32,
+}
+
+/// A dependency used in code but not listed in package.json.
+#[derive(Debug, Serialize)]
+pub struct UnlistedDependency {
+    pub package_name: String,
+    pub imported_from: Vec<PathBuf>,
+}
+
+/// An export that appears multiple times across the project.
+#[derive(Debug, Serialize)]
+pub struct DuplicateExport {
+    pub export_name: String,
+    pub locations: Vec<PathBuf>,
 }

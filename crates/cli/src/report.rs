@@ -82,6 +82,89 @@ fn print_human(
         println!();
     }
 
+    if !results.unused_enum_members.is_empty() {
+        println!(
+            "Unused enum members ({})",
+            results.unused_enum_members.len()
+        );
+        println!("{}", "-".repeat(60));
+        for member in &results.unused_enum_members {
+            let relative = member.path.strip_prefix(root).unwrap_or(&member.path);
+            println!(
+                "  {}  `{}.{}`",
+                relative.display(),
+                member.parent_name,
+                member.member_name
+            );
+        }
+        println!();
+    }
+
+    if !results.unused_class_members.is_empty() {
+        println!(
+            "Unused class members ({})",
+            results.unused_class_members.len()
+        );
+        println!("{}", "-".repeat(60));
+        for member in &results.unused_class_members {
+            let relative = member.path.strip_prefix(root).unwrap_or(&member.path);
+            println!(
+                "  {}  `{}.{}`",
+                relative.display(),
+                member.parent_name,
+                member.member_name
+            );
+        }
+        println!();
+    }
+
+    if !results.unresolved_imports.is_empty() {
+        println!(
+            "Unresolved imports ({})",
+            results.unresolved_imports.len()
+        );
+        println!("{}", "-".repeat(60));
+        for import in &results.unresolved_imports {
+            let relative = import.path.strip_prefix(root).unwrap_or(&import.path);
+            println!("  {}  `{}`", relative.display(), import.specifier);
+        }
+        println!();
+    }
+
+    if !results.unlisted_dependencies.is_empty() {
+        println!(
+            "Unlisted dependencies ({})",
+            results.unlisted_dependencies.len()
+        );
+        println!("{}", "-".repeat(60));
+        for dep in &results.unlisted_dependencies {
+            println!("  {}", dep.package_name);
+        }
+        println!();
+    }
+
+    if !results.duplicate_exports.is_empty() {
+        println!(
+            "Duplicate exports ({})",
+            results.duplicate_exports.len()
+        );
+        println!("{}", "-".repeat(60));
+        for dup in &results.duplicate_exports {
+            let locations: Vec<String> = dup
+                .locations
+                .iter()
+                .map(|p| {
+                    p.strip_prefix(root)
+                        .unwrap_or(p)
+                        .display()
+                        .to_string()
+                })
+                .collect();
+            println!("  `{}` in {}", dup.export_name, locations.join(", "));
+        }
+        println!();
+    }
+
     if !quiet {
         let total = results.total_issues();
         if total == 0 {
@@ -130,6 +213,41 @@ fn print_compact(results: &AnalysisResults, root: &std::path::Path) {
     }
     for dep in &results.unused_dev_dependencies {
         println!("unused-devdep:{}", dep.package_name);
+    }
+    for member in &results.unused_enum_members {
+        let relative = member.path.strip_prefix(root).unwrap_or(&member.path);
+        println!(
+            "unused-enum-member:{}:{}:{}.{}",
+            relative.display(),
+            member.line,
+            member.parent_name,
+            member.member_name
+        );
+    }
+    for member in &results.unused_class_members {
+        let relative = member.path.strip_prefix(root).unwrap_or(&member.path);
+        println!(
+            "unused-class-member:{}:{}:{}.{}",
+            relative.display(),
+            member.line,
+            member.parent_name,
+            member.member_name
+        );
+    }
+    for import in &results.unresolved_imports {
+        let relative = import.path.strip_prefix(root).unwrap_or(&import.path);
+        println!(
+            "unresolved-import:{}:{}:{}",
+            relative.display(),
+            import.line,
+            import.specifier
+        );
+    }
+    for dep in &results.unlisted_dependencies {
+        println!("unlisted-dep:{}", dep.package_name);
+    }
+    for dup in &results.duplicate_exports {
+        println!("duplicate-export:{}", dup.export_name);
     }
 }
 
