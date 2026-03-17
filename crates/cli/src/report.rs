@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use colored::Colorize;
 use fallow_config::{OutputFormat, ResolvedConfig};
 use fallow_core::results::AnalysisResults;
 
@@ -19,13 +20,21 @@ pub fn print_results(
 }
 
 fn print_human(results: &AnalysisResults, root: &std::path::Path, elapsed: Duration, quiet: bool) {
+    let separator = "-".repeat(60);
+
     if !quiet {
         eprintln!();
     }
 
+    // Warning-level: unused files
     if !results.unused_files.is_empty() {
-        println!("Unused files ({})", results.unused_files.len());
-        println!("{}", "-".repeat(60));
+        println!(
+            "{}",
+            format!("Unused files ({})", results.unused_files.len())
+                .yellow()
+                .bold()
+        );
+        println!("{}", separator.dimmed());
         for file in &results.unused_files {
             let relative = file.path.strip_prefix(root).unwrap_or(&file.path);
             println!("  {}", relative.display());
@@ -33,118 +42,170 @@ fn print_human(results: &AnalysisResults, root: &std::path::Path, elapsed: Durat
         println!();
     }
 
+    // Info-level: unused exports
     if !results.unused_exports.is_empty() {
-        println!("Unused exports ({})", results.unused_exports.len());
-        println!("{}", "-".repeat(60));
+        println!(
+            "{}",
+            format!("Unused exports ({})", results.unused_exports.len())
+                .cyan()
+                .bold()
+        );
+        println!("{}", separator.dimmed());
         for export in &results.unused_exports {
             let relative = export.path.strip_prefix(root).unwrap_or(&export.path);
-            println!("  {}  `{}`", relative.display(), export.export_name);
+            println!("  {}  {}", relative.display(), export.export_name.bold());
         }
         println!();
     }
 
+    // Info-level: unused types
     if !results.unused_types.is_empty() {
-        println!("Unused type exports ({})", results.unused_types.len());
-        println!("{}", "-".repeat(60));
+        println!(
+            "{}",
+            format!("Unused type exports ({})", results.unused_types.len())
+                .cyan()
+                .bold()
+        );
+        println!("{}", separator.dimmed());
         for export in &results.unused_types {
             let relative = export.path.strip_prefix(root).unwrap_or(&export.path);
-            println!("  {}  `{}`", relative.display(), export.export_name);
+            println!("  {}  {}", relative.display(), export.export_name.bold());
         }
         println!();
     }
 
+    // Warning-level: unused dependencies
     if !results.unused_dependencies.is_empty() {
         println!(
-            "Unused dependencies ({})",
-            results.unused_dependencies.len()
+            "{}",
+            format!(
+                "Unused dependencies ({})",
+                results.unused_dependencies.len()
+            )
+            .yellow()
+            .bold()
         );
-        println!("{}", "-".repeat(60));
+        println!("{}", separator.dimmed());
         for dep in &results.unused_dependencies {
-            println!("  {}", dep.package_name);
+            println!("  {}", dep.package_name.bold());
         }
         println!();
     }
 
+    // Warning-level: unused devDependencies
     if !results.unused_dev_dependencies.is_empty() {
         println!(
-            "Unused devDependencies ({})",
-            results.unused_dev_dependencies.len()
+            "{}",
+            format!(
+                "Unused devDependencies ({})",
+                results.unused_dev_dependencies.len()
+            )
+            .yellow()
+            .bold()
         );
-        println!("{}", "-".repeat(60));
+        println!("{}", separator.dimmed());
         for dep in &results.unused_dev_dependencies {
-            println!("  {}", dep.package_name);
+            println!("  {}", dep.package_name.bold());
         }
         println!();
     }
 
+    // Info-level: unused enum members
     if !results.unused_enum_members.is_empty() {
         println!(
-            "Unused enum members ({})",
-            results.unused_enum_members.len()
+            "{}",
+            format!(
+                "Unused enum members ({})",
+                results.unused_enum_members.len()
+            )
+            .cyan()
+            .bold()
         );
-        println!("{}", "-".repeat(60));
+        println!("{}", separator.dimmed());
         for member in &results.unused_enum_members {
             let relative = member.path.strip_prefix(root).unwrap_or(&member.path);
             println!(
-                "  {}  `{}.{}`",
+                "  {}  {}",
                 relative.display(),
-                member.parent_name,
-                member.member_name
+                format!("{}.{}", member.parent_name, member.member_name).bold()
             );
         }
         println!();
     }
 
+    // Info-level: unused class members
     if !results.unused_class_members.is_empty() {
         println!(
-            "Unused class members ({})",
-            results.unused_class_members.len()
+            "{}",
+            format!(
+                "Unused class members ({})",
+                results.unused_class_members.len()
+            )
+            .cyan()
+            .bold()
         );
-        println!("{}", "-".repeat(60));
+        println!("{}", separator.dimmed());
         for member in &results.unused_class_members {
             let relative = member.path.strip_prefix(root).unwrap_or(&member.path);
             println!(
-                "  {}  `{}.{}`",
+                "  {}  {}",
                 relative.display(),
-                member.parent_name,
-                member.member_name
+                format!("{}.{}", member.parent_name, member.member_name).bold()
             );
         }
         println!();
     }
 
+    // Error-level: unresolved imports
     if !results.unresolved_imports.is_empty() {
-        println!("Unresolved imports ({})", results.unresolved_imports.len());
-        println!("{}", "-".repeat(60));
+        println!(
+            "{}",
+            format!("Unresolved imports ({})", results.unresolved_imports.len())
+                .red()
+                .bold()
+        );
+        println!("{}", separator.dimmed());
         for import in &results.unresolved_imports {
             let relative = import.path.strip_prefix(root).unwrap_or(&import.path);
-            println!("  {}  `{}`", relative.display(), import.specifier);
+            println!("  {}  {}", relative.display(), import.specifier.bold());
         }
         println!();
     }
 
+    // Warning-level: unlisted dependencies
     if !results.unlisted_dependencies.is_empty() {
         println!(
-            "Unlisted dependencies ({})",
-            results.unlisted_dependencies.len()
+            "{}",
+            format!(
+                "Unlisted dependencies ({})",
+                results.unlisted_dependencies.len()
+            )
+            .yellow()
+            .bold()
         );
-        println!("{}", "-".repeat(60));
+        println!("{}", separator.dimmed());
         for dep in &results.unlisted_dependencies {
-            println!("  {}", dep.package_name);
+            println!("  {}", dep.package_name.bold());
         }
         println!();
     }
 
+    // Info-level: duplicate exports
     if !results.duplicate_exports.is_empty() {
-        println!("Duplicate exports ({})", results.duplicate_exports.len());
-        println!("{}", "-".repeat(60));
+        println!(
+            "{}",
+            format!("Duplicate exports ({})", results.duplicate_exports.len())
+                .cyan()
+                .bold()
+        );
+        println!("{}", separator.dimmed());
         for dup in &results.duplicate_exports {
             let locations: Vec<String> = dup
                 .locations
                 .iter()
                 .map(|p| p.strip_prefix(root).unwrap_or(p).display().to_string())
                 .collect();
-            println!("  `{}` in {}", dup.export_name, locations.join(", "));
+            println!("  {} in {}", dup.export_name.bold(), locations.join(", "));
         }
         println!();
     }
@@ -152,13 +213,23 @@ fn print_human(results: &AnalysisResults, root: &std::path::Path, elapsed: Durat
     if !quiet {
         let total = results.total_issues();
         if total == 0 {
-            eprintln!("No issues found. ({:.2}s)", elapsed.as_secs_f64());
+            eprintln!(
+                "{}",
+                format!("No issues found. ({:.2}s)", elapsed.as_secs_f64())
+                    .green()
+                    .bold()
+            );
         } else {
             eprintln!(
-                "Found {} issue{} ({:.2}s)",
-                total,
-                if total == 1 { "" } else { "s" },
-                elapsed.as_secs_f64()
+                "{}",
+                format!(
+                    "Found {} issue{} ({:.2}s)",
+                    total,
+                    if total == 1 { "" } else { "s" },
+                    elapsed.as_secs_f64()
+                )
+                .red()
+                .bold()
             );
         }
     }

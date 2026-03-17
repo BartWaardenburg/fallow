@@ -208,16 +208,7 @@ fn check_detection(detection: &FrameworkDetection, pkg: &PackageJson, root: &Pat
         FrameworkDetection::Dependency { package } => {
             pkg.all_dependency_names().iter().any(|d| d == package)
         }
-        FrameworkDetection::FileExists { pattern } => {
-            let full = root.join(pattern);
-            // Simple check — for glob patterns we'd need to actually glob
-            full.exists() || {
-                globset::Glob::new(pattern)
-                    .ok()
-                    .and_then(|g| g.compile_matcher().is_match(root).then_some(true))
-                    .unwrap_or(false)
-            }
-        }
+        FrameworkDetection::FileExists { pattern } => file_exists_glob(pattern, root),
         FrameworkDetection::All { conditions } => {
             conditions.iter().all(|c| check_detection(c, pkg, root))
         }
@@ -329,6 +320,73 @@ pub fn discover_workspace_entry_points(
     entries.sort_by(|a, b| a.path.cmp(&b.path));
     entries.dedup_by(|a, b| a.path == b.path);
     entries
+}
+
+/// Check whether any file matching a glob pattern exists under root.
+///
+/// Uses `globset::Glob` for pattern compilation (supports brace expansion like
+/// `{ts,js}`) and walks the static prefix directory to find matches.
+fn file_exists_glob(pattern: &str, root: &Path) -> bool {
+    let matcher = match globset::Glob::new(pattern) {
+        Ok(g) => g.compile_matcher(),
+        Err(_) => return false,
+    };
+
+    // Extract the static directory prefix from the pattern to narrow the walk.
+    // E.g. for ".storybook/main.{ts,js}" the prefix is ".storybook".
+    let prefix: PathBuf = Path::new(pattern)
+        .components()
+        .take_while(|c| {
+            let s = c.as_os_str().to_string_lossy();
+            !s.contains('*') && !s.contains('?') && !s.contains('{') && !s.contains('[')
+        })
+        .collect();
+
+    let search_dir = if prefix.as_os_str().is_empty() {
+        root.to_path_buf()
+    } else {
+        // prefix may be an exact directory or include the filename portion.
+        // Use the parent if the joined path isn't a directory.
+        let joined = root.join(&prefix);
+        if joined.is_dir() {
+            joined
+        } else {
+            joined
+                .parent()
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| root.to_path_buf())
+        }
+    };
+
+    if !search_dir.is_dir() {
+        return false;
+    }
+
+    walk_dir_recursive(&search_dir, root, &matcher)
+}
+
+/// Recursively walk a directory and check if any file matches the glob.
+fn walk_dir_recursive(dir: &Path, root: &Path, matcher: &globset::GlobMatcher) -> bool {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(rd) => rd,
+        Err(_) => return false,
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            if walk_dir_recursive(&path, root, matcher) {
+                return true;
+            }
+        } else {
+            let relative = path.strip_prefix(root).unwrap_or(&path);
+            if matcher.is_match(relative) {
+                return true;
+            }
+        }
+    }
+
+    false
 }
 
 /// Simple glob matching against a file path relative to root.

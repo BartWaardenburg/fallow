@@ -464,6 +464,7 @@ fn cache_roundtrip() {
         re_exports: vec![],
         dynamic_imports: vec![],
         require_calls: vec![],
+        member_accesses: vec![],
         has_cjs_exports: false,
     };
 

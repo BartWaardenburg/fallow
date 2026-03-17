@@ -9,6 +9,7 @@ use oxc_parser::Parser;
 use oxc_span::{SourceType, Span};
 use rayon::prelude::*;
 
+use crate::cache::CacheStore;
 use crate::discover::{DiscoveredFile, FileId};
 
 /// Extracted module information from a single file.
@@ -20,6 +21,7 @@ pub struct ModuleInfo {
     pub re_exports: Vec<ReExportInfo>,
     pub dynamic_imports: Vec<DynamicImportInfo>,
     pub require_calls: Vec<RequireCallInfo>,
+    pub member_accesses: Vec<MemberAccess>,
     pub has_cjs_exports: bool,
     pub content_hash: u64,
 }
@@ -52,6 +54,15 @@ pub enum MemberKind {
     EnumMember,
     ClassMethod,
     ClassProperty,
+}
+
+/// A static member access expression (e.g., `Status.Active`, `MyClass.create()`).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct MemberAccess {
+    /// The identifier being accessed (the import name).
+    pub object: String,
+    /// The member being accessed.
+    pub member: String,
 }
 
 fn serialize_span<S: serde::Serializer>(span: &Span, serializer: S) -> Result<S::Ok, S::Error> {
@@ -121,30 +132,89 @@ pub struct RequireCallInfo {
 }
 
 /// Parse all files in parallel, extracting imports and exports.
-pub fn parse_all_files(files: &[DiscoveredFile], _config: &ResolvedConfig) -> Vec<ModuleInfo> {
-    files.par_iter().filter_map(parse_single_file).collect()
+/// Uses the cache to skip reparsing files whose content hasn't changed.
+pub fn parse_all_files(
+    files: &[DiscoveredFile],
+    _config: &ResolvedConfig,
+    cache: Option<&CacheStore>,
+) -> Vec<ModuleInfo> {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let cache_hits = AtomicUsize::new(0);
+    let cache_misses = AtomicUsize::new(0);
+
+    let result: Vec<ModuleInfo> = files
+        .par_iter()
+        .filter_map(|file| parse_single_file_cached(file, cache, &cache_hits, &cache_misses))
+        .collect();
+
+    let hits = cache_hits.load(Ordering::Relaxed);
+    let misses = cache_misses.load(Ordering::Relaxed);
+    if hits > 0 || misses > 0 {
+        tracing::info!(
+            cache_hits = hits,
+            cache_misses = misses,
+            "incremental cache stats"
+        );
+    }
+
+    result
+}
+
+/// Parse a single file, consulting the cache first.
+fn parse_single_file_cached(
+    file: &DiscoveredFile,
+    cache: Option<&CacheStore>,
+    cache_hits: &std::sync::atomic::AtomicUsize,
+    cache_misses: &std::sync::atomic::AtomicUsize,
+) -> Option<ModuleInfo> {
+    use std::sync::atomic::Ordering;
+
+    let source = std::fs::read_to_string(&file.path).ok()?;
+    let content_hash = xxhash_rust::xxh3::xxh3_64(source.as_bytes());
+
+    // Check cache before parsing
+    if let Some(store) = cache
+        && let Some(cached) = store.get(&file.path, content_hash)
+    {
+        cache_hits.fetch_add(1, Ordering::Relaxed);
+        return Some(crate::cache::cached_to_module(cached, file.id));
+    }
+    cache_misses.fetch_add(1, Ordering::Relaxed);
+
+    // Cache miss — do a full parse
+    parse_source_to_module(file.id, &file.path, &source, content_hash)
 }
 
 /// Parse a single file and extract module information.
 pub fn parse_single_file(file: &DiscoveredFile) -> Option<ModuleInfo> {
     let source = std::fs::read_to_string(&file.path).ok()?;
     let content_hash = xxhash_rust::xxh3::xxh3_64(source.as_bytes());
+    parse_source_to_module(file.id, &file.path, &source, content_hash)
+}
 
-    let source_type = SourceType::from_path(&file.path).unwrap_or_default();
+/// Parse source text into a ModuleInfo.
+fn parse_source_to_module(
+    file_id: FileId,
+    path: &Path,
+    source: &str,
+    content_hash: u64,
+) -> Option<ModuleInfo> {
+    let source_type = SourceType::from_path(path).unwrap_or_default();
     let allocator = Allocator::default();
-    let parser_return = Parser::new(&allocator, &source, source_type).parse();
+    let parser_return = Parser::new(&allocator, source, source_type).parse();
 
     // Extract imports/exports even if there are parse errors
     let mut extractor = ModuleInfoExtractor::new();
     extractor.visit_program(&parser_return.program);
 
     Some(ModuleInfo {
-        file_id: file.id,
+        file_id,
         exports: extractor.exports,
         imports: extractor.imports,
         re_exports: extractor.re_exports,
         dynamic_imports: extractor.dynamic_imports,
         require_calls: extractor.require_calls,
+        member_accesses: extractor.member_accesses,
         has_cjs_exports: extractor.has_cjs_exports,
         content_hash,
     })
@@ -167,6 +237,7 @@ pub fn parse_from_content(file_id: FileId, path: &Path, content: &str) -> Module
         re_exports: extractor.re_exports,
         dynamic_imports: extractor.dynamic_imports,
         require_calls: extractor.require_calls,
+        member_accesses: extractor.member_accesses,
         has_cjs_exports: extractor.has_cjs_exports,
         content_hash,
     }
@@ -212,6 +283,7 @@ struct ModuleInfoExtractor {
     re_exports: Vec<ReExportInfo>,
     dynamic_imports: Vec<DynamicImportInfo>,
     require_calls: Vec<RequireCallInfo>,
+    member_accesses: Vec<MemberAccess>,
     has_cjs_exports: bool,
 }
 
@@ -223,6 +295,7 @@ impl ModuleInfoExtractor {
             re_exports: Vec::new(),
             dynamic_imports: Vec::new(),
             require_calls: Vec::new(),
+            member_accesses: Vec::new(),
             has_cjs_exports: false,
         }
     }
@@ -507,6 +580,17 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         }
         walk::walk_assignment_expression(self, expr);
     }
+
+    fn visit_static_member_expression(&mut self, expr: &StaticMemberExpression<'a>) {
+        // Capture `Identifier.member` patterns (e.g., `Status.Active`, `MyClass.create()`)
+        if let Expression::Identifier(obj) = &expr.object {
+            self.member_accesses.push(MemberAccess {
+                object: obj.name.to_string(),
+                member: expr.property.name.to_string(),
+            });
+        }
+        walk::walk_static_member_expression(self, expr);
+    }
 }
 
 #[cfg(test)]
@@ -528,6 +612,7 @@ mod tests {
             re_exports: extractor.re_exports,
             dynamic_imports: extractor.dynamic_imports,
             require_calls: extractor.require_calls,
+            member_accesses: extractor.member_accesses,
             has_cjs_exports: extractor.has_cjs_exports,
             content_hash: 0,
         }
@@ -632,5 +717,24 @@ mod tests {
         assert!(info.has_cjs_exports);
         assert_eq!(info.exports.len(), 1);
         assert_eq!(info.exports[0].name, ExportName::Named("foo".to_string()));
+    }
+
+    #[test]
+    fn extracts_static_member_accesses() {
+        let info = parse_source(
+            "import { Status, MyClass } from './types';\nconsole.log(Status.Active);\nMyClass.create();",
+        );
+        // Should capture: console.log, Status.Active, MyClass.create
+        assert!(info.member_accesses.len() >= 2);
+        let has_status_active = info
+            .member_accesses
+            .iter()
+            .any(|a| a.object == "Status" && a.member == "Active");
+        let has_myclass_create = info
+            .member_accesses
+            .iter()
+            .any(|a| a.object == "MyClass" && a.member == "create");
+        assert!(has_status_active, "Should capture Status.Active");
+        assert!(has_myclass_create, "Should capture MyClass.create");
     }
 }

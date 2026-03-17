@@ -23,11 +23,15 @@ pub fn find_dead_code_with_resolved(
     let mut results = AnalysisResults::default();
 
     if config.detect.unused_files {
+        let t = std::time::Instant::now();
         results.unused_files = find_unused_files(graph);
+        eprintln!("[perf]   unused_files: {:?}", t.elapsed());
     }
 
     if config.detect.unused_exports || config.detect.unused_types {
+        let t = std::time::Instant::now();
         let (exports, types) = find_unused_exports(graph, config);
+        eprintln!("[perf]   unused_exports: {:?}", t.elapsed());
         if config.detect.unused_exports {
             results.unused_exports = exports;
         }
@@ -37,7 +41,9 @@ pub fn find_dead_code_with_resolved(
     }
 
     if config.detect.unused_enum_members || config.detect.unused_class_members {
-        let (enum_members, class_members) = find_unused_members(graph, config);
+        let t = std::time::Instant::now();
+        let (enum_members, class_members) = find_unused_members(graph, config, resolved_modules);
+        eprintln!("[perf]   unused_members: {:?}", t.elapsed());
         if config.detect.unused_enum_members {
             results.unused_enum_members = enum_members;
         }
@@ -49,7 +55,9 @@ pub fn find_dead_code_with_resolved(
     let pkg_path = config.root.join("package.json");
     if let Ok(pkg) = PackageJson::load(&pkg_path) {
         if config.detect.unused_dependencies || config.detect.unused_dev_dependencies {
+            let t = std::time::Instant::now();
             let (deps, dev_deps) = find_unused_dependencies(graph, &pkg, config);
+            eprintln!("[perf]   unused_deps: {:?}", t.elapsed());
             if config.detect.unused_dependencies {
                 results.unused_dependencies = deps;
             }
@@ -59,16 +67,22 @@ pub fn find_dead_code_with_resolved(
         }
 
         if config.detect.unlisted_dependencies {
+            let t = std::time::Instant::now();
             results.unlisted_dependencies = find_unlisted_dependencies(graph, &pkg);
+            eprintln!("[perf]   unlisted_deps: {:?}", t.elapsed());
         }
     }
 
     if config.detect.unresolved_imports && !resolved_modules.is_empty() {
+        let t = std::time::Instant::now();
         results.unresolved_imports = find_unresolved_imports(resolved_modules, config);
+        eprintln!("[perf]   unresolved: {:?}", t.elapsed());
     }
 
     if config.detect.duplicate_exports {
+        let t = std::time::Instant::now();
         results.duplicate_exports = find_duplicate_exports(graph, config);
+        eprintln!("[perf]   duplicates: {:?}", t.elapsed());
     }
 
     results
@@ -236,12 +250,46 @@ fn is_framework_used_export(
 }
 
 /// Find unused enum and class members in exported symbols.
+///
+/// Collects all `Identifier.member` static member accesses from all modules,
+/// maps them to their imported names, and filters out members that are accessed.
 fn find_unused_members(
     graph: &ModuleGraph,
     _config: &ResolvedConfig,
+    resolved_modules: &[ResolvedModule],
 ) -> (Vec<UnusedMember>, Vec<UnusedMember>) {
     let mut unused_enum_members = Vec::new();
     let mut unused_class_members = Vec::new();
+
+    // Build a set of (export_name, member_name) pairs that are accessed across all modules.
+    // We map local import names back to the original imported names.
+    let mut accessed_members: HashSet<(String, String)> = HashSet::new();
+
+    for resolved in resolved_modules {
+        // Build a map from local name -> imported name for this module's imports
+        let local_to_imported: HashMap<&str, &str> = resolved
+            .resolved_imports
+            .iter()
+            .filter_map(|imp| match &imp.info.imported_name {
+                crate::extract::ImportedName::Named(name) => {
+                    Some((imp.info.local_name.as_str(), name.as_str()))
+                }
+                crate::extract::ImportedName::Default => {
+                    Some((imp.info.local_name.as_str(), "default"))
+                }
+                _ => None,
+            })
+            .collect();
+
+        for access in &resolved.member_accesses {
+            // If the object is a local name for an import, map it to the original export name
+            let export_name = local_to_imported
+                .get(access.object.as_str())
+                .copied()
+                .unwrap_or(access.object.as_str());
+            accessed_members.insert((export_name.to_string(), access.member.clone()));
+        }
+    }
 
     for module in &graph.modules {
         if !module.is_reachable || module.is_entry_point {
@@ -258,14 +306,17 @@ fn find_unused_members(
                 continue;
             }
 
+            let export_name = export.name.to_string();
+
             for member in &export.members {
-                // For now, report all members of used exports as potentially unused.
-                // A more sophisticated approach would track property access on the imported symbol.
-                // We use a heuristic: if the export is used but has many members,
-                // some may be unused.
+                // Check if this member is accessed anywhere
+                if accessed_members.contains(&(export_name.clone(), member.name.clone())) {
+                    continue;
+                }
+
                 let unused = UnusedMember {
                     path: module.path.clone(),
-                    parent_name: export.name.to_string(),
+                    parent_name: export_name.clone(),
                     member_name: member.name.clone(),
                     kind: match member.kind {
                         MemberKind::EnumMember => "enum_member".to_string(),
@@ -286,12 +337,7 @@ fn find_unused_members(
         }
     }
 
-    // Note: Full member-level usage tracking requires property access analysis (e.g., `MyEnum.Foo`).
-    // This is a structural pass that identifies members for future refinement.
-    // For now, return empty to avoid false positives — member tracking requires
-    // property access analysis which we'll add incrementally.
-    let _ = (unused_enum_members, unused_class_members);
-    (Vec::new(), Vec::new())
+    (unused_enum_members, unused_class_members)
 }
 
 /// Find dependencies used in imports but not listed in package.json.

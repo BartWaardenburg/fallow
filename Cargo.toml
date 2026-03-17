@@ -44,6 +44,7 @@ bincode = "1"
 
 # Diagnostics & output
 codespan-reporting = "0.11"
+colored = "3"
 indicatif = "0.17"
 miette = { version = "7", features = ["fancy"] }
 

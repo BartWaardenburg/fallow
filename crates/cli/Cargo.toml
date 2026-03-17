@@ -14,6 +14,7 @@ path = "src/main.rs"
 fallow-core = { workspace = true }
 fallow-config = { workspace = true }
 clap = { workspace = true }
+colored = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 indicatif = { workspace = true }

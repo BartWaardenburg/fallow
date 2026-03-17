@@ -44,6 +44,7 @@ pub struct ResolvedModule {
     pub re_exports: Vec<ResolvedReExport>,
     pub resolved_imports: Vec<ResolvedImport>,
     pub resolved_dynamic_imports: Vec<ResolvedImport>,
+    pub member_accesses: Vec<crate::extract::MemberAccess>,
     pub has_cjs_exports: bool,
 }
 
@@ -136,6 +137,7 @@ pub fn resolve_all_imports(
                 re_exports,
                 resolved_imports: all_imports,
                 resolved_dynamic_imports,
+                member_accesses: module.member_accesses.clone(),
                 has_cjs_exports: module.has_cjs_exports,
             }
         })

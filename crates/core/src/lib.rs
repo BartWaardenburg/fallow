@@ -42,7 +42,7 @@ pub fn analyze(config: &ResolvedConfig) -> AnalysisResults {
     };
 
     tracing::info!("parsing files...");
-    let modules = extract::parse_all_files(&files, config);
+    let modules = extract::parse_all_files(&files, config, cache_store.as_ref());
     tracing::info!(count = modules.len(), "modules parsed");
 
     // Update cache with parsed results

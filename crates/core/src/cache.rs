@@ -3,10 +3,12 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use crate::extract::{ExportName, MemberKind};
+use oxc_span::Span;
+
+use crate::extract::{ExportName, MemberAccess, MemberKind};
 
 /// Cache version — bump when the cache format changes.
-const CACHE_VERSION: u32 = 1;
+const CACHE_VERSION: u32 = 2;
 
 /// Cached module information stored on disk.
 #[derive(Debug, Serialize, Deserialize)]
@@ -31,6 +33,8 @@ pub struct CachedModule {
     pub dynamic_imports: Vec<String>,
     /// Require() specifiers.
     pub require_calls: Vec<String>,
+    /// Static member accesses (e.g., `Status.Active`).
+    pub member_accesses: Vec<MemberAccess>,
     /// Whether this module uses CJS exports.
     pub has_cjs_exports: bool,
 }
@@ -139,6 +143,103 @@ impl Default for CacheStore {
     }
 }
 
+/// Reconstruct a ModuleInfo from a CachedModule.
+pub fn cached_to_module(
+    cached: &CachedModule,
+    file_id: crate::discover::FileId,
+) -> crate::extract::ModuleInfo {
+    use crate::extract::*;
+
+    let exports = cached
+        .exports
+        .iter()
+        .map(|e| ExportInfo {
+            name: if e.is_default {
+                ExportName::Default
+            } else {
+                ExportName::Named(e.name.clone())
+            },
+            local_name: e.local_name.clone(),
+            is_type_only: e.is_type_only,
+            span: Span::new(e.span_start, e.span_end),
+            members: e
+                .members
+                .iter()
+                .map(|m| MemberInfo {
+                    name: m.name.clone(),
+                    kind: match m.kind.as_str() {
+                        "enum" => MemberKind::EnumMember,
+                        "method" => MemberKind::ClassMethod,
+                        _ => MemberKind::ClassProperty,
+                    },
+                    span: Span::new(m.span_start, m.span_end),
+                })
+                .collect(),
+        })
+        .collect();
+
+    let imports = cached
+        .imports
+        .iter()
+        .map(|i| ImportInfo {
+            source: i.source.clone(),
+            imported_name: if i.is_side_effect {
+                ImportedName::SideEffect
+            } else if i.is_namespace {
+                ImportedName::Namespace
+            } else if i.is_default {
+                ImportedName::Default
+            } else {
+                ImportedName::Named(i.imported_name.clone())
+            },
+            local_name: i.local_name.clone(),
+            is_type_only: i.is_type_only,
+            span: Span::new(0, 0),
+        })
+        .collect();
+
+    let re_exports = cached
+        .re_exports
+        .iter()
+        .map(|r| ReExportInfo {
+            source: r.source.clone(),
+            imported_name: r.imported_name.clone(),
+            exported_name: r.exported_name.clone(),
+            is_type_only: r.is_type_only,
+        })
+        .collect();
+
+    let dynamic_imports = cached
+        .dynamic_imports
+        .iter()
+        .map(|source| DynamicImportInfo {
+            source: source.clone(),
+            span: Span::new(0, 0),
+        })
+        .collect();
+
+    let require_calls = cached
+        .require_calls
+        .iter()
+        .map(|source| RequireCallInfo {
+            source: source.clone(),
+            span: Span::new(0, 0),
+        })
+        .collect();
+
+    ModuleInfo {
+        file_id,
+        exports,
+        imports,
+        re_exports,
+        dynamic_imports,
+        require_calls,
+        member_accesses: cached.member_accesses.clone(),
+        has_cjs_exports: cached.has_cjs_exports,
+        content_hash: cached.content_hash,
+    }
+}
+
 /// Convert a ModuleInfo to a CachedModule for storage.
 pub fn module_to_cached(module: &crate::extract::ModuleInfo) -> CachedModule {
     CachedModule {
@@ -210,6 +311,7 @@ pub fn module_to_cached(module: &crate::extract::ModuleInfo) -> CachedModule {
             .iter()
             .map(|r| r.source.clone())
             .collect(),
+        member_accesses: module.member_accesses.clone(),
         has_cjs_exports: module.has_cjs_exports,
     }
 }

@@ -84,6 +84,10 @@ impl LanguageServer for FallowLspServer {
 
         let mut actions = Vec::new();
 
+        // Read file content once for computing line positions and edit ranges
+        let file_content = std::fs::read_to_string(&file_path).unwrap_or_default();
+        let file_lines: Vec<&str> = file_content.lines().collect();
+
         // Generate "Remove export" code actions for unused exports
         for export in results
             .unused_exports
@@ -94,37 +98,62 @@ impl LanguageServer for FallowLspServer {
                 continue;
             }
 
+            // export.line is a byte offset (from oxc Span), convert to 0-based line index
+            let byte_offset = export.line as usize;
+            let export_line = byte_offset_to_line(&file_content, byte_offset);
+
             // Check if this diagnostic is in the requested range
-            let export_line = export.line.saturating_sub(1);
             if export_line < params.range.start.line || export_line > params.range.end.line {
                 continue;
             }
 
+            // Determine the export prefix to remove by inspecting the line content
+            let line_content = file_lines.get(export_line as usize).copied().unwrap_or("");
+            let trimmed = line_content.trim_start();
+            let indent_len = line_content.len() - trimmed.len();
+
+            let prefix_to_remove = if trimmed.starts_with("export default ") {
+                Some("export default ")
+            } else if trimmed.starts_with("export ") {
+                // Handles: export const, export function, export class, export type,
+                // export interface, export enum, export abstract, export async,
+                // export let, export var, etc.
+                Some("export ")
+            } else {
+                None
+            };
+
+            let Some(prefix) = prefix_to_remove else {
+                continue;
+            };
+
             let title = format!("Remove unused export `{}`", export.export_name);
             let mut changes = std::collections::HashMap::new();
 
-            // Create a text edit that removes the "export " keyword
+            // Create a text edit that removes the export keyword prefix
             let edit = TextEdit {
                 range: Range {
                     start: Position {
                         line: export_line,
-                        character: 0,
+                        character: indent_len as u32,
                     },
                     end: Position {
                         line: export_line,
-                        character: 0,
+                        character: (indent_len + prefix.len()) as u32,
                     },
                 },
                 new_text: String::new(),
             };
 
-            // We'll use a simple approach - the actual removal requires reading the file
-            // For now, mark with a diagnostic
             changes.insert(uri.clone(), vec![edit]);
 
             actions.push(CodeActionOrCommand::CodeAction(CodeAction {
                 title,
                 kind: Some(CodeActionKind::QUICKFIX),
+                edit: Some(WorkspaceEdit {
+                    changes: Some(changes),
+                    ..Default::default()
+                }),
                 diagnostics: Some(vec![Diagnostic {
                     range: Range {
                         start: Position {
@@ -189,16 +218,24 @@ impl FallowLspServer {
         let mut diagnostics_by_file: std::collections::HashMap<Url, Vec<Diagnostic>> =
             std::collections::HashMap::new();
 
+        // Cache file contents to avoid re-reading the same file multiple times
+        let mut file_cache: std::collections::HashMap<PathBuf, String> =
+            std::collections::HashMap::new();
+
         for export in &results.unused_exports {
             if let Ok(uri) = Url::from_file_path(&export.path) {
+                let content = file_cache
+                    .entry(export.path.clone())
+                    .or_insert_with(|| std::fs::read_to_string(&export.path).unwrap_or_default());
+                let line = byte_offset_to_line(content, export.line as usize);
                 let diag = Diagnostic {
                     range: Range {
                         start: Position {
-                            line: export.line.saturating_sub(1),
+                            line,
                             character: export.col,
                         },
                         end: Position {
-                            line: export.line.saturating_sub(1),
+                            line,
                             character: export.col + export.export_name.len() as u32,
                         },
                     },
@@ -215,16 +252,14 @@ impl FallowLspServer {
 
         for export in &results.unused_types {
             if let Ok(uri) = Url::from_file_path(&export.path) {
+                let content = file_cache
+                    .entry(export.path.clone())
+                    .or_insert_with(|| std::fs::read_to_string(&export.path).unwrap_or_default());
+                let line = byte_offset_to_line(content, export.line as usize);
                 let diag = Diagnostic {
                     range: Range {
-                        start: Position {
-                            line: export.line.saturating_sub(1),
-                            character: 0,
-                        },
-                        end: Position {
-                            line: export.line.saturating_sub(1),
-                            character: 0,
-                        },
+                        start: Position { line, character: 0 },
+                        end: Position { line, character: 0 },
                     },
                     severity: Some(DiagnosticSeverity::HINT),
                     source: Some("fallow".to_string()),
@@ -263,16 +298,14 @@ impl FallowLspServer {
 
         for import in &results.unresolved_imports {
             if let Ok(uri) = Url::from_file_path(&import.path) {
+                let content = file_cache
+                    .entry(import.path.clone())
+                    .or_insert_with(|| std::fs::read_to_string(&import.path).unwrap_or_default());
+                let line = byte_offset_to_line(content, import.line as usize);
                 let diag = Diagnostic {
                     range: Range {
-                        start: Position {
-                            line: import.line.saturating_sub(1),
-                            character: 0,
-                        },
-                        end: Position {
-                            line: import.line.saturating_sub(1),
-                            character: 0,
-                        },
+                        start: Position { line, character: 0 },
+                        end: Position { line, character: 0 },
                     },
                     severity: Some(DiagnosticSeverity::ERROR),
                     source: Some("fallow".to_string()),
@@ -291,6 +324,23 @@ impl FallowLspServer {
                 .await;
         }
     }
+}
+
+/// Convert a byte offset in file content to a 0-based line number.
+fn byte_offset_to_line(content: &str, byte_offset: usize) -> u32 {
+    let mut line = 0u32;
+    let mut current_offset = 0;
+    for line_content in content.lines() {
+        let line_end = current_offset + line_content.len();
+        if byte_offset <= line_end {
+            return line;
+        }
+        // +1 for the newline character
+        current_offset = line_end + 1;
+        line += 1;
+    }
+    // If offset is past the end, return the last line
+    line.saturating_sub(1)
 }
 
 #[tokio::main]
