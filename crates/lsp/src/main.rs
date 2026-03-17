@@ -1,7 +1,9 @@
-use std::path::PathBuf;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Instant;
 
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
@@ -12,6 +14,8 @@ struct FallowLspServer {
     client: Client,
     root: Arc<RwLock<Option<PathBuf>>>,
     results: Arc<RwLock<Option<AnalysisResults>>>,
+    previous_diagnostic_uris: Arc<RwLock<HashSet<Url>>>,
+    last_analysis: Arc<Mutex<Instant>>,
 }
 
 #[tower_lsp::async_trait]
@@ -62,6 +66,16 @@ impl LanguageServer for FallowLspServer {
     }
 
     async fn did_save(&self, _params: DidSaveTextDocumentParams) {
+        // Debounce: skip if last analysis was less than 500ms ago
+        let now = Instant::now();
+        {
+            let mut last = self.last_analysis.lock().await;
+            if now.duration_since(*last) < std::time::Duration::from_millis(500) {
+                return;
+            }
+            *last = now;
+        }
+
         // Re-run analysis on save
         self.run_analysis().await;
     }
@@ -128,7 +142,7 @@ impl LanguageServer for FallowLspServer {
             };
 
             let title = format!("Remove unused export `{}`", export.export_name);
-            let mut changes = std::collections::HashMap::new();
+            let mut changes = HashMap::new();
 
             // Create a text edit that removes the export keyword prefix
             let edit = TextEdit {
@@ -175,6 +189,57 @@ impl LanguageServer for FallowLspServer {
             }));
         }
 
+        // Generate "Delete this file" code actions for unused files
+        for file in &results.unused_files {
+            if file.path != file_path {
+                continue;
+            }
+
+            // The diagnostic is at line 0, col 0 — check if the request range overlaps
+            if params.range.start.line > 0 {
+                continue;
+            }
+
+            let title = "Delete this unused file".to_string();
+
+            let delete_file_op = DocumentChangeOperation::Op(ResourceOp::Delete(DeleteFile {
+                uri: uri.clone(),
+                options: Some(DeleteFileOptions {
+                    recursive: Some(false),
+                    ignore_if_not_exists: Some(true),
+                    annotation_id: None,
+                }),
+            }));
+
+            actions.push(CodeActionOrCommand::CodeAction(CodeAction {
+                title,
+                kind: Some(CodeActionKind::QUICKFIX),
+                edit: Some(WorkspaceEdit {
+                    document_changes: Some(DocumentChanges::Operations(vec![delete_file_op])),
+                    ..Default::default()
+                }),
+                diagnostics: Some(vec![Diagnostic {
+                    range: Range {
+                        start: Position {
+                            line: 0,
+                            character: 0,
+                        },
+                        end: Position {
+                            line: 0,
+                            character: 0,
+                        },
+                    },
+                    severity: Some(DiagnosticSeverity::WARNING),
+                    source: Some("fallow".to_string()),
+                    code: Some(NumberOrString::String("unused-file".to_string())),
+                    message: "File is not reachable from any entry point".to_string(),
+                    tags: Some(vec![DiagnosticTag::UNNECESSARY]),
+                    ..Default::default()
+                }]),
+                ..Default::default()
+            }));
+        }
+
         if actions.is_empty() {
             Ok(None)
         } else {
@@ -213,14 +278,16 @@ impl FallowLspServer {
         }
     }
 
-    async fn publish_diagnostics(&self, results: &AnalysisResults, _root: &PathBuf) {
+    async fn publish_diagnostics(&self, results: &AnalysisResults, root: &Path) {
         // Collect diagnostics per file
-        let mut diagnostics_by_file: std::collections::HashMap<Url, Vec<Diagnostic>> =
-            std::collections::HashMap::new();
+        let mut diagnostics_by_file: HashMap<Url, Vec<Diagnostic>> = HashMap::new();
 
         // Cache file contents to avoid re-reading the same file multiple times
-        let mut file_cache: std::collections::HashMap<PathBuf, String> =
-            std::collections::HashMap::new();
+        let mut file_cache: HashMap<PathBuf, String> = HashMap::new();
+
+        // Helper: get the package.json URI for dependency-related diagnostics
+        let package_json_path = root.join("package.json");
+        let package_json_uri = Url::from_file_path(&package_json_path).ok();
 
         for export in &results.unused_exports {
             if let Ok(uri) = Url::from_file_path(&export.path) {
@@ -317,30 +384,223 @@ impl FallowLspServer {
             }
         }
 
-        // Publish
-        for (uri, diagnostics) in diagnostics_by_file {
+        // Unused dependencies → WARNING on package.json
+        for dep in &results.unused_dependencies {
+            if let Some(ref uri) = package_json_uri {
+                let diag = Diagnostic {
+                    range: Range {
+                        start: Position {
+                            line: 0,
+                            character: 0,
+                        },
+                        end: Position {
+                            line: 0,
+                            character: 0,
+                        },
+                    },
+                    severity: Some(DiagnosticSeverity::WARNING),
+                    source: Some("fallow".to_string()),
+                    code: Some(NumberOrString::String("unused-dependency".to_string())),
+                    message: format!("Unused dependency: {}", dep.package_name),
+                    ..Default::default()
+                };
+                diagnostics_by_file
+                    .entry(uri.clone())
+                    .or_default()
+                    .push(diag);
+            }
+        }
+
+        // Unused dev dependencies → WARNING on package.json
+        for dep in &results.unused_dev_dependencies {
+            if let Some(ref uri) = package_json_uri {
+                let diag = Diagnostic {
+                    range: Range {
+                        start: Position {
+                            line: 0,
+                            character: 0,
+                        },
+                        end: Position {
+                            line: 0,
+                            character: 0,
+                        },
+                    },
+                    severity: Some(DiagnosticSeverity::WARNING),
+                    source: Some("fallow".to_string()),
+                    code: Some(NumberOrString::String("unused-dev-dependency".to_string())),
+                    message: format!("Unused devDependency: {}", dep.package_name),
+                    ..Default::default()
+                };
+                diagnostics_by_file
+                    .entry(uri.clone())
+                    .or_default()
+                    .push(diag);
+            }
+        }
+
+        // Unused enum members → HINT with UNNECESSARY tag
+        for member in &results.unused_enum_members {
+            if let Ok(uri) = Url::from_file_path(&member.path) {
+                let content = file_cache
+                    .entry(member.path.clone())
+                    .or_insert_with(|| std::fs::read_to_string(&member.path).unwrap_or_default());
+                let line = byte_offset_to_line(content, member.line as usize);
+                let diag = Diagnostic {
+                    range: Range {
+                        start: Position {
+                            line,
+                            character: member.col,
+                        },
+                        end: Position {
+                            line,
+                            character: member.col + member.member_name.len() as u32,
+                        },
+                    },
+                    severity: Some(DiagnosticSeverity::HINT),
+                    source: Some("fallow".to_string()),
+                    code: Some(NumberOrString::String("unused-enum-member".to_string())),
+                    message: format!(
+                        "Enum member '{}.{}' is unused",
+                        member.parent_name, member.member_name
+                    ),
+                    tags: Some(vec![DiagnosticTag::UNNECESSARY]),
+                    ..Default::default()
+                };
+                diagnostics_by_file.entry(uri).or_default().push(diag);
+            }
+        }
+
+        // Unused class members → HINT with UNNECESSARY tag
+        for member in &results.unused_class_members {
+            if let Ok(uri) = Url::from_file_path(&member.path) {
+                let content = file_cache
+                    .entry(member.path.clone())
+                    .or_insert_with(|| std::fs::read_to_string(&member.path).unwrap_or_default());
+                let line = byte_offset_to_line(content, member.line as usize);
+                let diag = Diagnostic {
+                    range: Range {
+                        start: Position {
+                            line,
+                            character: member.col,
+                        },
+                        end: Position {
+                            line,
+                            character: member.col + member.member_name.len() as u32,
+                        },
+                    },
+                    severity: Some(DiagnosticSeverity::HINT),
+                    source: Some("fallow".to_string()),
+                    code: Some(NumberOrString::String("unused-class-member".to_string())),
+                    message: format!(
+                        "Class member '{}.{}' is unused",
+                        member.parent_name, member.member_name
+                    ),
+                    tags: Some(vec![DiagnosticTag::UNNECESSARY]),
+                    ..Default::default()
+                };
+                diagnostics_by_file.entry(uri).or_default().push(diag);
+            }
+        }
+
+        // Unlisted dependencies → WARNING on package.json
+        for dep in &results.unlisted_dependencies {
+            if let Some(ref uri) = package_json_uri {
+                let diag = Diagnostic {
+                    range: Range {
+                        start: Position {
+                            line: 0,
+                            character: 0,
+                        },
+                        end: Position {
+                            line: 0,
+                            character: 0,
+                        },
+                    },
+                    severity: Some(DiagnosticSeverity::WARNING),
+                    source: Some("fallow".to_string()),
+                    code: Some(NumberOrString::String("unlisted-dependency".to_string())),
+                    message: format!(
+                        "Unlisted dependency: {} (used but not in package.json)",
+                        dep.package_name
+                    ),
+                    ..Default::default()
+                };
+                diagnostics_by_file
+                    .entry(uri.clone())
+                    .or_default()
+                    .push(diag);
+            }
+        }
+
+        // Duplicate exports → WARNING on each file that has the duplicate
+        for dup in &results.duplicate_exports {
+            for location in &dup.locations {
+                if let Ok(uri) = Url::from_file_path(location) {
+                    let other_files: Vec<String> = dup
+                        .locations
+                        .iter()
+                        .filter(|l| *l != location)
+                        .map(|l| l.display().to_string())
+                        .collect();
+                    let diag = Diagnostic {
+                        range: Range {
+                            start: Position {
+                                line: 0,
+                                character: 0,
+                            },
+                            end: Position {
+                                line: 0,
+                                character: 0,
+                            },
+                        },
+                        severity: Some(DiagnosticSeverity::WARNING),
+                        source: Some("fallow".to_string()),
+                        code: Some(NumberOrString::String("duplicate-export".to_string())),
+                        message: format!(
+                            "Duplicate export '{}' (also in: {})",
+                            dup.export_name,
+                            other_files.join(", ")
+                        ),
+                        ..Default::default()
+                    };
+                    diagnostics_by_file.entry(uri).or_default().push(diag);
+                }
+            }
+        }
+
+        // Collect the set of URIs we are publishing to
+        let new_uris: HashSet<Url> = diagnostics_by_file.keys().cloned().collect();
+
+        // Publish diagnostics for current results
+        for (uri, diagnostics) in &diagnostics_by_file {
             self.client
-                .publish_diagnostics(uri, diagnostics, None)
+                .publish_diagnostics(uri.clone(), diagnostics.clone(), None)
                 .await;
         }
+
+        // Clear stale diagnostics: send empty arrays for URIs that had diagnostics
+        // in the previous run but not in this one
+        {
+            let previous_uris = self.previous_diagnostic_uris.read().await;
+            for old_uri in previous_uris.iter() {
+                if !new_uris.contains(old_uri) {
+                    self.client
+                        .publish_diagnostics(old_uri.clone(), vec![], None)
+                        .await;
+                }
+            }
+        }
+
+        // Update the tracked URIs for next run
+        *self.previous_diagnostic_uris.write().await = new_uris;
     }
 }
 
 /// Convert a byte offset in file content to a 0-based line number.
 fn byte_offset_to_line(content: &str, byte_offset: usize) -> u32 {
-    let mut line = 0u32;
-    let mut current_offset = 0;
-    for line_content in content.lines() {
-        let line_end = current_offset + line_content.len();
-        if byte_offset <= line_end {
-            return line;
-        }
-        // +1 for the newline character
-        current_offset = line_end + 1;
-        line += 1;
-    }
-    // If offset is past the end, return the last line
-    line.saturating_sub(1)
+    let offset = byte_offset.min(content.len());
+    let truncated = &content[..offset];
+    truncated.matches('\n').count() as u32
 }
 
 #[tokio::main]
@@ -357,6 +617,10 @@ async fn main() {
         client,
         root: Arc::new(RwLock::new(None)),
         results: Arc::new(RwLock::new(None)),
+        previous_diagnostic_uris: Arc::new(RwLock::new(HashSet::new())),
+        last_analysis: Arc::new(Mutex::new(
+            Instant::now() - std::time::Duration::from_secs(10),
+        )),
     });
 
     Server::new(stdin, stdout, socket).serve(service).await;

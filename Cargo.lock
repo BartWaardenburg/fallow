@@ -524,7 +524,6 @@ dependencies = [
 name = "fallow-lsp"
 version = "0.1.0"
 dependencies = [
- "fallow-config",
  "fallow-core",
  "serde_json",
  "tokio",

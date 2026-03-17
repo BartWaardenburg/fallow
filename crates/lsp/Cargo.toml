@@ -12,7 +12,6 @@ path = "src/main.rs"
 
 [dependencies]
 fallow-core = { workspace = true }
-fallow-config = { workspace = true }
 tower-lsp = { workspace = true }
 tokio = { workspace = true }
 serde_json = { workspace = true }
