@@ -49,10 +49,6 @@ struct Cli {
     #[arg(long, global = true)]
     threads: Option<usize>,
 
-    /// Exit with code 1 if issues are found
-    #[arg(long, global = true)]
-    fail_on_issues: bool,
-
     /// Only report issues in files changed since this git ref (e.g., main, HEAD~5)
     #[arg(long, global = true)]
     changed_since: Option<String>,
@@ -70,6 +66,10 @@ struct Cli {
 enum Command {
     /// Run dead code analysis (default)
     Check {
+        /// Exit with code 1 if issues are found
+        #[arg(long)]
+        fail_on_issues: bool,
+
         /// Only report unused files
         #[arg(long)]
         unused_files: bool,
@@ -301,6 +301,7 @@ fn main() -> ExitCode {
     });
 
     match cli.command.unwrap_or(Command::Check {
+        fail_on_issues: false,
         unused_files: false,
         unused_exports: false,
         unused_deps: false,
@@ -312,6 +313,7 @@ fn main() -> ExitCode {
         duplicate_exports: false,
     }) {
         Command::Check {
+            fail_on_issues,
             unused_files,
             unused_exports,
             unused_deps,
@@ -340,7 +342,7 @@ fn main() -> ExitCode {
                 cli.no_cache,
                 threads,
                 cli.quiet,
-                cli.fail_on_issues,
+                fail_on_issues,
                 &filters,
                 cli.changed_since.as_deref(),
                 cli.baseline.as_deref(),
@@ -400,7 +402,10 @@ fn run_check(
 ) -> ExitCode {
     let start = Instant::now();
 
-    let config = load_config(root, config_path, output, no_cache, threads);
+    let config = match load_config(root, config_path, output, no_cache, threads) {
+        Ok(c) => c,
+        Err(code) => return code,
+    };
 
     // Get changed files if --changed-since is set (already validated)
     let changed_files: Option<std::collections::HashSet<std::path::PathBuf>> =
@@ -457,7 +462,10 @@ fn run_check(
         }
     }
 
-    report::print_results(&results, &config, elapsed, quiet);
+    let report_code = report::print_results(&results, &config, elapsed, quiet);
+    if report_code != ExitCode::SUCCESS {
+        return report_code;
+    }
 
     if fail_on_issues && results.has_issues() {
         ExitCode::from(1)
@@ -471,13 +479,32 @@ fn get_changed_files(
     root: &std::path::Path,
     git_ref: &str,
 ) -> Option<std::collections::HashSet<std::path::PathBuf>> {
-    let output = std::process::Command::new("git")
+    let output = match std::process::Command::new("git")
         .args(["diff", "--name-only", git_ref])
         .current_dir(root)
         .output()
-        .ok()?;
+    {
+        Ok(o) => o,
+        Err(e) => {
+            // git binary not found or not executable — could be a non-git project
+            eprintln!("Warning: --changed-since ignored: failed to run git: {e}");
+            return None;
+        }
+    };
 
     if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if stderr.contains("not a git repository") {
+            // Not a git repo — silently skip the filter (could be OK)
+            eprintln!("Warning: --changed-since ignored: not a git repository");
+        } else {
+            // Likely a bad ref — warn the user
+            eprintln!(
+                "Warning: --changed-since failed for ref '{}': {}",
+                git_ref,
+                stderr.trim()
+            );
+        }
         return None;
     }
 
@@ -496,8 +523,8 @@ struct BaselineData {
     unused_files: Vec<String>,
     unused_exports: Vec<String>,
     unused_types: Vec<String>,
-    unused_deps: Vec<String>,
-    unused_dev_deps: Vec<String>,
+    unused_dependencies: Vec<String>,
+    unused_dev_dependencies: Vec<String>,
 }
 
 impl BaselineData {
@@ -518,12 +545,12 @@ impl BaselineData {
                 .iter()
                 .map(|e| format!("{}:{}", e.path.display(), e.export_name))
                 .collect(),
-            unused_deps: results
+            unused_dependencies: results
                 .unused_dependencies
                 .iter()
                 .map(|d| d.package_name.clone())
                 .collect(),
-            unused_dev_deps: results
+            unused_dev_dependencies: results
                 .unused_dev_dependencies
                 .iter()
                 .map(|d| d.package_name.clone())
@@ -554,10 +581,10 @@ fn filter_new_issues(
     });
     results
         .unused_dependencies
-        .retain(|d| !baseline.unused_deps.contains(&d.package_name));
+        .retain(|d| !baseline.unused_dependencies.contains(&d.package_name));
     results
         .unused_dev_dependencies
-        .retain(|d| !baseline.unused_dev_deps.contains(&d.package_name));
+        .retain(|d| !baseline.unused_dev_dependencies.contains(&d.package_name));
     results
 }
 
@@ -573,7 +600,10 @@ fn run_watch(
     use std::sync::mpsc;
     use std::time::Duration;
 
-    let config = load_config(root, config_path, output.clone(), no_cache, threads);
+    let config = match load_config(root, config_path, output.clone(), no_cache, threads) {
+        Ok(c) => c,
+        Err(code) => return code,
+    };
 
     eprintln!("Watching for changes... (press Ctrl+C to stop)");
 
@@ -587,7 +617,10 @@ fn run_watch(
         }
     };
     let elapsed = start.elapsed();
-    report::print_results(&results, &config, elapsed, quiet);
+    let report_code = report::print_results(&results, &config, elapsed, quiet);
+    if report_code != ExitCode::SUCCESS {
+        return report_code;
+    }
 
     // Set up file watcher
     let (tx, rx) = mpsc::channel();
@@ -627,12 +660,20 @@ fn run_watch(
 
                 if has_source_changes {
                     eprintln!("\nFile changed, re-analyzing...");
-                    let config = load_config(root, config_path, output.clone(), no_cache, threads);
+                    let config =
+                        match load_config(root, config_path, output.clone(), no_cache, threads) {
+                            Ok(c) => c,
+                            Err(code) => return code,
+                        };
                     let start = Instant::now();
                     match fallow_core::analyze(&config) {
                         Ok(results) => {
                             let elapsed = start.elapsed();
-                            report::print_results(&results, &config, elapsed, quiet);
+                            let report_code =
+                                report::print_results(&results, &config, elapsed, quiet);
+                            if report_code != ExitCode::SUCCESS {
+                                return report_code;
+                            }
                         }
                         Err(e) => {
                             eprintln!("Analysis error: {e}");
@@ -645,12 +686,10 @@ fn run_watch(
             }
             Err(e) => {
                 eprintln!("Channel error: {e}");
-                break;
+                return ExitCode::from(2);
             }
         }
     }
-
-    ExitCode::SUCCESS
 }
 
 fn run_fix(
@@ -662,7 +701,13 @@ fn run_fix(
     quiet: bool,
     dry_run: bool,
 ) -> ExitCode {
-    let config = load_config(root, config_path, OutputFormat::Human, no_cache, threads);
+    use std::collections::HashMap;
+    use std::io::Write;
+
+    let config = match load_config(root, config_path, OutputFormat::Human, no_cache, threads) {
+        Ok(c) => c,
+        Err(code) => return code,
+    };
 
     let results = match fallow_core::analyze(&config) {
         Ok(r) => r,
@@ -674,15 +719,17 @@ fn run_fix(
 
     if results.total_issues() == 0 {
         if matches!(output, OutputFormat::Json) {
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&serde_json::json!({
-                    "dry_run": dry_run,
-                    "fixes": [],
-                    "total_fixed": 0
-                }))
-                .unwrap()
-            );
+            match serde_json::to_string_pretty(&serde_json::json!({
+                "dry_run": dry_run,
+                "fixes": [],
+                "total_fixed": 0
+            })) {
+                Ok(json) => println!("{json}"),
+                Err(e) => {
+                    eprintln!("Error: failed to serialize fix output: {e}");
+                    return ExitCode::from(2);
+                }
+            }
         } else if !quiet {
             eprintln!("No issues to fix.");
         }
@@ -690,13 +737,33 @@ fn run_fix(
     }
 
     let mut fixes: Vec<serde_json::Value> = Vec::new();
+    let mut had_write_error = false;
 
-    // Fix unused exports: remove the `export` keyword
+    // Fix unused exports: group by file, apply all fixes per file at once.
+    // Group exports by file path so we can apply all fixes to a single in-memory copy.
+    let mut exports_by_file: HashMap<PathBuf, Vec<&fallow_core::results::UnusedExport>> =
+        HashMap::new();
     for export in &results.unused_exports {
-        let path = &export.path;
-        if let Ok(content) = std::fs::read_to_string(path) {
-            let lines: Vec<&str> = content.lines().collect();
-            // Find the line containing this export by span offset
+        exports_by_file
+            .entry(export.path.clone())
+            .or_default()
+            .push(export);
+    }
+
+    for (path, file_exports) in &exports_by_file {
+        let content = match std::fs::read_to_string(path) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        let lines: Vec<&str> = content.lines().collect();
+
+        struct ExportFix {
+            line_idx: usize,
+            export_name: String,
+        }
+
+        let mut line_fixes: Vec<ExportFix> = Vec::new();
+        for export in file_exports {
             let byte_offset = export.span_start as usize;
             let mut current_offset = 0;
             let mut target_line = None;
@@ -710,49 +777,119 @@ fn run_fix(
 
             if let Some(line_idx) = target_line {
                 let line = lines[line_idx];
-                // Simple fix: remove "export " prefix
-                if line.trim_start().starts_with("export ") {
-                    let indent = line.len() - line.trim_start().len();
-                    let new_line = format!(
-                        "{}{}",
-                        &line[..indent],
-                        line.trim_start()
-                            .strip_prefix("export ")
-                            .unwrap_or(line.trim_start())
-                    );
+                let trimmed = line.trim_start();
 
-                    let relative = path.strip_prefix(root).unwrap_or(path);
+                // Skip lines that don't start with "export "
+                if !trimmed.starts_with("export ") {
+                    continue;
+                }
 
-                    if dry_run {
-                        if !matches!(output, OutputFormat::Json) {
-                            eprintln!(
-                                "Would remove export from {}:{} `{}`",
-                                relative.display(),
-                                line_idx + 1,
-                                export.export_name
-                            );
-                        }
-                        fixes.push(serde_json::json!({
-                            "type": "remove_export",
-                            "path": relative.display().to_string(),
-                            "line": line_idx + 1,
-                            "name": export.export_name,
-                        }));
+                let after_export = trimmed.strip_prefix("export ").unwrap_or(trimmed);
+
+                // Handle `export default` cases
+                if after_export.starts_with("default ") {
+                    let after_default = after_export
+                        .strip_prefix("default ")
+                        .unwrap_or(after_export);
+                    if after_default.starts_with("function ") || after_default.starts_with("class ")
+                    {
+                        // `export default function Foo` -> `function Foo`
+                        // `export default class Foo` -> `class Foo`
+                        // handled below via line_fixes
                     } else {
-                        let mut new_lines: Vec<String> =
-                            lines.iter().map(|l| l.to_string()).collect();
-                        new_lines[line_idx] = new_line;
-                        let new_content = new_lines.join("\n");
-                        let success = std::fs::write(path, new_content).is_ok();
-                        fixes.push(serde_json::json!({
-                            "type": "remove_export",
-                            "path": relative.display().to_string(),
-                            "line": line_idx + 1,
-                            "name": export.export_name,
-                            "applied": success,
-                        }));
+                        // `export default expression` -> skip (can't safely remove)
+                        continue;
                     }
                 }
+
+                line_fixes.push(ExportFix {
+                    line_idx,
+                    export_name: export.export_name.clone(),
+                });
+            }
+        }
+
+        if line_fixes.is_empty() {
+            continue;
+        }
+
+        // Sort by line index descending so we can work backwards without shifting indices
+        line_fixes.sort_by(|a, b| b.line_idx.cmp(&a.line_idx));
+
+        // Deduplicate by line_idx (multiple exports on the same line shouldn't be applied twice)
+        line_fixes.dedup_by_key(|f| f.line_idx);
+
+        let relative = path.strip_prefix(root).unwrap_or(path);
+
+        if dry_run {
+            for fix in &line_fixes {
+                if !matches!(output, OutputFormat::Json) {
+                    eprintln!(
+                        "Would remove export from {}:{} `{}`",
+                        relative.display(),
+                        fix.line_idx + 1,
+                        fix.export_name,
+                    );
+                }
+                fixes.push(serde_json::json!({
+                    "type": "remove_export",
+                    "path": relative.display().to_string(),
+                    "line": fix.line_idx + 1,
+                    "name": fix.export_name,
+                }));
+            }
+        } else {
+            // Apply all fixes to a single in-memory copy
+            let mut new_lines: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
+            for fix in &line_fixes {
+                let line = &new_lines[fix.line_idx];
+                let indent = line.len() - line.trim_start().len();
+                let trimmed = line.trim_start();
+                let after_export = trimmed.strip_prefix("export ").unwrap_or(trimmed);
+
+                let replacement = if after_export.starts_with("default function ")
+                    || after_export.starts_with("default class ")
+                {
+                    // `export default function Foo` -> `function Foo`
+                    after_export
+                        .strip_prefix("default ")
+                        .unwrap_or(after_export)
+                } else {
+                    after_export
+                };
+
+                new_lines[fix.line_idx] = format!("{}{}", &" ".repeat(indent), replacement);
+            }
+            let new_content = new_lines.join("\n");
+
+            // Atomic write: temp file then rename
+            let tmp_path = path.with_extension("fallow-tmp");
+            let write_result = (|| -> std::io::Result<()> {
+                let mut file = std::fs::File::create(&tmp_path)?;
+                file.write_all(new_content.as_bytes())?;
+                file.sync_all()?;
+                std::fs::rename(&tmp_path, path)?;
+                Ok(())
+            })();
+
+            let success = write_result.is_ok();
+            if !success {
+                had_write_error = true;
+                if let Err(e) = write_result {
+                    eprintln!("Error: failed to write {}: {e}", relative.display());
+                }
+                // Clean up temp file if rename failed
+                let _ = std::fs::remove_file(&tmp_path);
+            }
+
+            for fix in &line_fixes {
+                fixes.push(serde_json::json!({
+                    "type": "remove_export",
+                    "path": relative.display().to_string(),
+                    "line": fix.line_idx + 1,
+                    "name": fix.export_name,
+                    "applied": success,
+                }));
             }
         }
     }
@@ -817,11 +954,31 @@ fn run_fix(
                 }
             }
 
-            if changed
-                && !dry_run
-                && let Ok(new_json) = serde_json::to_string_pretty(&pkg_value)
-            {
-                let _ = std::fs::write(&pkg_path, new_json + "\n");
+            if changed && !dry_run {
+                match serde_json::to_string_pretty(&pkg_value) {
+                    Ok(new_json) => {
+                        let pkg_content = new_json + "\n";
+                        // Atomic write for package.json
+                        let tmp_path = pkg_path.with_extension("fallow-tmp");
+                        let write_result = (|| -> std::io::Result<()> {
+                            let mut file = std::fs::File::create(&tmp_path)?;
+                            file.write_all(pkg_content.as_bytes())?;
+                            file.sync_all()?;
+                            std::fs::rename(&tmp_path, &pkg_path)?;
+                            Ok(())
+                        })();
+
+                        if let Err(e) = write_result {
+                            had_write_error = true;
+                            eprintln!("Error: failed to write package.json: {e}");
+                            let _ = std::fs::remove_file(&tmp_path);
+                        }
+                    }
+                    Err(e) => {
+                        had_write_error = true;
+                        eprintln!("Error: failed to serialize package.json: {e}");
+                    }
+                }
             }
         }
     }
@@ -831,15 +988,17 @@ fn run_fix(
             .iter()
             .filter(|f| f.get("applied").and_then(|v| v.as_bool()).unwrap_or(false))
             .count();
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&serde_json::json!({
-                "dry_run": dry_run,
-                "fixes": fixes,
-                "total_fixed": applied_count
-            }))
-            .unwrap()
-        );
+        match serde_json::to_string_pretty(&serde_json::json!({
+            "dry_run": dry_run,
+            "fixes": fixes,
+            "total_fixed": applied_count
+        })) {
+            Ok(json) => println!("{json}"),
+            Err(e) => {
+                eprintln!("Error: failed to serialize fix output: {e}");
+                return ExitCode::from(2);
+            }
+        }
     } else if !quiet {
         let fixed_count = fixes.len();
         if dry_run {
@@ -849,7 +1008,11 @@ fn run_fix(
         }
     }
 
-    ExitCode::SUCCESS
+    if had_write_error {
+        ExitCode::from(2)
+    } else {
+        ExitCode::SUCCESS
+    }
 }
 
 fn run_init(root: &std::path::Path) -> ExitCode {
@@ -879,7 +1042,10 @@ unused_dev_dependencies = true
 unused_types = true
 "#;
 
-    std::fs::write(&config_path, default_config).expect("Failed to write fallow.toml");
+    if let Err(e) = std::fs::write(&config_path, default_config) {
+        eprintln!("Error: Failed to write fallow.toml: {e}");
+        return ExitCode::from(2);
+    }
     eprintln!("Created fallow.toml");
     ExitCode::SUCCESS
 }
@@ -893,7 +1059,10 @@ fn run_list(
     files: bool,
     frameworks: bool,
 ) -> ExitCode {
-    let config = load_config(root, config_path, OutputFormat::Human, true, threads);
+    let config = match load_config(root, config_path, OutputFormat::Human, true, threads) {
+        Ok(c) => c,
+        Err(code) => return code,
+    };
 
     let show_all = !entry_points && !files && !frameworks;
 
@@ -953,10 +1122,13 @@ fn run_list(
                 result.insert("entry_points".to_string(), serde_json::json!(eps));
             }
 
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&serde_json::Value::Object(result)).unwrap()
-            );
+            match serde_json::to_string_pretty(&serde_json::Value::Object(result)) {
+                Ok(json) => println!("{json}"),
+                Err(e) => {
+                    eprintln!("Error: failed to serialize list output: {e}");
+                    return ExitCode::from(2);
+                }
+            }
         }
         _ => {
             if frameworks || show_all {
@@ -1003,11 +1175,16 @@ fn run_list(
 fn run_schema() -> ExitCode {
     let cmd = Cli::command();
     let schema = build_cli_schema(&cmd);
-    println!(
-        "{}",
-        serde_json::to_string_pretty(&schema).expect("Failed to serialize schema")
-    );
-    ExitCode::SUCCESS
+    match serde_json::to_string_pretty(&schema) {
+        Ok(json) => {
+            println!("{json}");
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("Error: failed to serialize schema: {e}");
+            ExitCode::from(2)
+        }
+    }
 }
 
 fn build_cli_schema(cmd: &clap::Command) -> serde_json::Value {
@@ -1166,14 +1343,21 @@ fn load_config(
     output: OutputFormat,
     no_cache: bool,
     threads: usize,
-) -> fallow_config::ResolvedConfig {
+) -> Result<fallow_config::ResolvedConfig, ExitCode> {
     let user_config = if let Some(path) = config_path {
-        FallowConfig::load(path).ok()
+        // Explicit --config: propagate errors
+        match FallowConfig::load(path) {
+            Ok(c) => Some(c),
+            Err(e) => {
+                eprintln!("Error: failed to load config '{}': {e}", path.display());
+                return Err(ExitCode::from(2));
+            }
+        }
     } else {
         FallowConfig::find_and_load(root).map(|(c, _)| c)
     };
 
-    match user_config {
+    Ok(match user_config {
         Some(mut config) => {
             config.output = output;
             config.resolve(root.to_path_buf(), threads, no_cache)
@@ -1190,5 +1374,5 @@ fn load_config(
             output,
         }
         .resolve(root.to_path_buf(), threads, no_cache),
-    }
+    })
 }

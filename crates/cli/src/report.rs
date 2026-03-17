@@ -1,3 +1,4 @@
+use std::process::ExitCode;
 use std::time::Duration;
 
 use colored::Colorize;
@@ -5,16 +6,23 @@ use fallow_config::{OutputFormat, ResolvedConfig};
 use fallow_core::results::AnalysisResults;
 
 /// Print analysis results in the configured format.
+/// Returns exit code 2 if serialization fails, SUCCESS otherwise.
 pub fn print_results(
     results: &AnalysisResults,
     config: &ResolvedConfig,
     elapsed: Duration,
     quiet: bool,
-) {
+) -> ExitCode {
     match config.output {
-        OutputFormat::Human => print_human(results, &config.root, elapsed, quiet),
+        OutputFormat::Human => {
+            print_human(results, &config.root, elapsed, quiet);
+            ExitCode::SUCCESS
+        }
         OutputFormat::Json => print_json(results, elapsed),
-        OutputFormat::Compact => print_compact(results, &config.root),
+        OutputFormat::Compact => {
+            print_compact(results, &config.root);
+            ExitCode::SUCCESS
+        }
         OutputFormat::Sarif => print_sarif(results, &config.root),
     }
 }
@@ -235,9 +243,16 @@ fn print_human(results: &AnalysisResults, root: &std::path::Path, elapsed: Durat
     }
 }
 
-fn print_json(results: &AnalysisResults, elapsed: Duration) {
+fn print_json(results: &AnalysisResults, elapsed: Duration) -> ExitCode {
     // Merge metadata alongside result fields for backwards compatibility
-    let mut output = serde_json::to_value(results).expect("Failed to serialize results");
+    let output = match serde_json::to_value(results) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("Error: failed to serialize results: {e}");
+            return ExitCode::from(2);
+        }
+    };
+    let mut output = output;
     if let serde_json::Value::Object(ref mut map) = output {
         map.insert(
             "version".to_string(),
@@ -252,10 +267,16 @@ fn print_json(results: &AnalysisResults, elapsed: Duration) {
             serde_json::json!(results.total_issues()),
         );
     }
-    println!(
-        "{}",
-        serde_json::to_string_pretty(&output).expect("Failed to serialize JSON")
-    );
+    match serde_json::to_string_pretty(&output) {
+        Ok(json) => {
+            println!("{json}");
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("Error: failed to serialize JSON output: {e}");
+            ExitCode::from(2)
+        }
+    }
 }
 
 fn print_compact(results: &AnalysisResults, root: &std::path::Path) {
@@ -324,10 +345,23 @@ fn print_compact(results: &AnalysisResults, root: &std::path::Path) {
     }
 }
 
-fn print_sarif(results: &AnalysisResults, root: &std::path::Path) {
+/// Normalize a path string to use forward slashes for cross-platform SARIF compatibility.
+fn normalize_uri(path_str: &str) -> String {
+    path_str.replace('\\', "/")
+}
+
+fn print_sarif(results: &AnalysisResults, root: &std::path::Path) -> ExitCode {
     let sarif = build_sarif(results, root);
-    let json = serde_json::to_string_pretty(&sarif).expect("Failed to serialize SARIF");
-    println!("{json}");
+    match serde_json::to_string_pretty(&sarif) {
+        Ok(json) => {
+            println!("{json}");
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("Error: failed to serialize SARIF output: {e}");
+            ExitCode::from(2)
+        }
+    }
 }
 
 fn build_sarif(results: &AnalysisResults, root: &std::path::Path) -> serde_json::Value {
@@ -341,7 +375,7 @@ fn build_sarif(results: &AnalysisResults, root: &std::path::Path) -> serde_json:
             "message": { "text": "File is not reachable from any entry point" },
             "locations": [{
                 "physicalLocation": {
-                    "artifactLocation": { "uri": relative.display().to_string() }
+                    "artifactLocation": { "uri": normalize_uri(&relative.display().to_string()) }
                 }
             }]
         }));
@@ -349,6 +383,8 @@ fn build_sarif(results: &AnalysisResults, root: &std::path::Path) -> serde_json:
 
     for export in &results.unused_exports {
         let relative = export.path.strip_prefix(root).unwrap_or(&export.path);
+        // TODO: Once core provides `line` as a real line number, use it directly.
+        // Currently `line` is a byte offset; `col` is the column number.
         sarif_results.push(serde_json::json!({
             "ruleId": "fallow/unused-export",
             "level": "warning",
@@ -357,8 +393,8 @@ fn build_sarif(results: &AnalysisResults, root: &std::path::Path) -> serde_json:
             },
             "locations": [{
                 "physicalLocation": {
-                    "artifactLocation": { "uri": relative.display().to_string() },
-                    "region": { "startLine": export.line }
+                    "artifactLocation": { "uri": normalize_uri(&relative.display().to_string()) },
+                    "region": { "startLine": export.line, "startColumn": export.col }
                 }
             }]
         }));
@@ -366,6 +402,7 @@ fn build_sarif(results: &AnalysisResults, root: &std::path::Path) -> serde_json:
 
     for export in &results.unused_types {
         let relative = export.path.strip_prefix(root).unwrap_or(&export.path);
+        // TODO: Once core provides `line` as a real line number, use it directly.
         sarif_results.push(serde_json::json!({
             "ruleId": "fallow/unused-type",
             "level": "warning",
@@ -374,8 +411,8 @@ fn build_sarif(results: &AnalysisResults, root: &std::path::Path) -> serde_json:
             },
             "locations": [{
                 "physicalLocation": {
-                    "artifactLocation": { "uri": relative.display().to_string() },
-                    "region": { "startLine": export.line }
+                    "artifactLocation": { "uri": normalize_uri(&relative.display().to_string()) },
+                    "region": { "startLine": export.line, "startColumn": export.col }
                 }
             }]
         }));
@@ -413,6 +450,7 @@ fn build_sarif(results: &AnalysisResults, root: &std::path::Path) -> serde_json:
 
     for member in &results.unused_enum_members {
         let relative = member.path.strip_prefix(root).unwrap_or(&member.path);
+        // TODO: Once core provides `line` as a real line number, use it directly.
         sarif_results.push(serde_json::json!({
             "ruleId": "fallow/unused-enum-member",
             "level": "warning",
@@ -421,8 +459,8 @@ fn build_sarif(results: &AnalysisResults, root: &std::path::Path) -> serde_json:
             },
             "locations": [{
                 "physicalLocation": {
-                    "artifactLocation": { "uri": relative.display().to_string() },
-                    "region": { "startLine": member.line }
+                    "artifactLocation": { "uri": normalize_uri(&relative.display().to_string()) },
+                    "region": { "startLine": member.line, "startColumn": member.col }
                 }
             }]
         }));
@@ -430,6 +468,7 @@ fn build_sarif(results: &AnalysisResults, root: &std::path::Path) -> serde_json:
 
     for member in &results.unused_class_members {
         let relative = member.path.strip_prefix(root).unwrap_or(&member.path);
+        // TODO: Once core provides `line` as a real line number, use it directly.
         sarif_results.push(serde_json::json!({
             "ruleId": "fallow/unused-class-member",
             "level": "warning",
@@ -438,8 +477,8 @@ fn build_sarif(results: &AnalysisResults, root: &std::path::Path) -> serde_json:
             },
             "locations": [{
                 "physicalLocation": {
-                    "artifactLocation": { "uri": relative.display().to_string() },
-                    "region": { "startLine": member.line }
+                    "artifactLocation": { "uri": normalize_uri(&relative.display().to_string()) },
+                    "region": { "startLine": member.line, "startColumn": member.col }
                 }
             }]
         }));
@@ -447,6 +486,7 @@ fn build_sarif(results: &AnalysisResults, root: &std::path::Path) -> serde_json:
 
     for import in &results.unresolved_imports {
         let relative = import.path.strip_prefix(root).unwrap_or(&import.path);
+        // TODO: Once core provides `line` as a real line number, use it directly.
         sarif_results.push(serde_json::json!({
             "ruleId": "fallow/unresolved-import",
             "level": "error",
@@ -455,8 +495,8 @@ fn build_sarif(results: &AnalysisResults, root: &std::path::Path) -> serde_json:
             },
             "locations": [{
                 "physicalLocation": {
-                    "artifactLocation": { "uri": relative.display().to_string() },
-                    "region": { "startLine": import.line }
+                    "artifactLocation": { "uri": normalize_uri(&relative.display().to_string()) },
+                    "region": { "startLine": import.line, "startColumn": import.col }
                 }
             }]
         }));
@@ -478,7 +518,7 @@ fn build_sarif(results: &AnalysisResults, root: &std::path::Path) -> serde_json:
     }
 
     for dup in &results.duplicate_exports {
-        // Emit one result per location (SARIF 2.1.0 §3.27.12)
+        // Emit one result per location (SARIF 2.1.0 section 3.27.12)
         for loc_path in &dup.locations {
             let relative = loc_path.strip_prefix(root).unwrap_or(loc_path);
             sarif_results.push(serde_json::json!({
@@ -489,7 +529,7 @@ fn build_sarif(results: &AnalysisResults, root: &std::path::Path) -> serde_json:
                 },
                 "locations": [{
                     "physicalLocation": {
-                        "artifactLocation": { "uri": relative.display().to_string() }
+                        "artifactLocation": { "uri": normalize_uri(&relative.display().to_string()) }
                     }
                 }]
             }));
