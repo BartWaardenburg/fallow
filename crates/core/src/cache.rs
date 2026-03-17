@@ -691,6 +691,82 @@ mod tests {
         assert!(result.is_none());
     }
 
+    /// Create a unique temporary directory for cache tests.
+    fn test_cache_dir(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir()
+            .join("fallow_cache_tests")
+            .join(name)
+            .join(format!("{}", std::process::id()));
+        // Clean up any leftover from previous runs
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn cache_save_and_load_roundtrip() {
+        let dir = test_cache_dir("roundtrip");
+        let mut store = CacheStore::new();
+        let module = CachedModule {
+            content_hash: 42,
+            exports: vec![],
+            imports: vec![],
+            re_exports: vec![],
+            dynamic_imports: vec![],
+            require_calls: vec![],
+            member_accesses: vec![],
+            has_cjs_exports: false,
+        };
+        store.insert(Path::new("test.ts"), module);
+        store.save(&dir).unwrap();
+
+        let loaded = CacheStore::load(&dir);
+        assert!(loaded.is_some());
+        let loaded = loaded.unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert!(loaded.get(Path::new("test.ts"), 42).is_some());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn cache_version_mismatch_returns_none() {
+        let dir = test_cache_dir("version_mismatch");
+        let mut store = CacheStore::new();
+        let module = CachedModule {
+            content_hash: 42,
+            exports: vec![],
+            imports: vec![],
+            re_exports: vec![],
+            dynamic_imports: vec![],
+            require_calls: vec![],
+            member_accesses: vec![],
+            has_cjs_exports: false,
+        };
+        store.insert(Path::new("test.ts"), module);
+        store.save(&dir).unwrap();
+
+        // Verify the cache loads correctly before tampering
+        assert!(CacheStore::load(&dir).is_some());
+
+        // Read raw bytes and modify the version field.
+        // With bincode standard config, u32 is varint-encoded.
+        // The version (CACHE_VERSION = 3) is the first encoded field.
+        // Replace the first byte with a different version value (e.g., 255)
+        // to simulate a version mismatch.
+        let cache_file = dir.join("cache.bin");
+        let mut data = std::fs::read(&cache_file).unwrap();
+        assert!(!data.is_empty());
+        data[0] = 255; // Corrupt the version byte
+        std::fs::write(&cache_file, &data).unwrap();
+
+        // Loading should return None due to version mismatch
+        let result = CacheStore::load(&dir);
+        assert!(result.is_none());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn module_to_cached_roundtrip_type_only_import() {
         let module = ModuleInfo {

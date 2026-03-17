@@ -1013,3 +1013,227 @@ fn barrel_exports_detects_unused_re_export_bar() {
         "foo should NOT be unused since index.ts imports it from barrel"
     );
 }
+
+// ── Framework entry points (Next.js) ───────────────────────────
+
+#[test]
+fn nextjs_page_default_export_not_flagged() {
+    let root = fixture_path("nextjs-project");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_file_names: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|f| f.path.file_name().unwrap().to_string_lossy().to_string())
+        .collect();
+
+    // page.tsx is a Next.js App Router entry point, so it should NOT be unused
+    assert!(
+        !unused_file_names.contains(&"page.tsx".to_string()),
+        "page.tsx should be treated as framework entry point, unused files: {unused_file_names:?}"
+    );
+
+    // utils.ts is not imported by anything, so it should be unused
+    assert!(
+        unused_file_names.contains(&"utils.ts".to_string()),
+        "utils.ts should be detected as unused file, found: {unused_file_names:?}"
+    );
+}
+
+#[test]
+fn nextjs_unused_util_export_flagged() {
+    let root = fixture_path("nextjs-project");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_export_names: Vec<&str> = results
+        .unused_exports
+        .iter()
+        .map(|e| e.export_name.as_str())
+        .collect();
+
+    // unusedUtil is exported but never imported — however, since utils.ts is an
+    // unreachable file, it may be reported as unused file instead of unused export.
+    // The key point is that it IS flagged as a problem in some way.
+    let unused_file_names: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|f| f.path.file_name().unwrap().to_string_lossy().to_string())
+        .collect();
+
+    assert!(
+        unused_export_names.contains(&"unusedUtil")
+            || unused_file_names.contains(&"utils.ts".to_string()),
+        "unusedUtil should be flagged as unused export or utils.ts as unused file"
+    );
+}
+
+// ── Unused devDependencies ─────────────────────────────────────
+
+#[test]
+fn unused_dev_dependency_detected() {
+    let root = fixture_path("unused-dev-deps");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_dev_dep_names: Vec<&str> = results
+        .unused_dev_dependencies
+        .iter()
+        .map(|d| d.package_name.as_str())
+        .collect();
+
+    assert!(
+        unused_dev_dep_names.contains(&"my-custom-dev-tool"),
+        "my-custom-dev-tool should be detected as unused dev dependency, found: {unused_dev_dep_names:?}"
+    );
+}
+
+// ── Default export detection ───────────────────────────────────
+
+#[test]
+fn default_export_flagged_when_not_imported() {
+    let root = fixture_path("default-export");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    // unused-default.ts is never imported, so it should be an unused file
+    let unused_file_names: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|f| f.path.file_name().unwrap().to_string_lossy().to_string())
+        .collect();
+
+    assert!(
+        unused_file_names.contains(&"unused-default.ts".to_string()),
+        "unused-default.ts should be detected as unused file, found: {unused_file_names:?}"
+    );
+}
+
+#[test]
+fn default_export_flagged_when_only_named_imported() {
+    let root = fixture_path("default-export");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    // component.ts is imported for { usedNamed } only, so its default export
+    // should be flagged as unused
+    let unused_export_entries: Vec<(&str, String)> = results
+        .unused_exports
+        .iter()
+        .map(|e| {
+            (
+                e.export_name.as_str(),
+                e.path.file_name().unwrap().to_string_lossy().to_string(),
+            )
+        })
+        .collect();
+
+    assert!(
+        unused_export_entries
+            .iter()
+            .any(|(name, file)| *name == "default" && file == "component.ts"),
+        "default export on component.ts should be flagged as unused, found: {unused_export_entries:?}"
+    );
+
+    // usedNamed should NOT be flagged
+    let unused_export_names: Vec<&str> = results
+        .unused_exports
+        .iter()
+        .map(|e| e.export_name.as_str())
+        .collect();
+
+    assert!(
+        !unused_export_names.contains(&"usedNamed"),
+        "usedNamed should NOT be detected as unused"
+    );
+}
+
+// ── Side-effect imports ────────────────────────────────────────
+
+#[test]
+fn side_effect_import_makes_file_reachable() {
+    let root = fixture_path("side-effect-imports");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_file_names: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|f| f.path.file_name().unwrap().to_string_lossy().to_string())
+        .collect();
+
+    // setup.ts is imported via side-effect import, so it should be reachable
+    assert!(
+        !unused_file_names.contains(&"setup.ts".to_string()),
+        "setup.ts should be reachable via side-effect import, unused files: {unused_file_names:?}"
+    );
+
+    // orphan.ts is never imported, so it should be unused
+    assert!(
+        unused_file_names.contains(&"orphan.ts".to_string()),
+        "orphan.ts should be detected as unused file, found: {unused_file_names:?}"
+    );
+}
+
+// ── Multi-hop barrel chains ────────────────────────────────────
+
+#[test]
+fn multi_hop_barrel_used_propagates() {
+    let root = fixture_path("multi-hop-barrel");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_export_names: Vec<&str> = results
+        .unused_exports
+        .iter()
+        .map(|e| e.export_name.as_str())
+        .collect();
+
+    // `used` is imported through barrel1 -> barrel2 -> source, so it should NOT be flagged
+    assert!(
+        !unused_export_names.contains(&"used"),
+        "used should propagate through barrel chain and NOT be flagged"
+    );
+}
+
+#[test]
+fn multi_hop_barrel_unused_detected() {
+    let root = fixture_path("multi-hop-barrel");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_export_names: Vec<&str> = results
+        .unused_exports
+        .iter()
+        .map(|e| e.export_name.as_str())
+        .collect();
+
+    // unused2 is only exported from source.ts and re-exported from barrel2
+    // but NOT re-exported from barrel1, so it should be flagged
+    assert!(
+        unused_export_names.contains(&"unused2"),
+        "unused2 should be detected as unused export, found: {unused_export_names:?}"
+    );
+}
+
+// ── Path aliases ───────────────────────────────────────────────
+
+#[test]
+fn path_alias_not_flagged_as_unlisted() {
+    let root = fixture_path("path-aliases");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unlisted_names: Vec<&str> = results
+        .unlisted_dependencies
+        .iter()
+        .map(|d| d.package_name.as_str())
+        .collect();
+
+    // @/utils is a path alias, not an npm package, so it should NOT be flagged
+    assert!(
+        !unlisted_names.contains(&"@/utils"),
+        "@/utils should not be flagged as unlisted dependency, found: {unlisted_names:?}"
+    );
+}

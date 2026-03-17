@@ -534,6 +534,7 @@ dependencies = [
  "rayon",
  "serde",
  "serde_json",
+ "tempfile",
  "tracing",
  "xxhash-rust",
 ]

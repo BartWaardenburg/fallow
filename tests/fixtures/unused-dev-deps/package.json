@@ -1,0 +1,7 @@
+{
+  "name": "unused-dev-deps",
+  "main": "src/index.ts",
+  "devDependencies": {
+    "my-custom-dev-tool": "^1.0.0"
+  }
+}

@@ -65,6 +65,7 @@ notify-debouncer-mini = "0.7"
 
 # Testing
 criterion = { version = "0.8", features = ["html_reports"] }
+tempfile = "3"
 
 [profile.release]
 lto = true
