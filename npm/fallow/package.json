@@ -5,11 +5,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/bartwaardenburg/fallow.git"
+    "url": "git+https://github.com/BartWaardenburg/fallow.git"
   },
-  "homepage": "https://github.com/bartwaardenburg/fallow",
+  "homepage": "https://github.com/BartWaardenburg/fallow",
   "bugs": {
-    "url": "https://github.com/bartwaardenburg/fallow/issues"
+    "url": "https://github.com/BartWaardenburg/fallow/issues"
   },
   "keywords": [
     "dead-code",
