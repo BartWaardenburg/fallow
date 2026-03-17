@@ -184,18 +184,22 @@ fn create_resolver(config: &ResolvedConfig) -> Resolver {
 
     // Configure tsconfig if available
     if let Some(tsconfig_path) = &config.tsconfig_path {
-        options.tsconfig = Some(oxc_resolver::TsconfigOptions {
-            config_file: tsconfig_path.clone(),
-            references: oxc_resolver::TsconfigReferences::Auto,
-        });
+        options.tsconfig = Some(oxc_resolver::TsconfigDiscovery::Manual(
+            oxc_resolver::TsconfigOptions {
+                config_file: tsconfig_path.clone(),
+                references: oxc_resolver::TsconfigReferences::Auto,
+            },
+        ));
     } else {
         // Auto-detect tsconfig.json
         let tsconfig = config.root.join("tsconfig.json");
         if tsconfig.exists() {
-            options.tsconfig = Some(oxc_resolver::TsconfigOptions {
-                config_file: tsconfig,
-                references: oxc_resolver::TsconfigReferences::Auto,
-            });
+            options.tsconfig = Some(oxc_resolver::TsconfigDiscovery::Manual(
+                oxc_resolver::TsconfigOptions {
+                    config_file: tsconfig,
+                    references: oxc_resolver::TsconfigReferences::Auto,
+                },
+            ));
         }
     }
 
