@@ -52,6 +52,8 @@ pub struct UnusedExport {
     pub is_type_only: bool,
     pub line: u32,
     pub col: u32,
+    /// Byte offset into the source file (used by the fix command).
+    pub span_start: u32,
 }
 
 /// A dependency that is listed in package.json but never imported.
@@ -133,6 +135,7 @@ mod tests {
             is_type_only: false,
             line: 1,
             col: 0,
+            span_start: 0,
         });
         assert_eq!(results.total_issues(), 1);
         assert!(results.has_issues());
@@ -150,6 +153,7 @@ mod tests {
             is_type_only: false,
             line: 1,
             col: 0,
+            span_start: 0,
         });
         results.unused_types.push(UnusedExport {
             path: PathBuf::from("c.ts"),
@@ -157,6 +161,7 @@ mod tests {
             is_type_only: true,
             line: 1,
             col: 0,
+            span_start: 0,
         });
         results.unused_dependencies.push(UnusedDependency {
             package_name: "dep".to_string(),

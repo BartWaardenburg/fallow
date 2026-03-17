@@ -117,6 +117,16 @@ impl ModuleGraph {
 
         let module_count = files.len();
 
+        // Compute the total capacity needed, accounting for workspace FileIds
+        // that may exceed files.len() if IDs are assigned beyond the file count.
+        let max_file_id = files
+            .iter()
+            .map(|f| f.id.0 as usize)
+            .max()
+            .map(|m| m + 1)
+            .unwrap_or(0);
+        let total_capacity = max_file_id.max(module_count);
+
         // Build path -> FileId index
         let path_to_id: HashMap<PathBuf, FileId> =
             files.iter().map(|f| (f.path.clone(), f.id)).collect();
@@ -128,7 +138,7 @@ impl ModuleGraph {
         let mut all_edges = Vec::new();
         let mut modules = Vec::with_capacity(module_count);
         let mut package_usage: HashMap<String, Vec<FileId>> = HashMap::new();
-        let mut reverse_deps = vec![Vec::new(); module_count];
+        let mut reverse_deps = vec![Vec::new(); total_capacity];
 
         // Build entry point set — use path_to_id map instead of O(n) scan per entry
         let entry_point_ids: HashSet<FileId> = entry_points
@@ -148,7 +158,7 @@ impl ModuleGraph {
             .collect();
 
         // Track which modules have namespace imports (precomputed)
-        let mut namespace_imported = FixedBitSet::with_capacity(module_count);
+        let mut namespace_imported = FixedBitSet::with_capacity(total_capacity);
 
         for file in files {
             let edge_start = all_edges.len();
@@ -163,7 +173,7 @@ impl ModuleGraph {
                             // Track namespace imports during edge creation
                             if matches!(import.info.imported_name, ImportedName::Namespace) {
                                 let idx = target_id.0 as usize;
-                                if idx < module_count {
+                                if idx < total_capacity {
                                     namespace_imported.insert(idx);
                                 }
                             }
@@ -337,21 +347,24 @@ impl ModuleGraph {
         }
 
         // Mark reachable modules via BFS from entry points
-        let mut visited = FixedBitSet::with_capacity(module_count);
+        let mut visited = FixedBitSet::with_capacity(total_capacity);
         let mut queue = VecDeque::new();
 
         for &ep_id in &entry_point_ids {
-            if (ep_id.0 as usize) < module_count {
+            if (ep_id.0 as usize) < total_capacity {
                 visited.insert(ep_id.0 as usize);
                 queue.push_back(ep_id);
             }
         }
 
         while let Some(file_id) = queue.pop_front() {
+            if (file_id.0 as usize) >= modules.len() {
+                continue;
+            }
             let module = &modules[file_id.0 as usize];
             for edge in &all_edges[module.edge_range.clone()] {
                 let target_idx = edge.target.0 as usize;
-                if target_idx < module_count && !visited.contains(target_idx) {
+                if target_idx < total_capacity && !visited.contains(target_idx) {
                     visited.insert(target_idx);
                     queue.push_back(edge.target);
                 }

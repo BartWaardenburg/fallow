@@ -74,10 +74,17 @@ pub fn resolve_all_imports(
     // Resolve in parallel — shared resolver instance
     modules
         .par_iter()
-        .map(|module| {
-            let file_path = file_id_to_path
-                .get(&module.file_id)
-                .expect("file_id must exist");
+        .filter_map(|module| {
+            let file_path = match file_id_to_path.get(&module.file_id) {
+                Some(p) => p,
+                None => {
+                    tracing::warn!(
+                        file_id = module.file_id.0,
+                        "Skipping module with unknown file_id during resolution"
+                    );
+                    return None;
+                }
+            };
 
             let resolved_imports: Vec<ResolvedImport> = module
                 .imports
@@ -99,13 +106,7 @@ pub fn resolve_all_imports(
                         is_type_only: false,
                         span: imp.span,
                     },
-                    target: resolve_specifier_fast(
-                        specifier_kind(&imp.source),
-                        file_path,
-                        &imp.source,
-                        &path_to_id,
-                        &resolver,
-                    ),
+                    target: resolve_specifier(&resolver, file_path, &imp.source, &path_to_id),
                 })
                 .collect();
 
@@ -130,20 +131,14 @@ pub fn resolve_all_imports(
                         is_type_only: false,
                         span: req.span,
                     },
-                    target: resolve_specifier_fast(
-                        specifier_kind(&req.source),
-                        file_path,
-                        &req.source,
-                        &path_to_id,
-                        &resolver,
-                    ),
+                    target: resolve_specifier(&resolver, file_path, &req.source, &path_to_id),
                 })
                 .collect();
 
             let mut all_imports = resolved_imports;
             all_imports.extend(require_imports);
 
-            ResolvedModule {
+            Some(ResolvedModule {
                 file_id: module.file_id,
                 path: file_path.clone(),
                 exports: module.exports.clone(),
@@ -152,7 +147,7 @@ pub fn resolve_all_imports(
                 resolved_dynamic_imports,
                 member_accesses: module.member_accesses.clone(),
                 has_cjs_exports: module.has_cjs_exports,
-            }
+            })
         })
         .collect()
 }
@@ -200,37 +195,6 @@ fn create_resolver(config: &ResolvedConfig) -> Resolver {
     }
 
     Resolver::new(options)
-}
-
-/// Classify specifier to skip expensive resolution for bare specifiers.
-enum SpecifierKind {
-    Bare,
-    Relative,
-}
-
-fn specifier_kind(specifier: &str) -> SpecifierKind {
-    if specifier.starts_with('.') || specifier.starts_with('/') || specifier.starts_with('#') {
-        SpecifierKind::Relative
-    } else {
-        SpecifierKind::Bare
-    }
-}
-
-/// Fast path: skip resolver for bare specifiers that will just become NpmPackage.
-fn resolve_specifier_fast(
-    kind: SpecifierKind,
-    from_file: &Path,
-    specifier: &str,
-    path_to_id: &HashMap<PathBuf, FileId>,
-    resolver: &Resolver,
-) -> ResolveResult {
-    match kind {
-        SpecifierKind::Bare => {
-            // Try resolver first for bare specifiers that might resolve to local files
-            resolve_specifier(resolver, from_file, specifier, path_to_id)
-        }
-        SpecifierKind::Relative => resolve_specifier(resolver, from_file, specifier, path_to_id),
-    }
 }
 
 /// Resolve a single import specifier to a target.

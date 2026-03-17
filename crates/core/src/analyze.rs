@@ -7,6 +7,29 @@ use crate::graph::ModuleGraph;
 use crate::resolve::ResolvedModule;
 use crate::results::*;
 
+/// Convert a byte offset in source text to a 1-based line and 0-based column.
+fn byte_offset_to_line_col(source: &str, byte_offset: u32) -> (u32, u32) {
+    let mut line = 1u32;
+    let mut col = 0u32;
+    for (i, ch) in source.char_indices() {
+        if i >= byte_offset as usize {
+            break;
+        }
+        if ch == '\n' {
+            line += 1;
+            col = 0;
+        } else {
+            col += 1;
+        }
+    }
+    (line, col)
+}
+
+/// Read source content from disk, returning empty string on failure.
+fn read_source(path: &std::path::Path) -> String {
+    std::fs::read_to_string(path).unwrap_or_default()
+}
+
 /// Find all dead code in the project.
 pub fn find_dead_code(graph: &ModuleGraph, config: &ResolvedConfig) -> AnalysisResults {
     find_dead_code_with_resolved(graph, config, &[])
@@ -158,6 +181,9 @@ fn find_unused_exports(
             .map(|(_, exports)| *exports)
             .collect();
 
+        // Lazily load source content for line/col computation
+        let mut source_content: Option<String> = None;
+
         for export in &module.exports {
             if export.references.is_empty() {
                 let export_str = export.name.to_string();
@@ -178,12 +204,16 @@ fn find_unused_exports(
                     continue;
                 }
 
+                let source = source_content.get_or_insert_with(|| read_source(&module.path));
+                let (line, col) = byte_offset_to_line_col(source, export.span.start);
+
                 let unused = UnusedExport {
                     path: module.path.clone(),
                     export_name: export_str,
                     is_type_only: export.is_type_only,
-                    line: export.span.start,
-                    col: 0,
+                    line,
+                    col,
+                    span_start: export.span.start,
                 };
 
                 if export.is_type_only {
@@ -280,6 +310,9 @@ fn find_unused_members(
             continue;
         }
 
+        // Lazily load source content for line/col computation
+        let mut source_content: Option<String> = None;
+
         for export in &module.exports {
             if export.members.is_empty() {
                 continue;
@@ -298,6 +331,9 @@ fn find_unused_members(
                     continue;
                 }
 
+                let source = source_content.get_or_insert_with(|| read_source(&module.path));
+                let (line, col) = byte_offset_to_line_col(source, member.span.start);
+
                 let unused = UnusedMember {
                     path: module.path.clone(),
                     parent_name: export_name.clone(),
@@ -307,8 +343,8 @@ fn find_unused_members(
                         MemberKind::ClassMethod => "class_method".to_string(),
                         MemberKind::ClassProperty => "class_property".to_string(),
                     },
-                    line: member.span.start,
-                    col: 0,
+                    line,
+                    col,
                 };
 
                 match member.kind {
@@ -357,13 +393,19 @@ fn find_unresolved_imports(
     let mut unresolved = Vec::new();
 
     for module in resolved_modules {
+        // Lazily load source content for line/col computation
+        let mut source_content: Option<String> = None;
+
         for import in &module.resolved_imports {
             if let crate::resolve::ResolveResult::Unresolvable(spec) = &import.target {
+                let source = source_content.get_or_insert_with(|| read_source(&module.path));
+                let (line, col) = byte_offset_to_line_col(source, import.info.span.start);
+
                 unresolved.push(UnresolvedImport {
                     path: module.path.clone(),
                     specifier: spec.clone(),
-                    line: import.info.span.start,
-                    col: 0,
+                    line,
+                    col,
                 });
             }
         }
@@ -459,8 +501,6 @@ fn is_tooling_dependency(name: &str) -> bool {
     let tooling_prefixes = [
         "@types/",
         "eslint",
-        "prettier",
-        "typescript",
         "@typescript-eslint",
         "husky",
         "lint-staged",

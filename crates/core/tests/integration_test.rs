@@ -33,7 +33,7 @@ fn create_config(root: PathBuf) -> fallow_config::ResolvedConfig {
 fn basic_project_detects_unused_files() {
     let root = fixture_path("basic-project");
     let config = create_config(root.clone());
-    let results = fallow_core::analyze(&config);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
 
     // orphan.ts should be detected as unused
     let unused_file_names: Vec<String> = results
@@ -52,7 +52,7 @@ fn basic_project_detects_unused_files() {
 fn basic_project_detects_unused_exports() {
     let root = fixture_path("basic-project");
     let config = create_config(root.clone());
-    let results = fallow_core::analyze(&config);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_export_names: Vec<&str> = results
         .unused_exports
@@ -79,7 +79,7 @@ fn basic_project_detects_unused_exports() {
 fn basic_project_detects_unused_types() {
     let root = fixture_path("basic-project");
     let config = create_config(root.clone());
-    let results = fallow_core::analyze(&config);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_type_names: Vec<&str> = results
         .unused_types
@@ -106,7 +106,7 @@ fn basic_project_detects_unused_types() {
 fn basic_project_detects_unused_dependencies() {
     let root = fixture_path("basic-project");
     let config = create_config(root.clone());
-    let results = fallow_core::analyze(&config);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_dep_names: Vec<&str> = results
         .unused_dependencies
@@ -124,7 +124,7 @@ fn basic_project_detects_unused_dependencies() {
 fn barrel_exports_resolves_through_barrel() {
     let root = fixture_path("barrel-exports");
     let config = create_config(root.clone());
-    let results = fallow_core::analyze(&config);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_export_names: Vec<&str> = results
         .unused_exports
@@ -143,7 +143,7 @@ fn barrel_exports_resolves_through_barrel() {
 fn analysis_returns_correct_total_count() {
     let root = fixture_path("basic-project");
     let config = create_config(root.clone());
-    let results = fallow_core::analyze(&config);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(results.has_issues(), "basic-project should have issues");
     assert!(results.total_issues() > 0, "total_issues should be > 0");
@@ -286,7 +286,7 @@ fn circular_import_does_not_crash() {
 
     let config = create_config(temp_dir.clone());
     // This should not crash or infinite loop
-    let results = fallow_core::analyze(&config);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
     let _ = &results; // ensure analysis completed without panic
 
     let _ = std::fs::remove_dir_all(&temp_dir);
@@ -514,7 +514,7 @@ fn workspace_patterns_yarn_format() {
 fn namespace_import_makes_all_exports_used() {
     let root = fixture_path("namespace-imports");
     let config = create_config(root.clone());
-    let results = fallow_core::analyze(&config);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
 
     // With import * as utils, all exports should be considered used
     let unused_export_names: Vec<&str> = results
@@ -543,7 +543,7 @@ fn namespace_import_makes_all_exports_used() {
 fn duplicate_exports_detected() {
     let root = fixture_path("duplicate-exports");
     let config = create_config(root.clone());
-    let results = fallow_core::analyze(&config);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
 
     let dup_names: Vec<&str> = results
         .duplicate_exports
@@ -564,7 +564,7 @@ fn detect_config_disables_unused_files() {
     let root = fixture_path("detect-config");
     let mut config = create_config(root.clone());
     config.detect.unused_files = false;
-    let results = fallow_core::analyze(&config);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(
         results.unused_files.is_empty(),
@@ -577,7 +577,7 @@ fn detect_config_disables_unused_exports() {
     let root = fixture_path("detect-config");
     let mut config = create_config(root.clone());
     config.detect.unused_exports = false;
-    let results = fallow_core::analyze(&config);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(
         results.unused_exports.is_empty(),
@@ -590,7 +590,7 @@ fn detect_config_disables_unused_types() {
     let root = fixture_path("detect-config");
     let mut config = create_config(root.clone());
     config.detect.unused_types = false;
-    let results = fallow_core::analyze(&config);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(
         results.unused_types.is_empty(),
@@ -603,7 +603,7 @@ fn detect_config_disables_unused_dependencies() {
     let root = fixture_path("detect-config");
     let mut config = create_config(root.clone());
     config.detect.unused_dependencies = false;
-    let results = fallow_core::analyze(&config);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(
         results.unused_dependencies.is_empty(),
@@ -616,7 +616,7 @@ fn detect_config_disables_duplicate_exports() {
     let root = fixture_path("duplicate-exports");
     let mut config = create_config(root.clone());
     config.detect.duplicate_exports = false;
-    let results = fallow_core::analyze(&config);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(
         results.duplicate_exports.is_empty(),
@@ -646,7 +646,7 @@ fn ignore_exports_wildcard() {
     }
     .resolve(root.clone(), 4, true);
 
-    let results = fallow_core::analyze(&config);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_export_names: Vec<&str> = results
         .unused_exports
@@ -684,7 +684,7 @@ fn ignore_exports_specific() {
     }
     .resolve(root.clone(), 4, true);
 
-    let results = fallow_core::analyze(&config);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_export_names: Vec<&str> = results
         .unused_exports
@@ -708,7 +708,7 @@ fn ignore_exports_specific() {
 fn cjs_project_detects_orphan() {
     let root = fixture_path("cjs-project");
     let config = create_config(root.clone());
-    let results = fallow_core::analyze(&config);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_file_names: Vec<String> = results
         .unused_files
@@ -728,7 +728,7 @@ fn cjs_project_detects_orphan() {
 fn dynamic_import_makes_module_reachable() {
     let root = fixture_path("dynamic-imports");
     let config = create_config(root.clone());
-    let results = fallow_core::analyze(&config);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_file_names: Vec<String> = results
         .unused_files
@@ -768,7 +768,7 @@ fn ignore_dependencies_config() {
     }
     .resolve(root.clone(), 4, true);
 
-    let results = fallow_core::analyze(&config);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_dep_names: Vec<&str> = results
         .unused_dependencies
@@ -787,7 +787,7 @@ fn ignore_dependencies_config() {
 #[test]
 fn analyze_project_convenience_function() {
     let root = fixture_path("basic-project");
-    let results = fallow_core::analyze_project(&root);
+    let results = fallow_core::analyze_project(&root).expect("analysis should succeed");
     assert!(results.has_issues());
 }
 
@@ -795,7 +795,7 @@ fn analyze_project_convenience_function() {
 fn results_serializable_to_json() {
     let root = fixture_path("basic-project");
     let config = create_config(root.clone());
-    let results = fallow_core::analyze(&config);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
     let json = serde_json::to_string(&results).unwrap();
     assert!(!json.is_empty());
     // Verify it round-trips
