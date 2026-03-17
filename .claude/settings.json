@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.command' | grep -q '^git commit' && cargo fmt --all 2>/dev/null || true",
+            "statusMessage": "Formatting Rust code..."
+          }
+        ]
+      }
+    ]
+  }
+}
