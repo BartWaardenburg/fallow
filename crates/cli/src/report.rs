@@ -62,7 +62,11 @@ fn print_human(results: &AnalysisResults, root: &std::path::Path, elapsed: Durat
 
     // Info-level: unused types (grouped by file)
     if !results.unused_types.is_empty() {
-        print_section_header("Unused type exports", results.unused_types.len(), Level::Info);
+        print_section_header(
+            "Unused type exports",
+            results.unused_types.len(),
+            Level::Info,
+        );
         print_grouped_by_file(
             &results.unused_types,
             root,
@@ -159,13 +163,7 @@ fn print_human(results: &AnalysisResults, root: &std::path::Path, elapsed: Durat
             &results.unresolved_imports,
             root,
             |i| i.path.as_path(),
-            |i| {
-                format!(
-                    "{} {}",
-                    format!(":{}", i.line).dimmed(),
-                    i.specifier.bold()
-                )
-            },
+            |i| format!("{} {}", format!(":{}", i.line).dimmed(), i.specifier.bold()),
         );
         println!();
     }
@@ -196,7 +194,11 @@ fn print_human(results: &AnalysisResults, root: &std::path::Path, elapsed: Durat
                 .iter()
                 .map(|p| p.strip_prefix(root).unwrap_or(p).display().to_string())
                 .collect();
-            println!("  {}  {}", dup.export_name.bold(), locations.join(", ").dimmed());
+            println!(
+                "  {}  {}",
+                dup.export_name.bold(),
+                locations.join(", ").dimmed()
+            );
         }
         println!();
     }
@@ -256,9 +258,7 @@ fn print_grouped_by_file<'a, T>(
     let mut last_file = String::new();
     for &i in &indices {
         let item = &items[i];
-        let relative = get_path(item)
-            .strip_prefix(root)
-            .unwrap_or(get_path(item));
+        let relative = get_path(item).strip_prefix(root).unwrap_or(get_path(item));
         let file_str = relative.display().to_string();
         if file_str != last_file {
             println!("  {}", file_str.dimmed());
