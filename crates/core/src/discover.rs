@@ -38,9 +38,7 @@ pub enum EntryPointSource {
     ManualEntry,
 }
 
-const SOURCE_EXTENSIONS: &[&str] = &[
-    "ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs",
-];
+const SOURCE_EXTENSIONS: &[&str] = &["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"];
 
 /// Discover all source files in the project.
 pub fn discover_files(config: &ResolvedConfig) -> Vec<DiscoveredFile> {
@@ -66,11 +64,7 @@ pub fn discover_files(config: &ResolvedConfig) -> Vec<DiscoveredFile> {
 
     let mut files: Vec<DiscoveredFile> = walker
         .filter_map(|entry| entry.ok())
-        .filter(|entry| {
-            entry
-                .file_type()
-                .map_or(false, |ft| ft.is_file())
-        })
+        .filter(|entry| entry.file_type().is_some_and(|ft| ft.is_file()))
         .filter(|entry| !config.ignore_patterns.is_match(entry.path()))
         .enumerate()
         .map(|(idx, entry)| {
@@ -95,10 +89,7 @@ pub fn discover_files(config: &ResolvedConfig) -> Vec<DiscoveredFile> {
 }
 
 /// Discover entry points from package.json, framework rules, and defaults.
-pub fn discover_entry_points(
-    config: &ResolvedConfig,
-    files: &[DiscoveredFile],
-) -> Vec<EntryPoint> {
+pub fn discover_entry_points(config: &ResolvedConfig, files: &[DiscoveredFile]) -> Vec<EntryPoint> {
     let _span = tracing::info_span!("discover_entry_points").entered();
     let mut entries = Vec::new();
 
@@ -212,11 +203,7 @@ fn is_framework_active(
     }
 }
 
-fn check_detection(
-    detection: &FrameworkDetection,
-    pkg: &PackageJson,
-    root: &Path,
-) -> bool {
+fn check_detection(detection: &FrameworkDetection, pkg: &PackageJson, root: &Path) -> bool {
     match detection {
         FrameworkDetection::Dependency { package } => {
             pkg.all_dependency_names().iter().any(|d| d == package)

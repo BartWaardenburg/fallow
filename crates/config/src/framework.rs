@@ -160,9 +160,7 @@ fn builtin_frameworks() -> Vec<FrameworkRule> {
                 },
                 FrameworkUsedExport {
                     file_pattern: "app/**/route.{ts,tsx,js,jsx}".to_string(),
-                    exports: strs(&[
-                        "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS",
-                    ]),
+                    exports: strs(&["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]),
                 },
                 FrameworkUsedExport {
                     file_pattern: "pages/**/*.{ts,tsx,js,jsx}".to_string(),
@@ -252,15 +250,20 @@ fn builtin_frameworks() -> Vec<FrameworkRule> {
                 pat("app/entry.server.{ts,tsx,js,jsx}"),
             ],
             always_used: vec![],
-            used_exports: vec![
-                FrameworkUsedExport {
-                    file_pattern: "app/routes/**/*.{ts,tsx,js,jsx}".to_string(),
-                    exports: strs(&[
-                        "default", "loader", "action", "meta", "links", "headers",
-                        "handle", "ErrorBoundary", "HydrateFallback",
-                    ]),
-                },
-            ],
+            used_exports: vec![FrameworkUsedExport {
+                file_pattern: "app/routes/**/*.{ts,tsx,js,jsx}".to_string(),
+                exports: strs(&[
+                    "default",
+                    "loader",
+                    "action",
+                    "meta",
+                    "links",
+                    "headers",
+                    "handle",
+                    "ErrorBoundary",
+                    "HydrateFallback",
+                ]),
+            }],
         },
         // ── Astro ────────────────────────────────────────────
         FrameworkRule {
@@ -302,10 +305,7 @@ fn builtin_frameworks() -> Vec<FrameworkRule> {
             used_exports: vec![
                 FrameworkUsedExport {
                     file_pattern: "server/api/**/*.{ts,js}".to_string(),
-                    exports: strs(&[
-                        "default",
-                        "defineEventHandler",
-                    ]),
+                    exports: strs(&["default", "defineEventHandler"]),
                 },
                 FrameworkUsedExport {
                     file_pattern: "middleware/**/*.{ts,js}".to_string(),
@@ -358,12 +358,8 @@ fn builtin_frameworks() -> Vec<FrameworkRule> {
             detection: Some(FrameworkDetection::Dependency {
                 package: "prisma".to_string(),
             }),
-            entry_points: vec![
-                pat("prisma/seed.{ts,js}"),
-            ],
-            always_used: vec![
-                "prisma/schema.prisma".to_string(),
-            ],
+            entry_points: vec![pat("prisma/seed.{ts,js}")],
+            always_used: vec!["prisma/schema.prisma".to_string()],
             used_exports: vec![],
         },
         // ── ESLint ──────────────────────────────────────────
@@ -377,12 +373,10 @@ fn builtin_frameworks() -> Vec<FrameworkRule> {
                 ".eslintrc.{js,cjs,mjs,json,yaml,yml}".to_string(),
                 "eslint.config.{js,mjs,cjs,ts,mts,cts}".to_string(),
             ],
-            used_exports: vec![
-                FrameworkUsedExport {
-                    file_pattern: "eslint.config.{js,mjs,cjs,ts,mts,cts}".to_string(),
-                    exports: strs(&["default"]),
-                },
-            ],
+            used_exports: vec![FrameworkUsedExport {
+                file_pattern: "eslint.config.{js,mjs,cjs,ts,mts,cts}".to_string(),
+                exports: strs(&["default"]),
+            }],
         },
         // ── TypeScript ──────────────────────────────────────
         FrameworkRule {
@@ -391,10 +385,7 @@ fn builtin_frameworks() -> Vec<FrameworkRule> {
                 package: "typescript".to_string(),
             }),
             entry_points: vec![],
-            always_used: vec![
-                "tsconfig.json".to_string(),
-                "tsconfig.*.json".to_string(),
-            ],
+            always_used: vec!["tsconfig.json".to_string(), "tsconfig.*.json".to_string()],
             used_exports: vec![],
         },
         // ── Webpack ─────────────────────────────────────────
@@ -403,9 +394,7 @@ fn builtin_frameworks() -> Vec<FrameworkRule> {
             detection: Some(FrameworkDetection::Dependency {
                 package: "webpack".to_string(),
             }),
-            entry_points: vec![
-                pat("src/index.{ts,tsx,js,jsx}"),
-            ],
+            entry_points: vec![pat("src/index.{ts,tsx,js,jsx}")],
             always_used: vec![
                 "webpack.config.{ts,js,mjs,cjs}".to_string(),
                 "webpack.*.config.{ts,js,mjs,cjs}".to_string(),
@@ -467,19 +456,24 @@ fn builtin_frameworks() -> Vec<FrameworkRule> {
                 pat("app/entry.client.{ts,tsx,js,jsx}"),
                 pat("app/entry.server.{ts,tsx,js,jsx}"),
             ],
-            always_used: vec![
-                "react-router.config.{ts,js}".to_string(),
-            ],
-            used_exports: vec![
-                FrameworkUsedExport {
-                    file_pattern: "app/routes/**/*.{ts,tsx,js,jsx}".to_string(),
-                    exports: strs(&[
-                        "default", "loader", "clientLoader", "action", "clientAction",
-                        "meta", "links", "headers", "handle", "ErrorBoundary",
-                        "HydrateFallback", "shouldRevalidate",
-                    ]),
-                },
-            ],
+            always_used: vec!["react-router.config.{ts,js}".to_string()],
+            used_exports: vec![FrameworkUsedExport {
+                file_pattern: "app/routes/**/*.{ts,tsx,js,jsx}".to_string(),
+                exports: strs(&[
+                    "default",
+                    "loader",
+                    "clientLoader",
+                    "action",
+                    "clientAction",
+                    "meta",
+                    "links",
+                    "headers",
+                    "handle",
+                    "ErrorBoundary",
+                    "HydrateFallback",
+                    "shouldRevalidate",
+                ]),
+            }],
         },
     ]
 }

@@ -160,11 +160,7 @@ fn find_unused_dependencies(
     pkg: &PackageJson,
     config: &ResolvedConfig,
 ) -> (Vec<UnusedDependency>, Vec<UnusedDependency>) {
-    let used_packages: HashSet<&str> = graph
-        .package_usage
-        .keys()
-        .map(|s| s.as_str())
-        .collect();
+    let used_packages: HashSet<&str> = graph.package_usage.keys().map(|s| s.as_str()).collect();
 
     let unused_deps: Vec<UnusedDependency> = pkg
         .production_dependency_names()
@@ -208,10 +204,8 @@ fn is_export_ignored(
             .map(|g| g.compile_matcher().is_match(file_str.as_ref()))
             .unwrap_or(false);
 
-        if file_matches {
-            if rule.exports.iter().any(|e| e == "*" || e == &export_str) {
-                return true;
-            }
+        if file_matches && rule.exports.iter().any(|e| e == "*" || e == &export_str) {
+            return true;
         }
     }
     false
@@ -244,7 +238,7 @@ fn is_framework_used_export(
 /// Find unused enum and class members in exported symbols.
 fn find_unused_members(
     graph: &ModuleGraph,
-    config: &ResolvedConfig,
+    _config: &ResolvedConfig,
 ) -> (Vec<UnusedMember>, Vec<UnusedMember>) {
     let mut unused_enum_members = Vec::new();
     let mut unused_class_members = Vec::new();
@@ -263,11 +257,6 @@ fn find_unused_members(
             if export.references.is_empty() && !graph.has_namespace_import(module.file_id) {
                 continue;
             }
-
-            let relative_path = module
-                .path
-                .strip_prefix(&config.root)
-                .unwrap_or(&module.path);
 
             for member in &export.members {
                 // For now, report all members of used exports as potentially unused.
@@ -306,10 +295,7 @@ fn find_unused_members(
 }
 
 /// Find dependencies used in imports but not listed in package.json.
-fn find_unlisted_dependencies(
-    graph: &ModuleGraph,
-    pkg: &PackageJson,
-) -> Vec<UnlistedDependency> {
+fn find_unlisted_dependencies(graph: &ModuleGraph, pkg: &PackageJson) -> Vec<UnlistedDependency> {
     let all_deps: HashSet<String> = pkg.all_dependency_names().into_iter().collect();
 
     let mut unlisted: HashMap<String, Vec<std::path::PathBuf>> = HashMap::new();
@@ -318,12 +304,7 @@ fn find_unlisted_dependencies(
         if !all_deps.contains(package_name) && !is_builtin_module(package_name) {
             let paths: Vec<std::path::PathBuf> = file_ids
                 .iter()
-                .filter_map(|id| {
-                    graph
-                        .modules
-                        .get(id.0 as usize)
-                        .map(|m| m.path.clone())
-                })
+                .filter_map(|id| graph.modules.get(id.0 as usize).map(|m| m.path.clone()))
                 .collect();
             unlisted.insert(package_name.clone(), paths);
         }
@@ -341,7 +322,7 @@ fn find_unlisted_dependencies(
 /// Find imports that could not be resolved.
 fn find_unresolved_imports(
     resolved_modules: &[ResolvedModule],
-    config: &ResolvedConfig,
+    _config: &ResolvedConfig,
 ) -> Vec<UnresolvedImport> {
     let mut unresolved = Vec::new();
 
@@ -362,10 +343,7 @@ fn find_unresolved_imports(
 }
 
 /// Find exports that appear with the same name in multiple files (potential duplicates).
-fn find_duplicate_exports(
-    graph: &ModuleGraph,
-    config: &ResolvedConfig,
-) -> Vec<DuplicateExport> {
+fn find_duplicate_exports(graph: &ModuleGraph, _config: &ResolvedConfig) -> Vec<DuplicateExport> {
     let mut export_locations: HashMap<String, Vec<std::path::PathBuf>> = HashMap::new();
 
     for module in &graph.modules {
@@ -398,12 +376,44 @@ fn find_duplicate_exports(
 /// Check if a package name is a Node.js built-in module.
 fn is_builtin_module(name: &str) -> bool {
     let builtins = [
-        "assert", "buffer", "child_process", "cluster", "console", "constants",
-        "crypto", "dgram", "dns", "domain", "events", "fs", "http", "http2",
-        "https", "module", "net", "os", "path", "perf_hooks", "process",
-        "punycode", "querystring", "readline", "repl", "stream", "string_decoder",
-        "sys", "timers", "tls", "tty", "url", "util", "v8", "vm", "wasi",
-        "worker_threads", "zlib",
+        "assert",
+        "buffer",
+        "child_process",
+        "cluster",
+        "console",
+        "constants",
+        "crypto",
+        "dgram",
+        "dns",
+        "domain",
+        "events",
+        "fs",
+        "http",
+        "http2",
+        "https",
+        "module",
+        "net",
+        "os",
+        "path",
+        "perf_hooks",
+        "process",
+        "punycode",
+        "querystring",
+        "readline",
+        "repl",
+        "stream",
+        "string_decoder",
+        "sys",
+        "timers",
+        "tls",
+        "tty",
+        "url",
+        "util",
+        "v8",
+        "vm",
+        "wasi",
+        "worker_threads",
+        "zlib",
     ];
     let stripped = name.strip_prefix("node:").unwrap_or(name);
     builtins.contains(&stripped)
@@ -446,6 +456,5 @@ fn is_tooling_dependency(name: &str) -> bool {
         "tsx",
     ];
 
-    tooling_prefixes.iter().any(|p| name.starts_with(p))
-        || exact_matches.iter().any(|m| name == *m)
+    tooling_prefixes.iter().any(|p| name.starts_with(p)) || exact_matches.contains(&name)
 }

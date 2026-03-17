@@ -34,10 +34,10 @@ pub fn discover_workspaces(root: &Path) -> Vec<WorkspaceInfo> {
 
     // 2. Check pnpm-workspace.yaml
     let pnpm_workspace = root.join("pnpm-workspace.yaml");
-    if pnpm_workspace.exists() {
-        if let Ok(content) = std::fs::read_to_string(&pnpm_workspace) {
-            patterns.extend(parse_pnpm_workspace_yaml(&content));
-        }
+    if pnpm_workspace.exists()
+        && let Ok(content) = std::fs::read_to_string(&pnpm_workspace)
+    {
+        patterns.extend(parse_pnpm_workspace_yaml(&content));
     }
 
     if patterns.is_empty() {
@@ -48,7 +48,10 @@ pub fn discover_workspaces(root: &Path) -> Vec<WorkspaceInfo> {
     let mut workspaces = Vec::new();
     for pattern in &patterns {
         let glob_pattern = if pattern.ends_with('/') || pattern.ends_with("/*") {
-            pattern.trim_end_matches('/').trim_end_matches("/*").to_string()
+            pattern
+                .trim_end_matches('/')
+                .trim_end_matches("/*")
+                .to_string()
         } else {
             pattern.clone()
         };
@@ -57,19 +60,19 @@ pub fn discover_workspaces(root: &Path) -> Vec<WorkspaceInfo> {
         let matched_dirs = expand_workspace_glob(root, &glob_pattern);
         for dir in matched_dirs {
             let ws_pkg_path = dir.join("package.json");
-            if ws_pkg_path.exists() {
-                if let Ok(pkg) = PackageJson::load(&ws_pkg_path) {
-                    let name = pkg.name.unwrap_or_else(|| {
-                        dir.file_name()
-                            .map(|n| n.to_string_lossy().to_string())
-                            .unwrap_or_default()
-                    });
-                    workspaces.push(WorkspaceInfo {
-                        root: dir,
-                        name,
-                        is_internal_dependency: false,
-                    });
-                }
+            if ws_pkg_path.exists()
+                && let Ok(pkg) = PackageJson::load(&ws_pkg_path)
+            {
+                let name = pkg.name.unwrap_or_else(|| {
+                    dir.file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_default()
+                });
+                workspaces.push(WorkspaceInfo {
+                    root: dir,
+                    name,
+                    is_internal_dependency: false,
+                });
             }
         }
     }
@@ -112,21 +115,21 @@ fn expand_workspace_glob(root: &Path, pattern: &str) -> Vec<PathBuf> {
     if let Some(parent) = pattern.rsplit_once('/') {
         let (dir_prefix, _glob_part) = parent;
         let search_dir = root.join(dir_prefix);
-        if search_dir.is_dir() {
-            if let Ok(entries) = std::fs::read_dir(&search_dir) {
-                for entry in entries.flatten() {
-                    if entry.path().is_dir() {
-                        let relative = entry
-                            .path()
-                            .strip_prefix(root)
-                            .unwrap_or(&entry.path())
-                            .to_string_lossy()
-                            .to_string();
-                        if let Ok(glob) = Glob::new(pattern) {
-                            if glob.compile_matcher().is_match(&relative) {
-                                results.push(entry.path());
-                            }
-                        }
+        if search_dir.is_dir()
+            && let Ok(entries) = std::fs::read_dir(&search_dir)
+        {
+            for entry in entries.flatten() {
+                if entry.path().is_dir() {
+                    let relative = entry
+                        .path()
+                        .strip_prefix(root)
+                        .unwrap_or(&entry.path())
+                        .to_string_lossy()
+                        .to_string();
+                    if let Ok(glob) = Glob::new(pattern)
+                        && glob.compile_matcher().is_match(&relative)
+                    {
+                        results.push(entry.path());
                     }
                 }
             }

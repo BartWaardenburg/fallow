@@ -4,8 +4,8 @@ use std::path::PathBuf;
 
 use fixedbitset::FixedBitSet;
 
-use crate::discover::{EntryPoint, DiscoveredFile, FileId};
-use crate::extract::{ExportInfo, ExportName, ImportedName, ReExportInfo};
+use crate::discover::{DiscoveredFile, EntryPoint, FileId};
+use crate::extract::{ExportName, ImportedName};
 use crate::resolve::{ResolveResult, ResolvedModule};
 
 /// The core module dependency graph.
@@ -87,6 +87,7 @@ pub enum ReferenceKind {
 
 /// An edge in the module graph.
 #[derive(Debug)]
+#[allow(dead_code)]
 struct Edge {
     target: FileId,
     symbols: Vec<ImportedSymbol>,
@@ -114,16 +115,12 @@ impl ModuleGraph {
         let module_count = files.len();
 
         // Build path -> FileId index
-        let path_to_id: HashMap<PathBuf, FileId> = files
-            .iter()
-            .map(|f| (f.path.clone(), f.id))
-            .collect();
+        let path_to_id: HashMap<PathBuf, FileId> =
+            files.iter().map(|f| (f.path.clone(), f.id)).collect();
 
         // Build FileId -> ResolvedModule index
-        let module_by_id: HashMap<FileId, &ResolvedModule> = resolved_modules
-            .iter()
-            .map(|m| (m.file_id, m))
-            .collect();
+        let module_by_id: HashMap<FileId, &ResolvedModule> =
+            resolved_modules.iter().map(|m| (m.file_id, m)).collect();
 
         let mut all_edges = Vec::new();
         let mut modules = Vec::with_capacity(module_count);
@@ -166,10 +163,7 @@ impl ModuleGraph {
                                 });
                         }
                         ResolveResult::NpmPackage(name) => {
-                            package_usage
-                                .entry(name.clone())
-                                .or_default()
-                                .push(file.id);
+                            package_usage.entry(name.clone()).or_default().push(file.id);
                         }
                         _ => {}
                     }
@@ -190,10 +184,7 @@ impl ModuleGraph {
                                 local_name: re_export.info.exported_name.clone(),
                             });
                     } else if let ResolveResult::NpmPackage(name) = &re_export.target {
-                        package_usage
-                            .entry(name.clone())
-                            .or_default()
-                            .push(file.id);
+                        package_usage.entry(name.clone()).or_default().push(file.id);
                     }
                 }
 
@@ -289,7 +280,10 @@ impl ModuleGraph {
         for edge in &all_edges {
             let source_file_id = modules
                 .iter()
-                .find(|m| m.edge_range.contains(&(edge as *const _ as usize - all_edges.as_ptr() as usize) ))
+                .find(|m| {
+                    m.edge_range
+                        .contains(&(edge as *const _ as usize - all_edges.as_ptr() as usize))
+                })
                 .map(|m| m.file_id);
 
             // Find source file from reverse lookup
@@ -382,7 +376,12 @@ impl ModuleGraph {
             .iter()
             .flat_map(|m| {
                 m.re_exports.iter().map(move |re| {
-                    (m.file_id, re.source_file, re.imported_name.clone(), re.exported_name.clone())
+                    (
+                        m.file_id,
+                        re.source_file,
+                        re.imported_name.clone(),
+                        re.exported_name.clone(),
+                    )
                 })
             })
             .collect();
@@ -443,9 +442,7 @@ impl ModuleGraph {
                             .iter()
                             .any(|r| r.from_file == ref_item.from_file);
                         if !already_has {
-                            source.exports[export_idx]
-                                .references
-                                .push(ref_item.clone());
+                            source.exports[export_idx].references.push(ref_item.clone());
                             changed = true;
                         }
                     }
@@ -489,8 +486,8 @@ impl ModuleGraph {
 
 /// Find the source FileId for an edge by checking which module's edge_range contains it.
 fn find_edge_source(modules: &[ModuleNode], all_edges: &[Edge], edge: &Edge) -> Option<FileId> {
-    let edge_idx = (edge as *const Edge as usize - all_edges.as_ptr() as usize)
-        / std::mem::size_of::<Edge>();
+    let edge_idx =
+        (edge as *const Edge as usize - all_edges.as_ptr() as usize) / std::mem::size_of::<Edge>();
 
     modules
         .iter()

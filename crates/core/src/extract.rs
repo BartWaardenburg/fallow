@@ -3,8 +3,8 @@ use std::path::Path;
 use fallow_config::ResolvedConfig;
 use oxc_allocator::Allocator;
 use oxc_ast::ast::*;
-use oxc_ast_visit::walk;
 use oxc_ast_visit::Visit;
+use oxc_ast_visit::walk;
 use oxc_parser::Parser;
 use oxc_span::{SourceType, Span};
 use rayon::prelude::*;
@@ -121,14 +121,8 @@ pub struct RequireCallInfo {
 }
 
 /// Parse all files in parallel, extracting imports and exports.
-pub fn parse_all_files(
-    files: &[DiscoveredFile],
-    _config: &ResolvedConfig,
-) -> Vec<ModuleInfo> {
-    files
-        .par_iter()
-        .filter_map(|file| parse_single_file(file))
-        .collect()
+pub fn parse_all_files(files: &[DiscoveredFile], _config: &ResolvedConfig) -> Vec<ModuleInfo> {
+    files.par_iter().filter_map(parse_single_file).collect()
 }
 
 /// Parse a single file and extract module information.
@@ -309,37 +303,31 @@ impl ModuleInfoExtractor {
                     members,
                 });
             }
-            Declaration::TSModuleDeclaration(module) => {
-                match &module.id {
-                    TSModuleDeclarationName::Identifier(id) => {
-                        self.exports.push(ExportInfo {
-                            name: ExportName::Named(id.name.to_string()),
-                            local_name: Some(id.name.to_string()),
-                            is_type_only: true,
-                            span: id.span,
-                            members: vec![],
-                        });
-                    }
-                    TSModuleDeclarationName::StringLiteral(lit) => {
-                        self.exports.push(ExportInfo {
-                            name: ExportName::Named(lit.value.to_string()),
-                            local_name: Some(lit.value.to_string()),
-                            is_type_only: true,
-                            span: lit.span,
-                            members: vec![],
-                        });
-                    }
+            Declaration::TSModuleDeclaration(module) => match &module.id {
+                TSModuleDeclarationName::Identifier(id) => {
+                    self.exports.push(ExportInfo {
+                        name: ExportName::Named(id.name.to_string()),
+                        local_name: Some(id.name.to_string()),
+                        is_type_only: true,
+                        span: id.span,
+                        members: vec![],
+                    });
                 }
-            }
+                TSModuleDeclarationName::StringLiteral(lit) => {
+                    self.exports.push(ExportInfo {
+                        name: ExportName::Named(lit.value.to_string()),
+                        local_name: Some(lit.value.to_string()),
+                        is_type_only: true,
+                        span: lit.span,
+                        members: vec![],
+                    });
+                }
+            },
             _ => {}
         }
     }
 
-    fn extract_binding_pattern_names(
-        &mut self,
-        pattern: &BindingPattern<'_>,
-        is_type_only: bool,
-    ) {
+    fn extract_binding_pattern_names(&mut self, pattern: &BindingPattern<'_>, is_type_only: bool) {
         match pattern {
             BindingPattern::BindingIdentifier(id) => {
                 self.exports.push(ExportInfo {
@@ -378,9 +366,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                     ImportDeclarationSpecifier::ImportSpecifier(s) => {
                         self.imports.push(ImportInfo {
                             source: source.clone(),
-                            imported_name: ImportedName::Named(
-                                s.imported.name().to_string(),
-                            ),
+                            imported_name: ImportedName::Named(s.imported.name().to_string()),
                             local_name: s.local.name.to_string(),
                             is_type_only: is_type_only || s.import_kind.is_type(),
                             span: s.span,
@@ -487,15 +473,14 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
 
     fn visit_call_expression(&mut self, expr: &CallExpression<'a>) {
         // Detect require()
-        if let Expression::Identifier(ident) = &expr.callee {
-            if ident.name == "require" {
-                if let Some(Argument::StringLiteral(lit)) = expr.arguments.first() {
-                    self.require_calls.push(RequireCallInfo {
-                        source: lit.value.to_string(),
-                        span: expr.span,
-                    });
-                }
-            }
+        if let Expression::Identifier(ident) = &expr.callee
+            && ident.name == "require"
+            && let Some(Argument::StringLiteral(lit)) = expr.arguments.first()
+        {
+            self.require_calls.push(RequireCallInfo {
+                source: lit.value.to_string(),
+                span: expr.span,
+            });
         }
 
         walk::walk_call_expression(self, expr);
@@ -503,21 +488,21 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
 
     fn visit_assignment_expression(&mut self, expr: &AssignmentExpression<'a>) {
         // Detect module.exports = ... and exports.foo = ...
-        if let AssignmentTarget::StaticMemberExpression(member) = &expr.left {
-            if let Expression::Identifier(obj) = &member.object {
-                if obj.name == "module" && member.property.name == "exports" {
-                    self.has_cjs_exports = true;
-                }
-                if obj.name == "exports" {
-                    self.has_cjs_exports = true;
-                    self.exports.push(ExportInfo {
-                        name: ExportName::Named(member.property.name.to_string()),
-                        local_name: None,
-                        is_type_only: false,
-                        span: expr.span,
-                        members: vec![],
-                    });
-                }
+        if let AssignmentTarget::StaticMemberExpression(member) = &expr.left
+            && let Expression::Identifier(obj) = &member.object
+        {
+            if obj.name == "module" && member.property.name == "exports" {
+                self.has_cjs_exports = true;
+            }
+            if obj.name == "exports" {
+                self.has_cjs_exports = true;
+                self.exports.push(ExportInfo {
+                    name: ExportName::Named(member.property.name.to_string()),
+                    local_name: None,
+                    is_type_only: false,
+                    span: expr.span,
+                    members: vec![],
+                });
             }
         }
         walk::walk_assignment_expression(self, expr);
@@ -567,7 +552,10 @@ mod tests {
     fn extracts_named_imports() {
         let info = parse_source("import { foo, bar } from './utils';");
         assert_eq!(info.imports.len(), 2);
-        assert_eq!(info.imports[0].imported_name, ImportedName::Named("foo".to_string()));
+        assert_eq!(
+            info.imports[0].imported_name,
+            ImportedName::Named("foo".to_string())
+        );
         assert_eq!(info.imports[0].source, "./utils");
     }
 
@@ -619,9 +607,7 @@ mod tests {
 
     #[test]
     fn extracts_type_exports() {
-        let info = parse_source(
-            "export type Foo = string; export interface Bar { x: number; }",
-        );
+        let info = parse_source("export type Foo = string; export interface Bar { x: number; }");
         assert_eq!(info.exports.len(), 2);
         assert!(info.exports[0].is_type_only);
         assert!(info.exports[1].is_type_only);

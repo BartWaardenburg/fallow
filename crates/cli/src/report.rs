@@ -18,12 +18,7 @@ pub fn print_results(
     }
 }
 
-fn print_human(
-    results: &AnalysisResults,
-    root: &std::path::Path,
-    elapsed: Duration,
-    quiet: bool,
-) {
+fn print_human(results: &AnalysisResults, root: &std::path::Path, elapsed: Duration, quiet: bool) {
     if !quiet {
         eprintln!();
     }
@@ -119,10 +114,7 @@ fn print_human(
     }
 
     if !results.unresolved_imports.is_empty() {
-        println!(
-            "Unresolved imports ({})",
-            results.unresolved_imports.len()
-        );
+        println!("Unresolved imports ({})", results.unresolved_imports.len());
         println!("{}", "-".repeat(60));
         for import in &results.unresolved_imports {
             let relative = import.path.strip_prefix(root).unwrap_or(&import.path);
@@ -144,21 +136,13 @@ fn print_human(
     }
 
     if !results.duplicate_exports.is_empty() {
-        println!(
-            "Duplicate exports ({})",
-            results.duplicate_exports.len()
-        );
+        println!("Duplicate exports ({})", results.duplicate_exports.len());
         println!("{}", "-".repeat(60));
         for dup in &results.duplicate_exports {
             let locations: Vec<String> = dup
                 .locations
                 .iter()
-                .map(|p| {
-                    p.strip_prefix(root)
-                        .unwrap_or(p)
-                        .display()
-                        .to_string()
-                })
+                .map(|p| p.strip_prefix(root).unwrap_or(p).display().to_string())
                 .collect();
             println!("  `{}` in {}", dup.export_name, locations.join(", "));
         }
@@ -257,10 +241,7 @@ fn print_sarif(results: &AnalysisResults, root: &std::path::Path) {
     println!("{json}");
 }
 
-fn build_sarif(
-    results: &AnalysisResults,
-    root: &std::path::Path,
-) -> serde_json::Value {
+fn build_sarif(results: &AnalysisResults, root: &std::path::Path) -> serde_json::Value {
     let mut sarif_results = Vec::new();
 
     for file in &results.unused_files {

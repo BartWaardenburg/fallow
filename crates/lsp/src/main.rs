@@ -17,10 +17,10 @@ struct FallowLspServer {
 #[tower_lsp::async_trait]
 impl LanguageServer for FallowLspServer {
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
-        if let Some(root_uri) = params.root_uri {
-            if let Ok(path) = root_uri.to_file_path() {
-                *self.root.write().await = Some(path);
-            }
+        if let Some(root_uri) = params.root_uri
+            && let Ok(path) = root_uri.to_file_path()
+        {
+            *self.root.write().await = Some(path);
         }
 
         Ok(InitializeResult {
@@ -38,9 +38,7 @@ impl LanguageServer for FallowLspServer {
                 )),
                 code_action_provider: Some(CodeActionProviderCapability::Options(
                     CodeActionOptions {
-                        code_action_kinds: Some(vec![
-                            CodeActionKind::QUICKFIX,
-                        ]),
+                        code_action_kinds: Some(vec![CodeActionKind::QUICKFIX]),
                         ..Default::default()
                     },
                 )),
@@ -165,10 +163,8 @@ impl FallowLspServer {
             .log_message(MessageType::INFO, "Running fallow analysis...")
             .await;
 
-        let results = tokio::task::spawn_blocking(move || {
-            fallow_core::analyze_project(&root)
-        })
-        .await;
+        let results =
+            tokio::task::spawn_blocking(move || fallow_core::analyze_project(&root)).await;
 
         match results {
             Ok(results) => {

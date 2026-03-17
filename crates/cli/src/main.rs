@@ -167,24 +167,22 @@ fn main() -> ExitCode {
             unused_exports,
             unused_deps,
             unused_types,
-        } => {
-            run_check(
-                &root,
-                &cli.config,
-                cli.format.into(),
-                cli.no_cache,
-                threads,
-                cli.quiet,
-                cli.fail_on_issues,
-                unused_files,
-                unused_exports,
-                unused_deps,
-                unused_types,
-                cli.changed_since.as_deref(),
-                cli.baseline.as_deref(),
-                cli.save_baseline.as_deref(),
-            )
-        }
+        } => run_check(
+            &root,
+            &cli.config,
+            cli.format.into(),
+            cli.no_cache,
+            threads,
+            cli.quiet,
+            cli.fail_on_issues,
+            unused_files,
+            unused_exports,
+            unused_deps,
+            unused_types,
+            cli.changed_since.as_deref(),
+            cli.baseline.as_deref(),
+            cli.save_baseline.as_deref(),
+        ),
         Command::Watch => run_watch(
             &root,
             &cli.config,
@@ -210,8 +208,9 @@ fn main() -> ExitCode {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_check(
-    root: &PathBuf,
+    root: &std::path::Path,
     config_path: &Option<PathBuf>,
     output: OutputFormat,
     no_cache: bool,
@@ -242,9 +241,15 @@ fn run_check(
         results.unused_files.retain(|f| changed.contains(&f.path));
         results.unused_exports.retain(|e| changed.contains(&e.path));
         results.unused_types.retain(|e| changed.contains(&e.path));
-        results.unused_enum_members.retain(|m| changed.contains(&m.path));
-        results.unused_class_members.retain(|m| changed.contains(&m.path));
-        results.unresolved_imports.retain(|i| changed.contains(&i.path));
+        results
+            .unused_enum_members
+            .retain(|m| changed.contains(&m.path));
+        results
+            .unused_class_members
+            .retain(|m| changed.contains(&m.path));
+        results
+            .unresolved_imports
+            .retain(|i| changed.contains(&i.path));
     }
 
     // Save baseline if requested
@@ -260,17 +265,13 @@ fn run_check(
     }
 
     // Compare against baseline if provided
-    if let Some(baseline_path) = baseline {
-        if let Ok(content) = std::fs::read_to_string(baseline_path) {
-            if let Ok(baseline_data) = serde_json::from_str::<BaselineData>(&content) {
-                results = filter_new_issues(results, &baseline_data);
-                if !quiet {
-                    eprintln!(
-                        "Comparing against baseline: {}",
-                        baseline_path.display()
-                    );
-                }
-            }
+    if let Some(baseline_path) = baseline
+        && let Ok(content) = std::fs::read_to_string(baseline_path)
+        && let Ok(baseline_data) = serde_json::from_str::<BaselineData>(&content)
+    {
+        results = filter_new_issues(results, &baseline_data);
+        if !quiet {
+            eprintln!("Comparing against baseline: {}", baseline_path.display());
         }
     }
 
@@ -369,12 +370,12 @@ fn filter_new_issues(
             .unused_types
             .contains(&format!("{}:{}", e.path.display(), e.export_name))
     });
-    results.unused_dependencies.retain(|d| {
-        !baseline.unused_deps.contains(&d.package_name)
-    });
-    results.unused_dev_dependencies.retain(|d| {
-        !baseline.unused_dev_deps.contains(&d.package_name)
-    });
+    results
+        .unused_dependencies
+        .retain(|d| !baseline.unused_deps.contains(&d.package_name));
+    results
+        .unused_dev_dependencies
+        .retain(|d| !baseline.unused_dev_deps.contains(&d.package_name));
     results
 }
 
@@ -386,7 +387,7 @@ fn run_watch(
     threads: usize,
     quiet: bool,
 ) -> ExitCode {
-    use notify_debouncer_mini::{new_debouncer, DebouncedEventKind};
+    use notify_debouncer_mini::{DebouncedEventKind, new_debouncer};
     use std::sync::mpsc;
     use std::time::Duration;
 
@@ -410,10 +411,10 @@ fn run_watch(
         }
     };
 
-    if let Err(e) = debouncer.watcher().watch(
-        root.as_ref(),
-        notify::RecursiveMode::Recursive,
-    ) {
+    if let Err(e) = debouncer
+        .watcher()
+        .watch(root.as_ref(), notify::RecursiveMode::Recursive)
+    {
         eprintln!("Failed to watch directory: {e}");
         return ExitCode::from(2);
     }
@@ -438,8 +439,7 @@ fn run_watch(
 
                 if has_source_changes {
                     eprintln!("\nFile changed, re-analyzing...");
-                    let config =
-                        load_config(root, config_path, output.clone(), no_cache, threads);
+                    let config = load_config(root, config_path, output.clone(), no_cache, threads);
                     let start = Instant::now();
                     let results = fallow_core::analyze(&config);
                     let elapsed = start.elapsed();
@@ -467,13 +467,7 @@ fn run_fix(
     quiet: bool,
     dry_run: bool,
 ) -> ExitCode {
-    let config = load_config(
-        root,
-        config_path,
-        OutputFormat::Human,
-        no_cache,
-        threads,
-    );
+    let config = load_config(root, config_path, OutputFormat::Human, no_cache, threads);
 
     let results = fallow_core::analyze(&config);
 
@@ -511,7 +505,9 @@ fn run_fix(
                     let new_line = format!(
                         "{}{}",
                         &line[..indent],
-                        line.trim_start().strip_prefix("export ").unwrap_or(line.trim_start())
+                        line.trim_start()
+                            .strip_prefix("export ")
+                            .unwrap_or(line.trim_start())
                     );
 
                     if dry_run {
@@ -539,51 +535,44 @@ fn run_fix(
     // Fix unused dependencies: remove from package.json
     if !results.unused_dependencies.is_empty() || !results.unused_dev_dependencies.is_empty() {
         let pkg_path = root.join("package.json");
-        if let Ok(content) = std::fs::read_to_string(&pkg_path) {
-            if let Ok(mut pkg_value) = serde_json::from_str::<serde_json::Value>(&content) {
-                let mut changed = false;
+        if let Ok(content) = std::fs::read_to_string(&pkg_path)
+            && let Ok(mut pkg_value) = serde_json::from_str::<serde_json::Value>(&content)
+        {
+            let mut changed = false;
 
-                for dep in &results.unused_dependencies {
-                    if let Some(deps) = pkg_value.get_mut("dependencies") {
-                        if let Some(obj) = deps.as_object_mut() {
-                            if obj.remove(&dep.package_name).is_some() {
-                                if dry_run {
-                                    eprintln!(
-                                        "Would remove `{}` from dependencies",
-                                        dep.package_name
-                                    );
-                                } else {
-                                    changed = true;
-                                    fixed_count += 1;
-                                }
-                            }
-                        }
+            for dep in &results.unused_dependencies {
+                if let Some(deps) = pkg_value.get_mut("dependencies")
+                    && let Some(obj) = deps.as_object_mut()
+                    && obj.remove(&dep.package_name).is_some()
+                {
+                    if dry_run {
+                        eprintln!("Would remove `{}` from dependencies", dep.package_name);
+                    } else {
+                        changed = true;
+                        fixed_count += 1;
                     }
                 }
+            }
 
-                for dep in &results.unused_dev_dependencies {
-                    if let Some(deps) = pkg_value.get_mut("devDependencies") {
-                        if let Some(obj) = deps.as_object_mut() {
-                            if obj.remove(&dep.package_name).is_some() {
-                                if dry_run {
-                                    eprintln!(
-                                        "Would remove `{}` from devDependencies",
-                                        dep.package_name
-                                    );
-                                } else {
-                                    changed = true;
-                                    fixed_count += 1;
-                                }
-                            }
-                        }
+            for dep in &results.unused_dev_dependencies {
+                if let Some(deps) = pkg_value.get_mut("devDependencies")
+                    && let Some(obj) = deps.as_object_mut()
+                    && obj.remove(&dep.package_name).is_some()
+                {
+                    if dry_run {
+                        eprintln!("Would remove `{}` from devDependencies", dep.package_name);
+                    } else {
+                        changed = true;
+                        fixed_count += 1;
                     }
                 }
+            }
 
-                if changed && !dry_run {
-                    if let Ok(new_json) = serde_json::to_string_pretty(&pkg_value) {
-                        let _ = std::fs::write(&pkg_path, new_json + "\n");
-                    }
-                }
+            if changed
+                && !dry_run
+                && let Ok(new_json) = serde_json::to_string_pretty(&pkg_value)
+            {
+                let _ = std::fs::write(&pkg_path, new_json + "\n");
             }
         }
     }
@@ -599,7 +588,7 @@ fn run_fix(
     ExitCode::SUCCESS
 }
 
-fn run_init(root: &PathBuf) -> ExitCode {
+fn run_init(root: &std::path::Path) -> ExitCode {
     let config_path = root.join("fallow.toml");
     if config_path.exists() {
         eprintln!("fallow.toml already exists");
@@ -632,20 +621,14 @@ unused_types = true
 }
 
 fn run_list(
-    root: &PathBuf,
+    root: &std::path::Path,
     config_path: &Option<PathBuf>,
     threads: usize,
     entry_points: bool,
     files: bool,
     frameworks: bool,
 ) -> ExitCode {
-    let config = load_config(
-        root,
-        config_path,
-        OutputFormat::Human,
-        true,
-        threads,
-    );
+    let config = load_config(root, config_path, OutputFormat::Human, true, threads);
 
     if frameworks || (!entry_points && !files) {
         eprintln!("Detected frameworks:");
@@ -675,7 +658,7 @@ fn run_list(
 }
 
 fn load_config(
-    root: &PathBuf,
+    root: &std::path::Path,
     config_path: &Option<PathBuf>,
     output: OutputFormat,
     no_cache: bool,
@@ -690,7 +673,7 @@ fn load_config(
     match user_config {
         Some(mut config) => {
             config.output = output;
-            config.resolve(root.clone(), threads, no_cache)
+            config.resolve(root.to_path_buf(), threads, no_cache)
         }
         None => FallowConfig {
             root: None,
@@ -704,6 +687,6 @@ fn load_config(
             ignore_exports: vec![],
             output,
         }
-        .resolve(root.clone(), threads, no_cache),
+        .resolve(root.to_path_buf(), threads, no_cache),
     }
 }

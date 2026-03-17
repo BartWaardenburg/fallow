@@ -1,10 +1,9 @@
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use crate::discover::FileId;
-use crate::extract::{ExportName, MemberInfo, MemberKind};
+use crate::extract::{ExportName, MemberKind};
 
 /// Cache version — bump when the cache format changes.
 const CACHE_VERSION: u32 = 1;
@@ -99,10 +98,9 @@ impl CacheStore {
         std::fs::create_dir_all(cache_dir)
             .map_err(|e| format!("Failed to create cache dir: {e}"))?;
         let cache_file = cache_dir.join("cache.bin");
-        let data = bincode::serialize(self)
-            .map_err(|e| format!("Failed to serialize cache: {e}"))?;
-        std::fs::write(&cache_file, data)
-            .map_err(|e| format!("Failed to write cache: {e}"))?;
+        let data =
+            bincode::serialize(self).map_err(|e| format!("Failed to serialize cache: {e}"))?;
+        std::fs::write(&cache_file, data).map_err(|e| format!("Failed to write cache: {e}"))?;
         Ok(())
     }
 
@@ -189,10 +187,7 @@ pub fn module_to_cached(module: &crate::extract::ModuleInfo) -> CachedModule {
                 is_type_only: i.is_type_only,
                 is_namespace: matches!(i.imported_name, crate::extract::ImportedName::Namespace),
                 is_default: matches!(i.imported_name, crate::extract::ImportedName::Default),
-                is_side_effect: matches!(
-                    i.imported_name,
-                    crate::extract::ImportedName::SideEffect
-                ),
+                is_side_effect: matches!(i.imported_name, crate::extract::ImportedName::SideEffect),
             })
             .collect(),
         re_exports: module
@@ -205,8 +200,16 @@ pub fn module_to_cached(module: &crate::extract::ModuleInfo) -> CachedModule {
                 is_type_only: r.is_type_only,
             })
             .collect(),
-        dynamic_imports: module.dynamic_imports.iter().map(|d| d.source.clone()).collect(),
-        require_calls: module.require_calls.iter().map(|r| r.source.clone()).collect(),
+        dynamic_imports: module
+            .dynamic_imports
+            .iter()
+            .map(|d| d.source.clone())
+            .collect(),
+        require_calls: module
+            .require_calls
+            .iter()
+            .map(|r| r.source.clone())
+            .collect(),
         has_cjs_exports: module.has_cjs_exports,
     }
 }

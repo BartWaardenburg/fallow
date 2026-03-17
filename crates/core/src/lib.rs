@@ -1,8 +1,10 @@
 pub mod analyze;
 pub mod cache;
 pub mod discover;
+pub mod errors;
 pub mod extract;
 pub mod graph;
+pub mod progress;
 pub mod resolve;
 pub mod results;
 

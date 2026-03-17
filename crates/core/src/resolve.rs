@@ -64,10 +64,8 @@ pub fn resolve_all_imports(
         })
         .collect();
 
-    let file_id_to_path: HashMap<FileId, PathBuf> = files
-        .iter()
-        .map(|f| (f.id, f.path.clone()))
-        .collect();
+    let file_id_to_path: HashMap<FileId, PathBuf> =
+        files.iter().map(|f| (f.id, f.path.clone())).collect();
 
     // Resolve in parallel — each thread gets its own Resolver instance
     modules
@@ -225,9 +223,7 @@ fn resolve_specifier(
 
 /// Check if a specifier is a bare specifier (npm package).
 fn is_bare_specifier(specifier: &str) -> bool {
-    !specifier.starts_with('.')
-        && !specifier.starts_with('/')
-        && !specifier.starts_with('#')
+    !specifier.starts_with('.') && !specifier.starts_with('/') && !specifier.starts_with('#')
 }
 
 /// Extract the npm package name from a specifier.
@@ -242,11 +238,7 @@ pub fn extract_package_name(specifier: &str) -> String {
             specifier.to_string()
         }
     } else {
-        specifier
-            .split('/')
-            .next()
-            .unwrap_or(specifier)
-            .to_string()
+        specifier.split('/').next().unwrap_or(specifier).to_string()
     }
 }
 

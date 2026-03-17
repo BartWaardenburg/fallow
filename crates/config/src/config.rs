@@ -156,12 +156,10 @@ pub struct ResolvedConfig {
 impl FallowConfig {
     /// Load config from a `fallow.toml` file.
     pub fn load(path: &Path) -> Result<Self, miette::Report> {
-        let content = std::fs::read_to_string(path).map_err(|e| {
-            miette::miette!("Failed to read config file {}: {}", path.display(), e)
-        })?;
-        toml::from_str(&content).map_err(|e| {
-            miette::miette!("Failed to parse config file {}: {}", path.display(), e)
-        })
+        let content = std::fs::read_to_string(path)
+            .map_err(|e| miette::miette!("Failed to read config file {}: {}", path.display(), e))?;
+        toml::from_str(&content)
+            .map_err(|e| miette::miette!("Failed to parse config file {}: {}", path.display(), e))
     }
 
     /// Find and load config from the current directory or ancestors.
@@ -214,10 +212,8 @@ impl FallowConfig {
         let ignore_patterns = ignore_builder.build().unwrap_or_default();
         let cache_dir = root.join(".fallow");
 
-        let framework_rules = crate::framework::resolve_framework_rules(
-            &self.frameworks,
-            &self.framework,
-        );
+        let framework_rules =
+            crate::framework::resolve_framework_rules(&self.frameworks, &self.framework);
 
         ResolvedConfig {
             root,
