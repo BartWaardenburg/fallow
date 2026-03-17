@@ -27,14 +27,15 @@ fn read_source(path: &std::path::Path) -> String {
 
 /// Find all dead code in the project.
 pub fn find_dead_code(graph: &ModuleGraph, config: &ResolvedConfig) -> AnalysisResults {
-    find_dead_code_with_resolved(graph, config, &[])
+    find_dead_code_with_resolved(graph, config, &[], None)
 }
 
-/// Find all dead code, with optional resolved module data for additional analyses.
+/// Find all dead code, with optional resolved module data and plugin context.
 pub fn find_dead_code_with_resolved(
     graph: &ModuleGraph,
     config: &ResolvedConfig,
     resolved_modules: &[ResolvedModule],
+    plugin_result: Option<&crate::plugins::AggregatedPluginResult>,
 ) -> AnalysisResults {
     let _span = tracing::info_span!("find_dead_code").entered();
 
@@ -45,7 +46,7 @@ pub fn find_dead_code_with_resolved(
     }
 
     if config.detect.unused_exports || config.detect.unused_types {
-        let (exports, types) = find_unused_exports(graph, config);
+        let (exports, types) = find_unused_exports(graph, config, plugin_result);
         if config.detect.unused_exports {
             results.unused_exports = exports;
         }
@@ -67,7 +68,7 @@ pub fn find_dead_code_with_resolved(
     let pkg_path = config.root.join("package.json");
     if let Ok(pkg) = PackageJson::load(&pkg_path) {
         if config.detect.unused_dependencies || config.detect.unused_dev_dependencies {
-            let (deps, dev_deps) = find_unused_dependencies(graph, &pkg, config);
+            let (deps, dev_deps) = find_unused_dependencies(graph, &pkg, config, plugin_result);
             if config.detect.unused_dependencies {
                 results.unused_dependencies = deps;
             }
@@ -97,12 +98,21 @@ pub fn find_dead_code_with_resolved(
 /// TypeScript declaration files (`.d.ts`) are excluded because they are consumed
 /// by the TypeScript compiler via `tsconfig.json` includes, not via explicit
 /// import statements. Flagging them as unused is a false positive.
+///
+/// Configuration files (e.g., `babel.config.js`, `.eslintrc.js`, `knip.config.ts`)
+/// are also excluded because they are consumed by tools, not via imports.
+///
+/// Barrel files (index.ts that only re-export) are excluded when their re-export
+/// sources are reachable — they serve an organizational purpose even if consumers
+/// import directly from the source files rather than through the barrel.
 fn find_unused_files(graph: &ModuleGraph) -> Vec<UnusedFile> {
     graph
         .modules
         .iter()
         .filter(|m| !m.is_reachable && !m.is_entry_point)
         .filter(|m| !is_declaration_file(&m.path))
+        .filter(|m| !is_config_file(&m.path))
+        .filter(|m| !is_barrel_with_reachable_sources(m, graph))
         .map(|m| UnusedFile {
             path: m.path.clone(),
         })
@@ -115,10 +125,120 @@ fn is_declaration_file(path: &std::path::Path) -> bool {
     name.ends_with(".d.ts") || name.ends_with(".d.mts") || name.ends_with(".d.cts")
 }
 
+/// Check if a module is a barrel file (only re-exports) whose sources are reachable.
+///
+/// A barrel file like `index.ts` that only contains `export { Foo } from './source'`
+/// lines serves an organizational purpose. If the source modules are reachable,
+/// the barrel file should not be reported as unused — consumers may have bypassed
+/// it with direct imports, but the barrel still provides valid re-exports.
+fn is_barrel_with_reachable_sources(
+    module: &crate::graph::ModuleNode,
+    graph: &ModuleGraph,
+) -> bool {
+    // Must have re-exports
+    if module.re_exports.is_empty() {
+        return false;
+    }
+
+    // Must be a pure barrel: no local exports with real spans (only re-export-generated
+    // exports have span 0..0) and no CJS exports
+    let has_local_exports = module
+        .exports
+        .iter()
+        .any(|e| e.span.start != 0 || e.span.end != 0);
+    if has_local_exports || module.has_cjs_exports {
+        return false;
+    }
+
+    // At least one re-export source must be reachable
+    module.re_exports.iter().any(|re| {
+        let source_idx = re.source_file.0 as usize;
+        graph
+            .modules
+            .get(source_idx)
+            .is_some_and(|m| m.is_reachable)
+    })
+}
+
+/// Check if a file is a configuration file consumed by tooling, not via imports.
+///
+/// These files should never be reported as unused because they are loaded by
+/// their respective tools (e.g., Babel reads `babel.config.js`, ESLint reads
+/// `eslint.config.ts`, etc.) rather than being imported by application code.
+fn is_config_file(path: &std::path::Path) -> bool {
+    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+
+    // Dotfiles with "rc" suffix pattern (e.g., .secretlintrc.cjs, .commitlintrc.js, .prettierrc.js)
+    // Only match files with "rc." before the extension — avoids false matches on arbitrary dotfiles.
+    if name.starts_with('.') && !name.starts_with("..") {
+        let lower = name.to_ascii_lowercase();
+        // .foorc.{ext} pattern — standard for tool configs
+        if lower.contains("rc.") {
+            return true;
+        }
+    }
+
+    // Files matching common config naming patterns.
+    // Each pattern is a prefix — the file must start with it.
+    let config_patterns = [
+        // Build tools
+        "babel.config.",
+        "rollup.config.",
+        "webpack.config.",
+        "postcss.config.",
+        "stencil.config.",
+        "remotion.config.",
+        "metro.config.",
+        // Testing
+        "jest.config.",
+        "jest.setup.",
+        "vitest.config.",
+        "vitest.ci.config.",
+        "vitest.setup.",
+        "vitest.workspace.",
+        "playwright.config.",
+        "cypress.config.",
+        // Linting & formatting
+        "eslint.config.",
+        "prettier.config.",
+        "stylelint.config.",
+        "lint-staged.config.",
+        "commitlint.config.",
+        // Frameworks / CMS
+        "next.config.",
+        "next-sitemap.config.",
+        "nuxt.config.",
+        "astro.config.",
+        "sanity.config.",
+        "vite.config.",
+        "tailwind.config.",
+        "drizzle.config.",
+        "knexfile.",
+        "sentry.client.config.",
+        "sentry.server.config.",
+        "sentry.edge.config.",
+        "react-router.config.",
+        // Analysis & misc
+        "knip.config.",
+        "fallow.config.",
+        "i18next-parser.config.",
+        "codegen.config.",
+        "graphql.config.",
+        "npmpackagejsonlint.config.",
+        // Environment declarations
+        "next-env.d.",
+        "env.d.",
+        "vite-env.d.",
+    ];
+
+    config_patterns.iter().any(|p| name.starts_with(p))
+}
+
 /// Find exports that are never imported by other files.
 fn find_unused_exports(
     graph: &ModuleGraph,
     config: &ResolvedConfig,
+    plugin_result: Option<&crate::plugins::AggregatedPluginResult>,
 ) -> (Vec<UnusedExport>, Vec<UnusedExport>) {
     let mut unused_exports = Vec::new();
     let mut unused_types = Vec::new();
@@ -144,6 +264,23 @@ fn find_unused_exports(
                 .map(|g| (g.compile_matcher(), used.exports.as_slice()))
         })
         .collect();
+
+    // Also compile plugin-discovered used_exports rules
+    let plugin_matchers: Vec<(globset::GlobMatcher, Vec<&str>)> = plugin_result
+        .map(|pr| {
+            pr.used_exports
+                .iter()
+                .filter_map(|(file_pat, exports)| {
+                    globset::Glob::new(file_pat).ok().map(|g| {
+                        (
+                            g.compile_matcher(),
+                            exports.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+                        )
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
 
     for module in &graph.modules {
         // Skip unreachable modules (already reported as unused files)
@@ -187,6 +324,13 @@ fn find_unused_exports(
             .map(|(_, exports)| *exports)
             .collect();
 
+        // Check plugin-discovered used_exports rules
+        let matching_plugin: Vec<&Vec<&str>> = plugin_matchers
+            .iter()
+            .filter(|(m, _)| m.is_match(file_str.as_ref()))
+            .map(|(_, exports)| exports)
+            .collect();
+
         // Lazily load source content for line/col computation
         let mut source_content: Option<String> = None;
 
@@ -206,6 +350,14 @@ fn find_unused_exports(
                 if matching_framework
                     .iter()
                     .any(|exports| exports.iter().any(|e| e == &export_str))
+                {
+                    continue;
+                }
+
+                // Check if this export is considered "used" by a plugin rule
+                if matching_plugin
+                    .iter()
+                    .any(|exports| exports.iter().any(|e| *e == export_str))
                 {
                     continue;
                 }
@@ -239,14 +391,31 @@ fn find_unused_dependencies(
     graph: &ModuleGraph,
     pkg: &PackageJson,
     config: &ResolvedConfig,
+    plugin_result: Option<&crate::plugins::AggregatedPluginResult>,
 ) -> (Vec<UnusedDependency>, Vec<UnusedDependency>) {
     let used_packages: HashSet<&str> = graph.package_usage.keys().map(|s| s.as_str()).collect();
+
+    // Collect deps referenced in config files (discovered by plugins)
+    let plugin_referenced: HashSet<&str> = plugin_result
+        .map(|pr| {
+            pr.referenced_dependencies
+                .iter()
+                .map(|s| s.as_str())
+                .collect()
+        })
+        .unwrap_or_default();
+
+    // Collect tooling deps from plugins
+    let plugin_tooling: HashSet<&str> = plugin_result
+        .map(|pr| pr.tooling_dependencies.iter().map(|s| s.as_str()).collect())
+        .unwrap_or_default();
 
     let unused_deps: Vec<UnusedDependency> = pkg
         .production_dependency_names()
         .into_iter()
         .filter(|dep| !used_packages.contains(dep.as_str()))
         .filter(|dep| !is_implicit_dependency(dep))
+        .filter(|dep| !plugin_referenced.contains(dep.as_str()))
         .filter(|dep| !config.ignore_dependencies.iter().any(|d| d == dep))
         .map(|dep| UnusedDependency {
             package_name: dep,
@@ -259,6 +428,8 @@ fn find_unused_dependencies(
         .into_iter()
         .filter(|dep| !used_packages.contains(dep.as_str()))
         .filter(|dep| !is_tooling_dependency(dep))
+        .filter(|dep| !plugin_tooling.contains(dep.as_str()))
+        .filter(|dep| !plugin_referenced.contains(dep.as_str()))
         .filter(|dep| !config.ignore_dependencies.iter().any(|d| d == dep))
         .map(|dep| UnusedDependency {
             package_name: dep,
@@ -356,11 +527,7 @@ fn find_unused_members(
                     path: module.path.clone(),
                     parent_name: export_name.clone(),
                     member_name: member.name.clone(),
-                    kind: match member.kind {
-                        MemberKind::EnumMember => "enum_member".to_string(),
-                        MemberKind::ClassMethod => "class_method".to_string(),
-                        MemberKind::ClassProperty => "class_property".to_string(),
-                    },
+                    kind: member.kind.clone(),
                     line,
                     col,
                 };
@@ -526,6 +693,8 @@ fn find_duplicate_exports(graph: &ModuleGraph, _config: &ResolvedConfig) -> Vec<
 fn is_builtin_module(name: &str) -> bool {
     let builtins = [
         "assert",
+        "assert/strict",
+        "async_hooks",
         "buffer",
         "child_process",
         "cluster",
@@ -533,31 +702,47 @@ fn is_builtin_module(name: &str) -> bool {
         "constants",
         "crypto",
         "dgram",
+        "diagnostics_channel",
         "dns",
+        "dns/promises",
         "domain",
         "events",
         "fs",
+        "fs/promises",
         "http",
         "http2",
         "https",
+        "inspector",
+        "inspector/promises",
         "module",
         "net",
         "os",
         "path",
+        "path/posix",
+        "path/win32",
         "perf_hooks",
         "process",
         "punycode",
         "querystring",
         "readline",
+        "readline/promises",
         "repl",
         "stream",
+        "stream/consumers",
+        "stream/promises",
+        "stream/web",
         "string_decoder",
         "sys",
+        "test",
+        "test/reporters",
         "timers",
+        "timers/promises",
         "tls",
+        "trace_events",
         "tty",
         "url",
         "util",
+        "util/types",
         "v8",
         "vm",
         "wasi",
@@ -565,7 +750,15 @@ fn is_builtin_module(name: &str) -> bool {
         "zlib",
     ];
     let stripped = name.strip_prefix("node:").unwrap_or(name);
-    builtins.contains(&stripped)
+    // Check exact match or subpath (e.g., "fs/promises" matches "fs/promises",
+    // "assert/strict" matches "assert/strict")
+    builtins.contains(&stripped) || {
+        // Handle deep subpaths like "stream/consumers" or "test/reporters"
+        stripped
+            .split('/')
+            .next()
+            .is_some_and(|root| builtins.contains(&root))
+    }
 }
 
 /// Dependencies that are used implicitly (not via imports).
@@ -584,6 +777,9 @@ fn is_implicit_dependency(name: &str) -> bool {
         "@next/mdx",
         "@next/bundle-analyzer",
         "@next/env",
+        // WebSocket optional native addons (peer deps of ws)
+        "utf-8-validate",
+        "bufferutil",
     ];
     implicit_deps.contains(&name)
 }
@@ -613,11 +809,17 @@ fn is_tooling_dependency(name: &str) -> bool {
         "babel-",
         "@react-native-community/cli",
         "@react-native/",
-        "react-native-",
-        "@sentry/",
         "secretlint",
         "@secretlint/",
         "oxlint",
+        // Release & publishing tooling
+        "@semantic-release/",
+        "semantic-release",
+        "@release-it/",
+        "@lerna-lite/",
+        // Build tool plugins (used in config)
+        "@graphql-codegen/",
+        "@rollup/",
     ];
 
     let exact_matches = [
@@ -648,19 +850,56 @@ fn is_tooling_dependency(name: &str) -> bool {
         "rollup",
         "swc",
         "@swc/core",
+        "@swc/jest",
         "terser",
         "cssnano",
         "sharp",
+        // Release & publishing
+        "release-it",
+        "lerna",
+        // Dotenv CLI tools
+        "dotenv-cli",
+        "dotenv-flow",
+        // Code quality & analysis
+        "oxfmt",
+        "jscpd",
+        "npm-check-updates",
+        "markdownlint-cli",
+        "npm-package-json-lint",
+        "synp",
+        "flow-bin",
+        // i18n tooling
+        "i18next-parser",
+        "i18next-conv",
+        // Bundle analysis & build tooling
+        "webpack-bundle-analyzer",
+        // Vite plugins (used in config, not imported)
+        "vite-plugin-svgr",
+        "vite-plugin-eslint",
+        "@vitejs/plugin-vue",
+        "@vitejs/plugin-react",
+        // Site generation / SEO
+        "next-sitemap",
+        // Monorepo tools
+        "nx",
+        // Vue tooling
+        "vue-tsc",
+        "@vue/tsconfig",
+        "@tsconfig/node20",
+        "@tsconfig/react-native",
+        // TypeScript experimental
+        "@typescript/native-preview",
+        // CSS-only deps (not imported in JS)
+        "tw-animate-css",
     ];
 
     tooling_prefixes.iter().any(|p| name.starts_with(p)) || exact_matches.contains(&name)
 }
 
-/// React class component lifecycle methods that are called by the React runtime.
+/// Angular lifecycle hooks and framework-invoked methods.
 ///
-/// These should never be flagged as unused class members because they are not
-/// invoked directly by user code.
-/// Angular lifecycle hooks called by the Angular framework.
+/// These should never be flagged as unused class members because they are
+/// called by the Angular framework, not user code.
 fn is_angular_lifecycle_method(name: &str) -> bool {
     matches!(
         name,
@@ -811,6 +1050,8 @@ mod tests {
         assert!(!is_implicit_dependency("@scope/types"));
         assert!(!is_implicit_dependency("types"));
         assert!(!is_implicit_dependency("typescript"));
+        assert!(!is_implicit_dependency("prettier"));
+        assert!(!is_implicit_dependency("eslint"));
     }
 
     // is_tooling_dependency tests

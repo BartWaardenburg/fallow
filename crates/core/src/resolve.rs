@@ -188,20 +188,26 @@ fn create_resolver(config: &ResolvedConfig) -> Resolver {
         ..Default::default()
     };
 
-    // Auto-detect tsconfig.json (check common variants)
+    // Auto-detect tsconfig.json (check common variants at project root)
     let tsconfig_candidates = ["tsconfig.json", "tsconfig.app.json", "tsconfig.build.json"];
-    let tsconfig = tsconfig_candidates
+    let root_tsconfig = tsconfig_candidates
         .iter()
         .map(|name| config.root.join(name))
         .find(|p| p.exists());
 
-    if let Some(tsconfig) = tsconfig {
+    if let Some(tsconfig) = root_tsconfig {
+        // Use manual config with auto references to also discover workspace tsconfigs
         options.tsconfig = Some(oxc_resolver::TsconfigDiscovery::Manual(
             oxc_resolver::TsconfigOptions {
                 config_file: tsconfig,
                 references: oxc_resolver::TsconfigReferences::Auto,
             },
         ));
+    } else {
+        // No root tsconfig found — use auto-discovery mode so oxc_resolver
+        // can find the nearest tsconfig.json for each file (important for
+        // workspace packages that have their own tsconfig)
+        options.tsconfig = Some(oxc_resolver::TsconfigDiscovery::Auto);
     }
 
     Resolver::new(options)

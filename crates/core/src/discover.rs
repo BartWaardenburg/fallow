@@ -93,6 +93,110 @@ pub fn discover_files(config: &ResolvedConfig) -> Vec<DiscoveredFile> {
     files
 }
 
+/// Resolve a path relative to a base directory, with security check and extension fallback.
+///
+/// Returns `Some(EntryPoint)` if the path resolves to an existing file within `canonical_root`,
+/// trying source extensions as fallback when the exact path doesn't exist.
+fn resolve_entry_path(
+    base: &Path,
+    entry: &str,
+    canonical_root: &Path,
+    source: EntryPointSource,
+) -> Option<EntryPoint> {
+    let resolved = base.join(entry);
+    // Security: ensure resolved path stays within the allowed root
+    let canonical_resolved = resolved.canonicalize().unwrap_or(resolved.clone());
+    if !canonical_resolved.starts_with(canonical_root) {
+        tracing::warn!(path = %entry, "Skipping entry point outside project root");
+        return None;
+    }
+    if resolved.exists() {
+        return Some(EntryPoint {
+            path: resolved,
+            source,
+        });
+    }
+    // Try with source extensions
+    for ext in SOURCE_EXTENSIONS {
+        let with_ext = resolved.with_extension(ext);
+        if with_ext.exists() {
+            return Some(EntryPoint {
+                path: with_ext,
+                source,
+            });
+        }
+    }
+    None
+}
+
+/// Pre-compile entry point and always_used glob matchers from a framework rule.
+fn compile_rule_matchers(
+    rule: &fallow_config::FrameworkRule,
+) -> (Vec<globset::GlobMatcher>, Vec<globset::GlobMatcher>) {
+    let entry_matchers: Vec<globset::GlobMatcher> = rule
+        .entry_points
+        .iter()
+        .filter_map(|ep| {
+            globset::Glob::new(&ep.pattern)
+                .ok()
+                .map(|g| g.compile_matcher())
+        })
+        .collect();
+
+    let always_matchers: Vec<globset::GlobMatcher> = rule
+        .always_used
+        .iter()
+        .filter_map(|p| globset::Glob::new(p).ok().map(|g| g.compile_matcher()))
+        .collect();
+
+    (entry_matchers, always_matchers)
+}
+
+/// Default index patterns used when no other entry points are found.
+const DEFAULT_INDEX_PATTERNS: &[&str] = &[
+    "src/index.{ts,tsx,js,jsx}",
+    "src/main.{ts,tsx,js,jsx}",
+    "index.{ts,tsx,js,jsx}",
+    "main.{ts,tsx,js,jsx}",
+];
+
+/// Fall back to default index patterns if no entries were found.
+///
+/// When `ws_filter` is `Some`, only files whose canonical path starts with the given
+/// canonical workspace root are considered (used for workspace-scoped discovery).
+fn apply_default_fallback(
+    files: &[DiscoveredFile],
+    root: &Path,
+    ws_filter: Option<&Path>,
+) -> Vec<EntryPoint> {
+    let default_matchers: Vec<globset::GlobMatcher> = DEFAULT_INDEX_PATTERNS
+        .iter()
+        .filter_map(|p| globset::Glob::new(p).ok().map(|g| g.compile_matcher()))
+        .collect();
+
+    let mut entries = Vec::new();
+    for file in files {
+        if let Some(canonical_ws) = ws_filter {
+            let canonical_file = file.path.canonicalize().unwrap_or(file.path.clone());
+            if !canonical_file.starts_with(canonical_ws) {
+                continue;
+            }
+        }
+        let relative = file.path.strip_prefix(root).unwrap_or(&file.path);
+        let relative_str = relative.to_string_lossy();
+        if default_matchers
+            .iter()
+            .any(|m| m.is_match(relative_str.as_ref()))
+        {
+            entries.push(EntryPoint {
+                path: file.path.clone(),
+                source: EntryPointSource::DefaultIndex,
+            });
+        }
+    }
+    entries
+}
+
 /// Discover entry points from package.json, framework rules, and defaults.
 pub fn discover_entry_points(config: &ResolvedConfig, files: &[DiscoveredFile]) -> Vec<EntryPoint> {
     let _span = tracing::info_span!("discover_entry_points").entered();
@@ -130,30 +234,13 @@ pub fn discover_entry_points(config: &ResolvedConfig, files: &[DiscoveredFile]) 
     if let Ok(pkg) = PackageJson::load(&pkg_path) {
         let canonical_root = config.root.canonicalize().unwrap_or(config.root.clone());
         for entry_path in pkg.entry_points() {
-            let resolved = config.root.join(&entry_path);
-            // Security: ensure resolved path stays within project root
-            let canonical_resolved = resolved.canonicalize().unwrap_or(resolved.clone());
-            if !canonical_resolved.starts_with(&canonical_root) {
-                tracing::warn!(path = %entry_path, "Skipping entry point outside project root");
-                continue;
-            }
-            if resolved.exists() {
-                entries.push(EntryPoint {
-                    path: resolved,
-                    source: EntryPointSource::PackageJsonMain,
-                });
-            } else {
-                // Try with extensions
-                for ext in SOURCE_EXTENSIONS {
-                    let with_ext = resolved.with_extension(ext);
-                    if with_ext.exists() {
-                        entries.push(EntryPoint {
-                            path: with_ext,
-                            source: EntryPointSource::PackageJsonMain,
-                        });
-                        break;
-                    }
-                }
+            if let Some(ep) = resolve_entry_path(
+                &config.root,
+                &entry_path,
+                &canonical_root,
+                EntryPointSource::PackageJsonMain,
+            ) {
+                entries.push(ep);
             }
         }
 
@@ -161,30 +248,13 @@ pub fn discover_entry_points(config: &ResolvedConfig, files: &[DiscoveredFile]) 
         if let Some(scripts) = &pkg.scripts {
             for script_value in scripts.values() {
                 for file_ref in extract_script_file_refs(script_value) {
-                    let resolved = config.root.join(&file_ref);
-                    // Security: ensure resolved path stays within project root
-                    let canonical_resolved = resolved.canonicalize().unwrap_or(resolved.clone());
-                    if !canonical_resolved.starts_with(&canonical_root) {
-                        tracing::warn!(path = %file_ref, "Skipping script entry point outside project root");
-                        continue;
-                    }
-                    if resolved.exists() {
-                        entries.push(EntryPoint {
-                            path: resolved,
-                            source: EntryPointSource::PackageJsonScript,
-                        });
-                    } else {
-                        // Try with extensions
-                        for ext in SOURCE_EXTENSIONS {
-                            let with_ext = resolved.with_extension(ext);
-                            if with_ext.exists() {
-                                entries.push(EntryPoint {
-                                    path: with_ext,
-                                    source: EntryPointSource::PackageJsonScript,
-                                });
-                                break;
-                            }
-                        }
+                    if let Some(ep) = resolve_entry_path(
+                        &config.root,
+                        &file_ref,
+                        &canonical_root,
+                        EntryPointSource::PackageJsonScript,
+                    ) {
+                        entries.push(ep);
                     }
                 }
             }
@@ -198,23 +268,7 @@ pub fn discover_entry_points(config: &ResolvedConfig, files: &[DiscoveredFile]) 
             .collect();
 
         for rule in &active_rules {
-            // Pre-compile entry point matchers
-            let entry_matchers: Vec<globset::GlobMatcher> = rule
-                .entry_points
-                .iter()
-                .filter_map(|ep| {
-                    globset::Glob::new(&ep.pattern)
-                        .ok()
-                        .map(|g| g.compile_matcher())
-                })
-                .collect();
-
-            // Pre-compile always_used matchers
-            let always_matchers: Vec<globset::GlobMatcher> = rule
-                .always_used
-                .iter()
-                .filter_map(|p| globset::Glob::new(p).ok().map(|g| g.compile_matcher()))
-                .collect();
+            let (entry_matchers, always_matchers) = compile_rule_matchers(rule);
 
             // Single pass over files for all matchers of this rule
             for (idx, rel) in relative_paths.iter().enumerate() {
@@ -232,28 +286,14 @@ pub fn discover_entry_points(config: &ResolvedConfig, files: &[DiscoveredFile]) 
         }
     }
 
-    // 4. Default index files (if no other entries found)
-    if entries.is_empty() {
-        let default_patterns = [
-            "src/index.{ts,tsx,js,jsx}",
-            "src/main.{ts,tsx,js,jsx}",
-            "index.{ts,tsx,js,jsx}",
-            "main.{ts,tsx,js,jsx}",
-        ];
-        // Pre-compile default matchers
-        let default_matchers: Vec<globset::GlobMatcher> = default_patterns
-            .iter()
-            .filter_map(|p| globset::Glob::new(p).ok().map(|g| g.compile_matcher()))
-            .collect();
+    // 4. Auto-discover nested package.json entry points
+    // For monorepo-like structures without explicit workspace config, scan for
+    // package.json files in subdirectories and use their main/exports as entries.
+    discover_nested_package_entries(&config.root, files, &mut entries);
 
-        for (idx, rel) in relative_paths.iter().enumerate() {
-            if default_matchers.iter().any(|m| m.is_match(rel)) {
-                entries.push(EntryPoint {
-                    path: files[idx].path.clone(),
-                    source: EntryPointSource::DefaultIndex,
-                });
-            }
-        }
+    // 5. Default index files (if no other entries found)
+    if entries.is_empty() {
+        entries = apply_default_fallback(files, &config.root, None);
     }
 
     // Deduplicate by path
@@ -261,6 +301,67 @@ pub fn discover_entry_points(config: &ResolvedConfig, files: &[DiscoveredFile]) 
     entries.dedup_by(|a, b| a.path == b.path);
 
     entries
+}
+
+/// Discover entry points from nested package.json files in subdirectories.
+///
+/// When a project has subdirectories with their own package.json (e.g., `packages/foo/package.json`),
+/// the `main`, `module`, `exports`, and `bin` fields of those package.json files should be treated
+/// as entry points. This handles monorepos without explicit workspace configuration.
+fn discover_nested_package_entries(
+    root: &Path,
+    _files: &[DiscoveredFile],
+    entries: &mut Vec<EntryPoint>,
+) {
+    let canonical_root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+
+    // Walk common monorepo patterns to find nested package.json files
+    let search_dirs = ["packages", "apps", "libs", "modules", "plugins"];
+    for dir_name in &search_dirs {
+        let search_dir = root.join(dir_name);
+        if !search_dir.is_dir() {
+            continue;
+        }
+        let read_dir = match std::fs::read_dir(&search_dir) {
+            Ok(rd) => rd,
+            Err(_) => continue,
+        };
+        for entry in read_dir.flatten() {
+            let pkg_path = entry.path().join("package.json");
+            if !pkg_path.exists() {
+                continue;
+            }
+            let Ok(pkg) = PackageJson::load(&pkg_path) else {
+                continue;
+            };
+            let pkg_dir = entry.path();
+            for entry_path in pkg.entry_points() {
+                if let Some(ep) = resolve_entry_path(
+                    &pkg_dir,
+                    &entry_path,
+                    &canonical_root,
+                    EntryPointSource::PackageJsonExports,
+                ) {
+                    entries.push(ep);
+                }
+            }
+            // Also check scripts in nested package.json
+            if let Some(scripts) = &pkg.scripts {
+                for script_value in scripts.values() {
+                    for file_ref in extract_script_file_refs(script_value) {
+                        if let Some(ep) = resolve_entry_path(
+                            &pkg_dir,
+                            &file_ref,
+                            &canonical_root,
+                            EntryPointSource::PackageJsonScript,
+                        ) {
+                            entries.push(ep);
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// Check if a framework rule is active based on its detection config.
@@ -305,29 +406,13 @@ pub fn discover_workspace_entry_points(
     if let Ok(pkg) = PackageJson::load(&pkg_path) {
         let canonical_ws_root = ws_root.canonicalize().unwrap_or(ws_root.to_path_buf());
         for entry_path in pkg.entry_points() {
-            let resolved = ws_root.join(&entry_path);
-            // Security: ensure resolved path stays within workspace root
-            let canonical_resolved = resolved.canonicalize().unwrap_or(resolved.clone());
-            if !canonical_resolved.starts_with(&canonical_ws_root) {
-                tracing::warn!(path = %entry_path, "Skipping entry point outside workspace root");
-                continue;
-            }
-            if resolved.exists() {
-                entries.push(EntryPoint {
-                    path: resolved,
-                    source: EntryPointSource::PackageJsonMain,
-                });
-            } else {
-                for ext in SOURCE_EXTENSIONS {
-                    let with_ext = resolved.with_extension(ext);
-                    if with_ext.exists() {
-                        entries.push(EntryPoint {
-                            path: with_ext,
-                            source: EntryPointSource::PackageJsonMain,
-                        });
-                        break;
-                    }
-                }
+            if let Some(ep) = resolve_entry_path(
+                ws_root,
+                &entry_path,
+                &canonical_ws_root,
+                EntryPointSource::PackageJsonMain,
+            ) {
+                entries.push(ep);
             }
         }
 
@@ -335,29 +420,13 @@ pub fn discover_workspace_entry_points(
         if let Some(scripts) = &pkg.scripts {
             for script_value in scripts.values() {
                 for file_ref in extract_script_file_refs(script_value) {
-                    let resolved = ws_root.join(&file_ref);
-                    // Security: ensure resolved path stays within workspace root
-                    let canonical_resolved = resolved.canonicalize().unwrap_or(resolved.clone());
-                    if !canonical_resolved.starts_with(&canonical_ws_root) {
-                        tracing::warn!(path = %file_ref, "Skipping script entry point outside workspace root");
-                        continue;
-                    }
-                    if resolved.exists() {
-                        entries.push(EntryPoint {
-                            path: resolved,
-                            source: EntryPointSource::PackageJsonScript,
-                        });
-                    } else {
-                        for ext in SOURCE_EXTENSIONS {
-                            let with_ext = resolved.with_extension(ext);
-                            if with_ext.exists() {
-                                entries.push(EntryPoint {
-                                    path: with_ext,
-                                    source: EntryPointSource::PackageJsonScript,
-                                });
-                                break;
-                            }
-                        }
+                    if let Some(ep) = resolve_entry_path(
+                        ws_root,
+                        &file_ref,
+                        &canonical_ws_root,
+                        EntryPointSource::PackageJsonScript,
+                    ) {
+                        entries.push(ep);
                     }
                 }
             }
@@ -365,6 +434,7 @@ pub fn discover_workspace_entry_points(
 
         // Apply framework rules to workspace.
         // Check activation against BOTH workspace and root package deps (monorepo hoisting).
+        let canonical_ws = ws_root.canonicalize().unwrap_or(ws_root.to_path_buf());
         for rule in &config.framework_rules {
             let ws_active = is_framework_active(rule, &pkg, ws_root);
             let root_active = root_pkg
@@ -376,26 +446,9 @@ pub fn discover_workspace_entry_points(
                 continue;
             }
 
-            // Pre-compile entry point matchers to avoid recompiling per file
-            let entry_matchers: Vec<globset::GlobMatcher> = rule
-                .entry_points
-                .iter()
-                .filter_map(|ep| {
-                    globset::Glob::new(&ep.pattern)
-                        .ok()
-                        .map(|g| g.compile_matcher())
-                })
-                .collect();
-
-            // Pre-compile always_used matchers
-            let always_matchers: Vec<globset::GlobMatcher> = rule
-                .always_used
-                .iter()
-                .filter_map(|p| globset::Glob::new(p).ok().map(|g| g.compile_matcher()))
-                .collect();
+            let (entry_matchers, always_matchers) = compile_rule_matchers(rule);
 
             // Only consider files within this workspace for framework rule matching
-            let canonical_ws = ws_root.canonicalize().unwrap_or(ws_root.to_path_buf());
             for file in all_files {
                 let canonical_file = file.path.canonicalize().unwrap_or(file.path.clone());
                 if !canonical_file.starts_with(&canonical_ws) {
@@ -423,35 +476,8 @@ pub fn discover_workspace_entry_points(
 
     // Fall back to default index files if no entry points found for this workspace
     if entries.is_empty() {
-        let default_patterns = [
-            "src/index.{ts,tsx,js,jsx}",
-            "src/main.{ts,tsx,js,jsx}",
-            "index.{ts,tsx,js,jsx}",
-            "main.{ts,tsx,js,jsx}",
-        ];
-        let default_matchers: Vec<globset::GlobMatcher> = default_patterns
-            .iter()
-            .filter_map(|p| globset::Glob::new(p).ok().map(|g| g.compile_matcher()))
-            .collect();
-
         let canonical_ws = ws_root.canonicalize().unwrap_or(ws_root.to_path_buf());
-        for file in all_files {
-            let canonical_file = file.path.canonicalize().unwrap_or(file.path.clone());
-            if !canonical_file.starts_with(&canonical_ws) {
-                continue;
-            }
-            let relative = file.path.strip_prefix(ws_root).unwrap_or(&file.path);
-            let relative_str = relative.to_string_lossy();
-            if default_matchers
-                .iter()
-                .any(|m| m.is_match(relative_str.as_ref()))
-            {
-                entries.push(EntryPoint {
-                    path: file.path.clone(),
-                    source: EntryPointSource::DefaultIndex,
-                });
-            }
-        }
+        entries = apply_default_fallback(all_files, ws_root, Some(&canonical_ws));
     }
 
     entries.sort_by(|a, b| a.path.cmp(&b.path));
@@ -503,7 +529,8 @@ fn extract_script_file_refs(script: &str) -> Vec<String> {
 
         // Check if the command is a known runner
         if RUNNERS.contains(&cmd) {
-            // Find the first non-flag argument after the runner
+            // Collect ALL file path arguments after the runner (handles
+            // `node --test file1.mjs file2.mjs ...` and similar multi-file patterns)
             for &token in &tokens[start + 1..] {
                 if token.starts_with('-') {
                     continue;
@@ -512,7 +539,6 @@ fn extract_script_file_refs(script: &str) -> Vec<String> {
                 if looks_like_file_path(token) {
                     refs.push(token.to_string());
                 }
-                break;
             }
         } else {
             // Scan all tokens for bare file paths (e.g. `./scripts/build.js`)
@@ -534,7 +560,14 @@ fn extract_script_file_refs(script: &str) -> Vec<String> {
 /// JS/TS file extension).
 fn looks_like_file_path(token: &str) -> bool {
     let extensions = [".js", ".ts", ".mjs", ".cjs", ".mts", ".cts", ".jsx", ".tsx"];
-    extensions.iter().any(|ext| token.ends_with(ext)) || token.contains('/')
+    if extensions.iter().any(|ext| token.ends_with(ext)) {
+        return true;
+    }
+    // Only treat tokens with `/` as paths if they look like actual file paths,
+    // not URLs or scoped package names like @scope/package
+    token.starts_with("./")
+        || token.starts_with("../")
+        || (token.contains('/') && !token.starts_with('@') && !token.contains("://"))
 }
 
 /// Check if a token looks like a standalone script file reference (must have a
@@ -641,6 +674,91 @@ fn walk_dir_recursive_depth(
     }
 
     false
+}
+
+/// Discover entry points from plugin results (dynamic config parsing).
+///
+/// Converts plugin-discovered patterns and setup files into concrete entry points
+/// by matching them against the discovered file list.
+pub fn discover_plugin_entry_points(
+    plugin_result: &crate::plugins::AggregatedPluginResult,
+    config: &ResolvedConfig,
+    files: &[DiscoveredFile],
+) -> Vec<EntryPoint> {
+    let mut entries = Vec::new();
+
+    // Pre-compute relative paths
+    let relative_paths: Vec<String> = files
+        .iter()
+        .map(|f| {
+            f.path
+                .strip_prefix(&config.root)
+                .unwrap_or(&f.path)
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect();
+
+    // Match plugin entry patterns against files
+    let all_patterns: Vec<&str> = plugin_result
+        .entry_patterns
+        .iter()
+        .chain(plugin_result.discovered_always_used.iter())
+        .chain(plugin_result.always_used.iter())
+        .map(|s| s.as_str())
+        .collect();
+
+    let matchers: Vec<globset::GlobMatcher> = all_patterns
+        .iter()
+        .filter_map(|p| globset::Glob::new(p).ok().map(|g| g.compile_matcher()))
+        .collect();
+
+    for (idx, rel) in relative_paths.iter().enumerate() {
+        if matchers.iter().any(|m| m.is_match(rel)) {
+            entries.push(EntryPoint {
+                path: files[idx].path.clone(),
+                source: EntryPointSource::FrameworkRule {
+                    name: "plugin".to_string(),
+                },
+            });
+        }
+    }
+
+    // Add setup files (absolute paths from plugin config parsing)
+    for setup_file in &plugin_result.setup_files {
+        let resolved = if setup_file.is_absolute() {
+            setup_file.clone()
+        } else {
+            config.root.join(setup_file)
+        };
+        if resolved.exists() {
+            entries.push(EntryPoint {
+                path: resolved,
+                source: EntryPointSource::FrameworkRule {
+                    name: "plugin-setup".to_string(),
+                },
+            });
+        } else {
+            // Try with extensions
+            for ext in SOURCE_EXTENSIONS {
+                let with_ext = resolved.with_extension(ext);
+                if with_ext.exists() {
+                    entries.push(EntryPoint {
+                        path: with_ext,
+                        source: EntryPointSource::FrameworkRule {
+                            name: "plugin-setup".to_string(),
+                        },
+                    });
+                    break;
+                }
+            }
+        }
+    }
+
+    // Deduplicate
+    entries.sort_by(|a, b| a.path.cmp(&b.path));
+    entries.dedup_by(|a, b| a.path == b.path);
+    entries
 }
 
 /// Pre-compile a set of glob patterns for efficient matching against many paths.
