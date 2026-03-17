@@ -60,11 +60,14 @@ Defined declaratively in `crates/config/src/framework.rs`.
 
 ## CLI features
 
-- `check` — analyze with --format (human/json/sarif/compact), --changed-since, --baseline, --save-baseline
+- `check` — analyze with --format (human/json/sarif/compact), --changed-since, --baseline, --save-baseline, issue type filters (--unused-files, --unused-exports, etc.)
 - `watch` — file watcher with debounced re-analysis
-- `fix` — auto-remove unused exports and deps (--dry-run)
+- `fix` — auto-remove unused exports and deps (--dry-run, --format json for structured output)
 - `init` — create fallow.toml
-- `list` — show frameworks, entry points, files
+- `list` — show frameworks, entry points, files (--format json for structured output)
+- `schema` — dump CLI interface as machine-readable JSON for agent introspection
+
+See `AGENTS.md` for AI agent integration guide.
 
 ## Key design decisions
 

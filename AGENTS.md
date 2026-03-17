@@ -1,0 +1,148 @@
+---
+name: fallow
+description: Rust-native dead code analyzer for JavaScript/TypeScript projects. 10-100x faster alternative to knip.
+agent-usage: This CLI is frequently invoked by AI coding agents (Claude Code, Cursor, Copilot, etc.) for codebase hygiene tasks.
+---
+
+# Fallow CLI -- Agent Integration Guide
+
+Fallow detects unused files, exports, dependencies, types, enum members, class members, unresolved imports, unlisted dependencies, and duplicate exports in JS/TS projects.
+
+## Rules for AI agents
+
+1. **Always use `--format json`** for machine-readable output. Never parse human-formatted output.
+2. **Always use `--quiet`** to suppress progress bars and timing info on stderr.
+3. **Always use `--dry-run` before `fix`** mutations. Review the dry-run output, then run `fix` only if the changes are correct.
+4. **Use issue type filter flags** (`--unused-files`, `--unused-exports`, etc.) to limit response scope. This keeps output small and avoids exceeding context windows.
+5. **All paths in output are relative** to the project root. Do not join them with an absolute prefix unless you know the working directory.
+6. **Do not run `watch`** in agent workflows. It is interactive and never exits.
+
+## Exit codes
+
+| Code | Meaning |
+|------|---------|
+| 0    | Success (no issues, or issues found but `--fail-on-issues` was not set) |
+| 1    | Issues found (only when `--fail-on-issues` is passed) |
+| 2    | Error (invalid config, parse failure, etc.) |
+
+## Commands
+
+### `check` (default)
+
+Run dead code analysis.
+
+```bash
+fallow check --format json --quiet
+fallow check --format json --quiet --unused-exports
+fallow check --format json --quiet --fail-on-issues
+fallow check --format json --quiet --changed-since main
+```
+
+**Flags:**
+- `--format human|json|sarif|compact` -- output format (default: human)
+- `--quiet` -- suppress progress and timing on stderr
+- `--fail-on-issues` -- exit 1 if any issues are found
+- `--changed-since <ref>` -- only analyze files changed since a git ref
+- `--baseline <path>` -- compare against a saved baseline
+- `--save-baseline <path>` -- save current results as a baseline
+- Issue type filters: `--unused-files`, `--unused-exports`, `--unused-deps`, `--unused-types`, `--unused-enum-members`, `--unused-class-members`, `--unresolved-imports`, `--unlisted-deps`, `--duplicate-exports`
+
+### `fix`
+
+Auto-remove unused exports and dependencies.
+
+```bash
+fallow fix --dry-run --format json --quiet   # preview first
+fallow fix --format json --quiet             # apply changes
+```
+
+**Flags:**
+- `--dry-run` -- show what would be removed without modifying files
+- `--format json` -- machine-readable output of changes
+
+### `list`
+
+List discovered files, entry points, or detected frameworks.
+
+```bash
+fallow list --files --format json --quiet
+fallow list --entry-points --format json --quiet
+fallow list --frameworks --format json --quiet
+```
+
+### `init`
+
+Create a `fallow.toml` config file in the project root.
+
+```bash
+fallow init
+```
+
+### `schema`
+
+Dump the full CLI interface definition as machine-readable JSON. Use this for runtime introspection of available commands, flags, and options.
+
+```bash
+fallow schema
+```
+
+## Output structure
+
+JSON output goes to **stdout**. Progress bars and timing go to **stderr** (suppressed with `--quiet`).
+
+Compact format (`--format compact`) is grep-friendly: one issue per line as `type:path:line:name`.
+
+JSON output includes `version`, `elapsed_ms`, and `total_issues` metadata alongside the issue arrays.
+
+## Common agent workflows
+
+### Audit a project for all dead code
+
+```bash
+fallow check --format json --quiet
+```
+
+### Check only unused exports (smaller output)
+
+```bash
+fallow check --format json --quiet --unused-exports
+```
+
+### Check if a PR introduces dead code
+
+```bash
+fallow check --format json --quiet --changed-since main --fail-on-issues
+```
+
+### Safe auto-fix cycle
+
+```bash
+fallow fix --dry-run --format json --quiet   # 1. preview
+# agent reviews output
+fallow fix --format json --quiet             # 2. apply
+fallow check --format json --quiet           # 3. verify
+```
+
+### Discover project structure
+
+```bash
+fallow list --entry-points --format json --quiet
+fallow list --frameworks --format json --quiet
+```
+
+### Introspect CLI capabilities at runtime
+
+```bash
+fallow schema
+```
+
+## Configuration
+
+Fallow reads `fallow.toml` from the project root. Run `fallow init` to generate one. Framework presets (Next.js, Vite, Jest, Storybook, etc.) are auto-detected -- no configuration required for most projects.
+
+## Invariants
+
+- Fallow uses syntactic analysis only (no TypeScript compiler). It may miss dynamic imports or runtime-computed paths.
+- Re-export chains through barrel files are resolved. An export re-exported from `index.ts` is not falsely flagged if consumed downstream.
+- Workspace support (npm/yarn/pnpm) is automatic when `workspaces` is defined in the root `package.json` or `pnpm-workspace.yaml` exists.
+- Analysis is deterministic: same input always produces the same output.

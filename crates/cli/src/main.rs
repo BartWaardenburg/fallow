@@ -28,7 +28,13 @@ struct Cli {
     config: Option<PathBuf>,
 
     /// Output format (alias: --output)
-    #[arg(short, long, visible_alias = "output", global = true, default_value = "human")]
+    #[arg(
+        short,
+        long,
+        visible_alias = "output",
+        global = true,
+        default_value = "human"
+    )]
     format: Format,
 
     /// Suppress progress output
@@ -225,13 +231,13 @@ fn validate_git_ref(s: &str) -> Result<&str, String> {
     if s.starts_with('-') {
         return Err("git ref cannot start with '-'".to_string());
     }
-    // Reject control characters (ASCII < 0x20 and DEL)
-    if s.bytes().any(|b| b < 0x20 || b == 0x7f) {
-        return Err("git ref contains control characters".to_string());
-    }
-    // Reject null bytes
-    if s.contains('\0') {
-        return Err("git ref contains null bytes".to_string());
+    // Allowlist: only permit safe characters in git refs
+    // Covers branches, tags, HEAD~N, HEAD^N, @{n}, commit SHAs
+    if !s.chars().all(|c| {
+        c.is_ascii_alphanumeric()
+            || matches!(c, '.' | '_' | '-' | '/' | '~' | '^' | '@' | '{' | '}')
+    }) {
+        return Err("git ref contains disallowed characters".to_string());
     }
     Ok(s)
 }
@@ -281,11 +287,11 @@ fn main() -> ExitCode {
     };
 
     // Validate --changed-since early
-    if let Some(ref git_ref) = cli.changed_since {
-        if let Err(e) = validate_git_ref(git_ref) {
-            eprintln!("Error: invalid --changed-since: {e}");
-            return ExitCode::from(2);
-        }
+    if let Some(ref git_ref) = cli.changed_since
+        && let Err(e) = validate_git_ref(git_ref)
+    {
+        eprintln!("Error: invalid --changed-since: {e}");
+        return ExitCode::from(2);
     }
 
     let threads = cli.threads.unwrap_or_else(|| {
@@ -799,7 +805,7 @@ fn run_fix(
     if matches!(output, OutputFormat::Json) {
         let applied_count = fixes
             .iter()
-            .filter(|f| f.get("applied").and_then(|v| v.as_bool()).unwrap_or(!dry_run))
+            .filter(|f| f.get("applied").and_then(|v| v.as_bool()).unwrap_or(false))
             .count();
         println!(
             "{}",
@@ -881,43 +887,46 @@ fn run_list(
             }
 
             // Discover files once if needed by either files or entry_points
-            let discovered = if (files || show_all) || (entry_points || show_all) {
+            let need_files = files || show_all || entry_points;
+            let discovered = if need_files {
                 Some(fallow_core::discover::discover_files(&config))
             } else {
                 None
             };
 
-            if files || show_all {
-                if let Some(ref disc) = discovered {
-                    let paths: Vec<serde_json::Value> = disc
-                        .iter()
-                        .map(|f| {
-                            let relative = f.path.strip_prefix(root).unwrap_or(&f.path);
-                            serde_json::json!(relative.display().to_string())
-                        })
-                        .collect();
-                    result.insert("files".to_string(), serde_json::json!(paths));
-                    result.insert("file_count".to_string(), serde_json::json!(paths.len()));
-                }
+            if (files || show_all)
+                && let Some(ref disc) = discovered
+            {
+                let paths: Vec<serde_json::Value> = disc
+                    .iter()
+                    .map(|f| {
+                        let relative = f.path.strip_prefix(root).unwrap_or(&f.path);
+                        serde_json::json!(relative.display().to_string())
+                    })
+                    .collect();
+                result.insert("file_count".to_string(), serde_json::json!(paths.len()));
+                result.insert("files".to_string(), serde_json::json!(paths));
             }
 
-            if entry_points || show_all {
-                if let Some(ref disc) = discovered {
-                    let entries = fallow_core::discover::discover_entry_points(&config, disc);
-                    let eps: Vec<serde_json::Value> = entries
-                        .iter()
-                        .map(|ep| {
-                            let relative = ep.path.strip_prefix(root).unwrap_or(&ep.path);
-                            serde_json::json!({
-                                "path": relative.display().to_string(),
-                                "source": format!("{:?}", ep.source),
-                            })
+            if (entry_points || show_all)
+                && let Some(ref disc) = discovered
+            {
+                let entries = fallow_core::discover::discover_entry_points(&config, disc);
+                let eps: Vec<serde_json::Value> = entries
+                    .iter()
+                    .map(|ep| {
+                        let relative = ep.path.strip_prefix(root).unwrap_or(&ep.path);
+                        serde_json::json!({
+                            "path": relative.display().to_string(),
+                            "source": format!("{:?}", ep.source),
                         })
-                        .collect();
-                    result
-                        .insert("entry_point_count".to_string(), serde_json::json!(eps.len()));
-                    result.insert("entry_points".to_string(), serde_json::json!(eps));
-                }
+                    })
+                    .collect();
+                result.insert(
+                    "entry_point_count".to_string(),
+                    serde_json::json!(eps.len()),
+                );
+                result.insert("entry_points".to_string(), serde_json::json!(eps));
             }
 
             println!(
@@ -933,17 +942,27 @@ fn run_list(
                 }
             }
 
-            if files || show_all {
-                let discovered = fallow_core::discover::discover_files(&config);
-                eprintln!("Discovered {} files", discovered.len());
-                for file in &discovered {
+            // Discover files once for both files and entry_points
+            let need_discover = files || entry_points || show_all;
+            let discovered = if need_discover {
+                Some(fallow_core::discover::discover_files(&config))
+            } else {
+                None
+            };
+
+            if (files || show_all)
+                && let Some(ref disc) = discovered
+            {
+                eprintln!("Discovered {} files", disc.len());
+                for file in disc {
                     println!("{}", file.path.display());
                 }
             }
 
-            if entry_points || show_all {
-                let discovered = fallow_core::discover::discover_files(&config);
-                let entries = fallow_core::discover::discover_entry_points(&config, &discovered);
+            if (entry_points || show_all)
+                && let Some(ref disc) = discovered
+            {
+                let entries = fallow_core::discover::discover_entry_points(&config, disc);
                 eprintln!("Found {} entry points", entries.len());
                 for ep in &entries {
                     println!("{} ({:?})", ep.path.display(), ep.source);
@@ -1025,13 +1044,15 @@ fn build_cli_schema(cmd: &clap::Command) -> serde_json::Value {
                 "id": "unused-dependency",
                 "description": "Package in dependencies is never imported",
                 "filter_flag": "--unused-deps",
-                "fixable": true
+                "fixable": true,
+                "note": "--unused-deps controls both unused-dependency and unused-dev-dependency"
             },
             {
                 "id": "unused-dev-dependency",
                 "description": "Package in devDependencies is never imported",
                 "filter_flag": "--unused-deps",
-                "fixable": true
+                "fixable": true,
+                "note": "--unused-deps controls both unused-dependency and unused-dev-dependency"
             },
             {
                 "id": "unused-enum-member",

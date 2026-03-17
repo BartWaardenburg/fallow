@@ -407,26 +407,22 @@ fn build_sarif(results: &AnalysisResults, root: &std::path::Path) -> serde_json:
     }
 
     for dup in &results.duplicate_exports {
-        let locations: Vec<serde_json::Value> = dup
-            .locations
-            .iter()
-            .map(|p| {
-                let relative = p.strip_prefix(root).unwrap_or(p);
-                serde_json::json!({
+        // Emit one result per location (SARIF 2.1.0 §3.27.12)
+        for loc_path in &dup.locations {
+            let relative = loc_path.strip_prefix(root).unwrap_or(loc_path);
+            sarif_results.push(serde_json::json!({
+                "ruleId": "fallow/duplicate-export",
+                "level": "warning",
+                "message": {
+                    "text": format!("Export '{}' appears in multiple modules", dup.export_name)
+                },
+                "locations": [{
                     "physicalLocation": {
                         "artifactLocation": { "uri": relative.display().to_string() }
                     }
-                })
-            })
-            .collect();
-        sarif_results.push(serde_json::json!({
-            "ruleId": "fallow/duplicate-export",
-            "level": "warning",
-            "message": {
-                "text": format!("Export '{}' appears in multiple modules", dup.export_name)
-            },
-            "locations": locations
-        }));
+                }]
+            }));
+        }
     }
 
     serde_json::json!({
