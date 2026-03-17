@@ -21,34 +21,9 @@ fallow is a drop-in alternative to [knip](https://knip.dev) that runs **25–40x
 npx fallow check    # zero config, sub-second results
 ```
 
-```
-$ fallow check
+![Example `fallow check` output](assets/screenshots/fallow-check-output.png)
 
-Unused files (3)
-------------------------------------------------------------
-  src/legacy/oldUtils.ts
-  src/components/DeprecatedBanner.tsx
-  src/lib/unused-helper.ts
-
-Unused exports (5)
-------------------------------------------------------------
-  src/utils/format.ts  `formatCurrency`
-  src/utils/format.ts  `formatPercentage`
-  src/hooks/useAuth.ts  `AuthContext`
-  src/api/client.ts  `legacyFetch`
-  src/types/models.ts  `DeprecatedUser`
-
-Unused dependencies (2)
-------------------------------------------------------------
-  moment
-  lodash
-
-Unlisted dependencies (1)
-------------------------------------------------------------
-  chalk
-
-Found 11 issues (0.42s)
-```
+Regenerate this screenshot with `scripts/generate-readme-screenshot.sh` (uses `freeze`).
 
 ## Why fallow?
 
