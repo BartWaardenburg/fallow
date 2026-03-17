@@ -15,7 +15,6 @@ fn fixture_path(name: &str) -> PathBuf {
 
 fn create_config(root: PathBuf) -> fallow_config::ResolvedConfig {
     FallowConfig {
-        root: None,
         entry: vec![],
         ignore: vec![],
         detect: DetectConfig::default(),
@@ -630,7 +629,6 @@ fn detect_config_disables_duplicate_exports() {
 fn ignore_exports_wildcard() {
     let root = fixture_path("ignore-exports");
     let config = FallowConfig {
-        root: None,
         entry: vec![],
         ignore: vec![],
         detect: DetectConfig::default(),
@@ -668,7 +666,6 @@ fn ignore_exports_wildcard() {
 fn ignore_exports_specific() {
     let root = fixture_path("ignore-exports");
     let config = FallowConfig {
-        root: None,
         entry: vec![],
         ignore: vec![],
         detect: DetectConfig::default(),
@@ -755,7 +752,6 @@ fn dynamic_import_makes_module_reachable() {
 fn ignore_dependencies_config() {
     let root = fixture_path("basic-project");
     let config = FallowConfig {
-        root: None,
         entry: vec![],
         ignore: vec![],
         detect: DetectConfig::default(),

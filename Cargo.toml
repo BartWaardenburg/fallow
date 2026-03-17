@@ -34,6 +34,7 @@ rayon = "1"
 
 # File system
 ignore = "0.4"
+glob = "0.3"
 globset = { version = "0.4", features = ["serde1"] }
 
 # Hashing

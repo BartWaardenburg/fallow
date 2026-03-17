@@ -4,7 +4,6 @@ use fallow_config::{DetectConfig, FallowConfig, OutputFormat};
 
 fn create_test_config(root: std::path::PathBuf) -> fallow_config::ResolvedConfig {
     FallowConfig {
-        root: None,
         entry: vec![],
         ignore: vec![],
         detect: DetectConfig::default(),

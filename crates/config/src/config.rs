@@ -10,10 +10,6 @@ use crate::workspace::WorkspaceConfig;
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct FallowConfig {
-    /// Project root (defaults to config file location).
-    #[serde(default)]
-    pub root: Option<PathBuf>,
-
     /// Additional entry point glob patterns.
     #[serde(default)]
     pub entry: Vec<String>,
@@ -144,7 +140,6 @@ pub struct ResolvedConfig {
     pub ignore_patterns: GlobSet,
     pub detect: DetectConfig,
     pub framework_rules: Vec<crate::framework::FrameworkRule>,
-    pub tsconfig_path: Option<PathBuf>,
     pub output: OutputFormat,
     pub cache_dir: PathBuf,
     pub threads: usize,
@@ -163,6 +158,9 @@ impl FallowConfig {
     }
 
     /// Find and load config from the current directory or ancestors.
+    ///
+    /// Stops searching at the first directory containing `.git` or `package.json`,
+    /// to avoid picking up unrelated config files above the project root.
     pub fn find_and_load(start: &Path) -> Option<(Self, PathBuf)> {
         let config_names = ["fallow.toml", ".fallow.toml"];
 
@@ -173,23 +171,36 @@ impl FallowConfig {
                 if candidate.exists() {
                     match Self::load(&candidate) {
                         Ok(config) => return Some((config, candidate)),
-                        Err(_) => continue,
+                        Err(e) => {
+                            eprintln!("Warning: Failed to parse {}: {e}", candidate.display());
+                            return None; // Don't continue searching on parse error
+                        }
                     }
                 }
             }
-            match dir.parent() {
-                Some(parent) => dir = parent,
-                None => return None,
+            // Stop at project root indicators
+            if dir.join(".git").exists() || dir.join("package.json").exists() {
+                break;
             }
+            dir = match dir.parent() {
+                Some(parent) => parent,
+                None => break,
+            };
         }
+        None
     }
 
     /// Resolve into a fully resolved config with compiled globs.
     pub fn resolve(self, root: PathBuf, threads: usize, no_cache: bool) -> ResolvedConfig {
         let mut ignore_builder = GlobSetBuilder::new();
         for pattern in &self.ignore {
-            if let Ok(glob) = Glob::new(pattern) {
-                ignore_builder.add(glob);
+            match Glob::new(pattern) {
+                Ok(glob) => {
+                    ignore_builder.add(glob);
+                }
+                Err(e) => {
+                    eprintln!("Warning: Invalid ignore glob pattern '{pattern}': {e}");
+                }
             }
         }
 
@@ -221,7 +232,6 @@ impl FallowConfig {
             ignore_patterns,
             detect: self.detect,
             framework_rules,
-            tsconfig_path: None,
             output: self.output,
             cache_dir,
             threads,
@@ -319,7 +329,6 @@ ignore_dependencies = ["autoprefixer", "postcss"]
     #[test]
     fn fallow_config_resolve_default_ignores() {
         let config = FallowConfig {
-            root: None,
             entry: vec![],
             ignore: vec![],
             detect: DetectConfig::default(),
@@ -345,7 +354,6 @@ ignore_dependencies = ["autoprefixer", "postcss"]
     #[test]
     fn fallow_config_resolve_custom_ignores() {
         let config = FallowConfig {
-            root: None,
             entry: vec!["src/**/*.ts".to_string()],
             ignore: vec!["**/*.generated.ts".to_string()],
             detect: DetectConfig::default(),
@@ -367,7 +375,6 @@ ignore_dependencies = ["autoprefixer", "postcss"]
     #[test]
     fn fallow_config_resolve_cache_dir() {
         let config = FallowConfig {
-            root: None,
             entry: vec![],
             ignore: vec![],
             detect: DetectConfig::default(),

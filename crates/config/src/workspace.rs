@@ -1,6 +1,5 @@
 use std::path::{Path, PathBuf};
 
-use globset::Glob;
 use serde::{Deserialize, Serialize};
 
 /// Workspace configuration for monorepo support.
@@ -77,20 +76,7 @@ pub fn discover_workspaces(root: &Path) -> Vec<WorkspaceInfo> {
         }
     }
 
-    // 4. Mark workspaces that are internal dependencies
-    let all_names: Vec<String> = workspaces.iter().map(|w| w.name.clone()).collect();
-    for ws in &mut workspaces {
-        let ws_pkg_path = ws.root.join("package.json");
-        if let Ok(pkg) = PackageJson::load(&ws_pkg_path) {
-            for dep_name in pkg.all_dependency_names() {
-                if all_names.contains(&dep_name) {
-                    // Find the dependency workspace and mark it
-                    ws.is_internal_dependency = true;
-                }
-            }
-        }
-    }
-    // Re-pass: check if any workspace depends on another
+    // 4. Mark workspaces that are depended on by other workspaces
     let all_dep_names: Vec<String> = workspaces
         .iter()
         .flat_map(|ws| {
@@ -108,41 +94,20 @@ pub fn discover_workspaces(root: &Path) -> Vec<WorkspaceInfo> {
 }
 
 /// Expand a workspace glob pattern to matching directories.
+///
+/// Uses the `glob` crate for full glob support including `**` (deep matching).
 fn expand_workspace_glob(root: &Path, pattern: &str) -> Vec<PathBuf> {
-    let mut results = Vec::new();
-
-    // Handle simple patterns like "packages/*" or "apps/*"
-    if let Some(parent) = pattern.rsplit_once('/') {
-        let (dir_prefix, _glob_part) = parent;
-        let search_dir = root.join(dir_prefix);
-        if search_dir.is_dir()
-            && let Ok(entries) = std::fs::read_dir(&search_dir)
-        {
-            for entry in entries.flatten() {
-                if entry.path().is_dir() {
-                    let relative = entry
-                        .path()
-                        .strip_prefix(root)
-                        .unwrap_or(&entry.path())
-                        .to_string_lossy()
-                        .to_string();
-                    if let Ok(glob) = Glob::new(pattern)
-                        && glob.compile_matcher().is_match(&relative)
-                    {
-                        results.push(entry.path());
-                    }
-                }
-            }
-        }
-    } else {
-        // Simple directory name
-        let dir = root.join(pattern);
-        if dir.is_dir() {
-            results.push(dir);
+    let full_pattern = root.join(pattern).to_string_lossy().to_string();
+    match glob::glob(&full_pattern) {
+        Ok(paths) => paths
+            .filter_map(Result::ok)
+            .filter(|p| p.is_dir())
+            .collect(),
+        Err(e) => {
+            eprintln!("Warning: Invalid workspace glob pattern '{pattern}': {e}");
+            Vec::new()
         }
     }
-
-    results
 }
 
 /// Parse pnpm-workspace.yaml to extract package patterns.
