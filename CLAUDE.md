@@ -2,14 +2,14 @@
 
 ## What is this?
 
-Fallow finds unused files, exports, dependencies, types, enum members, class members, unresolved imports, unlisted deps, and duplicate exports in JS/TS projects. It's a Rust alternative to [knip](https://github.com/webpro-nl/knip) that is 25-50x faster on real-world projects by leveraging the Oxc parser ecosystem.
+Fallow finds unused files, exports, dependencies, types, enum members, class members, unresolved imports, unlisted deps, and duplicate exports in JS/TS projects. It's a Rust alternative to [knip](https://github.com/webpro-nl/knip) that is 25-40x faster on real-world projects by leveraging the Oxc parser ecosystem.
 
 ## Project structure
 
 ```
 crates/
   config/   — Configuration types, framework presets, package.json parsing, workspace discovery
-  core/     — Analysis engine: discovery, parsing, resolution, graph, analysis, caching, progress
+  core/     — Analysis engine: discovery, parsing, resolution, graph, plugins, caching, progress
   cli/      — CLI binary (check, watch, fix, init, list commands)
   lsp/      — LSP server with diagnostics, code actions
 npm/
@@ -28,6 +28,7 @@ Key modules in fallow-core:
 - `resolve.rs` — oxc_resolver-based import resolution
 - `graph.rs` — Module graph with re-export chain propagation
 - `analyze.rs` — Dead code detection (10 issue types)
+- `plugins/` — Plugin system: `Plugin` trait, registry, AST-based config parsing (23 built-in plugins)
 - `cache.rs` — Incremental bincode cache with xxh3 hashing
 - `progress.rs` — indicatif progress bars
 - `errors.rs` — Error types
@@ -52,11 +53,13 @@ cargo run -- fix --dry-run      # Auto-fix preview
 4. Duplicate exports across modules
 5. Re-export chain resolution through barrel files
 
-## Framework support (17 presets)
+## Framework support (23 plugins)
 
-Next.js, Vite, Vitest, Jest, Storybook, Remix, Astro, Nuxt, Angular, Playwright, Prisma, ESLint, TypeScript, Webpack, Tailwind, GraphQL Codegen, React Router
+Next.js, Vite, Vitest, Jest, Storybook, Remix, Astro, Nuxt, Angular, Playwright, Prisma, ESLint, TypeScript, Webpack, Tailwind, GraphQL Codegen, React Router, React Native, Expo, Sentry, Drizzle, Knex, MSW
 
-Defined declaratively in `crates/config/src/framework.rs`.
+Two complementary systems:
+- **Framework presets** (`crates/config/src/framework.rs`) — Declarative rules for entry points, always-used files, and used exports. Users can add custom presets via `fallow.toml`.
+- **Plugins** (`crates/core/src/plugins/`) — Rust trait-based plugins that add dynamic config file parsing via Oxc AST walking. Each plugin implements the `Plugin` trait with static patterns + `resolve_config()` for parsing tool configs.
 
 ## CLI features
 
@@ -72,7 +75,7 @@ See `AGENTS.md` for AI agent integration guide.
 ## Key design decisions
 
 - **No TypeScript compiler dependency**: Syntactic analysis only via Oxc. This is the speed advantage.
-- **Declarative framework presets**: Data (TOML), not code. Knip has 140+ JS plugins; ~85% are just glob patterns.
+- **Plugin system**: Rust trait-based plugins with AST-based config parsing (no JavaScript evaluation). Static patterns for common cases, dynamic Oxc parsing for tool configs. Knip has 140+ JS plugins; fallow covers 23 with deeper config extraction.
 - **Flat edge storage**: Contiguous `Vec<Edge>` with range indices for cache-friendly traversal.
 - **Re-export chain resolution**: Iterative propagation through barrel files with cycle detection.
 - **Workspace support**: npm/yarn/pnpm workspaces, pnpm-workspace.yaml.

@@ -1,20 +1,25 @@
 <p align="center">
   <img src="assets/logo.png" alt="fallow" width="460"><br>
-  <strong>Find dead code in JavaScript and TypeScript projects. Written in Rust.</strong><br><br>
+  <strong>Dead code detection for JavaScript and TypeScript — in milliseconds, not minutes.</strong><br><br>
   <a href="https://github.com/BartWaardenburg/fallow/actions/workflows/ci.yml"><img src="https://github.com/BartWaardenburg/fallow/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://github.com/BartWaardenburg/fallow/actions/workflows/coverage.yml"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/BartWaardenburg/fallow/badges/coverage.json" alt="Coverage"></a>
   <a href="https://crates.io/crates/fallow-cli"><img src="https://img.shields.io/crates/v/fallow-cli.svg" alt="crates.io"></a>
   <a href="https://www.npmjs.com/package/fallow"><img src="https://img.shields.io/npm/v/fallow.svg" alt="npm"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a><br>
   <a href="#quick-start">Quick Start</a> ·
+  <a href="#benchmarks">Benchmarks</a> ·
   <a href="#what-it-finds">What It Finds</a> ·
   <a href="#configuration">Configuration</a> ·
-  <a href="#ci-integration">CI Integration</a>
+  <a href="#comparison-with-knip">Comparison</a>
 </p>
 
 ---
 
-Fallow detects unused files, exports, dependencies, types, enum members, and class members across your codebase. It is a drop-in alternative to [knip](https://knip.dev) that runs **25–50x faster** on real-world projects by using the [Oxc](https://oxc.rs) parser instead of the TypeScript compiler.
+fallow is a drop-in alternative to [knip](https://knip.dev) that runs **25–40x faster** on real-world projects by using the [Oxc](https://oxc.rs) parser instead of the TypeScript compiler. It detects unused files, exports, dependencies, types, enum members, and class members in JavaScript and TypeScript codebases.
+
+```bash
+npx fallow check    # zero config, sub-second results
+```
 
 ```
 $ fallow check
@@ -49,20 +54,22 @@ Found 11 issues (0.42s)
 
 **knip is good. fallow is fast.**
 
-knip calls `ts.createProgram()` on every run — it loads the full TypeScript compiler to type-check your project, even though dead code detection is a syntactic problem. For a 2,000-file monorepo, that means 30–60 seconds of waiting.
+knip relies on the TypeScript compiler on every run — even though finding dead code doesn't require type information. For a 2,000-file monorepo, that means 30–60 seconds of waiting.
 
 fallow takes a different approach:
 
 - **Oxc parser** — syntactic analysis only, no type-checking overhead
-- **Parallel parsing** — every file parsed on its own rayon thread with a per-task allocator, zero contention
+- **Parallel parsing** — every file parsed on its own rayon thread with a per-task allocator, zero contention during parsing
 - **Incremental cache** — xxh3 content hashing + bincode serialization, only changed files are reparsed
 - **Flat graph storage** — contiguous `Vec<Edge>` with range indices for cache-friendly traversal
 
 The result: sub-second analysis on codebases where knip takes a minute.
 
+Detection accuracy has been validated against knip across 31 open-source projects. Since fallow uses syntactic analysis only (no type information), there are edge cases where results differ — see [Limitations](#limitations) below.
+
 ### Benchmarks
 
-Measured on real-world open-source projects (median of 7 runs, 3 warmup):
+Measured on real-world open-source projects (median of 5 runs, 2 warmup):
 
 | Project | Files | fallow | knip | Speedup |
 |:--------|------:|-------:|-----:|--------:|
@@ -70,7 +77,10 @@ Measured on real-world open-source projects (median of 7 runs, 3 warmup):
 | [fastify](https://github.com/fastify/fastify) | 286 | **20ms** | 804ms | **39.4x** |
 | [preact](https://github.com/preactjs/preact) | 244 | **29ms** | 771ms | **26.6x** |
 
-Scaling behavior on synthetic TypeScript projects:
+<details>
+<summary>Scaling behavior on synthetic projects</summary>
+
+At small sizes, knip's fixed startup cost dominates. At larger scales, per-file costs converge — but fallow remains faster at every size:
 
 | Size | Files | fallow | knip | Speedup |
 |:-----|------:|-------:|-----:|--------:|
@@ -79,6 +89,8 @@ Scaling behavior on synthetic TypeScript projects:
 | medium | 201 | **12ms** | 299ms | **25.0x** |
 | large | 1,001 | **42ms** | 372ms | **8.8x** |
 | xlarge | 5,001 | **186ms** | 610ms | **3.3x** |
+
+</details>
 
 <details>
 <summary>Reproduce these benchmarks</summary>
@@ -99,6 +111,8 @@ node bench.mjs                # Run all benchmarks
 npx fallow check
 ```
 
+Run it in any JavaScript or TypeScript project — no configuration needed. See something you want to fix? Run `fallow fix --dry-run` to preview auto-removal.
+
 Or install globally:
 
 ```bash
@@ -115,22 +129,21 @@ cargo install fallow-cli     # cargo
 | **Unused types** | Type aliases and interfaces never referenced |
 | **Unused dependencies** | Packages in `dependencies` never imported |
 | **Unused devDependencies** | Packages in `devDependencies` never imported |
-| **Unused enum members** | Individual enum values never accessed via static member expressions (e.g. `Status.Active`) |
-| **Unused class members** | Methods and properties never referenced via static member expressions (e.g. `MyClass.method`) |
+| **Unused enum members** | Enum values never referenced in your code |
+| **Unused class members** | Class methods and properties never referenced |
 | **Unresolved imports** | Import specifiers that cannot be resolved |
 | **Unlisted dependencies** | Imported packages missing from `package.json` |
 | **Duplicate exports** | Same symbol exported from multiple modules |
 
-## Features knip doesn't have
+## Key differentiators
 
-- **Watch mode** — file watcher with 500ms debounce, re-analyzes on save
-- **Auto-fix** — remove unused exports, clean dependencies from `package.json`
-- **LSP server** — real-time diagnostics for unused exports/types/files and unresolved imports, with quick-fix code actions
-- **Incremental cache** — only reparse changed files across runs
-- **Git-aware** — only report file-scoped issues in files changed since a branch (`--changed-since main`); dependency-level issues are always reported
+Both fallow and knip offer watch mode, auto-fix, caching, and LSP support. fallow's unique features:
+
+- **Git-aware analysis** — only report file-scoped issues in files changed since a branch (`--changed-since main`); dependency-level issues are always reported
 - **Baseline comparison** — save a snapshot, only fail CI on *new* issues (tracks unused files, exports, types, and dependencies)
 - **SARIF output** — native GitHub Code Scanning integration
-- **GitHub Action** — drop-in CI with one line of YAML
+- **GitHub Action** — drop-in CI with [one line of YAML](#github-actions)
+- **Speed** — 25–40x faster on real-world projects, with parallel parsing and incremental caching
 
 ## Usage
 
@@ -224,7 +237,7 @@ exports = ["default", "loader"]
 
 ## Framework support
 
-Fallow auto-detects 17 frameworks and adjusts entry points and used exports accordingly. Frameworks are defined as **declarative TOML presets**, not JavaScript plugins — because ~85% of knip's 140+ plugins are just glob patterns expressed as code.
+fallow auto-detects 23 frameworks and adjusts entry points and used exports for each:
 
 | Framework | Detection |
 |:----------|:----------|
@@ -233,7 +246,7 @@ Fallow auto-detects 17 frameworks and adjusts entry points and used exports acco
 | Vitest | `vitest` in dependencies |
 | Jest | `jest` in dependencies |
 | Storybook | `.storybook/main.{ts,js}` exists |
-| Remix | `@remix-run/node` in dependencies |
+| Remix | any `@remix-run/*` package in dependencies |
 | Astro | `astro` in dependencies |
 | Nuxt | `nuxt` in dependencies |
 | Angular | `@angular/core` in dependencies |
@@ -245,22 +258,37 @@ Fallow auto-detects 17 frameworks and adjusts entry points and used exports acco
 | Tailwind CSS | `tailwindcss` or `@tailwindcss/postcss` in dependencies |
 | GraphQL Codegen | `@graphql-codegen/cli` in dependencies |
 | React Router | `react-router`, `react-router-dom`, or `@react-router/dev` in dependencies |
+| React Native | `react-native` in dependencies |
+| Expo | `expo` in dependencies |
+| Sentry | `@sentry/nextjs`, `@sentry/react`, or `@sentry/node` in dependencies |
+| Drizzle | `drizzle-orm` in dependencies |
+| Knex | `knex` in dependencies |
+| MSW | `msw` in dependencies |
+
+knip has broader framework coverage (140+ plugins). If your framework isn't supported, you can [add a custom preset](#custom-framework-presets) in `fallow.toml`.
+
+## Workspace support
+
+fallow supports npm, yarn, and pnpm workspaces out of the box — including `pnpm-workspace.yaml`. Run `fallow check` at the workspace root and it discovers all packages automatically.
 
 ## CI integration
 
 ### GitHub Actions
 
 ```yaml
-- name: Install fallow
-  run: cargo install fallow-cli
-
 - name: Run fallow
-  run: fallow check --format sarif > results.sarif
+  run: npx fallow check --format sarif > results.sarif
 
 - name: Upload SARIF
   uses: github/codeql-action/upload-sarif@v3
   with:
     sarif_file: results.sarif
+```
+
+Or use the [GitHub Action](action.yml) directly:
+
+```yaml
+- uses: BartWaardenburg/fallow@main
 ```
 
 ### Baseline workflow
@@ -269,7 +297,7 @@ Prevent dead code from growing without blocking PRs on existing debt:
 
 ```yaml
 # On main: save baseline
-- run: fallow check --save-baseline fallow-baseline.json --quiet
+- run: npx fallow check --save-baseline fallow-baseline.json --quiet
 - uses: actions/upload-artifact@v4
   with:
     name: fallow-baseline
@@ -279,7 +307,7 @@ Prevent dead code from growing without blocking PRs on existing debt:
 - uses: actions/download-artifact@v4
   with:
     name: fallow-baseline
-- run: fallow check --baseline fallow-baseline.json --fail-on-issues
+- run: npx fallow check --baseline fallow-baseline.json --fail-on-issues
 ```
 
 ### Output formats
@@ -291,7 +319,29 @@ Prevent dead code from growing without blocking PRs on existing debt:
 | `sarif` | SARIF 2.1.0 — GitHub Code Scanning, VS Code SARIF Viewer |
 | `compact` | One issue per line — `grep`, `awk`, shell scripts |
 
-## How it works
+## Comparison with knip
+
+| | fallow | knip |
+|:--|:-------|:-----|
+| Language | Rust | TypeScript |
+| Parser | Oxc (syntactic only) | TypeScript compiler |
+| Parallelism | rayon (all cores) | Single-threaded |
+| Speed | **25–40x faster** (real-world) | Baseline |
+| Watch mode | Yes | Yes |
+| Auto-fix | Yes | Yes |
+| LSP server | Yes | Yes |
+| Incremental cache | Yes | Yes |
+| Git-aware analysis | Yes | No |
+| Baseline comparison | Yes | No |
+| SARIF output | Yes | No |
+| GitHub Action | Yes | — |
+| Framework plugins | 23 | 140+ |
+| Detection types | 10 | 10 |
+
+fallow intentionally covers the same 10 detection types as knip. The difference is in speed, CI integration, and git-aware workflows — not in what it detects.
+
+<details>
+<summary><strong>How it works</strong></summary>
 
 ```
                       ┌─────────────────────┐
@@ -301,8 +351,8 @@ Prevent dead code from growing without blocking PRs on existing debt:
                                 │
                       ┌─────────▼───────────┐
                       │   File Discovery     │
-                      │   (ignore crate +    │
-                      │    workspace-aware)  │
+                      │   (gitignore-aware   │
+                      │    + workspaces)     │
                       └─────────┬───────────┘
                                 │
                 ┌───────────────┼───────────────┐
@@ -347,37 +397,26 @@ Prevent dead code from growing without blocking PRs on existing debt:
 
 **Key design decisions:**
 
-1. **No TypeScript compiler.** knip's bottleneck is `ts.createProgram()`. Dead code detection is a graph problem on import/export edges — you don't need type information. Oxc gives us a full AST at native speed.
+1. **No TypeScript compiler.** Dead code detection is a graph problem on import/export edges — you don't need type information. Oxc gives us a full AST at native speed.
 
-2. **Declarative framework presets.** knip's 140+ plugins are mostly `{ entry: ["glob"], project: ["glob"] }` wrapped in JavaScript. Fallow expresses the same thing as TOML data. Adding a framework is editing a struct, not writing a plugin.
+2. **Flat edge storage.** Module graph edges live in a single contiguous `Vec<Edge>`. Each node stores a `Range<usize>` into this vec. This is dramatically more cache-friendly than `HashMap<NodeId, Vec<Edge>>` and matters when traversing graphs with tens of thousands of edges.
 
-3. **Flat edge storage.** Module graph edges live in a single contiguous `Vec<Edge>`. Each node stores a `Range<usize>` into this vec. This is dramatically more cache-friendly than `HashMap<NodeId, Vec<Edge>>` and matters when traversing graphs with tens of thousands of edges.
+3. **Per-task Oxc allocators.** Each rayon task creates its own `oxc_allocator::Allocator`. No Arc, no Mutex, no contention during the parsing phase.
 
-4. **Per-task Oxc allocators.** Each rayon task creates its own `oxc_allocator::Allocator`. No Arc, no Mutex, no contention during the parsing phase.
+4. **Iterative re-export resolution.** Barrel files (`index.ts` re-exporting from submodules) create chains that need to be resolved transitively. fallow propagates usage through these chains iteratively with cycle detection, up to 20 rounds.
 
-5. **Iterative re-export resolution.** Barrel files (`index.ts` re-exporting from submodules) create chains that need to be resolved transitively. Fallow propagates usage through these chains iteratively with cycle detection, up to 20 rounds.
+</details>
 
-## Comparison with knip
+## Limitations
 
-| | fallow | knip |
-|:--|:-------|:-----|
-| Language | Rust | TypeScript |
-| Parser | Oxc (syntactic only) | TypeScript compiler |
-| Parallelism | rayon (all cores) | Single-threaded |
-| Speed | **25–50x faster** (real-world) | Baseline |
-| Watch mode | Yes | No |
-| Auto-fix | Yes | No |
-| LSP server | Yes (4 issue types) | No |
-| Incremental cache | Yes | No |
-| Git-aware analysis | Yes | No |
-| Baseline comparison | Yes | No |
-| SARIF output | Yes | No |
-| Framework presets | 17 | 140+ |
-| Detection types | 10 | 10 |
+fallow uses syntactic analysis only — no type information. This is what makes it fast, but it means:
 
-fallow intentionally covers the same 10 detection types as knip. The difference is in speed, developer experience, and CI integration — not in what it detects.
+- **Enum and class member detection is static-only.** fallow detects `Status.Active` style access. Dynamic access like `Status[variable]` is not tracked and may produce false positives.
+- **No `.vue` single-file component parsing.** Nuxt framework support detects entry points and config, but imports inside `<script>` blocks in `.vue` files are not analyzed.
+- **Dynamic imports with variable paths** (e.g., `import(someVar)`) are not resolved.
+- **Type-level dead code** (e.g., unreachable branches via type narrowing) is out of scope — fallow detects unused *exports*, not unreachable *code within functions*.
 
-Knip has broader framework coverage (140+ plugins). Fallow covers the 17 most common frameworks. If your framework isn't supported, you can [add a custom preset](#custom-framework-presets) in `fallow.toml`.
+If fallow reports a false positive, you can suppress it with [`ignore_exports`](#ignoring-specific-exports) in `fallow.toml`.
 
 ## Building from source
 
@@ -393,6 +432,21 @@ cargo clippy --workspace         # Lint
 cargo bench -p fallow-core       # Run benchmarks
 ```
 
+## Contributing
+
+fallow is pre-1.0 and contributions are welcome. See the [issue tracker](https://github.com/BartWaardenburg/fallow/issues) for open bugs and feature requests.
+
+```bash
+cargo build --workspace && cargo test --workspace
+```
+
 ## License
 
 MIT
+
+---
+
+<p align="center">
+  <strong>Try it:</strong> <code>npx fallow check</code><br>
+  <a href="https://github.com/BartWaardenburg/fallow/issues">Report a bug</a> · <a href="https://github.com/BartWaardenburg/fallow/issues/new?template=feature_request.yml">Request a feature</a>
+</p>
