@@ -262,7 +262,12 @@ fn named_re_export_is_parsed() {
 #[test]
 fn circular_import_does_not_crash() {
     // Create temporary fixture with circular imports
-    let temp_dir = std::env::temp_dir().join("fallow-test-circular");
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let temp_dir = std::env::temp_dir().join(format!("fallow-test-circular-{unique}"));
     let _ = std::fs::remove_dir_all(&temp_dir);
     std::fs::create_dir_all(temp_dir.join("src")).unwrap();
 
@@ -450,8 +455,13 @@ fn extract_package_name_scoped() {
 #[test]
 fn cache_roundtrip() {
     use fallow_core::cache::CacheStore;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
-    let temp_dir = std::env::temp_dir().join("fallow-test-cache");
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let temp_dir = std::env::temp_dir().join(format!("fallow-test-cache-{unique}"));
     let _ = std::fs::remove_dir_all(&temp_dir);
 
     let mut store = CacheStore::new();
@@ -800,4 +810,109 @@ fn results_serializable_to_json() {
     assert!(!json.is_empty());
     // Verify it round-trips
     let _: serde_json::Value = serde_json::from_str(&json).unwrap();
+}
+
+// ── Workspace integration ──────────────────────────────────────
+
+#[test]
+fn workspace_project_discovers_workspace_packages() {
+    let root = fixture_path("workspace-project");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config);
+
+    // Workspace discovery should find files across workspace packages
+    // orphan.ts should always be detected as unused since nothing imports it
+    let unused_file_names: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|f| f.path.file_name().unwrap().to_string_lossy().to_string())
+        .collect();
+
+    assert!(
+        unused_file_names.contains(&"orphan.ts".to_string()),
+        "orphan.ts should be detected as unused file, found: {unused_file_names:?}"
+    );
+
+    // The analysis should have found issues across all workspace packages
+    assert!(
+        results.has_issues(),
+        "workspace project should have issues detected"
+    );
+}
+
+// ── Enum/class members integration ─────────────────────────────
+
+#[test]
+fn enum_class_members_detects_unused_members() {
+    let root = fixture_path("enum-class-members");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config);
+
+    let unused_enum_member_names: Vec<&str> = results
+        .unused_enum_members
+        .iter()
+        .map(|m| m.member_name.as_str())
+        .collect();
+
+    // Only Status.Active is used; Inactive and Pending should be unused
+    assert!(
+        unused_enum_member_names.contains(&"Inactive"),
+        "Inactive should be detected as unused enum member, found: {unused_enum_member_names:?}"
+    );
+    assert!(
+        unused_enum_member_names.contains(&"Pending"),
+        "Pending should be detected as unused enum member, found: {unused_enum_member_names:?}"
+    );
+
+    let unused_class_member_names: Vec<&str> = results
+        .unused_class_members
+        .iter()
+        .map(|m| m.member_name.as_str())
+        .collect();
+
+    // unusedMethod is never called
+    assert!(
+        unused_class_member_names.contains(&"unusedMethod"),
+        "unusedMethod should be detected as unused class member, found: {unused_class_member_names:?}"
+    );
+}
+
+// ── Unlisted dependencies integration ──────────────────────────
+
+#[test]
+fn unlisted_dependencies_detected() {
+    let root = fixture_path("unlisted-deps");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config);
+
+    let unlisted_names: Vec<&str> = results
+        .unlisted_dependencies
+        .iter()
+        .map(|d| d.package_name.as_str())
+        .collect();
+
+    assert!(
+        unlisted_names.contains(&"some-pkg"),
+        "some-pkg should be detected as unlisted dependency, found: {unlisted_names:?}"
+    );
+}
+
+// ── Unresolved imports integration ─────────────────────────────
+
+#[test]
+fn unresolved_imports_detected() {
+    let root = fixture_path("unresolved-imports");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config);
+
+    let unresolved_specifiers: Vec<&str> = results
+        .unresolved_imports
+        .iter()
+        .map(|u| u.specifier.as_str())
+        .collect();
+
+    assert!(
+        unresolved_specifiers.contains(&"./nonexistent"),
+        "\"./nonexistent\" should be detected as unresolved import, found: {unresolved_specifiers:?}"
+    );
 }

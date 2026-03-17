@@ -31,6 +31,12 @@ jobs:
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
             binary: fallow
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            binary: fallow
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-latest
+            binary: fallow
           - target: x86_64-pc-windows-msvc
             os: windows-latest
             binary: fallow.exe
@@ -43,10 +49,10 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Install cross-compilation tools
-        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        if: contains(matrix.target, 'aarch64-unknown-linux') || contains(matrix.target, 'musl')
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu
+          sudo apt-get install -y gcc-aarch64-linux-gnu musl-tools
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -120,7 +126,7 @@ jobs:
           VERSION="${TAG_REF#refs/tags/v}"
 
           # Update version in all npm packages
-          for pkg in npm/*/package.json; do
+          for pkg in npm/*/package.json npm/@fallow-cli/*/package.json; do
             jq --arg v "$VERSION" '.version = $v' "$pkg" > tmp.json && mv tmp.json "$pkg"
           done
 

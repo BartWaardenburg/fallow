@@ -5,17 +5,17 @@ const { join } = require('path');
 const { existsSync } = require('fs');
 
 const PLATFORMS = {
-  'darwin-arm64': '@fallow-cli/darwin-arm64',
-  'darwin-x64': '@fallow-cli/darwin-x64',
-  'linux-x64': '@fallow-cli/linux-x64-gnu',
-  'linux-arm64': '@fallow-cli/linux-arm64-gnu',
-  'win32-x64': '@fallow-cli/win32-x64-msvc',
+  'darwin-arm64': ['@fallow-cli/darwin-arm64'],
+  'darwin-x64': ['@fallow-cli/darwin-x64'],
+  'linux-x64': ['@fallow-cli/linux-x64-gnu', '@fallow-cli/linux-x64-musl'],
+  'linux-arm64': ['@fallow-cli/linux-arm64-gnu', '@fallow-cli/linux-arm64-musl'],
+  'win32-x64': ['@fallow-cli/win32-x64-msvc'],
 };
 
 const platformKey = `${process.platform}-${process.arch}`;
-const pkg = PLATFORMS[platformKey];
+const candidates = PLATFORMS[platformKey];
 
-if (!pkg) {
+if (!candidates) {
   console.error(`Unsupported platform: ${platformKey}`);
   console.error(`Supported platforms: ${Object.keys(PLATFORMS).join(', ')}`);
   process.exit(1);
@@ -23,18 +23,23 @@ if (!pkg) {
 
 let binaryPath;
 
-// Try to find the binary in node_modules
-try {
-  const pkgDir = require.resolve(`${pkg}/package.json`);
-  const binaryName = process.platform === 'win32' ? 'fallow.exe' : 'fallow';
-  binaryPath = join(pkgDir, '..', binaryName);
-} catch {
-  console.error(`Could not find ${pkg}. Run 'npm install' to install platform-specific binary.`);
-  process.exit(1);
+// Try each candidate package (gnu first, then musl fallback)
+for (const pkg of candidates) {
+  try {
+    const pkgDir = require.resolve(`${pkg}/package.json`);
+    const binaryName = process.platform === 'win32' ? 'fallow.exe' : 'fallow';
+    const candidate = join(pkgDir, '..', binaryName);
+    if (existsSync(candidate)) {
+      binaryPath = candidate;
+      break;
+    }
+  } catch {
+    // Package not installed, try next candidate
+  }
 }
 
-if (!existsSync(binaryPath)) {
-  console.error(`Binary not found at ${binaryPath}`);
+if (!binaryPath) {
+  console.error(`Could not find fallow binary for ${platformKey}. Run 'npm install' to install platform-specific binary.`);
   process.exit(1);
 }
 

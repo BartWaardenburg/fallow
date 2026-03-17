@@ -1,0 +1,4 @@
+{
+  "name": "unresolved-imports",
+  "main": "src/index.ts"
+}

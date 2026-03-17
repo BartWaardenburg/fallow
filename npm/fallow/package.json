@@ -7,6 +7,10 @@
     "type": "git",
     "url": "https://github.com/bartwaardenburg/fallow"
   },
+  "homepage": "https://github.com/bartwaardenburg/fallow",
+  "bugs": {
+    "url": "https://github.com/bartwaardenburg/fallow/issues"
+  },
   "keywords": [
     "dead-code",
     "unused",
@@ -17,10 +21,12 @@
     "typescript",
     "javascript"
   ],
+  "engines": {
+    "node": ">=16"
+  },
   "bin": {
     "fallow": "bin/fallow"
   },
-  "icon": "https://raw.githubusercontent.com/BartWaardenburg/fallow/main/assets/logo.png",
   "files": [
     "bin",
     "scripts"
@@ -33,6 +39,8 @@
     "@fallow-cli/darwin-x64": "0.1.0",
     "@fallow-cli/linux-x64-gnu": "0.1.0",
     "@fallow-cli/linux-arm64-gnu": "0.1.0",
+    "@fallow-cli/linux-x64-musl": "0.1.0",
+    "@fallow-cli/linux-arm64-musl": "0.1.0",
     "@fallow-cli/win32-x64-msvc": "0.1.0"
   }
 }

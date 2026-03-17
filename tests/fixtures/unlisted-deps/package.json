@@ -1,0 +1,5 @@
+{
+  "name": "unlisted-deps",
+  "main": "src/index.ts",
+  "dependencies": {}
+}
