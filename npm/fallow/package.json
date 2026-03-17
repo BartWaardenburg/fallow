@@ -20,6 +20,7 @@
   "bin": {
     "fallow": "bin/fallow"
   },
+  "icon": "https://raw.githubusercontent.com/BartWaardenburg/fallow/main/assets/logo.png",
   "files": [
     "bin",
     "scripts"
