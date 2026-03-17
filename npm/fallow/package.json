@@ -29,7 +29,8 @@
   },
   "files": [
     "bin",
-    "scripts"
+    "scripts",
+    "README.md"
   ],
   "scripts": {
     "postinstall": "node scripts/postinstall.js"

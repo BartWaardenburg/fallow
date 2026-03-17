@@ -50,7 +50,7 @@ jobs:
             npm_dir: win32-x64-msvc
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -91,13 +91,13 @@ jobs:
           7z a ../../../fallow-${{ matrix.target }}.zip ${{ matrix.binary }}
 
       - name: Upload release artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: fallow-${{ matrix.target }}
           path: fallow-${{ matrix.target }}.*
 
       - name: Upload npm binary
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: npm-${{ matrix.npm_dir }}
           path: target/${{ matrix.target }}/release/${{ matrix.binary }}
@@ -107,10 +107,10 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           path: artifacts
           pattern: fallow-*
@@ -131,9 +131,9 @@ jobs:
     env:
       TAG_REF: ${{ github.ref }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v6
         with:
           node-version: '22'
 
@@ -144,43 +144,43 @@ jobs:
         run: npm config set registry https://registry.npmjs.org/
 
       - name: Download darwin-arm64 binary
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           name: npm-darwin-arm64
           path: npm/darwin-arm64
 
       - name: Download darwin-x64 binary
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           name: npm-darwin-x64
           path: npm/darwin-x64
 
       - name: Download linux-x64-gnu binary
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           name: npm-linux-x64-gnu
           path: npm/linux-x64-gnu
 
       - name: Download linux-arm64-gnu binary
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           name: npm-linux-arm64-gnu
           path: npm/linux-arm64-gnu
 
       - name: Download linux-x64-musl binary
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           name: npm-linux-x64-musl
           path: npm/linux-x64-musl
 
       - name: Download linux-arm64-musl binary
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           name: npm-linux-arm64-musl
           path: npm/linux-arm64-musl
 
       - name: Download win32-x64-msvc binary
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           name: npm-win32-x64-msvc
           path: npm/win32-x64-msvc
