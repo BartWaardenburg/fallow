@@ -53,24 +53,6 @@ impl std::fmt::Display for FallowError {
 
 impl std::error::Error for FallowError {}
 
-/// Collection of non-fatal warnings during analysis.
-#[derive(Debug, Default)]
-pub struct AnalysisWarnings {
-    pub parse_errors: Vec<FallowError>,
-    pub resolve_errors: Vec<FallowError>,
-    pub file_read_errors: Vec<FallowError>,
-}
-
-impl AnalysisWarnings {
-    pub fn total(&self) -> usize {
-        self.parse_errors.len() + self.resolve_errors.len() + self.file_read_errors.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.total() == 0
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -118,31 +100,5 @@ mod tests {
         };
         let msg = format!("{err}");
         assert!(msg.contains("invalid TOML"));
-    }
-
-    #[test]
-    fn analysis_warnings_empty() {
-        let warnings = AnalysisWarnings::default();
-        assert!(warnings.is_empty());
-        assert_eq!(warnings.total(), 0);
-    }
-
-    #[test]
-    fn analysis_warnings_total() {
-        let mut warnings = AnalysisWarnings::default();
-        warnings.parse_errors.push(FallowError::ParseError {
-            path: PathBuf::from("a.ts"),
-            errors: vec![],
-        });
-        warnings.resolve_errors.push(FallowError::ResolveError {
-            from_file: PathBuf::from("b.ts"),
-            specifier: "./c".to_string(),
-        });
-        warnings.file_read_errors.push(FallowError::FileReadError {
-            path: PathBuf::from("d.ts"),
-            source: std::io::Error::new(std::io::ErrorKind::NotFound, "not found"),
-        });
-        assert_eq!(warnings.total(), 3);
-        assert!(!warnings.is_empty());
     }
 }

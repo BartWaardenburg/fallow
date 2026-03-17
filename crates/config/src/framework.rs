@@ -43,9 +43,6 @@ pub enum FrameworkDetection {
 pub struct FrameworkEntryPattern {
     /// Glob pattern for entry point files.
     pub pattern: String,
-    /// Only consider as entry if this export exists.
-    #[serde(default)]
-    pub requires_export: Option<String>,
 }
 
 /// Exports considered used for files matching a pattern.
@@ -545,6 +542,11 @@ fn builtin_frameworks() -> Vec<FrameworkRule> {
             always_used: vec![
                 ".eslintrc.{js,cjs,mjs,json,yaml,yml}".to_string(),
                 "eslint.config.{js,mjs,cjs,ts,mts,cts}".to_string(),
+                // Prettier + lint-staged often colocated with eslint
+                ".prettierrc.{js,cjs,mjs,json,yaml,yml}".to_string(),
+                "prettier.config.{js,mjs,cjs,ts}".to_string(),
+                ".lintstagedrc.{js,cjs,mjs,json}".to_string(),
+                "lint-staged.config.{js,mjs,cjs}".to_string(),
             ],
             used_exports: vec![FrameworkUsedExport {
                 file_pattern: "eslint.config.{js,mjs,cjs,ts,mts,cts}".to_string(),
@@ -604,6 +606,45 @@ fn builtin_frameworks() -> Vec<FrameworkRule> {
             always_used: vec![
                 "codegen.{ts,js,yml,yaml}".to_string(),
                 "graphql.config.{ts,js,yml,yaml}".to_string(),
+            ],
+            used_exports: vec![],
+        },
+        // ── React Native ────────────────────────────────────
+        FrameworkRule {
+            name: "react-native".to_string(),
+            detection: Some(FrameworkDetection::Dependency {
+                package: "react-native".to_string(),
+            }),
+            entry_points: vec![
+                pat("index.{ts,tsx,js,jsx}"),
+                pat("App.{ts,tsx,js,jsx}"),
+                pat("src/App.{ts,tsx,js,jsx}"),
+                pat("app.config.{ts,js}"),
+            ],
+            always_used: vec![
+                "metro.config.{ts,js}".to_string(),
+                "react-native.config.{ts,js}".to_string(),
+                "babel.config.{ts,js}".to_string(),
+                "app.json".to_string(),
+            ],
+            used_exports: vec![],
+        },
+        // ── Expo ────────────────────────────────────────────
+        FrameworkRule {
+            name: "expo".to_string(),
+            detection: Some(FrameworkDetection::Dependency {
+                package: "expo".to_string(),
+            }),
+            entry_points: vec![
+                pat("App.{ts,tsx,js,jsx}"),
+                pat("app/**/*.{ts,tsx,js,jsx}"),
+                pat("src/App.{ts,tsx,js,jsx}"),
+            ],
+            always_used: vec![
+                "app.json".to_string(),
+                "app.config.{ts,js}".to_string(),
+                "metro.config.{ts,js}".to_string(),
+                "babel.config.{ts,js}".to_string(),
             ],
             used_exports: vec![],
         },
@@ -711,7 +752,6 @@ fn builtin_frameworks() -> Vec<FrameworkRule> {
 fn pat(pattern: &str) -> FrameworkEntryPattern {
     FrameworkEntryPattern {
         pattern: pattern.to_string(),
-        requires_export: None,
     }
 }
 
@@ -757,6 +797,8 @@ mod tests {
         assert!(names.contains(&"webpack"));
         assert!(names.contains(&"tailwind"));
         assert!(names.contains(&"graphql-codegen"));
+        assert!(names.contains(&"react-native"));
+        assert!(names.contains(&"expo"));
         assert!(names.contains(&"sentry"));
         assert!(names.contains(&"drizzle"));
         assert!(names.contains(&"knex"));
@@ -803,7 +845,6 @@ mod tests {
             detection: None,
             entry_points: vec![FrameworkEntryPattern {
                 pattern: "src/custom/**/*.ts".to_string(),
-                requires_export: None,
             }],
             always_used: vec![],
             used_exports: vec![],
@@ -822,7 +863,6 @@ mod tests {
             }),
             entry_points: vec![FrameworkEntryPattern {
                 pattern: "src/**/*.test.ts".to_string(),
-                requires_export: None,
             }],
             always_used: vec!["setup.ts".to_string()],
             used_exports: vec![FrameworkUsedExport {

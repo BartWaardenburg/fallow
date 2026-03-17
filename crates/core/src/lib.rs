@@ -23,28 +23,10 @@ pub fn analyze(config: &ResolvedConfig) -> Result<AnalysisResults, FallowError> 
         tracing::info!(count = workspaces.len(), "workspaces discovered");
     }
 
-    // Stage 1: Discover all source files (across all workspaces)
-    let mut files = discover::discover_files(config);
-    // Also discover files in workspaces
-    for ws in &workspaces {
-        let ws_files = discover::discover_workspace_files(&ws.root, config, files.len());
-        files.extend(ws_files);
-    }
-
-    // Deduplicate files by canonical path (workspace walkers may produce paths with
-    // `.` or `..` components, e.g. from pnpm-workspace.yaml listing `.` as a workspace,
-    // which would cause `/project/./src/foo.ts` != `/project/src/foo.ts` in raw comparison).
-    {
-        let mut seen_paths = std::collections::HashSet::new();
-        files.retain(|f| {
-            let canonical = f.path.canonicalize().unwrap_or_else(|_| f.path.clone());
-            seen_paths.insert(canonical)
-        });
-        // Re-assign IDs after deduplication to keep them contiguous
-        for (idx, file) in files.iter_mut().enumerate() {
-            file.id = discover::FileId(idx as u32);
-        }
-    }
+    // Stage 1: Discover all source files
+    // The root walk already discovers files in nested workspace directories,
+    // so no separate workspace walk is needed.
+    let files = discover::discover_files(config);
 
     // Stage 2: Parse all files in parallel and extract imports/exports
     // Load cache if available
