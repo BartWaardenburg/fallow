@@ -10,6 +10,9 @@ use crate::extract::{ExportName, MemberAccess, MemberKind};
 /// Cache version — bump when the cache format changes.
 const CACHE_VERSION: u32 = 2;
 
+/// Maximum cache file size to deserialize (256 MB).
+const MAX_CACHE_SIZE: usize = 256 * 1024 * 1024;
+
 /// Cached module information stored on disk.
 #[derive(Debug, Encode, Decode)]
 pub struct CacheStore {
@@ -90,6 +93,13 @@ impl CacheStore {
     pub fn load(cache_dir: &Path) -> Option<Self> {
         let cache_file = cache_dir.join("cache.bin");
         let data = std::fs::read(&cache_file).ok()?;
+        if data.len() > MAX_CACHE_SIZE {
+            tracing::warn!(
+                size_mb = data.len() / (1024 * 1024),
+                "Cache file exceeds size limit, ignoring"
+            );
+            return None;
+        }
         let (store, _): (Self, usize) =
             bincode::decode_from_slice(&data, bincode::config::standard()).ok()?;
         if store.version != CACHE_VERSION {

@@ -98,9 +98,8 @@ impl LanguageServer for FallowLspServer {
                 continue;
             }
 
-            // export.line is a byte offset (from oxc Span), convert to 0-based line index
-            let byte_offset = export.line as usize;
-            let export_line = byte_offset_to_line(&file_content, byte_offset);
+            // export.line is a 1-based line number; convert to 0-based for LSP
+            let export_line = export.line.saturating_sub(1);
 
             // Check if this diagnostic is in the requested range
             if export_line < params.range.start.line || export_line > params.range.end.line {
@@ -192,17 +191,22 @@ impl FallowLspServer {
             .log_message(MessageType::INFO, "Running fallow analysis...")
             .await;
 
-        let results =
+        let join_result =
             tokio::task::spawn_blocking(move || fallow_core::analyze_project(&root)).await;
 
-        match results {
-            Ok(results) => {
+        match join_result {
+            Ok(Ok(results)) => {
                 let root_path = self.root.read().await.clone().unwrap();
                 self.publish_diagnostics(&results, &root_path).await;
                 *self.results.write().await = Some(results);
 
                 self.client
                     .log_message(MessageType::INFO, "Analysis complete")
+                    .await;
+            }
+            Ok(Err(e)) => {
+                self.client
+                    .log_message(MessageType::ERROR, format!("Analysis error: {e}"))
                     .await;
             }
             Err(e) => {
@@ -218,16 +222,10 @@ impl FallowLspServer {
         let mut diagnostics_by_file: std::collections::HashMap<Url, Vec<Diagnostic>> =
             std::collections::HashMap::new();
 
-        // Cache file contents to avoid re-reading the same file multiple times
-        let mut file_cache: std::collections::HashMap<PathBuf, String> =
-            std::collections::HashMap::new();
-
         for export in &results.unused_exports {
             if let Ok(uri) = Url::from_file_path(&export.path) {
-                let content = file_cache
-                    .entry(export.path.clone())
-                    .or_insert_with(|| std::fs::read_to_string(&export.path).unwrap_or_default());
-                let line = byte_offset_to_line(content, export.line as usize);
+                // export.line is 1-based; LSP uses 0-based
+                let line = export.line.saturating_sub(1);
                 let diag = Diagnostic {
                     range: Range {
                         start: Position {
@@ -252,14 +250,18 @@ impl FallowLspServer {
 
         for export in &results.unused_types {
             if let Ok(uri) = Url::from_file_path(&export.path) {
-                let content = file_cache
-                    .entry(export.path.clone())
-                    .or_insert_with(|| std::fs::read_to_string(&export.path).unwrap_or_default());
-                let line = byte_offset_to_line(content, export.line as usize);
+                // export.line is 1-based; LSP uses 0-based
+                let line = export.line.saturating_sub(1);
                 let diag = Diagnostic {
                     range: Range {
-                        start: Position { line, character: 0 },
-                        end: Position { line, character: 0 },
+                        start: Position {
+                            line,
+                            character: export.col,
+                        },
+                        end: Position {
+                            line,
+                            character: export.col,
+                        },
                     },
                     severity: Some(DiagnosticSeverity::HINT),
                     source: Some("fallow".to_string()),
@@ -298,14 +300,18 @@ impl FallowLspServer {
 
         for import in &results.unresolved_imports {
             if let Ok(uri) = Url::from_file_path(&import.path) {
-                let content = file_cache
-                    .entry(import.path.clone())
-                    .or_insert_with(|| std::fs::read_to_string(&import.path).unwrap_or_default());
-                let line = byte_offset_to_line(content, import.line as usize);
+                // import.line is 1-based; LSP uses 0-based
+                let line = import.line.saturating_sub(1);
                 let diag = Diagnostic {
                     range: Range {
-                        start: Position { line, character: 0 },
-                        end: Position { line, character: 0 },
+                        start: Position {
+                            line,
+                            character: import.col,
+                        },
+                        end: Position {
+                            line,
+                            character: import.col,
+                        },
                     },
                     severity: Some(DiagnosticSeverity::ERROR),
                     source: Some("fallow".to_string()),
@@ -324,23 +330,6 @@ impl FallowLspServer {
                 .await;
         }
     }
-}
-
-/// Convert a byte offset in file content to a 0-based line number.
-fn byte_offset_to_line(content: &str, byte_offset: usize) -> u32 {
-    let mut line = 0u32;
-    let mut current_offset = 0;
-    for line_content in content.lines() {
-        let line_end = current_offset + line_content.len();
-        if byte_offset <= line_end {
-            return line;
-        }
-        // +1 for the newline character
-        current_offset = line_end + 1;
-        line += 1;
-    }
-    // If offset is past the end, return the last line
-    line.saturating_sub(1)
 }
 
 #[tokio::main]

@@ -77,8 +77,12 @@ pub fn discover_files(config: &ResolvedConfig) -> Vec<DiscoveredFile> {
         })
         .collect();
 
-    // Sort largest files first for better rayon work-stealing
-    files.sort_unstable_by(|a, b| b.size_bytes.cmp(&a.size_bytes));
+    // Sort largest files first for better rayon work-stealing, with path as tiebreaker for determinism
+    files.sort_unstable_by(|a, b| {
+        b.size_bytes
+            .cmp(&a.size_bytes)
+            .then_with(|| a.path.cmp(&b.path))
+    });
 
     // Re-assign IDs after sorting
     for (idx, file) in files.iter_mut().enumerate() {
@@ -284,7 +288,11 @@ pub fn discover_workspace_files(
         })
         .collect();
 
-    files.sort_unstable_by(|a, b| b.size_bytes.cmp(&a.size_bytes));
+    files.sort_unstable_by(|a, b| {
+        b.size_bytes
+            .cmp(&a.size_bytes)
+            .then_with(|| a.path.cmp(&b.path))
+    });
     for (i, file) in files.iter_mut().enumerate() {
         file.id = FileId((start_id + i) as u32);
     }
@@ -329,16 +337,30 @@ pub fn discover_workspace_entry_points(
                 continue;
             }
 
-            for entry_pat in &rule.entry_points {
-                for file in all_files {
-                    if glob_matches(&entry_pat.pattern, &file.path, ws_root) {
-                        entries.push(EntryPoint {
-                            path: file.path.clone(),
-                            source: EntryPointSource::FrameworkRule {
-                                name: rule.name.clone(),
-                            },
-                        });
-                    }
+            // Pre-compile entry point matchers to avoid recompiling per file
+            let entry_matchers: Vec<(globset::GlobMatcher, &str)> = rule
+                .entry_points
+                .iter()
+                .filter_map(|ep| {
+                    globset::Glob::new(&ep.pattern)
+                        .ok()
+                        .map(|g| (g.compile_matcher(), rule.name.as_str()))
+                })
+                .collect();
+
+            for file in all_files {
+                let relative = file.path.strip_prefix(ws_root).unwrap_or(&file.path);
+                let relative_str = relative.to_string_lossy();
+                if entry_matchers
+                    .iter()
+                    .any(|(m, _)| m.is_match(relative_str.as_ref()))
+                {
+                    entries.push(EntryPoint {
+                        path: file.path.clone(),
+                        source: EntryPointSource::FrameworkRule {
+                            name: rule.name.clone(),
+                        },
+                    });
                 }
             }
         }
@@ -396,8 +418,29 @@ fn file_exists_glob(pattern: &str, root: &Path) -> bool {
     walk_dir_recursive(&search_dir, root, &matcher)
 }
 
+/// Maximum recursion depth for directory walking to prevent infinite loops on symlink cycles.
+const MAX_WALK_DEPTH: usize = 20;
+
 /// Recursively walk a directory and check if any file matches the glob.
 fn walk_dir_recursive(dir: &Path, root: &Path, matcher: &globset::GlobMatcher) -> bool {
+    walk_dir_recursive_depth(dir, root, matcher, 0)
+}
+
+/// Inner recursive walker with depth tracking.
+fn walk_dir_recursive_depth(
+    dir: &Path,
+    root: &Path,
+    matcher: &globset::GlobMatcher,
+    depth: usize,
+) -> bool {
+    if depth >= MAX_WALK_DEPTH {
+        tracing::warn!(
+            dir = %dir.display(),
+            "Maximum directory walk depth reached, possible symlink cycle"
+        );
+        return false;
+    }
+
     let entries = match std::fs::read_dir(dir) {
         Ok(rd) => rd,
         Err(_) => return false,
@@ -406,7 +449,7 @@ fn walk_dir_recursive(dir: &Path, root: &Path, matcher: &globset::GlobMatcher) -
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
-            if walk_dir_recursive(&path, root, matcher) {
+            if walk_dir_recursive_depth(&path, root, matcher, depth + 1) {
                 return true;
             }
         } else {
@@ -418,17 +461,6 @@ fn walk_dir_recursive(dir: &Path, root: &Path, matcher: &globset::GlobMatcher) -
     }
 
     false
-}
-
-/// Simple glob matching against a file path relative to root.
-fn glob_matches(pattern: &str, path: &Path, root: &Path) -> bool {
-    let relative = path.strip_prefix(root).unwrap_or(path);
-    let relative_str = relative.to_string_lossy();
-
-    globset::Glob::new(pattern)
-        .ok()
-        .map(|g| g.compile_matcher().is_match(relative_str.as_ref()))
-        .unwrap_or(false)
 }
 
 /// Pre-compile a set of glob patterns for efficient matching against many paths.

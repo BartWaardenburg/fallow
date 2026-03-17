@@ -406,7 +406,13 @@ fn run_check(
     let changed_files: Option<std::collections::HashSet<std::path::PathBuf>> =
         changed_since.and_then(|git_ref| get_changed_files(root, git_ref));
 
-    let mut results = fallow_core::analyze(&config);
+    let mut results = match fallow_core::analyze(&config) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("Analysis error: {e}");
+            return ExitCode::from(2);
+        }
+    };
     let elapsed = start.elapsed();
 
     // Filter to only changed files if requested
@@ -573,7 +579,13 @@ fn run_watch(
 
     // Run initial analysis
     let start = Instant::now();
-    let results = fallow_core::analyze(&config);
+    let results = match fallow_core::analyze(&config) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("Analysis error: {e}");
+            return ExitCode::from(2);
+        }
+    };
     let elapsed = start.elapsed();
     report::print_results(&results, &config, elapsed, quiet);
 
@@ -617,9 +629,15 @@ fn run_watch(
                     eprintln!("\nFile changed, re-analyzing...");
                     let config = load_config(root, config_path, output.clone(), no_cache, threads);
                     let start = Instant::now();
-                    let results = fallow_core::analyze(&config);
-                    let elapsed = start.elapsed();
-                    report::print_results(&results, &config, elapsed, quiet);
+                    match fallow_core::analyze(&config) {
+                        Ok(results) => {
+                            let elapsed = start.elapsed();
+                            report::print_results(&results, &config, elapsed, quiet);
+                        }
+                        Err(e) => {
+                            eprintln!("Analysis error: {e}");
+                        }
+                    }
                 }
             }
             Ok(Err(e)) => {
@@ -646,7 +664,13 @@ fn run_fix(
 ) -> ExitCode {
     let config = load_config(root, config_path, OutputFormat::Human, no_cache, threads);
 
-    let results = fallow_core::analyze(&config);
+    let results = match fallow_core::analyze(&config) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("Analysis error: {e}");
+            return ExitCode::from(2);
+        }
+    };
 
     if results.total_issues() == 0 {
         if matches!(output, OutputFormat::Json) {
@@ -673,7 +697,7 @@ fn run_fix(
         if let Ok(content) = std::fs::read_to_string(path) {
             let lines: Vec<&str> = content.lines().collect();
             // Find the line containing this export by span offset
-            let byte_offset = export.line as usize;
+            let byte_offset = export.span_start as usize;
             let mut current_offset = 0;
             let mut target_line = None;
             for (i, line) in lines.iter().enumerate() {

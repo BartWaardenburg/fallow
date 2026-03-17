@@ -157,7 +157,7 @@ export type Type{i} = {{ value: number }};
 
     c.bench_function("full_pipeline_10_files", |b| {
         b.iter(|| {
-            fallow_core::analyze(&config);
+            let _ = fallow_core::analyze(&config);
         });
     });
 

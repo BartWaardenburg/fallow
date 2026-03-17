@@ -10,11 +10,12 @@ pub mod results;
 
 use std::path::Path;
 
+use errors::FallowError;
 use fallow_config::{ResolvedConfig, discover_workspaces};
 use results::AnalysisResults;
 
 /// Run the full analysis pipeline.
-pub fn analyze(config: &ResolvedConfig) -> AnalysisResults {
+pub fn analyze(config: &ResolvedConfig) -> Result<AnalysisResults, FallowError> {
     let _span = tracing::info_span!("fallow_analyze").entered();
     // Discover workspaces if in a monorepo
     let workspaces = discover_workspaces(&config.root);
@@ -68,11 +69,13 @@ pub fn analyze(config: &ResolvedConfig) -> AnalysisResults {
     let graph = graph::ModuleGraph::build(&resolved, &entry_points, &files);
 
     // Stage 6: Analyze for dead code
-    analyze::find_dead_code_with_resolved(&graph, config, &resolved)
+    Ok(analyze::find_dead_code_with_resolved(
+        &graph, config, &resolved,
+    ))
 }
 
 /// Run analysis on a project directory.
-pub fn analyze_project(root: &Path) -> AnalysisResults {
+pub fn analyze_project(root: &Path) -> Result<AnalysisResults, FallowError> {
     let config = default_config(root);
     analyze(&config)
 }
