@@ -1,6 +1,6 @@
 {
   "name": "fallow",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Find unused files, exports, and dependencies in JavaScript/TypeScript projects",
   "license": "MIT",
   "repository": {
@@ -38,12 +38,12 @@
     "detect-libc": "^2.0.0"
   },
   "optionalDependencies": {
-    "@fallow-cli/darwin-arm64": "0.1.1",
-    "@fallow-cli/darwin-x64": "0.1.1",
-    "@fallow-cli/linux-x64-gnu": "0.1.1",
-    "@fallow-cli/linux-arm64-gnu": "0.1.1",
-    "@fallow-cli/linux-x64-musl": "0.1.1",
-    "@fallow-cli/linux-arm64-musl": "0.1.1",
-    "@fallow-cli/win32-x64-msvc": "0.1.1"
+    "@fallow-cli/darwin-arm64": "0.1.2",
+    "@fallow-cli/darwin-x64": "0.1.2",
+    "@fallow-cli/linux-x64-gnu": "0.1.2",
+    "@fallow-cli/linux-arm64-gnu": "0.1.2",
+    "@fallow-cli/linux-x64-musl": "0.1.2",
+    "@fallow-cli/linux-arm64-musl": "0.1.2",
+    "@fallow-cli/win32-x64-msvc": "0.1.2"
   }
 }
