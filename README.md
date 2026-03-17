@@ -22,7 +22,7 @@ npx fallow check    # zero config, sub-second results
 ```
 
 <p align="center">
-  <img src="assets/screenshots/fallow-check-output.png" alt="Example fallow check output" width="560">
+  <img src="assets/screenshots/fallow-check-output.png" alt="Example fallow check output" width="820">
 </p>
 
 Regenerate this screenshot with `scripts/generate-readme-screenshot.sh` (uses `freeze`).
