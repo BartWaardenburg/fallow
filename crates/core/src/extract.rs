@@ -57,7 +57,7 @@ pub enum MemberKind {
 }
 
 /// A static member access expression (e.g., `Status.Active`, `MyClass.create()`).
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, bincode::Encode, bincode::Decode)]
 pub struct MemberAccess {
     /// The identifier being accessed (the import name).
     pub object: String,

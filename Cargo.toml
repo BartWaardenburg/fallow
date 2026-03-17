@@ -40,7 +40,7 @@ globset = { version = "0.4", features = ["serde1"] }
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
 
 # Caching
-bincode = "3"
+bincode = "2"
 
 # Diagnostics & output
 codespan-reporting = "0.11"

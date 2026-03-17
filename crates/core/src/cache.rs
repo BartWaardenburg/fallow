@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use serde::{Deserialize, Serialize};
+use bincode::{Decode, Encode};
 
 use oxc_span::Span;
 
@@ -11,7 +11,7 @@ use crate::extract::{ExportName, MemberAccess, MemberKind};
 const CACHE_VERSION: u32 = 2;
 
 /// Cached module information stored on disk.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Encode, Decode)]
 pub struct CacheStore {
     version: u32,
     /// Map from file path to cached module data.
@@ -19,7 +19,7 @@ pub struct CacheStore {
 }
 
 /// Cached data for a single module.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Encode, Decode)]
 pub struct CachedModule {
     /// xxh3 hash of the file content.
     pub content_hash: u64,
@@ -39,7 +39,7 @@ pub struct CachedModule {
     pub has_cjs_exports: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Encode, Decode)]
 pub struct CachedExport {
     pub name: String,
     pub is_default: bool,
@@ -50,7 +50,7 @@ pub struct CachedExport {
     pub members: Vec<CachedMember>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Encode, Decode)]
 pub struct CachedImport {
     pub source: String,
     pub imported_name: String,
@@ -61,7 +61,7 @@ pub struct CachedImport {
     pub is_side_effect: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Encode, Decode)]
 pub struct CachedReExport {
     pub source: String,
     pub imported_name: String,
@@ -69,7 +69,7 @@ pub struct CachedReExport {
     pub is_type_only: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Encode, Decode)]
 pub struct CachedMember {
     pub name: String,
     pub kind: String,
@@ -90,7 +90,8 @@ impl CacheStore {
     pub fn load(cache_dir: &Path) -> Option<Self> {
         let cache_file = cache_dir.join("cache.bin");
         let data = std::fs::read(&cache_file).ok()?;
-        let store: Self = bincode::deserialize(&data).ok()?;
+        let (store, _): (Self, usize) =
+            bincode::decode_from_slice(&data, bincode::config::standard()).ok()?;
         if store.version != CACHE_VERSION {
             return None;
         }
@@ -102,8 +103,8 @@ impl CacheStore {
         std::fs::create_dir_all(cache_dir)
             .map_err(|e| format!("Failed to create cache dir: {e}"))?;
         let cache_file = cache_dir.join("cache.bin");
-        let data =
-            bincode::serialize(self).map_err(|e| format!("Failed to serialize cache: {e}"))?;
+        let data = bincode::encode_to_vec(self, bincode::config::standard())
+            .map_err(|e| format!("Failed to serialize cache: {e}"))?;
         std::fs::write(&cache_file, data).map_err(|e| format!("Failed to write cache: {e}"))?;
         Ok(())
     }
