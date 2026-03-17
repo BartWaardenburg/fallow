@@ -16,8 +16,6 @@
 
 Fallow detects unused files, exports, dependencies, types, enum members, and class members across your codebase. It is a drop-in alternative to [knip](https://knip.dev) that runs **25–50x faster** on real-world projects by using the [Oxc](https://oxc.rs) parser instead of the TypeScript compiler.
 
-<!-- TODO: Replace with an actual terminal recording (e.g. VHS/asciinema SVG) -->
-
 ```
 $ fallow check
 
@@ -250,14 +248,19 @@ Fallow auto-detects 17 frameworks and adjusts entry points and used exports acco
 
 ## CI integration
 
-### GitHub Action
+### GitHub Actions
 
 ```yaml
-- uses: bartwaardenburg/fallow@v1
+- name: Install fallow
+  run: cargo install fallow-cli
+
+- name: Run fallow
+  run: fallow check --format sarif > results.sarif
+
+- name: Upload SARIF
+  uses: github/codeql-action/upload-sarif@v3
   with:
-    format: sarif           # Uploads to GitHub Code Scanning automatically
-    fail-on-issues: true
-    changed-since: ${{ github.event.pull_request.base.sha }}
+    sarif_file: results.sarif
 ```
 
 ### Baseline workflow

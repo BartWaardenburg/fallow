@@ -1,0 +1,9 @@
+{
+  "name": "@fallow-cli/linux-arm64-gnu",
+  "version": "0.1.0",
+  "os": ["linux"],
+  "cpu": ["arm64"],
+  "bin": {
+    "fallow": "fallow"
+  }
+}
