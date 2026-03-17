@@ -1,4 +1,5 @@
 pub mod analyze;
+pub mod cache;
 pub mod discover;
 pub mod extract;
 pub mod graph;
@@ -31,9 +32,29 @@ pub fn analyze(config: &ResolvedConfig) -> AnalysisResults {
     tracing::info!(count = files.len(), "files discovered");
 
     // Stage 2: Parse all files in parallel and extract imports/exports
+    // Load cache if available
+    let mut cache_store = if config.no_cache {
+        None
+    } else {
+        cache::CacheStore::load(&config.cache_dir)
+    };
+
     tracing::info!("parsing files...");
     let modules = extract::parse_all_files(&files, config);
     tracing::info!(count = modules.len(), "modules parsed");
+
+    // Update cache with parsed results
+    if !config.no_cache {
+        let store = cache_store.get_or_insert_with(cache::CacheStore::new);
+        for module in &modules {
+            if let Some(file) = files.get(module.file_id.0 as usize) {
+                store.insert(&file.path, cache::module_to_cached(module));
+            }
+        }
+        if let Err(e) = store.save(&config.cache_dir) {
+            tracing::warn!("Failed to save cache: {e}");
+        }
+    }
 
     // Stage 3: Discover entry points
     tracing::info!("discovering entry points...");

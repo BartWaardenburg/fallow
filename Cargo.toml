@@ -58,6 +58,10 @@ fixedbitset = "0.5"
 tower-lsp = "0.20"
 tokio = { version = "1", features = ["full"] }
 
+# File watching
+notify = "8"
+notify-debouncer-mini = "0.6"
+
 # Testing
 criterion = { version = "0.5", features = ["html_reports"] }
 
