@@ -486,7 +486,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-cli"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "clap",
  "colored",
@@ -504,7 +504,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-config"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "glob",
  "globset",
@@ -516,7 +516,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-core"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "bincode",
  "criterion",
@@ -540,7 +540,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-lsp"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "fallow-core",
  "serde_json",
