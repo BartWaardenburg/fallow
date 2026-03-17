@@ -135,6 +135,14 @@ fn builtin_frameworks() -> Vec<FrameworkRule> {
                 pat("pages/**/*.{ts,tsx,js,jsx}"),
                 pat("src/app/**/page.{ts,tsx,js,jsx}"),
                 pat("src/app/**/layout.{ts,tsx,js,jsx}"),
+                pat("src/app/**/loading.{ts,tsx,js,jsx}"),
+                pat("src/app/**/error.{ts,tsx,js,jsx}"),
+                pat("src/app/**/not-found.{ts,tsx,js,jsx}"),
+                pat("src/app/**/template.{ts,tsx,js,jsx}"),
+                pat("src/app/**/default.{ts,tsx,js,jsx}"),
+                pat("src/app/**/route.{ts,tsx,js,jsx}"),
+                pat("src/app/**/global-error.{ts,tsx,js,jsx}"),
+                pat("src/app/**/opengraph-image.{ts,tsx,js,jsx}"),
                 pat("src/pages/**/*.{ts,tsx,js,jsx}"),
                 pat("src/middleware.{ts,js}"),
                 pat("middleware.{ts,js}"),
@@ -240,8 +248,18 @@ fn builtin_frameworks() -> Vec<FrameworkRule> {
         // ── Remix ────────────────────────────────────────────
         FrameworkRule {
             name: "remix".to_string(),
-            detection: Some(FrameworkDetection::Dependency {
-                package: "@remix-run/node".to_string(),
+            detection: Some(FrameworkDetection::Any {
+                conditions: vec![
+                    FrameworkDetection::Dependency {
+                        package: "@remix-run/node".to_string(),
+                    },
+                    FrameworkDetection::Dependency {
+                        package: "@remix-run/react".to_string(),
+                    },
+                    FrameworkDetection::Dependency {
+                        package: "@remix-run/cloudflare".to_string(),
+                    },
+                ],
             }),
             entry_points: vec![
                 pat("app/routes/**/*.{ts,tsx,js,jsx}"),

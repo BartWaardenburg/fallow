@@ -1155,7 +1155,6 @@ fn load_config(
             config.resolve(root.to_path_buf(), threads, no_cache)
         }
         None => FallowConfig {
-            root: None,
             entry: vec![],
             ignore: vec![],
             detect: fallow_config::DetectConfig::default(),

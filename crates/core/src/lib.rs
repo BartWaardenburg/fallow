@@ -83,7 +83,6 @@ fn default_config(root: &Path) -> ResolvedConfig {
     match user_config {
         Some((config, _path)) => config.resolve(root.to_path_buf(), num_cpus(), false),
         None => fallow_config::FallowConfig {
-            root: None,
             entry: vec![],
             ignore: vec![],
             detect: fallow_config::DetectConfig::default(),
