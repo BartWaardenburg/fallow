@@ -51,10 +51,16 @@ fn print_human(results: &AnalysisResults, root: &std::path::Path, elapsed: Durat
             root,
             |e| e.path.as_path(),
             |e| {
+                let tag = if e.is_re_export {
+                    " (re-export)".dimmed().to_string()
+                } else {
+                    String::new()
+                };
                 format!(
-                    "{} {}",
+                    "{} {}{}",
                     format!(":{}", e.line).dimmed(),
-                    e.export_name.bold()
+                    e.export_name.bold(),
+                    tag
                 )
             },
         );
@@ -73,10 +79,16 @@ fn print_human(results: &AnalysisResults, root: &std::path::Path, elapsed: Durat
             root,
             |e| e.path.as_path(),
             |e| {
+                let tag = if e.is_re_export {
+                    " (re-export)".dimmed().to_string()
+                } else {
+                    String::new()
+                };
                 format!(
-                    "{} {}",
+                    "{} {}{}",
                     format!(":{}", e.line).dimmed(),
-                    e.export_name.bold()
+                    e.export_name.bold(),
+                    tag
                 )
             },
         );
@@ -91,7 +103,13 @@ fn print_human(results: &AnalysisResults, root: &std::path::Path, elapsed: Durat
             Level::Warn,
         );
         for dep in &results.unused_dependencies {
-            println!("  {}", dep.package_name.bold());
+            let rel_path = dep.path.strip_prefix(root).unwrap_or(&dep.path);
+            let pkg_label = rel_path.display().to_string();
+            if pkg_label == "package.json" {
+                println!("  {}", dep.package_name.bold());
+            } else {
+                println!("  {} ({})", dep.package_name.bold(), pkg_label.dimmed());
+            }
         }
         println!();
     }
@@ -104,7 +122,13 @@ fn print_human(results: &AnalysisResults, root: &std::path::Path, elapsed: Durat
             Level::Warn,
         );
         for dep in &results.unused_dev_dependencies {
-            println!("  {}", dep.package_name.bold());
+            let rel_path = dep.path.strip_prefix(root).unwrap_or(&dep.path);
+            let pkg_label = rel_path.display().to_string();
+            if pkg_label == "package.json" {
+                println!("  {}", dep.package_name.bold());
+            } else {
+                println!("  {} ({})", dep.package_name.bold(), pkg_label.dimmed());
+            }
         }
         println!();
     }
@@ -324,8 +348,14 @@ fn build_compact_lines(results: &AnalysisResults, root: &std::path::Path) -> Vec
     }
     for export in &results.unused_exports {
         let relative = export.path.strip_prefix(root).unwrap_or(&export.path);
+        let kind = if export.is_re_export {
+            "unused-re-export"
+        } else {
+            "unused-export"
+        };
         lines.push(format!(
-            "unused-export:{}:{}:{}",
+            "{}:{}:{}:{}",
+            kind,
             relative.display(),
             export.line,
             export.export_name
@@ -333,8 +363,14 @@ fn build_compact_lines(results: &AnalysisResults, root: &std::path::Path) -> Vec
     }
     for export in &results.unused_types {
         let relative = export.path.strip_prefix(root).unwrap_or(&export.path);
+        let kind = if export.is_re_export {
+            "unused-re-export-type"
+        } else {
+            "unused-type"
+        };
         lines.push(format!(
-            "unused-type:{}:{}:{}",
+            "{}:{}:{}:{}",
+            kind,
             relative.display(),
             export.line,
             export.export_name
@@ -465,16 +501,34 @@ pub(crate) fn build_sarif(results: &AnalysisResults, root: &std::path::Path) -> 
                 .display()
                 .to_string(),
         );
-        sarif_results.push(sarif_result(
-            "fallow/unused-export",
+        let (rule_id, message) = if export.is_re_export {
+            (
+                "fallow/unused-export",
+                format!(
+                    "Re-export '{}' is never imported by other modules",
+                    export.export_name
+                ),
+            )
+        } else {
+            (
+                "fallow/unused-export",
+                format!(
+                    "Export '{}' is never imported by other modules",
+                    export.export_name
+                ),
+            )
+        };
+        let mut result = sarif_result(
+            rule_id,
             "warning",
-            &format!(
-                "Export '{}' is never imported by other modules",
-                export.export_name
-            ),
+            &message,
             &uri,
             Some((export.line, export.col + 1)),
-        ));
+        );
+        if export.is_re_export {
+            result["properties"] = serde_json::json!({ "is_re_export": true });
+        }
+        sarif_results.push(result);
     }
     for export in &results.unused_types {
         let uri = normalize_uri(
@@ -485,18 +539,43 @@ pub(crate) fn build_sarif(results: &AnalysisResults, root: &std::path::Path) -> 
                 .display()
                 .to_string(),
         );
-        sarif_results.push(sarif_result(
-            "fallow/unused-type",
+        let (rule_id, message) = if export.is_re_export {
+            (
+                "fallow/unused-type",
+                format!(
+                    "Type re-export '{}' is never imported by other modules",
+                    export.export_name
+                ),
+            )
+        } else {
+            (
+                "fallow/unused-type",
+                format!(
+                    "Type export '{}' is never imported by other modules",
+                    export.export_name
+                ),
+            )
+        };
+        let mut result = sarif_result(
+            rule_id,
             "warning",
-            &format!(
-                "Type export '{}' is never imported by other modules",
-                export.export_name
-            ),
+            &message,
             &uri,
             Some((export.line, export.col + 1)),
-        ));
+        );
+        if export.is_re_export {
+            result["properties"] = serde_json::json!({ "is_re_export": true });
+        }
+        sarif_results.push(result);
     }
     for dep in &results.unused_dependencies {
+        let dep_uri = normalize_uri(
+            &dep.path
+                .strip_prefix(root)
+                .unwrap_or(&dep.path)
+                .display()
+                .to_string(),
+        );
         sarif_results.push(sarif_result(
             "fallow/unused-dependency",
             "warning",
@@ -504,11 +583,18 @@ pub(crate) fn build_sarif(results: &AnalysisResults, root: &std::path::Path) -> 
                 "Package '{}' is in dependencies but never imported",
                 dep.package_name
             ),
-            "package.json",
+            &dep_uri,
             None,
         ));
     }
     for dep in &results.unused_dev_dependencies {
+        let dep_uri = normalize_uri(
+            &dep.path
+                .strip_prefix(root)
+                .unwrap_or(&dep.path)
+                .display()
+                .to_string(),
+        );
         sarif_results.push(sarif_result(
             "fallow/unused-dev-dependency",
             "warning",
@@ -516,7 +602,7 @@ pub(crate) fn build_sarif(results: &AnalysisResults, root: &std::path::Path) -> 
                 "Package '{}' is in devDependencies but never imported",
                 dep.package_name
             ),
-            "package.json",
+            &dep_uri,
             None,
         ));
     }
@@ -922,6 +1008,7 @@ mod tests {
             line: 10,
             col: 4,
             span_start: 120,
+            is_re_export: false,
         });
         r.unused_types.push(UnusedExport {
             path: root.join("src/types.ts"),
@@ -930,14 +1017,17 @@ mod tests {
             line: 5,
             col: 0,
             span_start: 60,
+            is_re_export: false,
         });
         r.unused_dependencies.push(UnusedDependency {
             package_name: "lodash".to_string(),
             location: DependencyLocation::Dependencies,
+            path: root.join("package.json"),
         });
         r.unused_dev_dependencies.push(UnusedDependency {
             package_name: "jest".to_string(),
             location: DependencyLocation::DevDependencies,
+            path: root.join("package.json"),
         });
         r.unused_enum_members.push(UnusedMember {
             path: root.join("src/enums.ts"),
@@ -1102,6 +1192,7 @@ mod tests {
             line: 10,
             col: 4,
             span_start: 120,
+            is_re_export: false,
         });
 
         let sarif = build_sarif(&results, &root);
@@ -1157,10 +1248,12 @@ mod tests {
         results.unused_dependencies.push(UnusedDependency {
             package_name: "lodash".to_string(),
             location: DependencyLocation::Dependencies,
+            path: root.join("package.json"),
         });
         results.unused_dev_dependencies.push(UnusedDependency {
             package_name: "jest".to_string(),
             location: DependencyLocation::DevDependencies,
+            path: root.join("package.json"),
         });
 
         let sarif = build_sarif(&results, &root);
@@ -1320,6 +1413,7 @@ mod tests {
             line: 10,
             col: 4,
             span_start: 120,
+            is_re_export: false,
         });
         let elapsed = Duration::from_millis(0);
         let output = build_json(&results, elapsed).expect("should serialize");
@@ -1330,6 +1424,7 @@ mod tests {
         assert_eq!(export["col"], 4);
         assert_eq!(export["is_type_only"], false);
         assert_eq!(export["span_start"], 120);
+        assert_eq!(export["is_re_export"], false);
     }
 
     #[test]
@@ -1379,6 +1474,7 @@ mod tests {
             line: 10,
             col: 4,
             span_start: 120,
+            is_re_export: false,
         });
 
         let lines = build_compact_lines(&results, &root);
@@ -1396,6 +1492,7 @@ mod tests {
             line: 5,
             col: 0,
             span_start: 60,
+            is_re_export: false,
         });
 
         let lines = build_compact_lines(&results, &root);
@@ -1409,6 +1506,7 @@ mod tests {
         results.unused_dependencies.push(UnusedDependency {
             package_name: "lodash".to_string(),
             location: DependencyLocation::Dependencies,
+            path: root.join("package.json"),
         });
 
         let lines = build_compact_lines(&results, &root);
@@ -1422,6 +1520,7 @@ mod tests {
         results.unused_dev_dependencies.push(UnusedDependency {
             package_name: "jest".to_string(),
             location: DependencyLocation::DevDependencies,
+            path: root.join("package.json"),
         });
 
         let lines = build_compact_lines(&results, &root);

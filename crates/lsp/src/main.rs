@@ -371,42 +371,46 @@ impl FallowLspServer {
             }
         }
 
-        // Dependency issues on package.json: unused deps, unused dev deps, unlisted deps
-        if let Some(ref uri) = package_json_uri {
-            let dep_diagnostics: Vec<(&str, String)> = results
-                .unused_dependencies
-                .iter()
-                .map(|d| {
-                    (
-                        "unused-dependency" as &str,
-                        format!("Unused dependency: {}", d.package_name),
-                    )
-                })
-                .chain(results.unused_dev_dependencies.iter().map(|d| {
-                    (
-                        "unused-dev-dependency",
-                        format!("Unused devDependency: {}", d.package_name),
-                    )
-                }))
-                .chain(results.unlisted_dependencies.iter().map(|d| {
-                    (
-                        "unlisted-dependency",
-                        format!(
-                            "Unlisted dependency: {} (used but not in package.json)",
-                            d.package_name
-                        ),
-                    )
-                }))
-                .collect();
-
-            let entry = diagnostics_by_file.entry(uri.clone()).or_default();
-            for (code, message) in dep_diagnostics {
+        // Dependency issues: unused deps, unused dev deps (routed to their respective package.json)
+        for dep in &results.unused_dependencies {
+            if let Ok(dep_uri) = Url::from_file_path(&dep.path) {
+                let entry = diagnostics_by_file.entry(dep_uri).or_default();
                 entry.push(Diagnostic {
                     range: ZERO_RANGE,
                     severity: Some(DiagnosticSeverity::WARNING),
                     source: Some("fallow".to_string()),
-                    code: Some(NumberOrString::String(code.to_string())),
-                    message,
+                    code: Some(NumberOrString::String("unused-dependency".to_string())),
+                    message: format!("Unused dependency: {}", dep.package_name),
+                    ..Default::default()
+                });
+            }
+        }
+        for dep in &results.unused_dev_dependencies {
+            if let Ok(dep_uri) = Url::from_file_path(&dep.path) {
+                let entry = diagnostics_by_file.entry(dep_uri).or_default();
+                entry.push(Diagnostic {
+                    range: ZERO_RANGE,
+                    severity: Some(DiagnosticSeverity::WARNING),
+                    source: Some("fallow".to_string()),
+                    code: Some(NumberOrString::String("unused-dev-dependency".to_string())),
+                    message: format!("Unused devDependency: {}", dep.package_name),
+                    ..Default::default()
+                });
+            }
+        }
+        // Unlisted deps still use root package.json
+        if let Some(ref uri) = package_json_uri {
+            for dep in &results.unlisted_dependencies {
+                let entry = diagnostics_by_file.entry(uri.clone()).or_default();
+                entry.push(Diagnostic {
+                    range: ZERO_RANGE,
+                    severity: Some(DiagnosticSeverity::WARNING),
+                    source: Some("fallow".to_string()),
+                    code: Some(NumberOrString::String("unlisted-dependency".to_string())),
+                    message: format!(
+                        "Unlisted dependency: {} (used but not in package.json)",
+                        dep.package_name
+                    ),
                     ..Default::default()
                 });
             }

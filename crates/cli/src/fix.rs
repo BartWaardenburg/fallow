@@ -185,7 +185,7 @@ fn apply_export_fixes(
     had_write_error
 }
 
-/// Apply dependency fixes to package.json, returning JSON fix entries.
+/// Apply dependency fixes to package.json files (root and workspace), returning JSON fix entries.
 fn apply_dependency_fixes(
     root: &Path,
     results: &fallow_core::results::AnalysisResults,
@@ -199,76 +199,74 @@ fn apply_dependency_fixes(
         return had_write_error;
     }
 
-    let pkg_path = root.join("package.json");
-    if let Ok(content) = std::fs::read_to_string(&pkg_path)
-        && let Ok(mut pkg_value) = serde_json::from_str::<serde_json::Value>(&content)
-    {
-        let mut changed = false;
+    // Group all unused deps by their package.json path so we can batch edits per file
+    let mut deps_by_pkg: std::collections::HashMap<&Path, Vec<(&str, &str)>> =
+        std::collections::HashMap::new();
+    for dep in &results.unused_dependencies {
+        deps_by_pkg
+            .entry(&dep.path)
+            .or_default()
+            .push((&dep.package_name, "dependencies"));
+    }
+    for dep in &results.unused_dev_dependencies {
+        deps_by_pkg
+            .entry(&dep.path)
+            .or_default()
+            .push((&dep.package_name, "devDependencies"));
+    }
 
-        for dep in &results.unused_dependencies {
-            if let Some(deps) = pkg_value.get_mut("dependencies")
-                && let Some(obj) = deps.as_object_mut()
-                && obj.remove(&dep.package_name).is_some()
-            {
-                if dry_run {
-                    if !matches!(output, OutputFormat::Json) {
-                        eprintln!("Would remove `{}` from dependencies", dep.package_name);
+    let _ = root; // root was previously used to construct the path; now deps carry their own path
+
+    for (pkg_path, removals) in &deps_by_pkg {
+        if let Ok(content) = std::fs::read_to_string(pkg_path)
+            && let Ok(mut pkg_value) = serde_json::from_str::<serde_json::Value>(&content)
+        {
+            let mut changed = false;
+
+            for &(package_name, location) in removals {
+                if let Some(deps) = pkg_value.get_mut(location)
+                    && let Some(obj) = deps.as_object_mut()
+                    && obj.remove(package_name).is_some()
+                {
+                    if dry_run {
+                        if !matches!(output, OutputFormat::Json) {
+                            eprintln!(
+                                "Would remove `{package_name}` from {location} in {}",
+                                pkg_path.display()
+                            );
+                        }
+                        fixes.push(serde_json::json!({
+                            "type": "remove_dependency",
+                            "package": package_name,
+                            "location": location,
+                            "file": pkg_path.display().to_string(),
+                        }));
+                    } else {
+                        changed = true;
+                        fixes.push(serde_json::json!({
+                            "type": "remove_dependency",
+                            "package": package_name,
+                            "location": location,
+                            "file": pkg_path.display().to_string(),
+                            "applied": true,
+                        }));
                     }
-                    fixes.push(serde_json::json!({
-                        "type": "remove_dependency",
-                        "package": dep.package_name,
-                        "location": "dependencies",
-                    }));
-                } else {
-                    changed = true;
-                    fixes.push(serde_json::json!({
-                        "type": "remove_dependency",
-                        "package": dep.package_name,
-                        "location": "dependencies",
-                        "applied": true,
-                    }));
                 }
             }
-        }
 
-        for dep in &results.unused_dev_dependencies {
-            if let Some(deps) = pkg_value.get_mut("devDependencies")
-                && let Some(obj) = deps.as_object_mut()
-                && obj.remove(&dep.package_name).is_some()
-            {
-                if dry_run {
-                    if !matches!(output, OutputFormat::Json) {
-                        eprintln!("Would remove `{}` from devDependencies", dep.package_name);
+            if changed && !dry_run {
+                match serde_json::to_string_pretty(&pkg_value) {
+                    Ok(new_json) => {
+                        let pkg_content = new_json + "\n";
+                        if let Err(e) = atomic_write(pkg_path, pkg_content.as_bytes()) {
+                            had_write_error = true;
+                            eprintln!("Error: failed to write {}: {e}", pkg_path.display());
+                        }
                     }
-                    fixes.push(serde_json::json!({
-                        "type": "remove_dependency",
-                        "package": dep.package_name,
-                        "location": "devDependencies",
-                    }));
-                } else {
-                    changed = true;
-                    fixes.push(serde_json::json!({
-                        "type": "remove_dependency",
-                        "package": dep.package_name,
-                        "location": "devDependencies",
-                        "applied": true,
-                    }));
-                }
-            }
-        }
-
-        if changed && !dry_run {
-            match serde_json::to_string_pretty(&pkg_value) {
-                Ok(new_json) => {
-                    let pkg_content = new_json + "\n";
-                    if let Err(e) = atomic_write(&pkg_path, pkg_content.as_bytes()) {
+                    Err(e) => {
                         had_write_error = true;
-                        eprintln!("Error: failed to write package.json: {e}");
+                        eprintln!("Error: failed to serialize {}: {e}", pkg_path.display());
                     }
-                }
-                Err(e) => {
-                    had_write_error = true;
-                    eprintln!("Error: failed to serialize package.json: {e}");
                 }
             }
         }

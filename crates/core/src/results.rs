@@ -56,6 +56,8 @@ pub struct UnusedExport {
     pub col: u32,
     /// Byte offset into the source file (used by the fix command).
     pub span_start: u32,
+    /// Whether this finding comes from a barrel/index re-export rather than the source definition.
+    pub is_re_export: bool,
 }
 
 /// A dependency that is listed in package.json but never imported.
@@ -63,6 +65,9 @@ pub struct UnusedExport {
 pub struct UnusedDependency {
     pub package_name: String,
     pub location: DependencyLocation,
+    /// Path to the package.json where this dependency is listed.
+    /// For root deps this is `<root>/package.json`, for workspace deps it is `<ws>/package.json`.
+    pub path: PathBuf,
 }
 
 /// Where in package.json a dependency is listed.
@@ -138,6 +143,7 @@ mod tests {
             line: 1,
             col: 0,
             span_start: 0,
+            is_re_export: false,
         });
         assert_eq!(results.total_issues(), 1);
         assert!(results.has_issues());
@@ -156,6 +162,7 @@ mod tests {
             line: 1,
             col: 0,
             span_start: 0,
+            is_re_export: false,
         });
         results.unused_types.push(UnusedExport {
             path: PathBuf::from("c.ts"),
@@ -164,14 +171,17 @@ mod tests {
             line: 1,
             col: 0,
             span_start: 0,
+            is_re_export: false,
         });
         results.unused_dependencies.push(UnusedDependency {
             package_name: "dep".to_string(),
             location: DependencyLocation::Dependencies,
+            path: PathBuf::from("package.json"),
         });
         results.unused_dev_dependencies.push(UnusedDependency {
             package_name: "dev".to_string(),
             location: DependencyLocation::DevDependencies,
+            path: PathBuf::from("package.json"),
         });
         results.unused_enum_members.push(UnusedMember {
             path: PathBuf::from("d.ts"),
