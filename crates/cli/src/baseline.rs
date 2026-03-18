@@ -21,12 +21,24 @@ impl BaselineData {
             unused_exports: results
                 .unused_exports
                 .iter()
-                .map(|e| format!("{}:{}", e.path.to_string_lossy().replace('\\', "/"), e.export_name))
+                .map(|e| {
+                    format!(
+                        "{}:{}",
+                        e.path.to_string_lossy().replace('\\', "/"),
+                        e.export_name
+                    )
+                })
                 .collect(),
             unused_types: results
                 .unused_types
                 .iter()
-                .map(|e| format!("{}:{}", e.path.to_string_lossy().replace('\\', "/"), e.export_name))
+                .map(|e| {
+                    format!(
+                        "{}:{}",
+                        e.path.to_string_lossy().replace('\\', "/"),
+                        e.export_name
+                    )
+                })
                 .collect(),
             unused_dependencies: results
                 .unused_dependencies
@@ -66,11 +78,19 @@ pub(crate) fn filter_new_issues(
         .unused_files
         .retain(|f| !baseline_files.contains(f.path.to_string_lossy().replace('\\', "/").as_str()));
     results.unused_exports.retain(|e| {
-        let key = format!("{}:{}", e.path.to_string_lossy().replace('\\', "/"), e.export_name);
+        let key = format!(
+            "{}:{}",
+            e.path.to_string_lossy().replace('\\', "/"),
+            e.export_name
+        );
         !baseline_exports.contains(key.as_str())
     });
     results.unused_types.retain(|e| {
-        let key = format!("{}:{}", e.path.to_string_lossy().replace('\\', "/"), e.export_name);
+        let key = format!(
+            "{}:{}",
+            e.path.to_string_lossy().replace('\\', "/"),
+            e.export_name
+        );
         !baseline_types.contains(key.as_str())
     });
     results

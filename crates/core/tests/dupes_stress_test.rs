@@ -3,10 +3,10 @@
 use std::path::PathBuf;
 use std::time::Instant;
 
+use fallow_core::duplicates::DetectionMode;
 use fallow_core::duplicates::detect::CloneDetector;
 use fallow_core::duplicates::normalize::{HashedToken, normalize_and_hash};
 use fallow_core::duplicates::tokenize::{FileTokens, SourceToken, TokenKind};
-use fallow_core::duplicates::DetectionMode;
 use oxc_span::Span;
 
 // ── Helpers ────────────────────────────────────────────────
