@@ -1,9 +1,8 @@
 //! Suffix Array + LCP based clone detection engine.
 //!
-//! Replaces the previous sliding-window hash approach with an O(N log^2 N)
-//! suffix array construction followed by an O(N) LCP scan. This avoids
-//! quadratic pairwise comparisons and naturally finds all maximal clones in
-//! a single linear pass.
+//! Uses an O(N log N) prefix-doubling suffix array construction (with radix
+//! sort) followed by an O(N) LCP scan. This avoids quadratic pairwise
+//! comparisons and naturally finds all maximal clones in a single linear pass.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -51,6 +50,8 @@ impl CloneDetector {
         &self,
         file_data: Vec<(PathBuf, Vec<HashedToken>, FileTokens)>,
     ) -> DuplicationReport {
+        let _span = tracing::info_span!("clone_detect").entered();
+
         if file_data.is_empty() || self.min_tokens == 0 {
             return empty_report(0);
         }
@@ -69,31 +70,105 @@ impl CloneDetector {
         let total_lines: usize = files.iter().map(|f| f.file_tokens.line_count).sum();
         let total_tokens: usize = files.iter().map(|f| f.hashed_tokens.len()).sum();
 
+        tracing::debug!(
+            total_files,
+            total_tokens,
+            total_lines,
+            "clone detection input"
+        );
+
         // Step 1: Rank reduction — map u64 hashes to consecutive u32 ranks.
+        let t0 = std::time::Instant::now();
         let ranked_files = rank_reduce(&files);
+        let rank_time = t0.elapsed();
+        let unique_ranks: usize = ranked_files
+            .iter()
+            .flat_map(|f| f.iter())
+            .copied()
+            .max()
+            .map_or(0, |m| m as usize + 1);
+        tracing::debug!(
+            elapsed_us = rank_time.as_micros(),
+            unique_ranks,
+            "step1_rank_reduce"
+        );
 
         // Step 2: Concatenate with sentinels.
+        let t0 = std::time::Instant::now();
         let (text, file_of, file_offsets) = concatenate_with_sentinels(&ranked_files);
+        let concat_time = t0.elapsed();
+        tracing::debug!(
+            elapsed_us = concat_time.as_micros(),
+            concat_len = text.len(),
+            "step2_concatenate"
+        );
 
         if text.is_empty() {
             return empty_report(total_files);
         }
 
         // Step 3: Build suffix array.
+        let t0 = std::time::Instant::now();
         let sa = build_suffix_array(&text);
+        let sa_time = t0.elapsed();
+        tracing::debug!(
+            elapsed_us = sa_time.as_micros(),
+            n = text.len(),
+            "step3_suffix_array"
+        );
 
         // Step 4: Build LCP array (Kasai's algorithm, sentinel-aware).
+        let t0 = std::time::Instant::now();
         let lcp = build_lcp(&text, &sa);
+        let lcp_time = t0.elapsed();
+        tracing::debug!(elapsed_us = lcp_time.as_micros(), "step4_lcp_array");
 
         // Step 5: Extract clone groups from LCP intervals.
+        let t0 = std::time::Instant::now();
         let raw_groups =
             extract_clone_groups(&sa, &lcp, &file_of, &file_offsets, self.min_tokens, &files);
+        let extract_time = t0.elapsed();
+        tracing::debug!(
+            elapsed_us = extract_time.as_micros(),
+            raw_groups = raw_groups.len(),
+            "step5_extract_groups"
+        );
 
         // Step 6: Build CloneGroup structs with line info, apply filters.
+        let t0 = std::time::Instant::now();
         let clone_groups = self.build_groups(raw_groups, &files);
+        let build_time = t0.elapsed();
+        tracing::debug!(
+            elapsed_us = build_time.as_micros(),
+            final_groups = clone_groups.len(),
+            "step6_build_groups"
+        );
 
         // Step 7: Compute stats.
+        let t0 = std::time::Instant::now();
         let stats = compute_stats(&clone_groups, total_files, total_lines, total_tokens);
+        let stats_time = t0.elapsed();
+        tracing::debug!(elapsed_us = stats_time.as_micros(), "step7_compute_stats");
+
+        tracing::info!(
+            total_us = (rank_time
+                + concat_time
+                + sa_time
+                + lcp_time
+                + extract_time
+                + build_time
+                + stats_time)
+                .as_micros(),
+            rank_us = rank_time.as_micros(),
+            sa_us = sa_time.as_micros(),
+            lcp_us = lcp_time.as_micros(),
+            extract_us = extract_time.as_micros(),
+            build_us = build_time.as_micros(),
+            stats_us = stats_time.as_micros(),
+            total_tokens,
+            clone_groups = clone_groups.len(),
+            "clone detection complete"
+        );
 
         DuplicationReport {
             clone_groups,
@@ -103,10 +178,91 @@ impl CloneDetector {
 
     /// Convert raw groups into `CloneGroup` structs, applying min_lines and
     /// skip_local filters, deduplication, and subset removal.
-    fn build_groups(&self, raw_groups: Vec<RawGroup>, files: &[FileData]) -> Vec<CloneGroup> {
-        let mut clone_groups: Vec<CloneGroup> = Vec::new();
+    fn build_groups(&self, mut raw_groups: Vec<RawGroup>, files: &[FileData]) -> Vec<CloneGroup> {
+        if raw_groups.is_empty() {
+            return Vec::new();
+        }
+
+        // ── Token-level subset removal (cheap) ────────────────
+        //
+        // Sort raw groups by length desc. For each instance (file_id, offset),
+        // track non-overlapping covered intervals per file. A smaller group is
+        // skipped if all its instances fall within already-covered intervals.
+        // This eliminates the vast majority of raw groups before the expensive
+        // line-calculation step.
+        let raw_count = raw_groups.len();
+        raw_groups.sort_by(|a, b| b.length.cmp(&a.length));
+
+        // covered[file_id] is a sorted vec of non-overlapping (start, end)
+        // intervals. Kept sorted by start for binary search.
+        let mut covered: Vec<Vec<(usize, usize)>> = vec![Vec::new(); files.len()];
+        let mut surviving_groups: Vec<RawGroup> = Vec::new();
 
         for rg in raw_groups {
+            let len = rg.length;
+            // Check if all instances are fully covered by existing intervals.
+            let all_covered = rg.instances.iter().all(|&(fid, offset)| {
+                let intervals = &covered[fid];
+                // Binary search for the interval that could contain [offset, offset+len).
+                let idx = intervals.partition_point(|&(s, _)| s <= offset);
+                if idx > 0 {
+                    let (s, e) = intervals[idx - 1];
+                    offset >= s && offset + len <= e
+                } else {
+                    false
+                }
+            });
+
+            if !all_covered {
+                // Insert covered intervals for this group's instances.
+                for &(fid, offset) in &rg.instances {
+                    let end = offset + len;
+                    let intervals = &mut covered[fid];
+                    let idx = intervals.partition_point(|&(s, _)| s < offset);
+                    // Check if the new interval merges with an existing one.
+                    if idx > 0 {
+                        let prev = &mut intervals[idx - 1];
+                        if prev.1 >= offset {
+                            // Extend previous interval if needed.
+                            if end > prev.1 {
+                                prev.1 = end;
+                            }
+                            continue;
+                        }
+                    }
+                    intervals.insert(idx, (offset, end));
+                }
+                surviving_groups.push(rg);
+            }
+        }
+
+        tracing::trace!(
+            raw = raw_count,
+            surviving = surviving_groups.len(),
+            "token-level subset removal"
+        );
+
+        // ── Pre-compute line offset tables ────────────────────
+        //
+        // For each file, build a sorted vec of newline byte positions so that
+        // byte_offset_to_line_col can use binary search (O(log L)) instead of
+        // linear scan (O(L)).
+        let line_tables: Vec<Vec<usize>> = files
+            .iter()
+            .map(|f| {
+                f.file_tokens
+                    .source
+                    .bytes()
+                    .enumerate()
+                    .filter_map(|(i, b)| if b == b'\n' { Some(i) } else { None })
+                    .collect()
+            })
+            .collect();
+
+        // ── Build CloneGroups for survivors ────────────────────
+        let mut clone_groups: Vec<CloneGroup> = Vec::new();
+
+        for rg in surviving_groups {
             // Build instances, deduplicating by (file_id, offset).
             let mut seen: HashMap<(usize, usize), bool> = HashMap::new();
             let mut group_instances: Vec<CloneInstance> = Vec::new();
@@ -118,7 +274,9 @@ impl CloneDetector {
                 seen.insert((file_id, offset), true);
 
                 let file = &files[file_id];
-                if let Some(inst) = build_clone_instance(file, offset, rg.length) {
+                if let Some(inst) =
+                    build_clone_instance_fast(file, offset, rg.length, &line_tables[file_id])
+                {
                     group_instances.push(inst);
                 }
             }
@@ -244,29 +402,25 @@ struct RawGroup {
 /// Returns `ranked_files` where `ranked_files[i]` contains the rank
 /// sequence for `files[i]`.
 fn rank_reduce(files: &[FileData]) -> Vec<Vec<u32>> {
-    // Collect all unique hashes.
-    let mut all_hashes: Vec<u64> = Vec::new();
-    for file in files {
-        for ht in &file.hashed_tokens {
-            all_hashes.push(ht.hash);
-        }
-    }
-    all_hashes.sort_unstable();
-    all_hashes.dedup();
-
-    // Build hash -> rank map.
-    let hash_to_rank: HashMap<u64, u32> = all_hashes
-        .iter()
-        .enumerate()
-        .map(|(i, &h)| (h, i as u32))
-        .collect();
+    // Single-pass: assign ranks on first encounter. The exact rank values
+    // don't matter as long as equal hashes get equal ranks. Skipping the
+    // sort+dedup saves O(N log N) and a second allocation.
+    let total: usize = files.iter().map(|f| f.hashed_tokens.len()).sum();
+    let mut hash_to_rank: HashMap<u64, u32> = HashMap::with_capacity(total / 2);
+    let mut next_rank: u32 = 0;
 
     files
         .iter()
         .map(|file| {
             file.hashed_tokens
                 .iter()
-                .map(|ht| hash_to_rank[&ht.hash])
+                .map(|ht| {
+                    *hash_to_rank.entry(ht.hash).or_insert_with(|| {
+                        let r = next_rank;
+                        next_rank += 1;
+                        r
+                    })
+                })
                 .collect()
         })
         .collect()
@@ -314,7 +468,8 @@ fn concatenate_with_sentinels(ranked_files: &[Vec<u32>]) -> (Vec<i64>, Vec<usize
 
 // ── Step 3: Suffix array construction (prefix doubling) ────
 
-/// Build a suffix array using the O(N log^2 N) prefix-doubling algorithm.
+/// Build a suffix array using the O(N log N) prefix-doubling algorithm with
+/// radix sort.
 ///
 /// Returns `sa` where `sa[i]` is the starting position of the i-th
 /// lexicographically smallest suffix in `text`.
@@ -331,20 +486,68 @@ fn build_suffix_array(text: &[i64]) -> Vec<usize> {
     let mut sa: Vec<usize> = (0..n).collect();
     let mut tmp: Vec<i64> = vec![0; n];
     let mut k: usize = 1;
+    let mut iterations = 0u32;
+
+    // Scratch buffers for radix sort (reused across iterations).
+    let mut sa_tmp: Vec<usize> = vec![0; n];
 
     while k < n {
-        let rank_ref = &rank;
-        let kk = k;
-        sa.sort_by(|&a, &b| {
-            let ra = rank_ref[a];
-            let rb = rank_ref[b];
-            if ra != rb {
-                return ra.cmp(&rb);
-            }
-            let ra2 = if a + kk < n { rank_ref[a + kk] } else { -1 };
-            let rb2 = if b + kk < n { rank_ref[b + kk] } else { -1 };
-            ra2.cmp(&rb2)
-        });
+        iterations += 1;
+        let max_rank = rank.iter().copied().max().unwrap_or(0) as usize;
+
+        // Two-pass radix sort: sort by secondary key (rank[i+k]) first,
+        // then by primary key (rank[i]). Each pass is O(N + K) where
+        // K = max_rank + 2 (including the -1 sentinel rank).
+        let bucket_count = max_rank + 2; // ranks 0..=max_rank plus -1 mapped to 0
+
+        // Pass 1: sort by secondary key (rank at offset k).
+        let mut counts = vec![0usize; bucket_count + 1];
+        for &i in &sa {
+            let r2 = if i + k < n {
+                rank[i + k] as usize + 1
+            } else {
+                0
+            };
+            counts[r2] += 1;
+        }
+        // Prefix sum.
+        let mut sum = 0;
+        for c in counts.iter_mut() {
+            let v = *c;
+            *c = sum;
+            sum += v;
+        }
+        for &i in &sa {
+            let r2 = if i + k < n {
+                rank[i + k] as usize + 1
+            } else {
+                0
+            };
+            sa_tmp[counts[r2]] = i;
+            counts[r2] += 1;
+        }
+
+        // Pass 2: sort by primary key (rank[i]), stable.
+        // No +1 offset needed here: rank[i] is always >= 0 because the
+        // initial ranks are shifted by min_val, and subsequent iterations
+        // assign ranks starting from 0.
+        counts.iter_mut().for_each(|c| *c = 0);
+        counts.resize(bucket_count + 1, 0);
+        for &i in &sa_tmp {
+            let r1 = rank[i] as usize;
+            counts[r1] += 1;
+        }
+        sum = 0;
+        for c in counts.iter_mut() {
+            let v = *c;
+            *c = sum;
+            sum += v;
+        }
+        for &i in &sa_tmp {
+            let r1 = rank[i] as usize;
+            sa[counts[r1]] = i;
+            counts[r1] += 1;
+        }
 
         // Compute new ranks.
         tmp[sa[0]] = 0;
@@ -352,24 +555,25 @@ fn build_suffix_array(text: &[i64]) -> Vec<usize> {
             let prev = sa[i - 1];
             let curr = sa[i];
             let same = rank[prev] == rank[curr] && {
-                let rp2 = if prev + kk < n { rank[prev + kk] } else { -1 };
-                let rc2 = if curr + kk < n { rank[curr + kk] } else { -1 };
+                let rp2 = if prev + k < n { rank[prev + k] } else { -1 };
+                let rc2 = if curr + k < n { rank[curr + k] } else { -1 };
                 rp2 == rc2
             };
             tmp[curr] = tmp[prev] + if same { 0 } else { 1 };
         }
 
         // Early exit when all ranks are unique.
-        let max_rank = tmp[sa[n - 1]];
+        let new_max_rank = tmp[sa[n - 1]];
         std::mem::swap(&mut rank, &mut tmp);
 
-        if max_rank as usize == n - 1 {
+        if new_max_rank as usize == n - 1 {
             break;
         }
 
         k *= 2;
     }
 
+    tracing::trace!(n, iterations, "suffix array constructed");
     sa
 }
 
@@ -554,7 +758,59 @@ fn is_subset_group(smaller: &CloneGroup, larger: &CloneGroup) -> bool {
     })
 }
 
+/// Build a `CloneInstance` using a pre-computed line offset table for fast lookup.
+fn build_clone_instance_fast(
+    file: &FileData,
+    token_offset: usize,
+    token_length: usize,
+    line_table: &[usize],
+) -> Option<CloneInstance> {
+    let tokens = &file.hashed_tokens;
+    let source_tokens = &file.file_tokens.tokens;
+
+    if token_offset + token_length > tokens.len() {
+        return None;
+    }
+
+    // Map from hashed token indices back to source token spans.
+    let first_hashed = &tokens[token_offset];
+    let last_hashed = &tokens[token_offset + token_length - 1];
+
+    let first_source = &source_tokens[first_hashed.original_index];
+    let last_source = &source_tokens[last_hashed.original_index];
+
+    let start_byte = first_source.span.start as usize;
+    let end_byte = last_source.span.end as usize;
+
+    // Guard against inverted spans that can occur when normalization reorders
+    // token original_index values for very small windows.
+    if start_byte > end_byte {
+        return None;
+    }
+
+    let source = &file.file_tokens.source;
+    let (start_line, start_col) = byte_offset_to_line_col_fast(source, start_byte, line_table);
+    let (end_line, end_col) = byte_offset_to_line_col_fast(source, end_byte, line_table);
+
+    // Extract the fragment.
+    let fragment = if end_byte <= source.len() {
+        source[start_byte..end_byte].to_string()
+    } else {
+        String::new()
+    };
+
+    Some(CloneInstance {
+        file: file.path.clone(),
+        start_line,
+        end_line,
+        start_col,
+        end_col,
+        fragment,
+    })
+}
+
 /// Build a `CloneInstance` from file data and token offset/length.
+#[cfg(test)]
 fn build_clone_instance(
     file: &FileData,
     token_offset: usize,
@@ -604,7 +860,28 @@ fn build_clone_instance(
     })
 }
 
+/// Convert a byte offset into a 1-based line number and 0-based character column
+/// using a pre-computed table of newline positions for O(log L) lookup.
+fn byte_offset_to_line_col_fast(
+    source: &str,
+    byte_offset: usize,
+    line_table: &[usize],
+) -> (usize, usize) {
+    let offset = byte_offset.min(source.len());
+    // Binary search: find the number of newlines before this offset.
+    let line_idx = line_table.partition_point(|&nl_pos| nl_pos < offset);
+    let line = line_idx + 1; // 1-based
+    let line_start = if line_idx == 0 {
+        0
+    } else {
+        line_table[line_idx - 1] + 1
+    };
+    let col = source[line_start..offset].chars().count();
+    (line, col)
+}
+
 /// Convert a byte offset into a 1-based line number and 0-based character column.
+#[cfg(test)]
 fn byte_offset_to_line_col(source: &str, byte_offset: usize) -> (usize, usize) {
     let offset = byte_offset.min(source.len());
     let before = &source[..offset];
@@ -621,10 +898,12 @@ fn compute_stats(
     total_lines: usize,
     total_tokens: usize,
 ) -> DuplicationStats {
-    let mut files_with_clones: std::collections::HashSet<&PathBuf> =
-        std::collections::HashSet::new();
-    let mut duplicated_lines: std::collections::HashSet<(PathBuf, usize)> =
-        std::collections::HashSet::new();
+    use std::collections::HashSet;
+    use std::path::Path;
+
+    let mut files_with_clones: HashSet<&Path> = HashSet::new();
+    // Group duplicated lines by file to avoid cloning PathBuf per line.
+    let mut file_dup_lines: HashMap<&Path, HashSet<usize>> = HashMap::new();
     let mut duplicated_tokens = 0usize;
     let mut clone_instances = 0usize;
 
@@ -632,8 +911,9 @@ fn compute_stats(
         for instance in &group.instances {
             files_with_clones.insert(&instance.file);
             clone_instances += 1;
+            let lines = file_dup_lines.entry(&instance.file).or_default();
             for line in instance.start_line..=instance.end_line {
-                duplicated_lines.insert((instance.file.clone(), line));
+                lines.insert(line);
             }
         }
         // Each instance contributes token_count duplicated tokens,
@@ -643,7 +923,7 @@ fn compute_stats(
         }
     }
 
-    let dup_line_count = duplicated_lines.len();
+    let dup_line_count: usize = file_dup_lines.values().map(|s| s.len()).sum();
     let duplication_percentage = if total_lines > 0 {
         (dup_line_count as f64 / total_lines as f64) * 100.0
     } else {

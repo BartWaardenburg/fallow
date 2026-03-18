@@ -604,6 +604,174 @@ fn bench_cache_round_trip(c: &mut Criterion) {
     });
 }
 
+// ── Dupe detection benchmarks ──────────────────────────────────────
+
+fn make_hashed_tokens(hashes: &[u64]) -> Vec<fallow_core::duplicates::normalize::HashedToken> {
+    hashes
+        .iter()
+        .enumerate()
+        .map(
+            |(i, &hash)| fallow_core::duplicates::normalize::HashedToken {
+                hash,
+                original_index: i,
+            },
+        )
+        .collect()
+}
+
+fn make_file_tokens_for(count: usize) -> fallow_core::duplicates::tokenize::FileTokens {
+    use fallow_core::duplicates::tokenize::{FileTokens, SourceToken, TokenKind};
+    use oxc_span::Span;
+
+    let tokens: Vec<SourceToken> = (0..count)
+        .map(|i| SourceToken {
+            kind: TokenKind::Identifier(format!("t{i}")),
+            span: Span::new((i * 3) as u32, (i * 3 + 2) as u32),
+        })
+        .collect();
+
+    let mut source = String::with_capacity(count * 4);
+    for i in 0..count {
+        source.push_str("xx");
+        if i < count - 1 {
+            source.push('\n');
+        }
+    }
+    let line_count = source.lines().count().max(1);
+    FileTokens {
+        tokens,
+        source,
+        line_count,
+    }
+}
+
+type DupeInput = Vec<(
+    PathBuf,
+    Vec<fallow_core::duplicates::normalize::HashedToken>,
+    fallow_core::duplicates::tokenize::FileTokens,
+)>;
+
+/// Build N identical files with `tokens_per_file` tokens each.
+fn make_identical_files(n: usize, tokens_per_file: usize) -> DupeInput {
+    let hashes: Vec<u64> = (1..=tokens_per_file as u64).collect();
+    (0..n)
+        .map(|i| {
+            (
+                PathBuf::from(format!("dir{i}/file{i}.ts")),
+                make_hashed_tokens(&hashes),
+                make_file_tokens_for(tokens_per_file),
+            )
+        })
+        .collect()
+}
+
+/// Build files with diverse content (low duplication).
+fn make_diverse_files(n: usize, tokens_per_file: usize) -> DupeInput {
+    (0..n)
+        .map(|i| {
+            let base = (i * tokens_per_file * 10) as u64;
+            let hashes: Vec<u64> = (base..base + tokens_per_file as u64).collect();
+            (
+                PathBuf::from(format!("dir{i}/file{i}.ts")),
+                make_hashed_tokens(&hashes),
+                make_file_tokens_for(tokens_per_file),
+            )
+        })
+        .collect()
+}
+
+fn bench_dupe_detect_2x500(c: &mut Criterion) {
+    use fallow_core::duplicates::detect::CloneDetector;
+    let data = make_identical_files(2, 500);
+    c.bench_function("dupe_detect_2x500_identical", |b| {
+        b.iter_batched(
+            || data.clone(),
+            |d| CloneDetector::new(30, 5, false).detect(d),
+            criterion::BatchSize::SmallInput,
+        );
+    });
+}
+
+fn bench_dupe_detect_2x2000(c: &mut Criterion) {
+    use fallow_core::duplicates::detect::CloneDetector;
+    let data = make_identical_files(2, 2000);
+    c.bench_function("dupe_detect_2x2000_identical", |b| {
+        b.iter_batched(
+            || data.clone(),
+            |d| CloneDetector::new(30, 5, false).detect(d),
+            criterion::BatchSize::SmallInput,
+        );
+    });
+}
+
+fn bench_dupe_detect_10x500(c: &mut Criterion) {
+    use fallow_core::duplicates::detect::CloneDetector;
+    let data = make_identical_files(10, 500);
+    c.bench_function("dupe_detect_10x500_identical", |b| {
+        b.iter_batched(
+            || data.clone(),
+            |d| CloneDetector::new(30, 5, false).detect(d),
+            criterion::BatchSize::SmallInput,
+        );
+    });
+}
+
+fn bench_dupe_detect_50x200_diverse(c: &mut Criterion) {
+    use fallow_core::duplicates::detect::CloneDetector;
+    let data = make_diverse_files(50, 200);
+    c.bench_function("dupe_detect_50x200_diverse", |b| {
+        b.iter_batched(
+            || data.clone(),
+            |d| CloneDetector::new(30, 5, false).detect(d),
+            criterion::BatchSize::SmallInput,
+        );
+    });
+}
+
+fn bench_dupe_detect_100x200_mixed(c: &mut Criterion) {
+    use fallow_core::duplicates::detect::CloneDetector;
+    // 20 identical + 80 diverse
+    let hashes: Vec<u64> = (1..=200).collect();
+    let data: DupeInput = (0..100)
+        .map(|i| {
+            let h = if i < 20 {
+                make_hashed_tokens(&hashes)
+            } else {
+                let base = (i * 10000) as u64;
+                let unique_hashes: Vec<u64> = (base..base + 200).collect();
+                make_hashed_tokens(&unique_hashes)
+            };
+            (
+                PathBuf::from(format!("dir{i}/file{i}.ts")),
+                h,
+                make_file_tokens_for(200),
+            )
+        })
+        .collect();
+
+    c.bench_function("dupe_detect_100x200_mixed", |b| {
+        b.iter_batched(
+            || data.clone(),
+            |d| CloneDetector::new(30, 5, false).detect(d),
+            criterion::BatchSize::SmallInput,
+        );
+    });
+}
+
+fn bench_dupe_suffix_array_only(c: &mut Criterion) {
+    // Benchmark just the suffix array construction on a large input
+    // to isolate its cost. We access it through the public detect() API.
+    use fallow_core::duplicates::detect::CloneDetector;
+    let data = make_identical_files(2, 5000);
+    c.bench_function("dupe_detect_2x5000_identical", |b| {
+        b.iter_batched(
+            || data.clone(),
+            |d| CloneDetector::new(30, 5, false).detect(d),
+            criterion::BatchSize::SmallInput,
+        );
+    });
+}
+
 criterion_group!(
     benches,
     bench_parse_file,
@@ -613,4 +781,15 @@ criterion_group!(
     bench_resolve_re_export_chains,
     bench_cache_round_trip,
 );
-criterion_main!(benches);
+
+criterion_group!(
+    dupe_benches,
+    bench_dupe_detect_2x500,
+    bench_dupe_detect_2x2000,
+    bench_dupe_detect_10x500,
+    bench_dupe_detect_50x200_diverse,
+    bench_dupe_detect_100x200_mixed,
+    bench_dupe_suffix_array_only,
+);
+
+criterion_main!(benches, dupe_benches);
