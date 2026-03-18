@@ -154,6 +154,17 @@ impl CloneDetector {
             group_instances
                 .sort_by(|a, b| a.file.cmp(&b.file).then(a.start_line.cmp(&b.start_line)));
 
+            // Deduplicate instances that map to the same or overlapping line
+            // ranges within the same file (different token offsets can resolve
+            // to the same source span).
+            group_instances.dedup_by(|b, a| {
+                a.file == b.file && a.start_line == b.start_line && a.end_line == b.end_line
+            });
+
+            if group_instances.len() < 2 {
+                continue;
+            }
+
             clone_groups.push(CloneGroup {
                 instances: group_instances,
                 token_count: rg.length,
@@ -538,6 +549,12 @@ fn build_clone_instance(
 
     let start_byte = first_source.span.start as usize;
     let end_byte = last_source.span.end as usize;
+
+    // Guard against inverted spans that can occur when normalization reorders
+    // token original_index values for very small windows.
+    if start_byte > end_byte {
+        return None;
+    }
 
     let source = &file.file_tokens.source;
     let (start_line, start_col) = byte_offset_to_line_col(source, start_byte);
