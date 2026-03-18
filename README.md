@@ -63,6 +63,8 @@ fallow dupes                    # Default: mild mode
 fallow dupes --mode semantic    # Catch clones with renamed variables
 fallow dupes --skip-local       # Only cross-directory duplicates
 fallow dupes --threshold 5      # Fail CI if duplication exceeds 5%
+fallow dupes --save-baseline    # Save current duplication as baseline
+fallow dupes --baseline         # Fail only on new duplication vs baseline
 ```
 
 | Mode | What it catches |
@@ -71,6 +73,8 @@ fallow dupes --threshold 5      # Fail CI if duplication exceeds 5%
 | **mild** | Default — normalizes syntax variations |
 | **weak** | Clones with different string literal values |
 | **semantic** | Clones with renamed variables and different literals |
+
+Clone groups sharing the same file set are grouped into **clone families** with refactoring suggestions (extract function or module).
 
 ## Benchmarks
 

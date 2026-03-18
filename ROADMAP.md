@@ -8,78 +8,40 @@ Fallow is a Rust-native dead code and duplication analyzer for JavaScript/TypeSc
 
 ---
 
-## Current State (v0.2.0)
+## Current State (v0.2.x)
 
 ### Dead Code (`check`)
 - **10 issue types**: unused files, exports, types, dependencies, devDeps, enum members, class members, unresolved imports, unlisted deps, duplicate exports
 - **40 framework plugins**: declarative glob patterns + AST-based config parsing for ~20 plugins (15 with rich config extraction)
+- **Deep config parsing** for all top 10 frameworks: ESLint, Vite, Jest, Storybook, Tailwind, Webpack, TypeScript, Babel, Rollup, PostCSS — extracts entry points, dependencies, setup files, and tooling references from config objects via Oxc AST analysis (no JS runtime)
 - **4 output formats**: human, JSON, SARIF, compact
 - **Auto-fix**: remove unused exports and dependencies (`fix --dry-run` to preview)
 - **CI features**: `--changed-since`, `--baseline`/`--save-baseline`, `--fail-on-issues`, SARIF for GitHub Code Scanning
-- **Rules system**: per-issue-type severity (`error`/`warn`/`off`) in `[rules]` config section
-- **Inline suppression**: `// fallow-ignore-next-line` and `// fallow-ignore-file` comments
+- **Rules system**: per-issue-type severity (`error`/`warn`/`off`) in config. All 10 issue types configurable. `--fail-on-issues` promotes `warn` → `error`
+- **Inline suppression**: `// fallow-ignore-next-line [issue-type]` and `// fallow-ignore-file [issue-type]` comments, supporting all issue types including `code-duplication`
+- **Production mode**: `--production` flag excludes test/dev files, limits to production scripts, skips devDep warnings, reports type-only imports in production deps
+- **Script parser**: extracts binary names (mapped to packages), `--config` args (entry points), file path args from `package.json` scripts; handles env wrappers and package manager runners
 
 ### Duplication (`dupes`)
 - **4 detection modes**: strict (exact tokens), mild (normalized syntax), weak (different literals), semantic (renamed variables)
 - **Suffix array with LCP**: no quadratic pairwise comparison — 10x+ faster than jscpd (up to 500x on large projects)
-- **Filtering**: `--skip-local`, `--threshold`, `--min-lines`, `--min-tokens`
-- **Same output formats**: human, JSON, SARIF, compact
+- **Clone families**: groups clone groups sharing the same file set with refactoring suggestions (extract function/module)
+- **Baseline tracking**: `--save-baseline` / `--baseline` for incremental CI adoption of duplication thresholds
+- **Filtering**: `--skip-local`, `--threshold`, `--min-lines`, `--min-tokens`, `duplicates.ignore` config globs
 
 ### Shared Infrastructure
-- **CLI commands**: check, dupes, watch, fix, init, list, schema
+- **CLI commands**: check, dupes, watch, fix, init, list, schema, config-schema
+- **Config format**: JSONC (default), JSON, TOML — with `$schema` support for IDE autocomplete/validation
 - **LSP server**: diagnostics for all 10 dead code issue types + quick-fix code actions
-- **Performance**: rayon parallelism, oxc_parser, incremental bincode cache, flat graph storage
+- **Performance**: rayon parallelism, oxc_parser, incremental bincode cache, flat graph storage, DashMap lock-free bare specifier cache
+- **Duplication accuracy**: curated benchmark corpus with 100% precision/recall on default settings
 
-### Known Limitations (honest assessment)
+### Known Limitations
 
-- **Config parsing gap**: Plugins use declarative patterns, not runtime config loading. This causes false positives when frameworks have custom entry points in their config files (e.g., `jest.config.ts` transforms, `vite.config.ts` plugins). This is the #1 priority to fix.
 - **No cross-workspace resolution**: Monorepo packages are analyzed independently. Exports used by sibling packages get flagged as unused.
 - **Syntactic analysis only**: No TypeScript type information. Projects using `isolatedModules: true` (required for esbuild/swc/vite) are well-served; legacy tsc-only projects may see false positives on type-only imports.
-- **Dupes: no cross-file semantic matching yet**: Semantic mode works within single analysis but doesn't yet track cross-project clone families or suggest refactoring targets.
-
----
-
-## Phase 0: Credibility & Technical Foundation (now)
-
-Ship immediately. These are blockers or trust issues, not features.
-
-### 0.1 README Accuracy ✅
-
-Fixed: comparison table now says "40 (20 with config parsing)" vs knip's "140+ (runtime config loading)". Benchmark speed ranges updated to match actual table data (25-40x for dead code, 4-75x for duplication).
-
-### 0.2 Rules System ✅
-
-Per-issue-type severity (`error`/`warn`/`off`) in `[rules]` section of `fallow.toml`. All 10 issue types configurable individually. Defaults to `error` for backwards compatibility. `--fail-on-issues` promotes `warn` → `error`. Human output colors and SARIF levels reflect configured severity. `[detect] X = false` is preserved and forces `Severity::Off`.
-
-```toml
-[rules]
-unused_files = "error"       # fail CI
-unused_exports = "warn"      # report but don't fail
-unused_types = "off"         # ignore entirely
-unresolved_imports = "error"
-```
-
-Note: Duplication thresholds remain in `[duplicates]` (existing config section) rather than `[rules.dupes]` to avoid schema duplication.
-
-### 0.3 Inline Suppression Comments ✅
-
-Teams need per-instance suppression for false positives before they can trust CI integration:
-- `// fallow-ignore-next-line` — suppress any issue on the next line
-- `// fallow-ignore-next-line unused-export` — suppress specific issue type
-- `// fallow-ignore-file` — suppress all issues in a file
-- `// fallow-ignore-file unused-export` — suppress specific issue type for the file
-
-### 0.4 Resolve Contention Under Parallelism ✅
-
-Replaced `Mutex<HashMap>` with `DashMap` (sharded concurrent map) for the bare specifier cache in `resolve.rs`. Lock-free reads after warmup eliminate contention under rayon's work-stealing on large projects.
-
-### 0.5 Duplication Accuracy Baseline ✅
-
-Curated JS/TS benchmark corpus (`tests/benchmark-corpus/`) with 14 files across 4 clone types (Type-1 exact, Type-2 renamed, Type-3 near-miss, Type-4 semantic) plus 3 negative controls. Automated evaluation pipeline (`evaluate.sh` + `evaluate-results.py`) computes precision/recall per mode against 7 annotated clone pairs and 5 negative pairs.
-
-**Results:** strict/mild/weak modes achieve 100% precision and 100% recall on expected pairs with zero false positives. Semantic mode achieves 100% recall with 75% precision (2 FPs from structurally similar TypeScript interface declarations after identifier blinding). Default production settings (`min-tokens=50, min-lines=5`) achieve 100% precision/recall.
-
-Full report: `tests/benchmark-corpus/BASELINE-REPORT.md`
+- **Config parsing ceiling**: AST-based extraction covers static object literals, string arrays, and simple wrappers like `defineConfig(...)`. Computed values (`getPlugins()`), conditionals (`process.env.NODE_ENV`), and nested config factories are out of reach without JS eval.
+- **Dupes: no cross-language semantic matching yet**: Semantic mode works within JS/TS but doesn't yet detect clones between `.ts` and `.tsx` variants or across language boundaries.
 
 ---
 
@@ -87,27 +49,7 @@ Full report: `tests/benchmark-corpus/BASELINE-REPORT.md`
 
 The goal: a developer can run `fallow check` on a real project and get results they trust. This is the gate to 1.0.
 
-### 1.1 Config File Parsing (top 10 frameworks) ✅
-
-Extended `resolve_config` in the Plugin trait for all 10 priority frameworks. Uses Oxc's parser to extract string literals, arrays, object keys, and require() sources from config files — no JS runtime needed.
-
-**Implemented** (all 10 have rich AST-based config parsing):
-- **ESLint**: Legacy `.eslintrc` plugin/extends/parser short-name resolution (e.g., `"react"` → `eslint-plugin-react`), flat config `plugins` object keys, JSON config support
-- **Vite**: `build.rollupOptions.input`, `build.lib.entry` → entry points; `optimizeDeps.include/exclude` → deps; `ssr.external`/`ssr.noExternal` → deps
-- **Jest**: `preset`, `setupFiles`, `setupFilesAfterEnv`, `globalSetup`/`globalTeardown` → setup files; `testMatch` → entry patterns; `transform`, `reporters`, `testEnvironment`, `watchPlugins`, `resolver`, `snapshotSerializers`, `testRunner`, `runner` → deps; JSON config support
-- **Storybook**: `addons`, `framework` (string/object), `stories` → patterns; `core.builder` → dep; `typescript.reactDocgen` → dep
-- **Tailwind**: `content` → always-used file globs; `plugins`/`presets` via require() and shallow strings → deps
-- **Webpack**: `entry` → entry points (string/array/object); `plugins` require() → deps; `externals` → deps; `module.rules` loader extraction (`loader`, `use` string/array/objects, `oneOf` recursion)
-- **TypeScript**: `extends` → dep or setup file (supports TS 5.0+ array extends); `compilerOptions.types` → `@types/*` deps; `jsxImportSource` → dep; `compilerOptions.plugins[].name` → deps; `references[].path` → setup files; JSONC support
-- **Babel**: `presets`/`plugins` with Babel short-name resolution (`"env"` → `"@babel/preset-env"`, `"transform-runtime"` → `"@babel/plugin-transform-runtime"`); `extends` → dep; JSON/`.babelrc` support
-- **Rollup**: `input` → entry points; `external` → deps
-- **PostCSS**: `plugins` object keys → deps; `plugins` require() → deps; `plugins` string array → deps
-
-**Config parser helpers**: `extract_config_object_keys`, `extract_config_string_or_array`, `extract_config_require_strings`, `find_config_object` JSON/JSONC support via parenthesized expression wrapping.
-
-**Accuracy ceiling**: AST-based extraction covers the majority of real-world configs — static object literals, string arrays, and simple function wrappers like `defineConfig(...)`. Computed values (`getPlugins()`), conditionals (`process.env.NODE_ENV`), and nested config factories (`defineConfig(withSentry(...))`) are out of reach without JS eval.
-
-### 1.2 Cross-Workspace Resolution
+### 1.1 Cross-Workspace Resolution
 
 **Dealbreaker for monorepo adoption.** Build a unified module graph across all workspace packages:
 - Resolve cross-workspace imports via `node_modules` symlinks, `package.json` `exports` field, and tsconfig project references
@@ -117,32 +59,7 @@ Extended `resolve_config` in the Plugin trait for all 10 priority frameworks. Us
 
 **Architecture note**: This requires a `ProjectState` struct that owns the module graph, file registry, and resolved modules across workspace boundaries. This also requires stable FileIds — the current `FileId(idx as u32)` assigned by sort order re-indexes everything when files are added/removed. Introduce `ProjectState` with stable ID assignment here — it also unblocks incremental analysis later.
 
-### 1.3 Script Parser ✅
-
-Lightweight shell command parser for `package.json` scripts:
-- Extract binary names (for unlisted binaries detection)
-- Extract `--config` and positional arguments (for entry point discovery)
-- Handle `node`, `tsx`, `ts-node`, `npx`, `pnpm exec` patterns
-- Binary → package name mapping via static divergence map + `node_modules/.bin/` symlink resolution
-- Env wrapper handling (`cross-env`, `dotenv`, `KEY=value`)
-- Integrated into unused dependency detection pipeline
-
-### 1.4 Production Mode
-
-`--production` flag limiting analysis to shipped code:
-- Exclude test files, stories, dev configs
-- Only consider `start`/`build` scripts
-- Report type-only imports in `dependencies` (should be `devDependencies`)
-
-### 1.5 Duplication: Cross-File Clone Families
-
-Extend `fallow dupes` beyond pairwise detection:
-- **Clone families**: Group all instances of the same duplicated code across the project, not just pairs
-- **Refactoring suggestions**: "These 4 clones could be extracted to a shared function in `utils/`"
-- **Duplication trends with baseline**: `fallow dupes --baseline` to track duplication growth over time, mirroring the dead code baseline feature
-- **Ignore patterns for dupes**: `ignore_dupes = ["**/*.test.ts", "**/*.stories.ts"]` — test files often have legitimate boilerplate
-
-### 1.6 Large-Scale Benchmarks
+### 1.2 Large-Scale Benchmarks
 
 Add benchmarks on 1,000+ and 5,000+ file projects for both `check` and `dupes`. Show warm cache vs cold. Publish methodology, hardware specs, and memory usage. The current 3-project, 174-286 file suite doesn't substantiate claims for real adoption.
 
@@ -185,11 +102,10 @@ Community-driven plugin growth instead of writing 80 plugins solo:
 
 ### 2.4 More Plugins (community-prioritized)
 
-Add the most-requested plugins based on GitHub issues, not a waterfall list. Likely priorities:
-- **Frameworks**: SvelteKit, Gatsby, Docusaurus, NestJS
-- **Bundlers**: Rspack/Rsbuild, tsup, unbuild
+Add the most-requested plugins based on GitHub issues, not a waterfall list. Likely remaining priorities:
+- **Frameworks**: SvelteKit, Gatsby
+- **Bundlers**: Rspack/Rsbuild, unbuild
 - **Git hooks**: husky, lint-staged, lefthook
-- **Release**: Changesets, semantic-release
 
 ### 2.5 Compilers for Non-JS File Types
 
@@ -251,16 +167,16 @@ Extend import extraction to `.astro`, `.mdx`, and improve existing `.vue`/`.svel
 - [x] Config parsing for top 10 frameworks with documented accuracy ceiling
 - [x] Rules system with per-issue-type severity
 - [x] Inline suppression comments
-- [ ] Stable config format (`fallow.toml`) with backwards compatibility promise
+- [x] Script parser for package.json binary/config extraction
+- [x] Production mode for CI pipelines
+- [ ] Stable config format with backwards compatibility promise
 - [ ] Stable JSON output schema for CI consumers
 - [ ] GitHub Action published
 - [ ] MCP server published
 - [ ] VS Code extension published
-- [ ] Duplication detection with clone families and baseline tracking
+- [x] Duplication detection with clone families and baseline tracking
 - [ ] Large-scale benchmarks published (1000+ files, warm/cold cache, memory)
 - [ ] Migration guide from knip with worked examples + `fallow migrate` CLI command
-
-Phase 0 items are prerequisites — they ship before Phase 1 starts, so these boxes should already be checked by then.
 
 ---
 
@@ -297,7 +213,7 @@ These are not gated on any release — they should happen continuously:
 
 - **Documentation site**: Move from GitHub wiki to a proper docs site (Starlight, Nextra, or similar)
 - **CHANGELOG**: Maintain a changelog from v0.3 onward
-- **Migration tooling**: `fallow migrate` command that reads knip config and generates `fallow.toml`, plus a written migration guide with worked examples
+- **Migration tooling**: `fallow migrate` command that reads knip config and generates fallow config, plus a written migration guide with worked examples
 - **Communication**: GitHub Discussions for support, feedback, and RFCs
 - **Contributing guide**: Plugin authoring tutorial, "your first PR" guide, issue templates
 - **Compatibility matrix**: For each of the top 20 frameworks, document exactly what fallow detects vs. knip — let users make informed choices
@@ -320,8 +236,8 @@ Fallow should be fast enough to run on every save and every commit — not as a 
 
 | Version | Theme | Key Deliverables |
 |---------|-------|-----------------|
-| **0.2** | Current | 10 issue types, 40 plugins, 4 duplication modes, LSP, CI features |
-| **0.3** | Trust | Config parsing, cross-workspace, rules system, script parser, dupes clone families, large-scale benchmarks |
+| **0.2** | Done | 10 issue types, 40 plugins (15 with deep config parsing), 4 duplication modes, clone families, LSP, CI features, rules system, inline suppression, production mode, script parser |
+| **0.3** | Trust | Cross-workspace resolution, large-scale benchmarks |
 | **0.4** | Reach | GitHub Action, MCP server, plugin authoring guide, more plugins, SFC compilers, dupes semantic improvements |
 | **0.5** | Editor | Incremental analysis, VS Code extension, code lens, trace tooling |
 | **1.0** | Stable | Quality milestone — trustworthy results, stable formats, full docs, migration tooling |
