@@ -539,6 +539,7 @@ dependencies = [
  "tempfile",
  "toml",
  "tracing",
+ "tracing-subscriber",
  "xxhash-rust",
 ]
 

@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use fallow_core::duplicates::detect::CloneDetector;
-use fallow_core::duplicates::normalize::{normalize_and_hash, HashedToken};
+use fallow_core::duplicates::normalize::{HashedToken, normalize_and_hash};
 use fallow_core::duplicates::tokenize::{FileTokens, SourceToken, TokenKind};
 use fallow_core::duplicates::types::DetectionMode;
 use oxc_span::Span;
@@ -267,7 +267,11 @@ fn single_file_internal_repetition() {
 
     // The group should have 2 instances in the same file at non-overlapping positions.
     let group = &report.clone_groups[0];
-    assert_eq!(group.instances.len(), 2, "Should have 2 non-overlapping instances");
+    assert_eq!(
+        group.instances.len(),
+        2,
+        "Should have 2 non-overlapping instances"
+    );
     assert_eq!(group.token_count, 5, "Duplicated block should be 5 tokens");
 
     // Both instances should be in the same file.
@@ -384,7 +388,9 @@ fn many_small_files_with_some_duplicates() {
             shared_hashes.clone()
         } else {
             // Unique content per file.
-            ((i * 1000 + 1)..=(i * 1000 + 20)).map(|v| v as u64).collect()
+            ((i * 1000 + 1)..=(i * 1000 + 20))
+                .map(|v| v as u64)
+                .collect()
         };
 
         data.push((
@@ -676,7 +682,10 @@ fn duplication_report_serializes_to_valid_json() {
 
     // Verify clone_groups array is non-empty.
     let groups = parsed.get("clone_groups").unwrap().as_array().unwrap();
-    assert!(!groups.is_empty(), "Should have clone groups in JSON output");
+    assert!(
+        !groups.is_empty(),
+        "Should have clone groups in JSON output"
+    );
 
     // Verify each group has required fields.
     for group in groups {
