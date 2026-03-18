@@ -121,19 +121,41 @@ pub fn resolve_all_imports(
                 })
                 .collect();
 
-            // Also resolve require() calls
+            // Also resolve require() calls.
+            // Destructured requires → Named imports; others → Namespace (conservative).
             let require_imports: Vec<ResolvedImport> = module
                 .require_calls
                 .iter()
-                .map(|req| ResolvedImport {
-                    info: ImportInfo {
-                        source: req.source.clone(),
-                        imported_name: crate::extract::ImportedName::SideEffect,
-                        local_name: String::new(),
-                        is_type_only: false,
-                        span: req.span,
-                    },
-                    target: resolve_specifier(&resolver, file_path, &req.source, &path_to_id),
+                .flat_map(|req| {
+                    let target = resolve_specifier(&resolver, file_path, &req.source, &path_to_id);
+                    if req.destructured_names.is_empty() {
+                        vec![ResolvedImport {
+                            info: ImportInfo {
+                                source: req.source.clone(),
+                                imported_name: crate::extract::ImportedName::Namespace,
+                                local_name: req.local_name.clone().unwrap_or_default(),
+                                is_type_only: false,
+                                span: req.span,
+                            },
+                            target,
+                        }]
+                    } else {
+                        req.destructured_names
+                            .iter()
+                            .map(|name| ResolvedImport {
+                                info: ImportInfo {
+                                    source: req.source.clone(),
+                                    imported_name: crate::extract::ImportedName::Named(
+                                        name.clone(),
+                                    ),
+                                    local_name: name.clone(),
+                                    is_type_only: false,
+                                    span: req.span,
+                                },
+                                target: target.clone(),
+                            })
+                            .collect()
+                    }
                 })
                 .collect();
 

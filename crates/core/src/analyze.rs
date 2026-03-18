@@ -322,11 +322,8 @@ fn find_unused_exports(
             continue;
         }
 
-        // Check if this file has namespace imports (import * as ns)
-        // If so, all exports are conservatively considered used — O(1) lookup
-        if graph.has_namespace_import(module.file_id) {
-            continue;
-        }
+        // Namespace imports are now handled with member-access narrowing in graph.rs:
+        // only specific accessed members get references populated. No blanket skip needed.
 
         // Svelte files use `export let`/`export const` for component props, which are
         // consumed by the Svelte runtime rather than imported by other modules. Since we

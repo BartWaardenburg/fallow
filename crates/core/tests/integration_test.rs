@@ -527,7 +527,8 @@ fn namespace_import_makes_all_exports_used() {
     let config = create_config(root.clone());
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
 
-    // With import * as utils, all exports should be considered used
+    // With import * as utils, only members accessed via utils.member are used.
+    // In the fixture, only utils.foo is accessed; bar and baz are unused.
     let unused_export_names: Vec<&str> = results
         .unused_exports
         .iter()
@@ -536,15 +537,15 @@ fn namespace_import_makes_all_exports_used() {
 
     assert!(
         !unused_export_names.contains(&"foo"),
-        "foo should be used via namespace import"
+        "foo should be used via utils.foo member access"
     );
     assert!(
-        !unused_export_names.contains(&"bar"),
-        "bar should be used via namespace import"
+        unused_export_names.contains(&"bar"),
+        "bar should be unused (not accessed via utils.bar)"
     );
     assert!(
-        !unused_export_names.contains(&"baz"),
-        "baz should be used via namespace import"
+        unused_export_names.contains(&"baz"),
+        "baz should be unused (not accessed via utils.baz)"
     );
 }
 

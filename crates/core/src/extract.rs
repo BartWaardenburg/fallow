@@ -149,6 +149,9 @@ pub struct RequireCallInfo {
     /// Non-empty means `const { a, b } = require(...)` → Named imports.
     /// Empty means simple `require(...)` or `const x = require(...)` → Namespace.
     pub destructured_names: Vec<String>,
+    /// The local variable name for `const x = require(...)`.
+    /// Used for namespace import narrowing via member access tracking.
+    pub local_name: Option<String>,
 }
 
 /// Parse all files in parallel, extracting imports and exports.
@@ -762,26 +765,41 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             };
             let source = lit.value.to_string();
 
-            if let BindingPattern::ObjectPattern(obj_pat) = &declarator.id {
-                if obj_pat.rest.is_some() {
+            match &declarator.id {
+                BindingPattern::ObjectPattern(obj_pat) => {
+                    if obj_pat.rest.is_some() {
+                        self.require_calls.push(RequireCallInfo {
+                            source,
+                            span: call.span,
+                            destructured_names: Vec::new(),
+                            local_name: None,
+                        });
+                    } else {
+                        let names: Vec<String> = obj_pat
+                            .properties
+                            .iter()
+                            .filter_map(|prop| prop.key.static_name().map(|n| n.to_string()))
+                            .collect();
+                        self.require_calls.push(RequireCallInfo {
+                            source,
+                            span: call.span,
+                            destructured_names: names,
+                            local_name: None,
+                        });
+                    }
+                    self.handled_require_spans.push(call.span);
+                }
+                BindingPattern::BindingIdentifier(id) => {
+                    // `const mod = require('./x')` → Namespace with local_name for narrowing
                     self.require_calls.push(RequireCallInfo {
                         source,
                         span: call.span,
                         destructured_names: Vec::new(),
+                        local_name: Some(id.name.to_string()),
                     });
-                } else {
-                    let names: Vec<String> = obj_pat
-                        .properties
-                        .iter()
-                        .filter_map(|prop| prop.key.static_name().map(|n| n.to_string()))
-                        .collect();
-                    self.require_calls.push(RequireCallInfo {
-                        source,
-                        span: call.span,
-                        destructured_names: names,
-                    });
+                    self.handled_require_spans.push(call.span);
                 }
-                self.handled_require_spans.push(call.span);
+                _ => {}
             }
         }
         walk::walk_variable_declaration(self, decl);
@@ -798,6 +816,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 source: lit.value.to_string(),
                 span: expr.span,
                 destructured_names: Vec::new(),
+                local_name: None,
             });
         }
 
@@ -901,6 +920,22 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             if let Expression::Identifier(obj) = &member.object {
                 if obj.name == "module" && member.property.name == "exports" {
                     self.has_cjs_exports = true;
+                    // Extract exports from `module.exports = { foo, bar }`
+                    if let Expression::ObjectExpression(obj_expr) = &expr.right {
+                        for prop in &obj_expr.properties {
+                            if let oxc_ast::ast::ObjectPropertyKind::ObjectProperty(p) = prop
+                                && let Some(name) = p.key.static_name()
+                            {
+                                self.exports.push(ExportInfo {
+                                    name: ExportName::Named(name.to_string()),
+                                    local_name: None,
+                                    is_type_only: false,
+                                    span: p.span,
+                                    members: vec![],
+                                });
+                            }
+                        }
+                    }
                 }
                 if obj.name == "exports" {
                     self.has_cjs_exports = true;

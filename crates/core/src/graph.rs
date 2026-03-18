@@ -411,15 +411,26 @@ impl ModuleGraph {
                         .unwrap_or_default();
 
                     // Check if the namespace variable is re-exported (export { ns } or export default ns)
-                    let is_re_exported = source_mod
+                    // from a NON-entry-point file. If the importing file IS an entry point,
+                    // the re-export is for external consumption and doesn't prove internal usage.
+                    let is_re_exported_from_non_entry = source_mod
                         .map(|m| {
                             m.exports
                                 .iter()
                                 .any(|e| e.local_name.as_deref() == Some(local_name.as_str()))
                         })
-                        .unwrap_or(false);
+                        .unwrap_or(false)
+                        && !entry_point_ids.contains(&source_id);
 
-                    if accessed_members.is_empty() || is_re_exported {
+                    // For entry point files with no member accesses, the namespace
+                    // is purely re-exported for external use — don't mark all exports
+                    // as used internally. The `export *` path handles individual tracking.
+                    let is_entry_with_no_access =
+                        accessed_members.is_empty() && entry_point_ids.contains(&source_id);
+
+                    if !is_entry_with_no_access
+                        && (accessed_members.is_empty() || is_re_exported_from_non_entry)
+                    {
                         // Can't narrow — mark all exports as referenced (conservative)
                         for export in &mut target_module.exports {
                             if export.references.iter().all(|r| r.from_file != source_id) {
