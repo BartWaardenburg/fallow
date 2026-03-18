@@ -70,7 +70,7 @@ fallow dupes --threshold 5      # Fail CI if duplication exceeds 5%
 
 ## Benchmarks
 
-Measured on real-world open-source projects (median of 5 runs, 2 warmup). fallow v0.1.6 vs knip v5.x.
+Measured on real-world open-source projects (median of 5 runs, 2 warmup). fallow v0.2.0 vs knip v5.x.
 
 | Project | Files | fallow | knip | Speedup |
 |:--------|------:|-------:|-----:|--------:|

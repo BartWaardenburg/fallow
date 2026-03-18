@@ -6,7 +6,7 @@ Fallow is a Rust-native dead code analyzer for JavaScript/TypeScript, 25-50x fas
 
 ---
 
-## Current State (v0.1.6)
+## Current State (v0.2.0)
 
 - **10 issue types**: unused files, exports, types, dependencies, devDeps, enum members, class members, unresolved imports, unlisted deps, duplicate exports
 - **25 framework plugins**: Next.js, Vite, Vitest, Jest, Storybook, Remix, Astro, Nuxt, Angular, Playwright, Prisma, ESLint, TypeScript, Webpack, Tailwind, GraphQL Codegen, React Router, React Native, Expo, Sentry, Drizzle, Knex, MSW, Cypress, PostCSS
