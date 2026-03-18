@@ -45,6 +45,7 @@ jobs:
 
       - name: Store benchmark result
         uses: benchmark-action/github-action-benchmark@v1
+        continue-on-error: ${{ github.event_name == 'pull_request' }}
         with:
           name: Fallow Benchmarks
           tool: 'cargo'

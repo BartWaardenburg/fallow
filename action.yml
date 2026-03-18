@@ -238,7 +238,7 @@ runs:
         # Generate comment body
         COMMENT_BODY="$(jq -r -f /tmp/fallow-summary.jq fallow-results.json)
 
-<!-- fallow-results -->"
+        <!-- fallow-results -->"
 
         # Find existing fallow comment to update (avoids spam on busy PRs)
         COMMENT_ID=$(gh api \
