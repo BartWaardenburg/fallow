@@ -1,6 +1,8 @@
 //! PostCSS plugin.
 //!
 //! Detects PostCSS projects and marks config files as always used.
+//! Parses config to extract plugin dependencies from object keys, require() calls,
+//! and string array forms.
 
 use std::path::Path;
 
@@ -65,6 +67,59 @@ impl Plugin for PostCssPlugin {
                 .push(crate::resolve::extract_package_name(dep));
         }
 
+        // plugins as string array: { plugins: ["autoprefixer", ["postcss-preset-env", {}]] }
+        let plugin_strings =
+            config_parser::extract_config_shallow_strings(source, config_path, "plugins");
+        for plugin in &plugin_strings {
+            result
+                .referenced_dependencies
+                .push(crate::resolve::extract_package_name(plugin));
+        }
+
         result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolve_config_string_array_plugins() {
+        let source = r#"
+            module.exports = {
+                plugins: ["autoprefixer", ["postcss-preset-env", { stage: 3 }]]
+            };
+        "#;
+        let plugin = PostCssPlugin;
+        let result = plugin.resolve_config(
+            std::path::Path::new("postcss.config.js"),
+            source,
+            std::path::Path::new("/project"),
+        );
+        let deps = &result.referenced_dependencies;
+        assert!(deps.contains(&"autoprefixer".to_string()));
+        assert!(deps.contains(&"postcss-preset-env".to_string()));
+    }
+
+    #[test]
+    fn resolve_config_object_and_require() {
+        let source = r#"
+            module.exports = {
+                plugins: {
+                    autoprefixer: {},
+                    tailwindcss: {}
+                }
+            };
+        "#;
+        let plugin = PostCssPlugin;
+        let result = plugin.resolve_config(
+            std::path::Path::new("postcss.config.js"),
+            source,
+            std::path::Path::new("/project"),
+        );
+        let deps = &result.referenced_dependencies;
+        assert!(deps.contains(&"autoprefixer".to_string()));
+        assert!(deps.contains(&"tailwindcss".to_string()));
     }
 }
