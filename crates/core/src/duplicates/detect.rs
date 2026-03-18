@@ -354,33 +354,58 @@ impl CloneDetector {
         });
 
         // Remove groups whose line ranges are fully contained within another
-        // group's line ranges. Check bidirectionally: a group with more tokens
-        // but a narrower line range can still be a subset of a group with fewer
-        // tokens but a wider line range.
-        let mut keep = vec![true; clone_groups.len()];
-        for i in 0..clone_groups.len() {
-            if !keep[i] {
-                continue;
+        // group's line ranges. Uses a per-file interval index to avoid O(g²×m×n).
+        //
+        // Strategy: iterate groups from largest to smallest. For each kept group,
+        // register its (file, start_line, end_line) spans into a spatial index.
+        // Smaller groups are checked against this index in O(instances × log(intervals)).
+
+        // Build file path → index mapping for interval tracking
+        let mut path_to_idx: HashMap<PathBuf, usize> = HashMap::new();
+        let mut next_idx = 0usize;
+        for group in &clone_groups {
+            for inst in &group.instances {
+                path_to_idx.entry(inst.file.clone()).or_insert_with(|| {
+                    let idx = next_idx;
+                    next_idx += 1;
+                    idx
+                });
             }
-            for j in (i + 1)..clone_groups.len() {
-                if !keep[j] {
-                    continue;
+        }
+        let mut file_intervals: Vec<Vec<(usize, usize)>> = vec![Vec::new(); next_idx];
+        let mut kept_groups: Vec<CloneGroup> = Vec::new();
+
+        for group in clone_groups {
+            // Check if ALL instances of this group are contained within existing intervals
+            let all_contained = group.instances.iter().all(|inst| {
+                let fidx = path_to_idx[&inst.file];
+                let intervals = &file_intervals[fidx];
+                let idx = intervals.partition_point(|&(s, _)| s <= inst.start_line);
+                idx > 0 && {
+                    let (s, e) = intervals[idx - 1];
+                    inst.start_line >= s && inst.end_line <= e
                 }
-                if is_subset_group(&clone_groups[j], &clone_groups[i]) {
-                    keep[j] = false;
-                } else if is_subset_group(&clone_groups[i], &clone_groups[j]) {
-                    keep[i] = false;
-                    break;
+            });
+
+            if !all_contained {
+                // Register this group's instances into the spatial index
+                for inst in &group.instances {
+                    let fidx = path_to_idx[&inst.file];
+                    let intervals = &mut file_intervals[fidx];
+                    let idx = intervals.partition_point(|&(s, _)| s < inst.start_line);
+                    if idx > 0 && intervals[idx - 1].1 >= inst.start_line {
+                        if inst.end_line > intervals[idx - 1].1 {
+                            intervals[idx - 1].1 = inst.end_line;
+                        }
+                    } else {
+                        intervals.insert(idx, (inst.start_line, inst.end_line));
+                    }
                 }
+                kept_groups.push(group);
             }
         }
 
-        clone_groups
-            .into_iter()
-            .enumerate()
-            .filter(|(i, _)| keep[*i])
-            .map(|(_, g)| g)
-            .collect()
+        kept_groups
     }
 }
 
@@ -747,16 +772,6 @@ fn build_raw_group(
 // ── Utility functions ──────────────────────────────────────
 
 /// Check if all instances of `smaller` overlap with instances of `larger`.
-fn is_subset_group(smaller: &CloneGroup, larger: &CloneGroup) -> bool {
-    smaller.instances.iter().all(|s_inst| {
-        larger.instances.iter().any(|l_inst| {
-            s_inst.file == l_inst.file
-                && s_inst.start_line >= l_inst.start_line
-                && s_inst.end_line <= l_inst.end_line
-        })
-    })
-}
-
 /// Build a `CloneInstance` using a pre-computed line offset table for fast lookup.
 fn build_clone_instance_fast(
     file: &FileData,

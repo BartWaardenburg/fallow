@@ -11,6 +11,7 @@ pub mod resolve;
 pub mod results;
 
 use std::path::Path;
+use std::time::Instant;
 
 use errors::FallowError;
 use fallow_config::{PackageJson, ResolvedConfig, discover_workspaces};
@@ -19,6 +20,7 @@ use results::AnalysisResults;
 /// Run the full analysis pipeline.
 pub fn analyze(config: &ResolvedConfig) -> Result<AnalysisResults, FallowError> {
     let _span = tracing::info_span!("fallow_analyze").entered();
+    let pipeline_start = Instant::now();
 
     // Warn if node_modules is missing — resolution will be severely degraded
     if !config.root.join("node_modules").is_dir() {
@@ -28,21 +30,25 @@ pub fn analyze(config: &ResolvedConfig) -> Result<AnalysisResults, FallowError> 
     }
 
     // Discover workspaces if in a monorepo
+    let t = Instant::now();
     let workspaces = discover_workspaces(&config.root);
+    let workspaces_ms = t.elapsed().as_secs_f64() * 1000.0;
     if !workspaces.is_empty() {
         tracing::info!(count = workspaces.len(), "workspaces discovered");
     }
 
     // Stage 1: Discover all source files
-    // The root walk already discovers files in nested workspace directories,
-    // so no separate workspace walk is needed.
+    let t = Instant::now();
     let files = discover::discover_files(config);
+    let discover_ms = t.elapsed().as_secs_f64() * 1000.0;
 
     // Stage 1.5: Run plugin system — parse config files, discover dynamic entries
+    let t = Instant::now();
     let plugin_result = run_plugins(config, &files, &workspaces);
+    let plugins_ms = t.elapsed().as_secs_f64() * 1000.0;
 
     // Stage 2: Parse all files in parallel and extract imports/exports
-    // Load cache if available
+    let t = Instant::now();
     let mut cache_store = if config.no_cache {
         None
     } else {
@@ -50,8 +56,10 @@ pub fn analyze(config: &ResolvedConfig) -> Result<AnalysisResults, FallowError> 
     };
 
     let modules = extract::parse_all_files(&files, config, cache_store.as_ref());
+    let parse_ms = t.elapsed().as_secs_f64() * 1000.0;
 
     // Update cache with parsed results
+    let t = Instant::now();
     if !config.no_cache {
         let store = cache_store.get_or_insert_with(cache::CacheStore::new);
         for module in &modules {
@@ -63,33 +71,67 @@ pub fn analyze(config: &ResolvedConfig) -> Result<AnalysisResults, FallowError> 
             tracing::warn!("Failed to save cache: {e}");
         }
     }
+    let cache_ms = t.elapsed().as_secs_f64() * 1000.0;
 
     // Stage 3: Discover entry points (static patterns + plugin-discovered patterns)
+    let t = Instant::now();
     let mut entry_points = discover::discover_entry_points(config, &files);
-    // Also discover workspace entry points
     for ws in &workspaces {
         let ws_entries = discover::discover_workspace_entry_points(&ws.root, config, &files);
         entry_points.extend(ws_entries);
     }
-
-    // Add plugin-discovered entry points and setup files
     let plugin_entries = discover::discover_plugin_entry_points(&plugin_result, config, &files);
     entry_points.extend(plugin_entries);
+    let entry_points_ms = t.elapsed().as_secs_f64() * 1000.0;
 
     // Stage 4: Resolve imports to file IDs
+    let t = Instant::now();
     let resolved = resolve::resolve_all_imports(&modules, config, &files);
+    let resolve_ms = t.elapsed().as_secs_f64() * 1000.0;
 
     // Stage 5: Build module graph
+    let t = Instant::now();
     let graph = graph::ModuleGraph::build(&resolved, &entry_points, &files);
+    let graph_ms = t.elapsed().as_secs_f64() * 1000.0;
 
     // Stage 6: Analyze for dead code (with plugin context and workspace info)
-    Ok(analyze::find_dead_code_full(
-        &graph,
-        config,
-        &resolved,
-        Some(&plugin_result),
-        &workspaces,
-    ))
+    let t = Instant::now();
+    let result =
+        analyze::find_dead_code_full(&graph, config, &resolved, Some(&plugin_result), &workspaces);
+    let analyze_ms = t.elapsed().as_secs_f64() * 1000.0;
+
+    let total_ms = pipeline_start.elapsed().as_secs_f64() * 1000.0;
+
+    tracing::debug!(
+        "\n┌─ Pipeline Profile ─────────────────────────────\n\
+         │  discover files:   {:>8.1}ms  ({} files)\n\
+         │  workspaces:       {:>8.1}ms\n\
+         │  plugins:          {:>8.1}ms\n\
+         │  parse/extract:    {:>8.1}ms  ({} modules)\n\
+         │  cache update:     {:>8.1}ms\n\
+         │  entry points:     {:>8.1}ms  ({} entries)\n\
+         │  resolve imports:  {:>8.1}ms\n\
+         │  build graph:      {:>8.1}ms\n\
+         │  analyze:          {:>8.1}ms\n\
+         │  ────────────────────────────────────────────\n\
+         │  TOTAL:            {:>8.1}ms\n\
+         └─────────────────────────────────────────────────",
+        discover_ms,
+        files.len(),
+        workspaces_ms,
+        plugins_ms,
+        parse_ms,
+        modules.len(),
+        cache_ms,
+        entry_points_ms,
+        entry_points.len(),
+        resolve_ms,
+        graph_ms,
+        analyze_ms,
+        total_ms,
+    );
+
+    Ok(result)
 }
 
 /// Run plugins for root project and all workspace packages.
