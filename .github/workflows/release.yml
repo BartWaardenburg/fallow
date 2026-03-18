@@ -13,6 +13,37 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  publish-crates:
+    name: Publish Rust crates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Publish fallow-config
+        run: cargo publish -p fallow-config || echo "Already published, skipping"
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      - name: Wait for crates.io index
+        run: sleep 30
+
+      - name: Publish fallow-core
+        run: cargo publish -p fallow-core || echo "Already published, skipping"
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      - name: Wait for crates.io index
+        run: sleep 30
+
+      - name: Publish fallow-cli
+        run: cargo publish -p fallow-cli || echo "Already published, skipping"
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
   build:
     name: Build (${{ matrix.target }})
     runs-on: ${{ matrix.os }}

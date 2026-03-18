@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "LSP server for the fallow dead code analyzer"
+publish = false
 
 [[bin]]
 name = "fallow-lsp"
