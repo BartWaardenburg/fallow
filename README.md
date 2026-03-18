@@ -10,7 +10,7 @@
 
 ---
 
-Finds unused files, exports, dependencies, and types — plus duplicated code blocks across your entire codebase. Dead code and duplication increase bundle sizes, slow CI, and make codebases harder to navigate. fallow finds both in seconds, not minutes. 25-40x faster than [knip](https://knip.dev) for dead code analysis, 4-70x faster than [jscpd](https://github.com/kucherenko/jscpd) for duplication detection, with no Node.js runtime dependency.
+Finds unused files, exports, dependencies, and types — plus duplicated code blocks across your entire codebase. Dead code and duplication increase bundle sizes, slow CI, and make codebases harder to navigate. fallow finds both in seconds, not minutes. 12-35x faster than [knip](https://knip.dev) for dead code analysis, 10-500x faster than [jscpd](https://github.com/kucherenko/jscpd) for duplication detection, with no Node.js runtime dependency.
 
 ```bash
 npx fallow check    # Dead code analysis
@@ -52,7 +52,7 @@ cargo install fallow-cli     # Or via cargo
 
 ## Code duplication
 
-`fallow dupes` finds copy-pasted code blocks across your entire codebase — one tool for both dead code and duplication, no separate jscpd/CPD setup needed. 4-70x faster than jscpd on real-world projects.
+`fallow dupes` finds copy-pasted code blocks across your entire codebase — one tool for both dead code and duplication, no separate jscpd/CPD setup needed. 10-500x faster than jscpd on real-world projects.
 
 ```bash
 fallow dupes                    # Default: mild mode
@@ -107,10 +107,10 @@ node bench-dupes.mjs          # Run duplication benchmarks
 
 | | fallow | knip |
 |:--|:-------|:-----|
-| Speed (real-world) | **25-40x faster** | Baseline |
+| Speed (real-world) | **12-35x faster** | Baseline |
 | Dead code detection | 10 issue types | Comparable |
 | Duplication detection | Built-in | Not included |
-| Framework plugins | 23 (AST-based config parsing) | 140+ (pattern-based) |
+| Framework plugins | 40 (AST-based config parsing) | 140+ (pattern-based) |
 | Runtime dependency | None (standalone binary) | Node.js |
 | Config format | TOML | JSON |
 
@@ -120,7 +120,7 @@ knip is a good tool with broader framework coverage. fallow covers the most popu
 
 | | fallow | jscpd |
 |:--|:-------|:------|
-| Speed (real-world) | **4-70x faster** | Baseline |
+| Speed (real-world) | **10-500x faster** | Baseline |
 | Detection modes | 4 (strict, mild, weak, semantic) | 1 (token-based) |
 | Algorithm | Suffix array with LCP | Rabin-Karp rolling hash |
 | Dead code integration | Built-in (`fallow check`) | Not included |
