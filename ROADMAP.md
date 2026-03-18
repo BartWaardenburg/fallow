@@ -91,19 +91,19 @@ The goal: a developer can run `fallow check` on a real project and get results t
 
 Extended `resolve_config` in the Plugin trait for all 10 priority frameworks. Uses Oxc's parser to extract string literals, arrays, object keys, and require() sources from config files — no JS runtime needed.
 
-**Implemented**:
+**Implemented** (all 10 have rich AST-based config parsing):
 - **ESLint**: Legacy `.eslintrc` plugin/extends/parser short-name resolution (e.g., `"react"` → `eslint-plugin-react`), flat config `plugins` object keys, JSON config support
-- **Vite**: `build.rollupOptions.input`, `build.lib.entry` → entry points; `optimizeDeps.include` → deps
-- **Jest**: Already rich — setup files, testMatch, transform, reporters, testEnvironment (pre-existing)
-- **Storybook**: Already good — addons, framework, stories (pre-existing)
+- **Vite**: `build.rollupOptions.input`, `build.lib.entry` → entry points; `optimizeDeps.include/exclude` → deps; `ssr.external`/`ssr.noExternal` → deps
+- **Jest**: `preset`, `setupFiles`, `setupFilesAfterEnv`, `globalSetup`/`globalTeardown` → setup files; `testMatch` → entry patterns; `transform`, `reporters`, `testEnvironment`, `watchPlugins`, `resolver`, `snapshotSerializers`, `testRunner`, `runner` → deps; JSON config support
+- **Storybook**: `addons`, `framework` (string/object), `stories` → patterns; `core.builder` → dep; `typescript.reactDocgen` → dep
 - **Tailwind**: `content` → always-used file globs; `plugins`/`presets` via require() and shallow strings → deps
-- **Webpack**: `entry` → entry points (string/array/object); `plugins` require() → deps
-- **TypeScript**: `extends` → dep or setup file; `compilerOptions.types` → `@types/*` deps; `jsxImportSource` → dep; `references[].path` → setup files; JSON wrapping for tsconfig.json/JSONC parsing
-- **Babel**: Already good — presets and plugins shallow extraction (pre-existing)
+- **Webpack**: `entry` → entry points (string/array/object); `plugins` require() → deps; `externals` → deps; `module.rules` loader extraction (`loader`, `use` string/array/objects, `oneOf` recursion)
+- **TypeScript**: `extends` → dep or setup file (supports TS 5.0+ array extends); `compilerOptions.types` → `@types/*` deps; `jsxImportSource` → dep; `compilerOptions.plugins[].name` → deps; `references[].path` → setup files; JSONC support
+- **Babel**: `presets`/`plugins` with Babel short-name resolution (`"env"` → `"@babel/preset-env"`, `"transform-runtime"` → `"@babel/plugin-transform-runtime"`); `extends` → dep; JSON/`.babelrc` support
 - **Rollup**: `input` → entry points; `external` → deps
-- **PostCSS**: `plugins` object keys → deps; `plugins` require() → deps
+- **PostCSS**: `plugins` object keys → deps; `plugins` require() → deps; `plugins` string array → deps
 
-**New config_parser helpers**: `extract_config_object_keys`, `extract_config_string_or_array`, `extract_config_require_strings`, `find_config_object` JSON/JSONC support via parenthesized expression wrapping.
+**Config parser helpers**: `extract_config_object_keys`, `extract_config_string_or_array`, `extract_config_require_strings`, `find_config_object` JSON/JSONC support via parenthesized expression wrapping.
 
 **Accuracy ceiling**: AST-based extraction covers the majority of real-world configs — static object literals, string arrays, and simple function wrappers like `defineConfig(...)`. Computed values (`getPlugins()`), conditionals (`process.env.NODE_ENV`), and nested config factories (`defineConfig(withSentry(...))`) are out of reach without JS eval.
 

@@ -187,6 +187,7 @@ Supports `--changed-since main` for PR-only analysis, `--baseline` for failing o
 - **Workspace support** — npm, yarn, and pnpm workspaces (including `pnpm-workspace.yaml`)
 - **Script binary analysis** — parses `package.json` scripts to detect CLI tool usage, reducing false positives in unused dependency detection
 - **Dynamic import resolution** — partial resolution of template literals, `import.meta.glob`, and `require.context`
+- **Production mode** — `--production` excludes test/story/dev files, only considers start/build scripts, and reports type-only dependencies that could be devDependencies
 
 ## Inline suppression comments
 

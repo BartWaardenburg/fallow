@@ -47,6 +47,7 @@ fallow check --format json --quiet --changed-since main
 - `--changed-since <ref>` -- only analyze files changed since a git ref
 - `--baseline <path>` -- compare against a saved baseline
 - `--save-baseline <path>` -- save current results as a baseline
+- `--production` -- exclude test/story/dev files, only start/build scripts, report type-only dependencies
 - Issue type filters: `--unused-files`, `--unused-exports`, `--unused-deps`, `--unused-types`, `--unused-enum-members`, `--unused-class-members`, `--unresolved-imports`, `--unlisted-deps`, `--duplicate-exports`
 
 ### `fix`
@@ -74,10 +75,11 @@ fallow list --frameworks --format json --quiet
 
 ### `init`
 
-Create a `fallow.toml` config file in the project root.
+Create a config file in the project root. Defaults to `fallow.jsonc` (JSONC with comments and `$schema` for IDE autocomplete). Use `--toml` for TOML format.
 
 ```bash
-fallow init
+fallow init          # creates fallow.jsonc
+fallow init --toml   # creates fallow.toml
 ```
 
 ### `schema`
@@ -86,6 +88,14 @@ Dump the full CLI interface definition as machine-readable JSON. Use this for ru
 
 ```bash
 fallow schema
+```
+
+### `config-schema`
+
+Print the JSON Schema for fallow configuration files. Pipe to a file for IDE integration.
+
+```bash
+fallow config-schema > schema.json
 ```
 
 ## Output structure
@@ -116,6 +126,12 @@ fallow check --format json --quiet --unused-exports
 fallow check --format json --quiet --changed-since main --fail-on-issues
 ```
 
+### Production-only analysis (skip test/dev files)
+
+```bash
+fallow check --format json --quiet --production
+```
+
 ### Safe auto-fix cycle
 
 ```bash
@@ -140,15 +156,20 @@ fallow schema
 
 ## Configuration
 
-Fallow reads `fallow.toml` from the project root. Run `fallow init` to generate one. Framework presets (Next.js, Vite, Jest, Storybook, etc.) are auto-detected -- no configuration required for most projects.
+Fallow reads config from the project root in priority order: `fallow.jsonc` > `fallow.json` > `fallow.toml` > `.fallow.toml`. Run `fallow init` to generate one. Framework presets (Next.js, Vite, Jest, Storybook, etc.) are auto-detected -- no configuration required for most projects.
 
 ### Rules (per-issue-type severity)
 
-```toml
-[rules]
-unused_files = "error"       # fail CI (exit 1)
-unused_exports = "warn"      # report but don't fail
-unused_types = "off"         # ignore entirely
+```jsonc
+// fallow.jsonc
+{
+  "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
+  "rules": {
+    "unused_files": "error",       // fail CI (exit 1)
+    "unused_exports": "warn",      // report but don't fail
+    "unused_types": "off"          // ignore entirely
+  }
+}
 ```
 
 - `error` (default) -- report and exit 1

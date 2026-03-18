@@ -29,7 +29,8 @@ Key modules in fallow-core:
 - `graph.rs` — Module graph with re-export chain propagation
 - `analyze.rs` — Dead code detection (10 issue types) with inline suppression filtering
 - `scripts.rs` — Shell command parser for package.json scripts: extracts binary names (mapped to package names for dependency usage detection), `--config` args (entry points), and file path args; handles env wrappers, package manager runners, node runners
-- `suppress.rs` — Inline suppression comment parsing (`fallow-ignore-next-line`, `fallow-ignore-file`)
+- `suppress.rs` — Inline suppression comment parsing (`fallow-ignore-next-line`, `fallow-ignore-file`); 11 issue kinds including `code-duplication`
+- `duplicates/families.rs` — Clone family grouping (groups by shared file set) and refactoring suggestion generation (extract function/module)
 - `plugins/` — Plugin system: `Plugin` trait, registry (40 built-in plugins, ~20 with AST-based config parsing); `config_parser.rs` provides Oxc-based helpers for extracting imports, string arrays, object keys, require() sources, and string-or-array values from JS/TS/JSON config files
 - `cache.rs` — Incremental bincode cache with xxh3 hashing
 - `progress.rs` — indicatif progress bars
@@ -57,8 +58,11 @@ cargo run -- fix --dry-run      # Auto-fix preview
 5. Re-export chain resolution through barrel files
 6. Vue/Svelte SFC parsing (regex-based `<script>` block extraction, `lang="ts"` detection)
 7. Dynamic import pattern resolution (template literals, string concat, import.meta.glob, require.context → glob matching against discovered files)
-8. Inline suppression comments (`// fallow-ignore-next-line [issue-type]`, `// fallow-ignore-file [issue-type]`)
+8. Inline suppression comments (`// fallow-ignore-next-line [issue-type]`, `// fallow-ignore-file [issue-type]`) — supports all issue types including `code-duplication`
 9. Script binary analysis (package.json scripts → binary names mapped to packages, `--config` args as entry points, env wrapper/package manager runner handling)
+10. Clone family grouping: groups clone groups sharing the same file set into families with refactoring suggestions (extract function/module)
+11. Duplication baseline support: `--save-baseline` / `--baseline` for incremental CI adoption of duplication thresholds
+12. Production mode (`--production`): excludes test/dev files, only start/build scripts, detects type-only dependencies
 
 ## Framework support (40 plugins)
 
@@ -75,22 +79,70 @@ cargo run -- fix --dry-run      # Auto-fix preview
 **Other**: GraphQL Codegen, MSW
 
 - **Plugins** (`crates/core/src/plugins/`) — Single source of truth for all built-in framework support. Each plugin implements the `Plugin` trait with enablers (package.json detection), static patterns (entry points, always-used files, used exports, tooling dependencies), and optional `resolve_config()` for AST-based config parsing via Oxc.
+- **Rich config parsing** — All top 10 framework plugins have deep `resolve_config()` implementations:
+  - **ESLint**: Legacy plugin/extends/parser short-name resolution, flat config plugin keys, JSON config
+  - **Vite**: rollupOptions.input, lib.entry, optimizeDeps include/exclude, ssr.external/noExternal
+  - **Jest**: preset, setupFiles, globalSetup/Teardown, testMatch, transform, reporters, testEnvironment, watchPlugins, resolver, snapshotSerializers, testRunner, runner, JSON config
+  - **Storybook**: addons, framework (string/object), stories, core.builder, typescript.reactDocgen
+  - **Tailwind**: content globs, plugins (require/strings), presets
+  - **Webpack**: entry (string/array/object), plugins require(), externals, module.rules loader extraction (loader/use/oneOf)
+  - **TypeScript**: extends (string/array TS 5.0+), compilerOptions.types → @types/*, jsxImportSource, compilerOptions.plugins, references[].path, JSONC support
+  - **Babel**: presets/plugins with short-name resolution (e.g. "env" → "@babel/preset-env"), extends, JSON/.babelrc support
+  - **Rollup**: input entries, external deps
+  - **PostCSS**: plugins (object keys, require() calls, string arrays)
 - **Custom framework presets** (`crates/config/src/framework.rs`) — Users can add custom framework definitions via `fallow.toml` for project-specific entry points and rules.
 
 ## CLI features
 
 - `check` — analyze with --format (human/json/sarif/compact), --changed-since, --baseline, --save-baseline, --fail-on-issues, issue type filters (--unused-files, --unused-exports, etc.)
+- `dupes` — find code duplication with clone families, refactoring suggestions, --baseline/--save-baseline, --mode (strict/mild/weak/semantic), --min-tokens, --min-lines, --threshold, --skip-local
 - `watch` — file watcher with debounced re-analysis
 - `fix` — auto-remove unused exports and deps (--dry-run, --format json for structured output)
-- `init` — create fallow.toml (includes commented `[rules]` section)
+- `init` — create fallow.jsonc (default) or fallow.toml (`--toml`), includes `$schema` for IDE autocomplete
 - `list` — show active plugins, entry points, files (--format json for structured output)
 - `schema` — dump CLI interface as machine-readable JSON for agent introspection
+- `config-schema` — print JSON Schema for fallow config files (enables IDE validation)
 
 See `AGENTS.md` for AI agent integration guide.
 
+## Production mode
+
+`--production` flag (or `production = true` in fallow.toml) for CI pipelines that only care about production code:
+
+- **Excludes test/dev files**: `*.test.*`, `*.spec.*`, `*.stories.*`, `__tests__/**`, `__mocks__/**`, etc.
+- **Only start/build scripts**: Only analyzes production-relevant package.json scripts (`start`, `build`, `serve`, `preview`, `prepare` and their pre/post hooks)
+- **Skips unused devDependencies**: Forces `unused_dev_dependencies` severity to `off`
+- **Reports type-only dependencies**: Detects production dependencies only imported via `import type` (should be devDependencies since types are erased at runtime)
+
+## Configuration format
+
+Supports JSONC (default), JSON, and TOML. Config files are searched in priority order:
+`fallow.jsonc` > `fallow.json` > `fallow.toml` > `.fallow.toml`
+
+- JSONC is the default for `fallow init` — matches the Oxc ecosystem (oxlint, oxfmt, Biome)
+- TOML is still fully supported via `fallow init --toml`
+- A `$schema` field in JSON/JSONC enables IDE autocomplete and validation
+- Run `fallow config-schema` to generate the JSON Schema, or reference it from GitHub
+- The `schema.json` file is checked into the repo root
+
 ## Rules system
 
-Per-issue-type severity in `fallow.toml` for incremental CI adoption:
+Per-issue-type severity for incremental CI adoption:
+
+```jsonc
+// fallow.jsonc
+{
+  "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
+  "rules": {
+    "unused_files": "error",       // fail CI (exit 1)
+    "unused_exports": "warn",      // report but don't fail
+    "unused_types": "off",         // ignore entirely
+    "unresolved_imports": "error"
+  }
+}
+```
+
+Or equivalently in TOML:
 
 ```toml
 [rules]
@@ -114,6 +166,8 @@ unresolved_imports = "error"
 - `// fallow-ignore-next-line unused-export` — suppress specific issue type
 - `// fallow-ignore-file` — suppress all issues in a file
 - `// fallow-ignore-file unused-export` — suppress specific issue type file-wide
+- `// fallow-ignore-file code-duplication` — suppress duplication detection for a file
+- `// fallow-ignore-next-line code-duplication` — suppress duplication detection for code on the next line
 
 ## Key design decisions
 
