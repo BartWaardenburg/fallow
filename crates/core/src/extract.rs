@@ -336,6 +336,27 @@ fn parse_source_to_module(
     let mut extractor = ModuleInfoExtractor::new();
     extractor.visit_program(&parser_return.program);
 
+    // If parsing produced very few results relative to source size (likely parse errors
+    // from Flow types or JSX in .js files), retry with JSX/TSX source type as a fallback.
+    let total_extracted =
+        extractor.exports.len() + extractor.imports.len() + extractor.re_exports.len();
+    if total_extracted == 0 && source.len() > 100 && !source_type.is_jsx() {
+        let jsx_type = if source_type.is_typescript() {
+            SourceType::tsx()
+        } else {
+            SourceType::jsx()
+        };
+        let allocator2 = Allocator::default();
+        let retry_return = Parser::new(&allocator2, source, jsx_type).parse();
+        let mut retry_extractor = ModuleInfoExtractor::new();
+        retry_extractor.visit_program(&retry_return.program);
+        let retry_total =
+            retry_extractor.exports.len() + retry_extractor.imports.len() + retry_extractor.re_exports.len();
+        if retry_total > total_extracted {
+            extractor = retry_extractor;
+        }
+    }
+
     ModuleInfo {
         file_id,
         exports: extractor.exports,

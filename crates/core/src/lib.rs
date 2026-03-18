@@ -141,6 +141,12 @@ fn run_plugins(
                     .used_exports
                     .push((format!("{ws_prefix}/{file_pat}"), exports.clone()));
             }
+            // Merge active plugin names (deduplicated)
+            for plugin_name in &ws_result.active_plugins {
+                if !result.active_plugins.contains(plugin_name) {
+                    result.active_plugins.push(plugin_name.clone());
+                }
+            }
             // These don't need prefixing (absolute paths / package names)
             result
                 .referenced_dependencies

@@ -228,6 +228,23 @@ pub fn tokenize_file(path: &Path, source: &str) -> FileTokens {
     let mut extractor = TokenExtractor::new();
     extractor.visit_program(&parser_return.program);
 
+    // If parsing produced very few tokens relative to source size (likely parse errors
+    // from Flow types or JSX in .js files), retry with JSX/TSX source type as a fallback.
+    if extractor.tokens.len() < 5 && source.len() > 100 && !source_type.is_jsx() {
+        let jsx_type = if source_type.is_typescript() {
+            SourceType::tsx()
+        } else {
+            SourceType::jsx()
+        };
+        let allocator2 = Allocator::default();
+        let retry_return = Parser::new(&allocator2, source, jsx_type).parse();
+        let mut retry_extractor = TokenExtractor::new();
+        retry_extractor.visit_program(&retry_return.program);
+        if retry_extractor.tokens.len() > extractor.tokens.len() {
+            extractor = retry_extractor;
+        }
+    }
+
     let line_count = source.lines().count().max(1);
 
     FileTokens {

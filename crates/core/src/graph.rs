@@ -195,24 +195,35 @@ impl ModuleGraph {
                 // Re-exports also create edges
                 for re_export in &resolved.re_exports {
                     if let ResolveResult::InternalModule(target_id) = &re_export.target {
+                        let is_star = re_export.info.imported_name == "*"
+                            && re_export.info.exported_name == "*";
                         let imp_name = if re_export.info.imported_name == "*" {
                             ImportedName::Namespace
                         } else {
                             ImportedName::Named(re_export.info.imported_name.clone())
                         };
-                        // Track namespace re-exports
-                        if matches!(imp_name, ImportedName::Namespace) {
+                        // Track namespace re-exports (but not bare star re-exports,
+                        // which are handled by the re-export chain propagation)
+                        if matches!(imp_name, ImportedName::Namespace) && !is_star {
                             let idx = target_id.0 as usize;
                             if idx < total_capacity {
                                 namespace_imported.insert(idx);
                             }
                         }
+                        // For bare `export * from './x'`, use SideEffect edge so we don't
+                        // conservatively mark all source exports as used. The re-export chain
+                        // propagation will handle individual name tracking.
+                        let (edge_imp_name, edge_local_name) = if is_star {
+                            (ImportedName::SideEffect, String::new())
+                        } else {
+                            (imp_name, re_export.info.exported_name.clone())
+                        };
                         edges_by_target
                             .entry(*target_id)
                             .or_default()
                             .push(ImportedSymbol {
-                                imported_name: imp_name,
-                                local_name: re_export.info.exported_name.clone(),
+                                imported_name: edge_imp_name,
+                                local_name: edge_local_name,
                             });
                     } else if let ResolveResult::NpmPackage(name) = &re_export.target {
                         package_usage.entry(name.clone()).or_default().push(file.id);
@@ -559,48 +570,105 @@ impl ModuleGraph {
                     continue;
                 }
 
-                // Find references to the re-exported name on the barrel module
-                let refs_on_barrel: Vec<SymbolReference> = {
-                    let barrel = &self.modules[barrel_idx];
-                    barrel
+                if exported_name == "*" {
+                    // Star re-export (`export * from './source'`): the barrel has no named
+                    // ExportSymbol entries for the re-exported names. Instead, look at which
+                    // named imports other modules make from this barrel and propagate each
+                    // to the matching export in the source module.
+
+                    // Collect named imports that target the barrel from ALL edges
+                    let barrel_file_id = self.modules[barrel_idx].file_id;
+                    let named_refs: Vec<(String, SymbolReference)> = self
+                        .edges
+                        .iter()
+                        .filter(|edge| edge.target == barrel_file_id)
+                        .flat_map(|edge| {
+                            edge.symbols.iter().filter_map(move |sym| {
+                                if let ImportedName::Named(name) = &sym.imported_name {
+                                    Some((
+                                        name.clone(),
+                                        SymbolReference {
+                                            from_file: edge.source,
+                                            kind: ReferenceKind::NamedImport,
+                                        },
+                                    ))
+                                } else {
+                                    None
+                                }
+                            })
+                        })
+                        .collect();
+
+                    // Also check for references already on barrel exports from
+                    // prior chain propagation (handles multi-level barrel chains)
+                    let barrel_export_refs: Vec<(String, SymbolReference)> = self.modules
+                        [barrel_idx]
                         .exports
                         .iter()
-                        .filter(|e| e.name.to_string() == *exported_name)
-                        .flat_map(|e| e.references.clone())
-                        .collect()
-                };
+                        .flat_map(|e| {
+                            e.references
+                                .iter()
+                                .map(move |r| (e.name.to_string(), r.clone()))
+                        })
+                        .collect();
 
-                if refs_on_barrel.is_empty() {
-                    continue;
-                }
-
-                // Propagate to source module's export
-                let source = &mut self.modules[source_idx];
-                let target_exports: Vec<usize> = if imported_name == "*" {
-                    // Star re-export: all exports in source are candidates
-                    (0..source.exports.len()).collect()
+                    // Propagate each named import to the matching source export
+                    let source = &mut self.modules[source_idx];
+                    for (name, ref_item) in named_refs.iter().chain(barrel_export_refs.iter()) {
+                        let export_name = if name == "default" {
+                            ExportName::Default
+                        } else {
+                            ExportName::Named(name.clone())
+                        };
+                        if let Some(export) = source
+                            .exports
+                            .iter_mut()
+                            .find(|e| e.name == export_name)
+                        && export.references.iter().all(|r| r.from_file != ref_item.from_file)
+                        {
+                            export.references.push(ref_item.clone());
+                            changed = true;
+                        }
+                    }
                 } else {
-                    source
+                    // Named re-export: find references to the exported name on the barrel
+                    let refs_on_barrel: Vec<SymbolReference> = {
+                        let barrel = &self.modules[barrel_idx];
+                        barrel
+                            .exports
+                            .iter()
+                            .filter(|e| e.name.to_string() == *exported_name)
+                            .flat_map(|e| e.references.clone())
+                            .collect()
+                    };
+
+                    if refs_on_barrel.is_empty() {
+                        continue;
+                    }
+
+                    // Propagate to source module's export
+                    let source = &mut self.modules[source_idx];
+                    let target_exports: Vec<usize> = source
                         .exports
                         .iter()
                         .enumerate()
                         .filter(|(_, e)| e.name.to_string() == *imported_name)
                         .map(|(i, _)| i)
-                        .collect()
-                };
+                        .collect();
 
-                for export_idx in target_exports {
-                    existing_refs.clear();
-                    existing_refs.extend(
-                        source.exports[export_idx]
-                            .references
-                            .iter()
-                            .map(|r| r.from_file),
-                    );
-                    for ref_item in &refs_on_barrel {
-                        if !existing_refs.contains(&ref_item.from_file) {
-                            source.exports[export_idx].references.push(ref_item.clone());
-                            changed = true;
+                    for export_idx in target_exports {
+                        existing_refs.clear();
+                        existing_refs.extend(
+                            source.exports[export_idx]
+                                .references
+                                .iter()
+                                .map(|r| r.from_file),
+                        );
+                        for ref_item in &refs_on_barrel {
+                            if !existing_refs.contains(&ref_item.from_file) {
+                                source.exports[export_idx].references.push(ref_item.clone());
+                                changed = true;
+                            }
                         }
                     }
                 }

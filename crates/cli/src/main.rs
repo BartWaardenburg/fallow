@@ -828,17 +828,33 @@ fn run_list(
 
     let show_all = !entry_points && !files && !plugins;
 
-    // Run plugin detection to find active plugins
+    // Run plugin detection to find active plugins (including workspace packages)
     let plugin_result = if plugins || show_all {
+        let disc = fallow_core::discover::discover_files(&config);
+        let file_paths: Vec<std::path::PathBuf> = disc.iter().map(|f| f.path.clone()).collect();
         let registry = fallow_core::plugins::PluginRegistry::new();
+
         let pkg_path = root.join("package.json");
-        if let Ok(pkg) = fallow_config::PackageJson::load(&pkg_path) {
-            let disc = fallow_core::discover::discover_files(&config);
-            let file_paths: Vec<std::path::PathBuf> = disc.iter().map(|f| f.path.clone()).collect();
-            Some(registry.run(&pkg, root, &file_paths))
+        let mut result = if let Ok(pkg) = fallow_config::PackageJson::load(&pkg_path) {
+            registry.run(&pkg, root, &file_paths)
         } else {
-            None
+            fallow_core::plugins::AggregatedPluginResult::default()
+        };
+
+        // Also run plugins for workspace packages
+        let workspaces = fallow_config::discover_workspaces(root);
+        for ws in &workspaces {
+            let ws_pkg_path = ws.root.join("package.json");
+            if let Ok(ws_pkg) = fallow_config::PackageJson::load(&ws_pkg_path) {
+                let ws_result = registry.run(&ws_pkg, &ws.root, &file_paths);
+                for plugin_name in &ws_result.active_plugins {
+                    if !result.active_plugins.contains(plugin_name) {
+                        result.active_plugins.push(plugin_name.clone());
+                    }
+                }
+            }
         }
+        Some(result)
     } else {
         None
     };
@@ -883,7 +899,20 @@ fn run_list(
             if (entry_points || show_all)
                 && let Some(ref disc) = discovered
             {
-                let entries = fallow_core::discover::discover_entry_points(&config, disc);
+                let mut entries = fallow_core::discover::discover_entry_points(&config, disc);
+                // Add workspace entry points
+                let workspaces = fallow_config::discover_workspaces(root);
+                for ws in &workspaces {
+                    let ws_entries =
+                        fallow_core::discover::discover_workspace_entry_points(&ws.root, &config, disc);
+                    entries.extend(ws_entries);
+                }
+                // Add plugin-discovered entry points
+                if let Some(ref pr) = plugin_result {
+                    let plugin_entries =
+                        fallow_core::discover::discover_plugin_entry_points(pr, &config, disc);
+                    entries.extend(plugin_entries);
+                }
                 let eps: Vec<serde_json::Value> = entries
                     .iter()
                     .map(|ep| {
@@ -939,7 +968,20 @@ fn run_list(
             if (entry_points || show_all)
                 && let Some(ref disc) = discovered
             {
-                let entries = fallow_core::discover::discover_entry_points(&config, disc);
+                let mut entries = fallow_core::discover::discover_entry_points(&config, disc);
+                // Add workspace entry points
+                let workspaces = fallow_config::discover_workspaces(root);
+                for ws in &workspaces {
+                    let ws_entries =
+                        fallow_core::discover::discover_workspace_entry_points(&ws.root, &config, disc);
+                    entries.extend(ws_entries);
+                }
+                // Add plugin-discovered entry points
+                if let Some(ref pr) = plugin_result {
+                    let plugin_entries =
+                        fallow_core::discover::discover_plugin_entry_points(pr, &config, disc);
+                    entries.extend(plugin_entries);
+                }
                 eprintln!("Found {} entry points", entries.len());
                 for ep in &entries {
                     println!("{} ({:?})", ep.path.display(), ep.source);
