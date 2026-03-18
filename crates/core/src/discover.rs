@@ -164,8 +164,8 @@ const DEFAULT_INDEX_PATTERNS: &[&str] = &[
 
 /// Fall back to default index patterns if no entries were found.
 ///
-/// When `ws_filter` is `Some`, only files whose canonical path starts with the given
-/// canonical workspace root are considered (used for workspace-scoped discovery).
+/// When `ws_filter` is `Some`, only files whose path starts with the given
+/// workspace root are considered (used for workspace-scoped discovery).
 fn apply_default_fallback(
     files: &[DiscoveredFile],
     root: &Path,
@@ -178,9 +178,9 @@ fn apply_default_fallback(
 
     let mut entries = Vec::new();
     for file in files {
-        if let Some(canonical_ws) = ws_filter {
-            let canonical_file = file.path.canonicalize().unwrap_or(file.path.clone());
-            if !canonical_file.starts_with(canonical_ws) {
+        // Use strip_prefix instead of canonicalize for workspace filtering
+        if let Some(ws_root) = ws_filter {
+            if file.path.strip_prefix(ws_root).is_err() {
                 continue;
             }
         }
@@ -436,7 +436,7 @@ pub fn discover_workspace_entry_points(
 
         // Apply framework rules to workspace.
         // Check activation against BOTH workspace and root package deps (monorepo hoisting).
-        let canonical_ws = ws_root.canonicalize().unwrap_or(ws_root.to_path_buf());
+        // Use path prefix matching instead of per-file canonicalize (avoids O(files×workspaces) syscalls)
         for rule in &config.framework_rules {
             let ws_active = is_framework_active(rule, &pkg, ws_root);
             let root_active = root_pkg
@@ -450,13 +450,12 @@ pub fn discover_workspace_entry_points(
 
             let (entry_matchers, always_matchers) = compile_rule_matchers(rule);
 
-            // Only consider files within this workspace for framework rule matching
+            // Only consider files within this workspace — use strip_prefix instead of canonicalize
             for file in all_files {
-                let canonical_file = file.path.canonicalize().unwrap_or(file.path.clone());
-                if !canonical_file.starts_with(&canonical_ws) {
-                    continue;
-                }
-                let relative = file.path.strip_prefix(ws_root).unwrap_or(&file.path);
+                let relative = match file.path.strip_prefix(ws_root) {
+                    Ok(rel) => rel,
+                    Err(_) => continue,
+                };
                 let relative_str = relative.to_string_lossy();
                 let matched = entry_matchers
                     .iter()
@@ -478,8 +477,7 @@ pub fn discover_workspace_entry_points(
 
     // Fall back to default index files if no entry points found for this workspace
     if entries.is_empty() {
-        let canonical_ws = ws_root.canonicalize().unwrap_or(ws_root.to_path_buf());
-        entries = apply_default_fallback(all_files, ws_root, Some(&canonical_ws));
+        entries = apply_default_fallback(all_files, ws_root, None);
     }
 
     entries.sort_by(|a, b| a.path.cmp(&b.path));

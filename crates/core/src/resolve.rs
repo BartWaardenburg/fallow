@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use fallow_config::ResolvedConfig;
 use oxc_resolver::{ResolveOptions, Resolver};
@@ -7,6 +8,31 @@ use rayon::prelude::*;
 
 use crate::discover::{DiscoveredFile, FileId};
 use crate::extract::{ImportInfo, ModuleInfo, ReExportInfo};
+
+/// Thread-safe cache for bare specifier resolutions.
+/// Bare specifiers (like `react`, `lodash/merge`) resolve to the same target
+/// regardless of which file imports them (modulo nested node_modules, which is rare).
+struct BareSpecifierCache {
+    cache: Mutex<HashMap<String, ResolveResult>>,
+}
+
+impl BareSpecifierCache {
+    fn new() -> Self {
+        Self {
+            cache: Mutex::new(HashMap::new()),
+        }
+    }
+
+    fn get(&self, specifier: &str) -> Option<ResolveResult> {
+        self.cache.lock().ok()?.get(specifier).cloned()
+    }
+
+    fn insert(&self, specifier: String, result: ResolveResult) {
+        if let Ok(mut cache) = self.cache.lock() {
+            cache.insert(specifier, result);
+        }
+    }
+}
 
 /// Result of resolving an import specifier.
 #[derive(Debug, Clone)]
@@ -56,22 +82,31 @@ pub fn resolve_all_imports(
     config: &ResolvedConfig,
     files: &[DiscoveredFile],
 ) -> Vec<ResolvedModule> {
-    // Build path -> FileId index (canonicalize once here)
-    let path_to_id: HashMap<PathBuf, FileId> = files
+    // Pre-compute canonical paths ONCE for all files (avoiding repeated syscalls)
+    let canonical_paths: Vec<PathBuf> = files
         .iter()
-        .filter_map(|f| {
-            f.path
-                .canonicalize()
-                .ok()
-                .map(|canonical| (canonical, f.id))
-        })
+        .map(|f| f.path.canonicalize().unwrap_or_else(|_| f.path.clone()))
         .collect();
 
-    let file_id_to_path: HashMap<FileId, PathBuf> =
-        files.iter().map(|f| (f.id, f.path.clone())).collect();
+    // Build path -> FileId index using pre-computed canonical paths
+    let path_to_id: HashMap<&Path, FileId> = canonical_paths
+        .iter()
+        .enumerate()
+        .map(|(idx, canonical)| (canonical.as_path(), files[idx].id))
+        .collect();
+
+    // Also index by non-canonical path for fallback lookups
+    let raw_path_to_id: HashMap<&Path, FileId> =
+        files.iter().map(|f| (f.path.as_path(), f.id)).collect();
+
+    let file_id_to_path: HashMap<FileId, &Path> =
+        files.iter().map(|f| (f.id, f.path.as_path())).collect();
 
     // Create resolver ONCE and share across threads (oxc_resolver::Resolver is Send + Sync)
     let resolver = create_resolver(config);
+
+    // Cache for bare specifier resolutions (e.g., `react`, `lodash/merge`)
+    let bare_cache = BareSpecifierCache::new();
 
     // Resolve in parallel — shared resolver instance
     modules
@@ -93,7 +128,14 @@ pub fn resolve_all_imports(
                 .iter()
                 .map(|imp| ResolvedImport {
                     info: imp.clone(),
-                    target: resolve_specifier(&resolver, file_path, &imp.source, &path_to_id),
+                    target: resolve_specifier(
+                        &resolver,
+                        file_path,
+                        &imp.source,
+                        &path_to_id,
+                        &raw_path_to_id,
+                        &bare_cache,
+                    ),
                 })
                 .collect();
 
@@ -101,7 +143,14 @@ pub fn resolve_all_imports(
                 .dynamic_imports
                 .iter()
                 .flat_map(|imp| {
-                    let target = resolve_specifier(&resolver, file_path, &imp.source, &path_to_id);
+                    let target = resolve_specifier(
+                        &resolver,
+                        file_path,
+                        &imp.source,
+                        &path_to_id,
+                        &raw_path_to_id,
+                        &bare_cache,
+                    );
                     if !imp.destructured_names.is_empty() {
                         // `const { a, b } = await import('./x')` → Named imports
                         imp.destructured_names
@@ -152,7 +201,14 @@ pub fn resolve_all_imports(
                 .iter()
                 .map(|re| ResolvedReExport {
                     info: re.clone(),
-                    target: resolve_specifier(&resolver, file_path, &re.source, &path_to_id),
+                    target: resolve_specifier(
+                        &resolver,
+                        file_path,
+                        &re.source,
+                        &path_to_id,
+                        &raw_path_to_id,
+                        &bare_cache,
+                    ),
                 })
                 .collect();
 
@@ -162,7 +218,14 @@ pub fn resolve_all_imports(
                 .require_calls
                 .iter()
                 .flat_map(|req| {
-                    let target = resolve_specifier(&resolver, file_path, &req.source, &path_to_id);
+                    let target = resolve_specifier(
+                        &resolver,
+                        file_path,
+                        &req.source,
+                        &path_to_id,
+                        &raw_path_to_id,
+                        &bare_cache,
+                    );
                     if req.destructured_names.is_empty() {
                         vec![ResolvedImport {
                             info: ImportInfo {
@@ -198,13 +261,11 @@ pub fn resolve_all_imports(
             all_imports.extend(require_imports);
 
             // Resolve dynamic import patterns via glob matching against discovered files.
-            // Match using paths relative to the importing file's directory.
-            // Canonicalize to handle symlinks (e.g., /var → /private/var on macOS).
-            let from_dir = file_path
-                .parent()
-                .unwrap_or(file_path)
-                .canonicalize()
-                .unwrap_or_else(|_| file_path.parent().unwrap_or(file_path).to_path_buf());
+            // Use pre-computed canonical paths (no syscalls in inner loop).
+            let from_dir = canonical_paths
+                .get(module.file_id.0 as usize)
+                .and_then(|p| p.parent())
+                .unwrap_or(file_path);
             let resolved_dynamic_patterns: Vec<(
                 crate::extract::DynamicImportPattern,
                 Vec<FileId>,
@@ -216,19 +277,18 @@ pub fn resolve_all_imports(
                     let matcher = globset::Glob::new(&glob_str)
                         .ok()
                         .map(|g| g.compile_matcher())?;
-                    let matched: Vec<FileId> = files
+                    let matched: Vec<FileId> = canonical_paths
                         .iter()
-                        .filter(|f| {
-                            // Compute path relative to the importing file's directory
-                            let canonical = f.path.canonicalize().unwrap_or(f.path.clone());
-                            if let Ok(relative) = canonical.strip_prefix(&from_dir) {
+                        .enumerate()
+                        .filter(|(_idx, canonical)| {
+                            if let Ok(relative) = canonical.strip_prefix(from_dir) {
                                 let rel_str = format!("./{}", relative.to_string_lossy());
                                 matcher.is_match(&rel_str)
                             } else {
                                 false
                             }
                         })
-                        .map(|f| f.id)
+                        .map(|(idx, _)| files[idx].id)
                         .collect();
                     if matched.is_empty() {
                         None
@@ -240,7 +300,7 @@ pub fn resolve_all_imports(
 
             Some(ResolvedModule {
                 file_id: module.file_id,
-                path: file_path.clone(),
+                path: file_path.to_path_buf(),
                 exports: module.exports.clone(),
                 re_exports,
                 resolved_imports: all_imports,
@@ -325,21 +385,36 @@ fn resolve_specifier(
     resolver: &Resolver,
     from_file: &Path,
     specifier: &str,
-    path_to_id: &HashMap<PathBuf, FileId>,
+    path_to_id: &HashMap<&Path, FileId>,
+    raw_path_to_id: &HashMap<&Path, FileId>,
+    bare_cache: &BareSpecifierCache,
 ) -> ResolveResult {
     // URL imports (https://, http://, data:) are valid but can't be resolved locally
     if specifier.contains("://") || specifier.starts_with("data:") {
         return ResolveResult::ExternalFile(PathBuf::from(specifier));
     }
 
+    // Fast path for bare specifiers: check cache first to avoid repeated resolver work
+    let is_bare = is_bare_specifier(specifier);
+    if is_bare {
+        if let Some(cached) = bare_cache.get(specifier) {
+            return cached;
+        }
+    }
+
     let dir = from_file.parent().unwrap_or(from_file);
 
-    match resolver.resolve(dir, specifier) {
+    let result = match resolver.resolve(dir, specifier) {
         Ok(resolved) => {
             let resolved_path = resolved.path();
+            // Try raw path lookup first (avoids canonicalize syscall in most cases)
+            if let Some(&file_id) = raw_path_to_id.get(resolved_path) {
+                return ResolveResult::InternalModule(file_id);
+            }
+            // Fall back to canonical path lookup
             match resolved_path.canonicalize() {
                 Ok(canonical) => {
-                    if let Some(&file_id) = path_to_id.get(&canonical) {
+                    if let Some(&file_id) = path_to_id.get(canonical.as_path()) {
                         ResolveResult::InternalModule(file_id)
                     } else if let Some(pkg_name) =
                         extract_package_name_from_node_modules_path(&canonical)
@@ -361,14 +436,21 @@ fn resolve_specifier(
             }
         }
         Err(_) => {
-            if is_bare_specifier(specifier) {
+            if is_bare {
                 let pkg_name = extract_package_name(specifier);
                 ResolveResult::NpmPackage(pkg_name)
             } else {
                 ResolveResult::Unresolvable(specifier.to_string())
             }
         }
+    };
+
+    // Cache bare specifier results (NpmPackage or failed resolutions) for reuse
+    if is_bare {
+        bare_cache.insert(specifier.to_string(), result.clone());
     }
+
+    result
 }
 
 /// Extract npm package name from a resolved path inside `node_modules`.
