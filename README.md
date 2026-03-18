@@ -1,5 +1,9 @@
 <p align="center">
-  <img src="assets/logo.svg" alt="fallow" width="290"><br>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="assets/logo.svg">
+    <img src="assets/logo.svg" alt="fallow" width="290">
+  </picture><br>
   <strong>Dead code and duplication analyzer for JavaScript and TypeScript, built in Rust.</strong><br><br>
   <a href="https://github.com/fallow-rs/fallow/actions/workflows/ci.yml"><img src="https://github.com/fallow-rs/fallow/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://github.com/fallow-rs/fallow/actions/workflows/coverage.yml"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/fallow-rs/fallow/badges/coverage.json" alt="Coverage"></a>

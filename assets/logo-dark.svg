@@ -8,5 +8,5 @@
     <path fill="#FDFAEF" d="M326.998 609.174C335.499 608.768 346.474 609.103 355.202 609.103L408.529 609.106L454.182 609.181C462.094 609.183 484.06 608.124 489.802 611.53C494.19 614.19 497.253 618.575 498.242 623.609C500.63 635.216 493.438 643.323 482.404 645.531C449.341 646.182 414.663 645.564 381.467 645.607L344.59 645.652C337.186 645.653 323.308 646.852 317.844 642.672C302.962 631.288 308.928 612.14 326.998 609.174Z"/>
   </g>
   <!-- Text vertically centered with icon -->
-  <text x="80" y="32" dominant-baseline="central" font-family="ui-monospace, 'Cascadia Code', 'Fira Code', monospace" font-size="42" font-weight="700" letter-spacing="-1" fill="#1C1B1C">fallow</text>
+  <text x="80" y="32" dominant-baseline="central" font-family="ui-monospace, 'Cascadia Code', 'Fira Code', monospace" font-size="42" font-weight="700" letter-spacing="-1" fill="#FDFAEF">fallow</text>
 </svg>
