@@ -144,7 +144,10 @@ impl ModuleGraph {
                 // Try direct lookup first (fast path)
                 path_to_id.get(&ep.path).copied().or_else(|| {
                     // Fallback: canonicalize entry point and do a direct HashMap lookup
-                    ep.path.canonicalize().ok().and_then(|c| path_to_id.get(&c).copied())
+                    ep.path
+                        .canonicalize()
+                        .ok()
+                        .and_then(|c| path_to_id.get(&c).copied())
                 })
             })
             .collect();

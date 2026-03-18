@@ -686,9 +686,11 @@ fn run_watch(
                         match load_config(root, config_path, output.clone(), no_cache, threads) {
                             Ok(c) => c,
                             Err(_) => {
-                                eprintln!("Warning: failed to reload config, using previous configuration");
+                                eprintln!(
+                                    "Warning: failed to reload config, using previous configuration"
+                                );
                                 continue;
-                            },
+                            }
                         };
                     let start = Instant::now();
                     match fallow_core::analyze(&config) {

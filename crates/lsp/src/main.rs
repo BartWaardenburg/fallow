@@ -105,7 +105,10 @@ impl LanguageServer for FallowLspServer {
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
-        self.documents.write().await.remove(&params.text_document.uri);
+        self.documents
+            .write()
+            .await
+            .remove(&params.text_document.uri);
     }
 
     async fn code_action(&self, params: CodeActionParams) -> Result<Option<CodeActionResponse>> {
