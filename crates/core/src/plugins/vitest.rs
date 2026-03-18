@@ -1,3 +1,9 @@
+//! Vitest test runner plugin.
+//!
+//! Detects Vitest projects and marks test/bench files as entry points.
+//! Parses vitest.config to extract test.include, setupFiles, globalSetup,
+//! and custom test environments as referenced dependencies.
+
 use std::path::Path;
 
 use super::config_parser;
@@ -22,7 +28,7 @@ const ALWAYS_USED: &[&str] = &[
     "vitest.workspace.{ts,js}",
 ];
 
-const TOOLING_DEPS: &[&str] = &[
+const TOOLING_DEPENDENCIES: &[&str] = &[
     "vitest",
     "@vitest/coverage-v8",
     "@vitest/coverage-istanbul",
@@ -52,7 +58,7 @@ impl Plugin for VitestPlugin {
     }
 
     fn tooling_dependencies(&self) -> &'static [&'static str] {
-        TOOLING_DEPS
+        TOOLING_DEPENDENCIES
     }
 
     fn resolve_config(&self, config_path: &Path, source: &str, root: &Path) -> PluginResult {
@@ -104,13 +110,15 @@ impl Plugin for VitestPlugin {
         }
 
         // test.environment → if custom, it's a referenced dependency
+        // Vitest custom environments use the package name `vitest-environment-<name>`
         if let Some(env) =
             config_parser::extract_config_string(source, config_path, &["test", "environment"])
+            && !matches!(env.as_str(), "node" | "jsdom" | "happy-dom")
         {
-            // Built-in environments don't need a dependency
-            if !matches!(env.as_str(), "node" | "jsdom" | "happy-dom") {
-                result.referenced_dependencies.push(env);
-            }
+            result
+                .referenced_dependencies
+                .push(format!("vitest-environment-{env}"));
+            result.referenced_dependencies.push(env);
         }
 
         result

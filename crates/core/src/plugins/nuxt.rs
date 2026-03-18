@@ -1,3 +1,9 @@
+//! Nuxt framework plugin.
+//!
+//! Detects Nuxt projects and marks pages, layouts, middleware, server API,
+//! plugins, composables, and utils as entry points. Recognizes conventional
+//! server API and middleware exports.
+
 use super::Plugin;
 
 pub struct NuxtPlugin;
@@ -23,12 +29,14 @@ const ALWAYS_USED: &[&str] = &[
     "error.vue",
 ];
 
+const TOOLING_DEPENDENCIES: &[&str] = &["nuxt", "@nuxt/devtools", "@nuxt/test-utils"];
+
 const USED_EXPORTS_SERVER_API: &[&str] = &["default", "defineEventHandler"];
 const USED_EXPORTS_MIDDLEWARE: &[&str] = &["default"];
 
 impl Plugin for NuxtPlugin {
     fn name(&self) -> &'static str {
-        "Nuxt"
+        "nuxt"
     }
 
     fn enablers(&self) -> &'static [&'static str] {
@@ -41,6 +49,10 @@ impl Plugin for NuxtPlugin {
 
     fn always_used(&self) -> &'static [&'static str] {
         ALWAYS_USED
+    }
+
+    fn tooling_dependencies(&self) -> &'static [&'static str] {
+        TOOLING_DEPENDENCIES
     }
 
     fn used_exports(&self) -> Vec<(&'static str, &'static [&'static str])> {

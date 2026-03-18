@@ -203,6 +203,9 @@ fn create_resolver(config: &ResolvedConfig) -> Resolver {
         extensions: vec![
             ".ts".into(),
             ".tsx".into(),
+            ".d.ts".into(),
+            ".d.mts".into(),
+            ".d.cts".into(),
             ".mts".into(),
             ".cts".into(),
             ".js".into(),
@@ -267,6 +270,11 @@ fn resolve_specifier(
     specifier: &str,
     path_to_id: &HashMap<PathBuf, FileId>,
 ) -> ResolveResult {
+    // URL imports (https://, http://, data:) are valid but can't be resolved locally
+    if specifier.contains("://") || specifier.starts_with("data:") {
+        return ResolveResult::ExternalFile(PathBuf::from(specifier));
+    }
+
     let dir = from_file.parent().unwrap_or(from_file);
 
     match resolver.resolve(dir, specifier) {
@@ -354,7 +362,10 @@ fn make_glob_from_pattern(pattern: &crate::extract::DynamicImportPattern) -> Str
 
 /// Check if a specifier is a bare specifier (npm package or Node.js imports map entry).
 fn is_bare_specifier(specifier: &str) -> bool {
-    !specifier.starts_with('.') && !specifier.starts_with('/')
+    !specifier.starts_with('.')
+        && !specifier.starts_with('/')
+        && !specifier.contains("://")
+        && !specifier.starts_with("data:")
 }
 
 /// Extract the npm package name from a specifier.

@@ -1,3 +1,8 @@
+//! Drizzle ORM plugin.
+//!
+//! Detects Drizzle projects and marks migration/schema files as entry points.
+//! Parses drizzle.config to extract referenced dependencies.
+
 use std::path::Path;
 
 use super::config_parser;
@@ -17,7 +22,7 @@ const TOOLING_DEPENDENCIES: &[&str] = &["drizzle-orm", "drizzle-kit"];
 
 impl Plugin for DrizzlePlugin {
     fn name(&self) -> &'static str {
-        "Drizzle ORM"
+        "drizzle"
     }
 
     fn enablers(&self) -> &'static [&'static str] {
@@ -44,8 +49,9 @@ impl Plugin for DrizzlePlugin {
         let mut result = PluginResult::default();
 
         let imports = config_parser::extract_imports(source, config_path);
-        for import in imports {
-            result.referenced_dependencies.push(import);
+        for imp in &imports {
+            let dep = crate::resolve::extract_package_name(imp);
+            result.referenced_dependencies.push(dep);
         }
 
         result

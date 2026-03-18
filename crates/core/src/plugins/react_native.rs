@@ -1,3 +1,8 @@
+//! React Native plugin.
+//!
+//! Detects React Native projects and marks app entry points and
+//! Metro/Babel config files as always used.
+
 use super::Plugin;
 
 pub struct ReactNativePlugin;
@@ -28,7 +33,7 @@ const TOOLING_DEPENDENCIES: &[&str] = &[
 
 impl Plugin for ReactNativePlugin {
     fn name(&self) -> &'static str {
-        "React Native"
+        "react-native"
     }
 
     fn enablers(&self) -> &'static [&'static str] {

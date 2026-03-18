@@ -1,3 +1,9 @@
+//! Next.js framework plugin.
+//!
+//! Detects Next.js projects and marks App Router/Pages Router convention files,
+//! middleware, instrumentation, and metadata files as entry points.
+//! Parses next.config to extract pageExtensions and referenced dependencies.
+
 use std::path::Path;
 
 use super::config_parser;
@@ -65,13 +71,14 @@ const CONFIG_PATTERNS: &[&str] = &["next.config.{ts,js,mjs,cjs}"];
 const ALWAYS_USED: &[&str] = &[
     "next.config.{ts,js,mjs,cjs}",
     "next-env.d.ts",
+    "favicon.ico",
     "src/i18n/request.{ts,js}",
     "src/i18n/routing.{ts,js}",
     "i18n/request.{ts,js}",
     "i18n/routing.{ts,js}",
 ];
 
-const TOOLING_DEPS: &[&str] = &[
+const TOOLING_DEPENDENCIES: &[&str] = &[
     "next",
     "@next/font",
     "@next/mdx",
@@ -119,10 +126,6 @@ impl Plugin for NextJsPlugin {
         ENTRY_PATTERNS
     }
 
-    fn production_patterns(&self) -> &'static [&'static str] {
-        ENTRY_PATTERNS
-    }
-
     fn config_patterns(&self) -> &'static [&'static str] {
         CONFIG_PATTERNS
     }
@@ -132,7 +135,7 @@ impl Plugin for NextJsPlugin {
     }
 
     fn tooling_dependencies(&self) -> &'static [&'static str] {
-        TOOLING_DEPS
+        TOOLING_DEPENDENCIES
     }
 
     fn used_exports(&self) -> Vec<(&'static str, &'static [&'static str])> {

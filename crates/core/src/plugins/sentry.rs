@@ -1,3 +1,7 @@
+//! Sentry error tracking plugin.
+//!
+//! Detects Sentry projects and marks client/server/edge config files as always used.
+
 use super::Plugin;
 
 pub struct SentryPlugin;
@@ -27,7 +31,7 @@ const TOOLING_DEPENDENCIES: &[&str] = &[
 
 impl Plugin for SentryPlugin {
     fn name(&self) -> &'static str {
-        "Sentry"
+        "sentry"
     }
 
     fn enablers(&self) -> &'static [&'static str] {

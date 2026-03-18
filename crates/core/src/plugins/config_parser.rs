@@ -18,97 +18,6 @@ use oxc_ast::ast::*;
 use oxc_parser::Parser;
 use oxc_span::SourceType;
 
-/// Parse a JS/TS/JSON source file and return the AST program.
-/// Returns None if parsing fails.
-pub fn parse_config(source: &str, path: &Path) -> Option<ParsedConfig> {
-    let source_type = SourceType::from_path(path).unwrap_or_default();
-    let alloc = Allocator::default();
-    let parsed = Parser::new(&alloc, source, source_type).parse();
-    if parsed.errors.is_empty() || !parsed.program.body.is_empty() {
-        Some(ParsedConfig {
-            source: source.to_string(),
-            path: path.to_path_buf(),
-        })
-    } else {
-        None
-    }
-}
-
-/// A parsed config file ready for value extraction.
-pub struct ParsedConfig {
-    source: String,
-    path: std::path::PathBuf,
-}
-
-impl ParsedConfig {
-    /// Extract all import source specifiers from the config file.
-    /// E.g., `import foo from 'bar'` → `"bar"`.
-    pub fn import_sources(&self) -> Vec<String> {
-        extract_from_source(&self.source, &self.path, |program| {
-            let mut sources = Vec::new();
-            for stmt in &program.body {
-                if let Statement::ImportDeclaration(decl) = stmt {
-                    sources.push(decl.source.value.to_string());
-                }
-            }
-            Some(sources)
-        })
-        .unwrap_or_default()
-    }
-
-    /// Extract string values from a property in the default export object.
-    /// Handles `export default { key: "value" }` and `defineConfig({ key: "value" })`.
-    pub fn get_string_property(&self, key: &str) -> Option<String> {
-        extract_from_source(&self.source, &self.path, |program| {
-            let obj = find_config_object(program)?;
-            get_object_string_property(obj, key)
-        })
-    }
-
-    /// Extract an array of strings from a property in the default export object.
-    /// Handles `export default { key: ["a", "b"] }`.
-    pub fn get_string_array_property(&self, key: &str) -> Vec<String> {
-        extract_from_source(&self.source, &self.path, |program| {
-            let obj = find_config_object(program)?;
-            Some(get_object_string_array_property(obj, key))
-        })
-        .unwrap_or_default()
-    }
-
-    /// Extract string values from a nested property path.
-    /// E.g., `get_nested_string_array(&["test", "include"])` extracts from
-    /// `export default { test: { include: ["**/*.test.ts"] } }`.
-    pub fn get_nested_string_array(&self, path: &[&str]) -> Vec<String> {
-        extract_from_source(&self.source, &self.path, |program| {
-            let obj = find_config_object(program)?;
-            get_nested_string_array_from_object(obj, path)
-        })
-        .unwrap_or_default()
-    }
-
-    /// Extract a nested string property value.
-    pub fn get_nested_string(&self, path: &[&str]) -> Option<String> {
-        extract_from_source(&self.source, &self.path, |program| {
-            let obj = find_config_object(program)?;
-            get_nested_string_from_object(obj, path)
-        })
-    }
-
-    /// Extract all string values from an array/object property, recursively.
-    /// Useful for deeply nested configs like package.json `exports`.
-    pub fn get_all_string_values_from_property(&self, key: &str) -> Vec<String> {
-        extract_from_source(&self.source, &self.path, |program| {
-            let obj = find_config_object(program)?;
-            let mut values = Vec::new();
-            if let Some(prop) = find_property(obj, key) {
-                collect_all_string_values(&prop.value, &mut values);
-            }
-            Some(values)
-        })
-        .unwrap_or_default()
-    }
-}
-
 /// Extract all import source specifiers from JS/TS source code.
 pub fn extract_imports(source: &str, path: &Path) -> Vec<String> {
     extract_from_source(source, path, |program| {
@@ -141,7 +50,11 @@ pub fn extract_config_string(source: &str, path: &Path, prop_path: &[&str]) -> O
 }
 
 /// Extract string values from top-level properties of the default export/module.exports object.
-/// Returns all string literal values found for the given property key.
+/// Returns all string literal values found for the given property key, recursively.
+///
+/// **Warning**: This recurses into nested objects/arrays. For config arrays that contain
+/// tuples like `["pkg-name", { options }]`, use [`extract_config_shallow_strings`] instead
+/// to avoid extracting option values as package names.
 pub fn extract_config_property_strings(source: &str, path: &Path, key: &str) -> Vec<String> {
     extract_from_source(source, path, |program| {
         let obj = find_config_object(program)?;
@@ -150,6 +63,21 @@ pub fn extract_config_property_strings(source: &str, path: &Path, key: &str) -> 
             collect_all_string_values(&prop.value, &mut values);
         }
         Some(values)
+    })
+    .unwrap_or_default()
+}
+
+/// Extract only top-level string values from a property's array.
+///
+/// Unlike [`extract_config_property_strings`], this does NOT recurse into nested
+/// objects or sub-arrays. Useful for config arrays with tuple elements like:
+/// `reporters: ["default", ["jest-junit", { outputDirectory: "reports" }]]`
+/// — only `"default"` and `"jest-junit"` are returned, not `"reports"`.
+pub fn extract_config_shallow_strings(source: &str, path: &Path, key: &str) -> Vec<String> {
+    extract_from_source(source, path, |program| {
+        let obj = find_config_object(program)?;
+        let prop = find_property(obj, key)?;
+        Some(collect_shallow_string_values(&prop.value))
     })
     .unwrap_or_default()
 }
@@ -366,6 +294,42 @@ fn expression_to_string_array(expr: &Expression) -> Vec<String> {
             .collect(),
         _ => vec![],
     }
+}
+
+/// Collect only top-level string values from an expression.
+///
+/// For arrays, extracts direct string elements and the first string element of sub-arrays
+/// (to handle `["pkg-name", { options }]` tuples). Does NOT recurse into objects.
+fn collect_shallow_string_values(expr: &Expression) -> Vec<String> {
+    let mut values = Vec::new();
+    match expr {
+        Expression::StringLiteral(s) => {
+            values.push(s.value.to_string());
+        }
+        Expression::ArrayExpression(arr) => {
+            for el in &arr.elements {
+                if let Some(inner) = el.as_expression() {
+                    match inner {
+                        Expression::StringLiteral(s) => {
+                            values.push(s.value.to_string());
+                        }
+                        // Handle tuples: ["pkg-name", { options }] → extract first string
+                        Expression::ArrayExpression(sub_arr) => {
+                            if let Some(first) = sub_arr.elements.first()
+                                && let Some(first_expr) = first.as_expression()
+                                && let Some(s) = expression_to_string(first_expr)
+                            {
+                                values.push(s);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+    values
 }
 
 /// Recursively collect all string literal values from an expression tree.

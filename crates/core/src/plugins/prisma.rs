@@ -1,3 +1,8 @@
+//! Prisma ORM plugin.
+//!
+//! Detects Prisma projects and marks seed files as entry points
+//! and schema files as always used.
+
 use super::Plugin;
 
 pub struct PrismaPlugin;
@@ -12,7 +17,7 @@ const TOOLING_DEPENDENCIES: &[&str] = &["prisma", "@prisma/client"];
 
 impl Plugin for PrismaPlugin {
     fn name(&self) -> &'static str {
-        "Prisma"
+        "prisma"
     }
 
     fn enablers(&self) -> &'static [&'static str] {

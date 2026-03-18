@@ -22,10 +22,6 @@ pub struct FallowConfig {
     #[serde(default)]
     pub detect: DetectConfig,
 
-    /// Framework presets to activate (auto-detected by default).
-    #[serde(default)]
-    pub frameworks: Option<Vec<String>>,
-
     /// Custom framework definitions.
     #[serde(default)]
     pub framework: Vec<FrameworkPreset>,
@@ -299,8 +295,7 @@ impl FallowConfig {
         let ignore_patterns = ignore_builder.build().unwrap_or_default();
         let cache_dir = root.join(".fallow");
 
-        let framework_rules =
-            crate::framework::resolve_framework_rules(&self.frameworks, &self.framework);
+        let framework_rules = crate::framework::resolve_framework_rules(&self.framework);
 
         ResolvedConfig {
             root,
@@ -409,7 +404,6 @@ ignore_dependencies = ["autoprefixer", "postcss"]
             entry: vec![],
             ignore: vec![],
             detect: DetectConfig::default(),
-            frameworks: None,
             framework: vec![],
             workspaces: None,
             ignore_dependencies: vec![],
@@ -435,7 +429,6 @@ ignore_dependencies = ["autoprefixer", "postcss"]
             entry: vec!["src/**/*.ts".to_string()],
             ignore: vec!["**/*.generated.ts".to_string()],
             detect: DetectConfig::default(),
-            frameworks: None,
             framework: vec![],
             workspaces: None,
             ignore_dependencies: vec![],
@@ -457,7 +450,6 @@ ignore_dependencies = ["autoprefixer", "postcss"]
             entry: vec![],
             ignore: vec![],
             detect: DetectConfig::default(),
-            frameworks: None,
             framework: vec![],
             workspaces: None,
             ignore_dependencies: vec![],

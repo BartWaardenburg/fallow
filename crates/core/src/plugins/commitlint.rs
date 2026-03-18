@@ -1,41 +1,40 @@
-//! Astro framework plugin.
+//! Commitlint plugin.
 //!
-//! Detects Astro projects and marks pages, layouts, content, and middleware
-//! as entry points. Parses astro.config to extract referenced dependencies.
+//! Detects Commitlint projects and marks config files as always used.
+//! Parses config to extract referenced dependencies.
 
 use std::path::Path;
 
 use super::config_parser;
 use super::{Plugin, PluginResult};
 
-pub struct AstroPlugin;
+pub struct CommitlintPlugin;
 
-const ENABLERS: &[&str] = &["astro"];
+const ENABLERS: &[&str] = &["@commitlint/cli"];
 
-const ENTRY_PATTERNS: &[&str] = &[
-    "src/pages/**/*.{astro,ts,tsx,js,jsx,md,mdx}",
-    "src/layouts/**/*.astro",
-    "src/content/**/*.{ts,js,md,mdx}",
-    "src/middleware.{js,ts}",
+const CONFIG_PATTERNS: &[&str] = &[
+    "commitlint.config.{js,cjs,mjs,ts}",
+    ".commitlintrc.{js,cjs}",
 ];
 
-const CONFIG_PATTERNS: &[&str] = &["astro.config.{ts,js,mjs}"];
+const ALWAYS_USED: &[&str] = &[
+    "commitlint.config.{js,cjs,mjs,ts}",
+    ".commitlintrc.{json,yaml,yml,js,cjs}",
+];
 
-const ALWAYS_USED: &[&str] = &["astro.config.{ts,js,mjs}"];
+const TOOLING_DEPENDENCIES: &[&str] = &[
+    "@commitlint/cli",
+    "@commitlint/config-conventional",
+    "@commitlint/config-angular",
+];
 
-const TOOLING_DEPENDENCIES: &[&str] = &["astro", "@astrojs/check", "@astrojs/ts-plugin"];
-
-impl Plugin for AstroPlugin {
+impl Plugin for CommitlintPlugin {
     fn name(&self) -> &'static str {
-        "astro"
+        "commitlint"
     }
 
     fn enablers(&self) -> &'static [&'static str] {
         ENABLERS
-    }
-
-    fn entry_patterns(&self) -> &'static [&'static str] {
-        ENTRY_PATTERNS
     }
 
     fn config_patterns(&self) -> &'static [&'static str] {

@@ -1,3 +1,7 @@
+//! Expo framework plugin.
+//!
+//! Detects Expo projects and marks app entry points and config files.
+
 use super::Plugin;
 
 pub struct ExpoPlugin;
@@ -21,7 +25,7 @@ const TOOLING_DEPENDENCIES: &[&str] = &["expo", "expo-cli", "@expo/webpack-confi
 
 impl Plugin for ExpoPlugin {
     fn name(&self) -> &'static str {
-        "Expo"
+        "expo"
     }
 
     fn enablers(&self) -> &'static [&'static str] {

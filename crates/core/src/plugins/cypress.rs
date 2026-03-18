@@ -1,3 +1,8 @@
+//! Cypress test runner plugin.
+//!
+//! Detects Cypress projects and marks test files and support files as entry points.
+//! Parses cypress.config to extract referenced dependencies.
+
 use std::path::Path;
 
 use super::config_parser;
@@ -8,7 +13,7 @@ pub struct CypressPlugin;
 const ENABLERS: &[&str] = &["cypress"];
 
 const ENTRY_PATTERNS: &[&str] = &[
-    "cypress/**/*.{ts,tsx,js,jsx,cy.ts,cy.tsx,cy.js,cy.jsx}",
+    "cypress/**/*.{ts,tsx,js,jsx}",
     "cypress/support/**/*.{ts,js}",
 ];
 
@@ -20,7 +25,7 @@ const TOOLING_DEPENDENCIES: &[&str] = &["cypress", "@cypress/react", "@cypress/v
 
 impl Plugin for CypressPlugin {
     fn name(&self) -> &'static str {
-        "Cypress"
+        "cypress"
     }
 
     fn enablers(&self) -> &'static [&'static str] {
@@ -47,8 +52,9 @@ impl Plugin for CypressPlugin {
         let mut result = PluginResult::default();
 
         let imports = config_parser::extract_imports(source, config_path);
-        for import in imports {
-            result.referenced_dependencies.push(import);
+        for imp in &imports {
+            let dep = crate::resolve::extract_package_name(imp);
+            result.referenced_dependencies.push(dep);
         }
 
         result

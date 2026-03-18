@@ -145,6 +145,10 @@ pub struct DynamicImportInfo {
 pub struct RequireCallInfo {
     pub source: String,
     pub span: Span,
+    /// Names destructured from the require() result.
+    /// Non-empty means `const { a, b } = require(...)` → Named imports.
+    /// Empty means simple `require(...)` or `const x = require(...)` → Namespace.
+    pub destructured_names: Vec<String>,
 }
 
 /// Parse all files in parallel, extracting imports and exports.
@@ -417,6 +421,8 @@ struct ModuleInfoExtractor {
     member_accesses: Vec<MemberAccess>,
     whole_object_uses: Vec<String>,
     has_cjs_exports: bool,
+    /// Spans of require() calls already handled via destructured require detection.
+    handled_require_spans: Vec<Span>,
 }
 
 impl ModuleInfoExtractor {
@@ -431,6 +437,7 @@ impl ModuleInfoExtractor {
             member_accesses: Vec::new(),
             whole_object_uses: Vec::new(),
             has_cjs_exports: false,
+            handled_require_spans: Vec::new(),
         }
     }
 
@@ -739,15 +746,58 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         walk::walk_import_expression(self, expr);
     }
 
+    fn visit_variable_declaration(&mut self, decl: &VariableDeclaration<'a>) {
+        for declarator in &decl.declarations {
+            let Some(Expression::CallExpression(call)) = &declarator.init else {
+                continue;
+            };
+            let Expression::Identifier(callee) = &call.callee else {
+                continue;
+            };
+            if callee.name != "require" {
+                continue;
+            }
+            let Some(Argument::StringLiteral(lit)) = call.arguments.first() else {
+                continue;
+            };
+            let source = lit.value.to_string();
+
+            if let BindingPattern::ObjectPattern(obj_pat) = &declarator.id {
+                if obj_pat.rest.is_some() {
+                    self.require_calls.push(RequireCallInfo {
+                        source,
+                        span: call.span,
+                        destructured_names: Vec::new(),
+                    });
+                } else {
+                    let names: Vec<String> = obj_pat
+                        .properties
+                        .iter()
+                        .filter_map(|prop| prop.key.static_name().map(|n| n.to_string()))
+                        .collect();
+                    self.require_calls.push(RequireCallInfo {
+                        source,
+                        span: call.span,
+                        destructured_names: names,
+                    });
+                }
+                self.handled_require_spans.push(call.span);
+            }
+        }
+        walk::walk_variable_declaration(self, decl);
+    }
+
     fn visit_call_expression(&mut self, expr: &CallExpression<'a>) {
         // Detect require()
         if let Expression::Identifier(ident) = &expr.callee
             && ident.name == "require"
             && let Some(Argument::StringLiteral(lit)) = expr.arguments.first()
+            && !self.handled_require_spans.contains(&expr.span)
         {
             self.require_calls.push(RequireCallInfo {
                 source: lit.value.to_string(),
                 span: expr.span,
+                destructured_names: Vec::new(),
             });
         }
 

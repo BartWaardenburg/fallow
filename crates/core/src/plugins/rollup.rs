@@ -1,41 +1,39 @@
-//! Astro framework plugin.
+//! Rollup module bundler plugin.
 //!
-//! Detects Astro projects and marks pages, layouts, content, and middleware
-//! as entry points. Parses astro.config to extract referenced dependencies.
+//! Detects Rollup projects and marks config files as always used.
+//! Parses rollup config to extract imports and plugin references as dependencies.
 
 use std::path::Path;
 
 use super::config_parser;
 use super::{Plugin, PluginResult};
 
-pub struct AstroPlugin;
+pub struct RollupPlugin;
 
-const ENABLERS: &[&str] = &["astro"];
+const ENABLERS: &[&str] = &["rollup"];
 
-const ENTRY_PATTERNS: &[&str] = &[
-    "src/pages/**/*.{astro,ts,tsx,js,jsx,md,mdx}",
-    "src/layouts/**/*.astro",
-    "src/content/**/*.{ts,js,md,mdx}",
-    "src/middleware.{js,ts}",
+const CONFIG_PATTERNS: &[&str] = &["rollup.config.{js,ts,mjs,cjs}"];
+
+const ALWAYS_USED: &[&str] = &["rollup.config.{js,ts,mjs,cjs}"];
+
+const TOOLING_DEPENDENCIES: &[&str] = &[
+    "rollup",
+    "@rollup/plugin-node-resolve",
+    "@rollup/plugin-commonjs",
+    "@rollup/plugin-typescript",
+    "@rollup/plugin-babel",
+    "@rollup/plugin-terser",
+    "@rollup/plugin-json",
+    "rollup-plugin-dts",
 ];
 
-const CONFIG_PATTERNS: &[&str] = &["astro.config.{ts,js,mjs}"];
-
-const ALWAYS_USED: &[&str] = &["astro.config.{ts,js,mjs}"];
-
-const TOOLING_DEPENDENCIES: &[&str] = &["astro", "@astrojs/check", "@astrojs/ts-plugin"];
-
-impl Plugin for AstroPlugin {
+impl Plugin for RollupPlugin {
     fn name(&self) -> &'static str {
-        "astro"
+        "rollup"
     }
 
     fn enablers(&self) -> &'static [&'static str] {
         ENABLERS
-    }
-
-    fn entry_patterns(&self) -> &'static [&'static str] {
-        ENTRY_PATTERNS
     }
 
     fn config_patterns(&self) -> &'static [&'static str] {

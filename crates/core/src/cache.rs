@@ -89,6 +89,7 @@ pub struct CachedRequireCall {
     pub source: String,
     pub span_start: u32,
     pub span_end: u32,
+    pub destructured_names: Vec<String>,
 }
 
 #[derive(Debug, Clone, Encode, Decode)]
@@ -275,6 +276,7 @@ pub fn cached_to_module(
         .map(|r| RequireCallInfo {
             source: r.source.clone(),
             span: Span::new(r.span_start, r.span_end),
+            destructured_names: r.destructured_names.clone(),
         })
         .collect();
 
@@ -387,6 +389,7 @@ pub fn module_to_cached(module: &crate::extract::ModuleInfo) -> CachedModule {
                 source: r.source.clone(),
                 span_start: r.span.start,
                 span_end: r.span.end,
+                destructured_names: r.destructured_names.clone(),
             })
             .collect(),
         member_accesses: module.member_accesses.clone(),
@@ -679,6 +682,7 @@ mod tests {
             require_calls: vec![RequireCallInfo {
                 source: "fs".to_string(),
                 span: Span::new(15, 25),
+                destructured_names: Vec::new(),
             }],
             member_accesses: vec![MemberAccess {
                 object: "Status".to_string(),

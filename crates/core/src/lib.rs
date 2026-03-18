@@ -128,11 +128,6 @@ fn run_plugins(
             for pat in &ws_result.entry_patterns {
                 result.entry_patterns.push(format!("{ws_prefix}/{pat}"));
             }
-            for pat in &ws_result.production_patterns {
-                result
-                    .production_patterns
-                    .push(format!("{ws_prefix}/{pat}"));
-            }
             for pat in &ws_result.always_used {
                 result.always_used.push(format!("{ws_prefix}/{pat}"));
             }
@@ -177,7 +172,6 @@ pub(crate) fn default_config(root: &Path) -> ResolvedConfig {
             entry: vec![],
             ignore: vec![],
             detect: fallow_config::DetectConfig::default(),
-            frameworks: None,
             framework: vec![],
             workspaces: None,
             ignore_dependencies: vec![],

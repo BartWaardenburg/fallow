@@ -1,26 +1,27 @@
-//! Mock Service Worker (MSW) plugin.
+//! Ava test runner plugin.
 //!
-//! Detects MSW projects and marks mock handler files as entry points.
+//! Detects Ava projects and marks test files as entry points.
 
 use super::Plugin;
 
-pub struct MswPlugin;
+pub struct AvaPlugin;
 
-const ENABLERS: &[&str] = &["msw"];
+const ENABLERS: &[&str] = &["ava"];
 
 const ENTRY_PATTERNS: &[&str] = &[
-    "mocks/**/*.{ts,tsx,js,jsx}",
-    "src/mocks/**/*.{ts,tsx,js,jsx}",
-    "**/mocks/**/*.{ts,tsx,js,jsx}",
+    "test/**/*.{ts,tsx,js,jsx}",
+    "tests/**/*.{ts,tsx,js,jsx}",
+    "**/*.test.{ts,tsx,js,jsx}",
+    "**/*.spec.{ts,tsx,js,jsx}",
 ];
 
-const ALWAYS_USED: &[&str] = &["public/mockServiceWorker.js"];
+const ALWAYS_USED: &[&str] = &["ava.config.{js,cjs,mjs}"];
 
-const TOOLING_DEPENDENCIES: &[&str] = &["msw", "msw-storybook-addon"];
+const TOOLING_DEPENDENCIES: &[&str] = &["ava", "@ava/typescript"];
 
-impl Plugin for MswPlugin {
+impl Plugin for AvaPlugin {
     fn name(&self) -> &'static str {
-        "msw"
+        "ava"
     }
 
     fn enablers(&self) -> &'static [&'static str] {

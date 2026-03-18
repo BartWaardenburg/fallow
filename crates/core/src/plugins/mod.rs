@@ -13,29 +13,44 @@ pub mod config_parser;
 
 mod angular;
 mod astro;
+mod ava;
+mod babel;
+mod biome;
+mod changesets;
+mod commitlint;
 mod cypress;
+mod docusaurus;
 mod drizzle;
 mod eslint;
 mod expo;
 mod graphql_codegen;
 mod jest;
 mod knex;
+mod mocha;
 mod msw;
+mod nestjs;
 mod nextjs;
 mod nuxt;
+mod nx;
 mod playwright;
 mod postcss;
 mod prisma;
 mod react_native;
 mod react_router;
 mod remix;
+mod rollup;
+mod semantic_release;
 mod sentry;
 mod storybook;
+mod stylelint;
 mod tailwind;
+mod tsup;
+mod turborepo;
 mod typescript;
 mod vite;
 mod vitest;
 mod webpack;
+mod wrangler;
 
 use std::path::{Path, PathBuf};
 
@@ -97,11 +112,6 @@ pub trait Plugin: Send + Sync {
         &[]
     }
 
-    /// Production-only entry patterns (subset of entry_patterns).
-    fn production_patterns(&self) -> &'static [&'static str] {
-        &[]
-    }
-
     /// Glob patterns for config files this plugin can parse.
     fn config_patterns(&self) -> &'static [&'static str] {
         &[]
@@ -142,8 +152,6 @@ pub struct PluginRegistry {
 pub struct AggregatedPluginResult {
     /// All entry point patterns from active plugins.
     pub entry_patterns: Vec<String>,
-    /// All production entry patterns from active plugins.
-    pub production_patterns: Vec<String>,
     /// All config file patterns from active plugins.
     pub config_patterns: Vec<String>,
     /// All always-used file patterns from active plugins.
@@ -166,31 +174,57 @@ impl PluginRegistry {
     /// Create a registry with all built-in plugins.
     pub fn new() -> Self {
         let plugins: Vec<Box<dyn Plugin>> = vec![
+            // Frameworks
             Box::new(nextjs::NextJsPlugin),
-            Box::new(vite::VitePlugin),
-            Box::new(vitest::VitestPlugin),
-            Box::new(jest::JestPlugin),
-            Box::new(storybook::StorybookPlugin),
+            Box::new(nuxt::NuxtPlugin),
             Box::new(remix::RemixPlugin),
             Box::new(astro::AstroPlugin),
-            Box::new(nuxt::NuxtPlugin),
             Box::new(angular::AngularPlugin),
-            Box::new(playwright::PlaywrightPlugin),
-            Box::new(prisma::PrismaPlugin),
-            Box::new(eslint::EslintPlugin),
-            Box::new(typescript::TypeScriptPlugin),
-            Box::new(webpack::WebpackPlugin),
-            Box::new(tailwind::TailwindPlugin),
-            Box::new(postcss::PostCssPlugin),
-            Box::new(graphql_codegen::GraphqlCodegenPlugin),
             Box::new(react_router::ReactRouterPlugin),
             Box::new(react_native::ReactNativePlugin),
             Box::new(expo::ExpoPlugin),
-            Box::new(sentry::SentryPlugin),
+            Box::new(nestjs::NestJsPlugin),
+            Box::new(docusaurus::DocusaurusPlugin),
+            // Bundlers
+            Box::new(vite::VitePlugin),
+            Box::new(webpack::WebpackPlugin),
+            Box::new(rollup::RollupPlugin),
+            Box::new(tsup::TsupPlugin),
+            // Testing
+            Box::new(vitest::VitestPlugin),
+            Box::new(jest::JestPlugin),
+            Box::new(playwright::PlaywrightPlugin),
+            Box::new(cypress::CypressPlugin),
+            Box::new(mocha::MochaPlugin),
+            Box::new(ava::AvaPlugin),
+            Box::new(storybook::StorybookPlugin),
+            // Linting & formatting
+            Box::new(eslint::EslintPlugin),
+            Box::new(biome::BiomePlugin),
+            Box::new(stylelint::StylelintPlugin),
+            // Transpilation & language
+            Box::new(typescript::TypeScriptPlugin),
+            Box::new(babel::BabelPlugin),
+            // CSS
+            Box::new(tailwind::TailwindPlugin),
+            Box::new(postcss::PostCssPlugin),
+            // Database & ORM
+            Box::new(prisma::PrismaPlugin),
             Box::new(drizzle::DrizzlePlugin),
             Box::new(knex::KnexPlugin),
+            // Monorepo
+            Box::new(turborepo::TurborepoPlugin),
+            Box::new(nx::NxPlugin),
+            Box::new(changesets::ChangesetsPlugin),
+            // CI/CD & release
+            Box::new(commitlint::CommitlintPlugin),
+            Box::new(semantic_release::SemanticReleasePlugin),
+            // Deployment
+            Box::new(wrangler::WranglerPlugin),
+            Box::new(sentry::SentryPlugin),
+            // Other tools
+            Box::new(graphql_codegen::GraphqlCodegenPlugin),
             Box::new(msw::MswPlugin),
-            Box::new(cypress::CypressPlugin),
         ];
         Self { plugins }
     }
@@ -231,9 +265,6 @@ impl PluginRegistry {
 
             for pat in plugin.entry_patterns() {
                 result.entry_patterns.push((*pat).to_string());
-            }
-            for pat in plugin.production_patterns() {
-                result.production_patterns.push((*pat).to_string());
             }
             for pat in plugin.config_patterns() {
                 result.config_patterns.push((*pat).to_string());

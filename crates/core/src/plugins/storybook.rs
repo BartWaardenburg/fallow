@@ -1,3 +1,9 @@
+//! Storybook plugin.
+//!
+//! Detects Storybook projects and marks story files and config as entry points.
+//! Parses .storybook/main config to extract addons, framework, and stories
+//! patterns as referenced dependencies and additional entry patterns.
+
 use std::path::Path;
 
 use super::config_parser;
@@ -20,7 +26,7 @@ const ALWAYS_USED: &[&str] = &[
     ".storybook/manager.{ts,tsx,js,jsx}",
 ];
 
-const TOOLING_DEPS: &[&str] = &[
+const TOOLING_DEPENDENCIES: &[&str] = &[
     "storybook",
     "@storybook/react",
     "@storybook/vue3",
@@ -73,7 +79,7 @@ impl Plugin for StorybookPlugin {
     }
 
     fn tooling_dependencies(&self) -> &'static [&'static str] {
-        TOOLING_DEPS
+        TOOLING_DEPENDENCIES
     }
 
     fn resolve_config(&self, config_path: &Path, source: &str, _root: &Path) -> PluginResult {
@@ -86,8 +92,8 @@ impl Plugin for StorybookPlugin {
             result.referenced_dependencies.push(dep);
         }
 
-        // addons → referenced dependencies
-        let addons = config_parser::extract_config_property_strings(source, config_path, "addons");
+        // addons → referenced dependencies (shallow to avoid options objects)
+        let addons = config_parser::extract_config_shallow_strings(source, config_path, "addons");
         for addon in &addons {
             let dep = crate::resolve::extract_package_name(addon);
             result.referenced_dependencies.push(dep);

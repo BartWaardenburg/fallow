@@ -1,3 +1,9 @@
+//! ESLint plugin.
+//!
+//! Detects ESLint projects and marks config files as always used.
+//! Parses ESLint config to extract plugin/config imports as referenced dependencies.
+//! Also covers Prettier and lint-staged config files.
+
 use std::path::Path;
 
 use super::config_parser;
@@ -21,7 +27,7 @@ const ALWAYS_USED: &[&str] = &[
     "lint-staged.config.{js,mjs,cjs}",
 ];
 
-const TOOLING_DEPS: &[&str] = &[
+const TOOLING_DEPENDENCIES: &[&str] = &[
     "eslint",
     "@eslint/js",
     "@eslint/eslintrc",
@@ -59,7 +65,7 @@ impl Plugin for EslintPlugin {
     }
 
     fn tooling_dependencies(&self) -> &'static [&'static str] {
-        TOOLING_DEPS
+        TOOLING_DEPENDENCIES
     }
 
     fn used_exports(&self) -> Vec<(&'static str, &'static [&'static str])> {

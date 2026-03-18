@@ -138,9 +138,9 @@ enum Command {
         #[arg(long)]
         files: bool,
 
-        /// Show detected frameworks
+        /// Show active plugins
         #[arg(long)]
-        frameworks: bool,
+        plugins: bool,
     },
 
     /// Find code duplication / clones across the project
@@ -413,7 +413,7 @@ fn main() -> ExitCode {
         Command::List {
             entry_points,
             files,
-            frameworks,
+            plugins,
         } => run_list(
             &root,
             &cli.config,
@@ -421,7 +421,7 @@ fn main() -> ExitCode {
             threads,
             entry_points,
             files,
-            frameworks,
+            plugins,
         ),
         Command::Dupes {
             mode,
@@ -819,26 +819,43 @@ fn run_list(
     threads: usize,
     entry_points: bool,
     files: bool,
-    frameworks: bool,
+    plugins: bool,
 ) -> ExitCode {
     let config = match load_config(root, config_path, OutputFormat::Human, true, threads) {
         Ok(c) => c,
         Err(code) => return code,
     };
 
-    let show_all = !entry_points && !files && !frameworks;
+    let show_all = !entry_points && !files && !plugins;
+
+    // Run plugin detection to find active plugins
+    let plugin_result = if plugins || show_all {
+        let registry = fallow_core::plugins::PluginRegistry::new();
+        let pkg_path = root.join("package.json");
+        if let Ok(pkg) = fallow_config::PackageJson::load(&pkg_path) {
+            let disc = fallow_core::discover::discover_files(&config);
+            let file_paths: Vec<std::path::PathBuf> = disc.iter().map(|f| f.path.clone()).collect();
+            Some(registry.run(&pkg, root, &file_paths))
+        } else {
+            None
+        }
+    } else {
+        None
+    };
 
     match output {
         OutputFormat::Json => {
             let mut result = serde_json::Map::new();
 
-            if frameworks || show_all {
-                let fw: Vec<serde_json::Value> = config
-                    .framework_rules
+            if (plugins || show_all)
+                && let Some(ref pr) = plugin_result
+            {
+                let pl: Vec<serde_json::Value> = pr
+                    .active_plugins
                     .iter()
-                    .map(|r| serde_json::json!({ "name": r.name }))
+                    .map(|name| serde_json::json!({ "name": name }))
                     .collect();
-                result.insert("frameworks".to_string(), serde_json::json!(fw));
+                result.insert("plugins".to_string(), serde_json::json!(pl));
             }
 
             // Discover files once if needed by either files or entry_points
@@ -893,10 +910,12 @@ fn run_list(
             }
         }
         _ => {
-            if frameworks || show_all {
-                eprintln!("Detected frameworks:");
-                for rule in &config.framework_rules {
-                    eprintln!("  - {}", rule.name);
+            if (plugins || show_all)
+                && let Some(ref pr) = plugin_result
+            {
+                eprintln!("Active plugins:");
+                for name in &pr.active_plugins {
+                    eprintln!("  - {name}");
                 }
             }
 
@@ -1134,7 +1153,6 @@ fn load_config(
             entry: vec![],
             ignore: vec![],
             detect: fallow_config::DetectConfig::default(),
-            frameworks: None,
             framework: vec![],
             workspaces: None,
             ignore_dependencies: vec![],

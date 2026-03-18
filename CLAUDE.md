@@ -8,7 +8,7 @@ Fallow finds unused files, exports, dependencies, types, enum members, class mem
 
 ```
 crates/
-  config/   — Configuration types, framework presets, package.json parsing, workspace discovery
+  config/   — Configuration types, custom framework presets, package.json parsing, workspace discovery
   core/     — Analysis engine: discovery, parsing, resolution, graph, plugins, caching, progress
   cli/      — CLI binary (check, watch, fix, init, list commands)
   lsp/      — LSP server with diagnostics, code actions
@@ -28,7 +28,7 @@ Key modules in fallow-core:
 - `resolve.rs` — oxc_resolver-based import resolution + glob-based dynamic import pattern resolution
 - `graph.rs` — Module graph with re-export chain propagation
 - `analyze.rs` — Dead code detection (10 issue types)
-- `plugins/` — Plugin system: `Plugin` trait, registry, AST-based config parsing (23 built-in plugins)
+- `plugins/` — Plugin system: `Plugin` trait, registry, AST-based config parsing (40 built-in plugins)
 - `cache.rs` — Incremental bincode cache with xxh3 hashing
 - `progress.rs` — indicatif progress bars
 - `errors.rs` — Error types
@@ -55,13 +55,22 @@ cargo run -- fix --dry-run      # Auto-fix preview
 6. Vue/Svelte SFC parsing (regex-based `<script>` block extraction, `lang="ts"` detection)
 7. Dynamic import pattern resolution (template literals, string concat, import.meta.glob, require.context → glob matching against discovered files)
 
-## Framework support (23 plugins)
+## Framework support (40 plugins)
 
-Next.js, Vite, Vitest, Jest, Storybook, Remix, Astro, Nuxt, Angular, Playwright, Prisma, ESLint, TypeScript, Webpack, Tailwind, GraphQL Codegen, React Router, React Native, Expo, Sentry, Drizzle, Knex, MSW
+**Frameworks**: Next.js, Nuxt, Remix, Astro, Angular, React Router, React Native, Expo, NestJS, Docusaurus
+**Bundlers**: Vite, Webpack, Rollup, Tsup
+**Testing**: Vitest, Jest, Playwright, Cypress, Mocha, Ava, Storybook
+**Linting**: ESLint, Biome, Stylelint, Commitlint
+**Transpilation**: TypeScript, Babel
+**CSS**: Tailwind, PostCSS
+**Database**: Prisma, Drizzle, Knex
+**Monorepo**: Turborepo, Nx, Changesets
+**CI/CD**: semantic-release
+**Deployment**: Wrangler (Cloudflare), Sentry
+**Other**: GraphQL Codegen, MSW
 
-Two complementary systems:
-- **Framework presets** (`crates/config/src/framework.rs`) — Declarative rules for entry points, always-used files, and used exports. Users can add custom presets via `fallow.toml`.
-- **Plugins** (`crates/core/src/plugins/`) — Rust trait-based plugins that add dynamic config file parsing via Oxc AST walking. Each plugin implements the `Plugin` trait with static patterns + `resolve_config()` for parsing tool configs.
+- **Plugins** (`crates/core/src/plugins/`) — Single source of truth for all built-in framework support. Each plugin implements the `Plugin` trait with enablers (package.json detection), static patterns (entry points, always-used files, used exports, tooling dependencies), and optional `resolve_config()` for AST-based config parsing via Oxc.
+- **Custom framework presets** (`crates/config/src/framework.rs`) — Users can add custom framework definitions via `fallow.toml` for project-specific entry points and rules.
 
 ## CLI features
 
@@ -69,7 +78,7 @@ Two complementary systems:
 - `watch` — file watcher with debounced re-analysis
 - `fix` — auto-remove unused exports and deps (--dry-run, --format json for structured output)
 - `init` — create fallow.toml
-- `list` — show frameworks, entry points, files (--format json for structured output)
+- `list` — show active plugins, entry points, files (--format json for structured output)
 - `schema` — dump CLI interface as machine-readable JSON for agent introspection
 
 See `AGENTS.md` for AI agent integration guide.
@@ -77,7 +86,7 @@ See `AGENTS.md` for AI agent integration guide.
 ## Key design decisions
 
 - **No TypeScript compiler dependency**: Syntactic analysis only via Oxc. This is the speed advantage.
-- **Plugin system**: Rust trait-based plugins with AST-based config parsing (no JavaScript evaluation). Static patterns for common cases, dynamic Oxc parsing for tool configs. Knip has 140+ JS plugins; fallow covers 23 with deeper config extraction.
+- **Plugin system**: Single source of truth for framework support. Rust trait-based plugins with AST-based config parsing (no JavaScript evaluation). Static patterns for common cases, dynamic Oxc parsing for tool configs. 40 built-in plugins covering ~99% of the JS/TS ecosystem.
 - **Flat edge storage**: Contiguous `Vec<Edge>` with range indices for cache-friendly traversal.
 - **Re-export chain resolution**: Iterative propagation through barrel files with cycle detection.
 - **Workspace support**: npm/yarn/pnpm workspaces, pnpm-workspace.yaml.

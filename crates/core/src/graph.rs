@@ -391,8 +391,60 @@ impl ModuleGraph {
                     });
                 }
 
-                // Namespace imports mark ALL exports as referenced
-                if matches!(sym.imported_name, ImportedName::Namespace) {
+                // Namespace imports: check if we can narrow to specific member accesses.
+                // `import * as ns from './x'; ns.foo; ns.bar` → only mark foo, bar as used.
+                // If the namespace variable is re-exported (`export { ns }`) or no member
+                // accesses are found, conservatively mark ALL exports as used.
+                if matches!(sym.imported_name, ImportedName::Namespace)
+                    && !sym.local_name.is_empty()
+                {
+                    let local_name = &sym.local_name;
+                    let source_mod = module_by_id.get(&source_id);
+                    let accessed_members: Vec<String> = source_mod
+                        .map(|m| {
+                            m.member_accesses
+                                .iter()
+                                .filter(|ma| ma.object == *local_name)
+                                .map(|ma| ma.member.clone())
+                                .collect()
+                        })
+                        .unwrap_or_default();
+
+                    // Check if the namespace variable is re-exported (export { ns } or export default ns)
+                    let is_re_exported = source_mod
+                        .map(|m| {
+                            m.exports
+                                .iter()
+                                .any(|e| e.local_name.as_deref() == Some(local_name.as_str()))
+                        })
+                        .unwrap_or(false);
+
+                    if accessed_members.is_empty() || is_re_exported {
+                        // Can't narrow — mark all exports as referenced (conservative)
+                        for export in &mut target_module.exports {
+                            if export.references.iter().all(|r| r.from_file != source_id) {
+                                export.references.push(SymbolReference {
+                                    from_file: source_id,
+                                    kind: ReferenceKind::NamespaceImport,
+                                });
+                            }
+                        }
+                    } else {
+                        // Narrow: only mark accessed members as referenced
+                        for export in &mut target_module.exports {
+                            let name_str = export.name.to_string();
+                            if accessed_members.contains(&name_str)
+                                && export.references.iter().all(|r| r.from_file != source_id)
+                            {
+                                export.references.push(SymbolReference {
+                                    from_file: source_id,
+                                    kind: ReferenceKind::NamespaceImport,
+                                });
+                            }
+                        }
+                    }
+                } else if matches!(sym.imported_name, ImportedName::Namespace) {
+                    // No local name available — mark all (conservative)
                     for export in &mut target_module.exports {
                         if export.references.iter().all(|r| r.from_file != source_id) {
                             export.references.push(SymbolReference {

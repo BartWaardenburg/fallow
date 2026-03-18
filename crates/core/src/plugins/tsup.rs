@@ -1,41 +1,30 @@
-//! Astro framework plugin.
+//! Tsup TypeScript library bundler plugin.
 //!
-//! Detects Astro projects and marks pages, layouts, content, and middleware
-//! as entry points. Parses astro.config to extract referenced dependencies.
+//! Detects Tsup projects and marks config files as always used.
+//! Parses tsup config to extract referenced dependencies.
 
 use std::path::Path;
 
 use super::config_parser;
 use super::{Plugin, PluginResult};
 
-pub struct AstroPlugin;
+pub struct TsupPlugin;
 
-const ENABLERS: &[&str] = &["astro"];
+const ENABLERS: &[&str] = &["tsup"];
 
-const ENTRY_PATTERNS: &[&str] = &[
-    "src/pages/**/*.{astro,ts,tsx,js,jsx,md,mdx}",
-    "src/layouts/**/*.astro",
-    "src/content/**/*.{ts,js,md,mdx}",
-    "src/middleware.{js,ts}",
-];
+const CONFIG_PATTERNS: &[&str] = &["tsup.config.{ts,js,cjs,mjs}"];
 
-const CONFIG_PATTERNS: &[&str] = &["astro.config.{ts,js,mjs}"];
+const ALWAYS_USED: &[&str] = &["tsup.config.{ts,js,cjs,mjs}"];
 
-const ALWAYS_USED: &[&str] = &["astro.config.{ts,js,mjs}"];
+const TOOLING_DEPENDENCIES: &[&str] = &["tsup"];
 
-const TOOLING_DEPENDENCIES: &[&str] = &["astro", "@astrojs/check", "@astrojs/ts-plugin"];
-
-impl Plugin for AstroPlugin {
+impl Plugin for TsupPlugin {
     fn name(&self) -> &'static str {
-        "astro"
+        "tsup"
     }
 
     fn enablers(&self) -> &'static [&'static str] {
         ENABLERS
-    }
-
-    fn entry_patterns(&self) -> &'static [&'static str] {
-        ENTRY_PATTERNS
     }
 
     fn config_patterns(&self) -> &'static [&'static str] {
@@ -58,6 +47,10 @@ impl Plugin for AstroPlugin {
             let dep = crate::resolve::extract_package_name(imp);
             result.referenced_dependencies.push(dep);
         }
+
+        // entry → source entry points for the library
+        let entries = config_parser::extract_config_string_array(source, config_path, &["entry"]);
+        result.entry_patterns.extend(entries);
 
         result
     }

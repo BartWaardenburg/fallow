@@ -9,7 +9,6 @@ fn create_test_config(root: std::path::PathBuf) -> fallow_config::ResolvedConfig
         entry: vec![],
         ignore: vec![],
         detect: DetectConfig::default(),
-        frameworks: None,
         framework: vec![],
         workspaces: None,
         ignore_dependencies: vec![],

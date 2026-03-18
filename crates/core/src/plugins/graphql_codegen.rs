@@ -1,3 +1,8 @@
+//! GraphQL Codegen plugin.
+//!
+//! Detects GraphQL Codegen projects and marks config files as always used.
+//! Parses codegen config to extract referenced dependencies.
+
 use std::path::Path;
 
 use super::config_parser;
@@ -7,10 +12,7 @@ pub struct GraphqlCodegenPlugin;
 
 const ENABLERS: &[&str] = &["@graphql-codegen/cli"];
 
-const CONFIG_PATTERNS: &[&str] = &[
-    "codegen.{ts,js,yml,yaml}",
-    "graphql.config.{ts,js,yml,yaml}",
-];
+const CONFIG_PATTERNS: &[&str] = &["codegen.{ts,js}", "graphql.config.{ts,js}"];
 
 const ALWAYS_USED: &[&str] = &[
     "codegen.{ts,js,yml,yaml}",
@@ -26,7 +28,7 @@ const TOOLING_DEPENDENCIES: &[&str] = &[
 
 impl Plugin for GraphqlCodegenPlugin {
     fn name(&self) -> &'static str {
-        "GraphQL Codegen"
+        "graphql-codegen"
     }
 
     fn enablers(&self) -> &'static [&'static str] {
@@ -49,8 +51,9 @@ impl Plugin for GraphqlCodegenPlugin {
         let mut result = PluginResult::default();
 
         let imports = config_parser::extract_imports(source, config_path);
-        for import in imports {
-            result.referenced_dependencies.push(import);
+        for imp in &imports {
+            let dep = crate::resolve::extract_package_name(imp);
+            result.referenced_dependencies.push(dep);
         }
 
         result

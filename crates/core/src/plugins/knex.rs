@@ -1,3 +1,7 @@
+//! Knex.js query builder plugin.
+//!
+//! Detects Knex projects and marks migration and seed files as entry points.
+
 use super::Plugin;
 
 pub struct KnexPlugin;
@@ -12,7 +16,7 @@ const TOOLING_DEPENDENCIES: &[&str] = &["knex"];
 
 impl Plugin for KnexPlugin {
     fn name(&self) -> &'static str {
-        "Knex"
+        "knex"
     }
 
     fn enablers(&self) -> &'static [&'static str] {

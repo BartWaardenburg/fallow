@@ -1,3 +1,7 @@
+//! TypeScript plugin.
+//!
+//! Detects TypeScript projects and marks tsconfig files as always used.
+
 use super::Plugin;
 
 pub struct TypeScriptPlugin;
@@ -10,7 +14,7 @@ const TOOLING_DEPENDENCIES: &[&str] = &["typescript", "ts-node", "tsx", "ts-load
 
 impl Plugin for TypeScriptPlugin {
     fn name(&self) -> &'static str {
-        "TypeScript"
+        "typescript"
     }
 
     fn enablers(&self) -> &'static [&'static str] {

@@ -1,41 +1,40 @@
-//! Astro framework plugin.
+//! Stylelint CSS linter plugin.
 //!
-//! Detects Astro projects and marks pages, layouts, content, and middleware
-//! as entry points. Parses astro.config to extract referenced dependencies.
+//! Detects Stylelint projects and marks config files as always used.
+//! Parses config to extract referenced dependencies.
 
 use std::path::Path;
 
 use super::config_parser;
 use super::{Plugin, PluginResult};
 
-pub struct AstroPlugin;
+pub struct StylelintPlugin;
 
-const ENABLERS: &[&str] = &["astro"];
+const ENABLERS: &[&str] = &["stylelint"];
 
-const ENTRY_PATTERNS: &[&str] = &[
-    "src/pages/**/*.{astro,ts,tsx,js,jsx,md,mdx}",
-    "src/layouts/**/*.astro",
-    "src/content/**/*.{ts,js,md,mdx}",
-    "src/middleware.{js,ts}",
+const CONFIG_PATTERNS: &[&str] = &["stylelint.config.{js,cjs,mjs}", ".stylelintrc.{js,cjs}"];
+
+const ALWAYS_USED: &[&str] = &[
+    "stylelint.config.{js,cjs,mjs}",
+    ".stylelintrc.{json,yaml,yml,js,cjs}",
 ];
 
-const CONFIG_PATTERNS: &[&str] = &["astro.config.{ts,js,mjs}"];
+const TOOLING_DEPENDENCIES: &[&str] = &[
+    "stylelint",
+    "stylelint-config-standard",
+    "stylelint-config-recommended",
+    "stylelint-order",
+    "stylelint-scss",
+    "postcss-scss",
+];
 
-const ALWAYS_USED: &[&str] = &["astro.config.{ts,js,mjs}"];
-
-const TOOLING_DEPENDENCIES: &[&str] = &["astro", "@astrojs/check", "@astrojs/ts-plugin"];
-
-impl Plugin for AstroPlugin {
+impl Plugin for StylelintPlugin {
     fn name(&self) -> &'static str {
-        "astro"
+        "stylelint"
     }
 
     fn enablers(&self) -> &'static [&'static str] {
         ENABLERS
-    }
-
-    fn entry_patterns(&self) -> &'static [&'static str] {
-        ENTRY_PATTERNS
     }
 
     fn config_patterns(&self) -> &'static [&'static str] {

@@ -1,3 +1,8 @@
+//! Angular framework plugin.
+//!
+//! Detects Angular projects and marks component, module, service, guard,
+//! pipe, directive, resolver, and interceptor files as entry points.
+
 use super::Plugin;
 
 pub struct AngularPlugin;
@@ -30,7 +35,7 @@ const TOOLING_DEPENDENCIES: &[&str] = &[
 
 impl Plugin for AngularPlugin {
     fn name(&self) -> &'static str {
-        "Angular"
+        "angular"
     }
 
     fn enablers(&self) -> &'static [&'static str] {
