@@ -142,7 +142,7 @@ Fallow reads `fallow.toml` from the project root. Run `fallow init` to generate 
 
 ## Invariants
 
-- Fallow uses syntactic analysis only (no TypeScript compiler). It may miss dynamic imports or runtime-computed paths.
+- Fallow uses syntactic analysis only (no TypeScript compiler). It partially resolves dynamic imports with static prefixes (template literals, string concatenation, import.meta.glob, require.context) but fully dynamic paths like `import(variable)` are not resolved.
 - Re-export chains through barrel files are resolved. An export re-exported from `index.ts` is not falsely flagged if consumed downstream.
 - Workspace support (npm/yarn/pnpm) is automatic when `workspaces` is defined in the root `package.json` or `pnpm-workspace.yaml` exists.
 - Analysis is deterministic: same input always produces the same output.

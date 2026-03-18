@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::sync::LazyLock;
 
 use fallow_config::ResolvedConfig;
 use oxc_allocator::Allocator;
@@ -20,10 +21,24 @@ pub struct ModuleInfo {
     pub imports: Vec<ImportInfo>,
     pub re_exports: Vec<ReExportInfo>,
     pub dynamic_imports: Vec<DynamicImportInfo>,
+    pub dynamic_import_patterns: Vec<DynamicImportPattern>,
     pub require_calls: Vec<RequireCallInfo>,
     pub member_accesses: Vec<MemberAccess>,
+    /// Identifiers used in "all members consumed" patterns
+    /// (Object.values, Object.keys, Object.entries, for..in, spread, computed dynamic access).
+    pub whole_object_uses: Vec<String>,
     pub has_cjs_exports: bool,
     pub content_hash: u64,
+}
+
+/// A dynamic import with a pattern that can be partially resolved (e.g., template literals).
+#[derive(Debug, Clone)]
+pub struct DynamicImportPattern {
+    /// Static prefix of the import path (e.g., "./locales/"). May contain glob characters.
+    pub prefix: String,
+    /// Static suffix of the import path (e.g., ".json"), if any.
+    pub suffix: Option<String>,
+    pub span: Span,
 }
 
 /// An export declaration.
@@ -203,6 +218,97 @@ pub fn parse_single_file(file: &DiscoveredFile) -> Option<ModuleInfo> {
     ))
 }
 
+/// Regex to extract `<script>` block content from Vue/Svelte SFCs.
+static SCRIPT_BLOCK_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r#"(?is)<script\b(?P<attrs>[^>]*)>(?P<body>[\s\S]*?)</script>"#)
+        .expect("valid regex")
+});
+
+/// Regex to extract the `lang` attribute value from a script tag.
+static LANG_ATTR_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r#"lang\s*=\s*["'](\w+)["']"#).expect("valid regex"));
+
+struct SfcScript {
+    body: String,
+    is_typescript: bool,
+}
+
+fn extract_sfc_scripts(source: &str) -> Vec<SfcScript> {
+    SCRIPT_BLOCK_RE
+        .captures_iter(source)
+        .map(|cap| {
+            let attrs = cap.name("attrs").map(|m| m.as_str()).unwrap_or("");
+            let body = cap
+                .name("body")
+                .map(|m| m.as_str())
+                .unwrap_or("")
+                .to_string();
+            let is_typescript = LANG_ATTR_RE
+                .captures(attrs)
+                .and_then(|c| c.get(1))
+                .map(|m| matches!(m.as_str(), "ts" | "tsx"))
+                .unwrap_or(false);
+            SfcScript {
+                body,
+                is_typescript,
+            }
+        })
+        .collect()
+}
+
+fn is_sfc_file(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|ext| ext == "vue" || ext == "svelte")
+}
+
+/// Parse an SFC file by extracting and combining all `<script>` blocks.
+fn parse_sfc_to_module(file_id: FileId, source: &str, content_hash: u64) -> ModuleInfo {
+    let scripts = extract_sfc_scripts(source);
+
+    let mut combined = ModuleInfo {
+        file_id,
+        exports: Vec::new(),
+        imports: Vec::new(),
+        re_exports: Vec::new(),
+        dynamic_imports: Vec::new(),
+        dynamic_import_patterns: Vec::new(),
+        require_calls: Vec::new(),
+        member_accesses: Vec::new(),
+        whole_object_uses: Vec::new(),
+        has_cjs_exports: false,
+        content_hash,
+    };
+
+    for script in &scripts {
+        let source_type = if script.is_typescript {
+            SourceType::ts()
+        } else {
+            SourceType::mjs()
+        };
+        let allocator = Allocator::default();
+        let parser_return = Parser::new(&allocator, &script.body, source_type).parse();
+        let mut extractor = ModuleInfoExtractor::new();
+        extractor.visit_program(&parser_return.program);
+
+        combined.imports.extend(extractor.imports);
+        combined.exports.extend(extractor.exports);
+        combined.re_exports.extend(extractor.re_exports);
+        combined.dynamic_imports.extend(extractor.dynamic_imports);
+        combined
+            .dynamic_import_patterns
+            .extend(extractor.dynamic_import_patterns);
+        combined.require_calls.extend(extractor.require_calls);
+        combined.member_accesses.extend(extractor.member_accesses);
+        combined
+            .whole_object_uses
+            .extend(extractor.whole_object_uses);
+        combined.has_cjs_exports |= extractor.has_cjs_exports;
+    }
+
+    combined
+}
+
 /// Parse source text into a ModuleInfo.
 fn parse_source_to_module(
     file_id: FileId,
@@ -210,6 +316,10 @@ fn parse_source_to_module(
     source: &str,
     content_hash: u64,
 ) -> ModuleInfo {
+    if is_sfc_file(path) {
+        return parse_sfc_to_module(file_id, source, content_hash);
+    }
+
     let source_type = SourceType::from_path(path).unwrap_or_default();
     let allocator = Allocator::default();
     let parser_return = Parser::new(&allocator, source, source_type).parse();
@@ -224,8 +334,10 @@ fn parse_source_to_module(
         imports: extractor.imports,
         re_exports: extractor.re_exports,
         dynamic_imports: extractor.dynamic_imports,
+        dynamic_import_patterns: extractor.dynamic_import_patterns,
         require_calls: extractor.require_calls,
         member_accesses: extractor.member_accesses,
+        whole_object_uses: extractor.whole_object_uses,
         has_cjs_exports: extractor.has_cjs_exports,
         content_hash,
     }
@@ -299,8 +411,10 @@ struct ModuleInfoExtractor {
     imports: Vec<ImportInfo>,
     re_exports: Vec<ReExportInfo>,
     dynamic_imports: Vec<DynamicImportInfo>,
+    dynamic_import_patterns: Vec<DynamicImportPattern>,
     require_calls: Vec<RequireCallInfo>,
     member_accesses: Vec<MemberAccess>,
+    whole_object_uses: Vec<String>,
     has_cjs_exports: bool,
 }
 
@@ -311,8 +425,10 @@ impl ModuleInfoExtractor {
             imports: Vec::new(),
             re_exports: Vec::new(),
             dynamic_imports: Vec::new(),
+            dynamic_import_patterns: Vec::new(),
             require_calls: Vec::new(),
             member_accesses: Vec::new(),
+            whole_object_uses: Vec::new(),
             has_cjs_exports: false,
         }
     }
@@ -556,12 +672,67 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
     }
 
     fn visit_import_expression(&mut self, expr: &ImportExpression<'a>) {
-        // Detect dynamic import()
-        if let Expression::StringLiteral(lit) = &expr.source {
-            self.dynamic_imports.push(DynamicImportInfo {
-                source: lit.value.to_string(),
-                span: expr.span,
-            });
+        match &expr.source {
+            Expression::StringLiteral(lit) => {
+                self.dynamic_imports.push(DynamicImportInfo {
+                    source: lit.value.to_string(),
+                    span: expr.span,
+                });
+            }
+            Expression::TemplateLiteral(tpl)
+                if !tpl.quasis.is_empty() && !tpl.expressions.is_empty() =>
+            {
+                // Template literal with expressions: extract prefix/suffix.
+                // For multi-expression templates like `./a/${x}/${y}.js` (3 quasis),
+                // use `**/` in the prefix so the glob can match nested directories.
+                let first_quasi = tpl.quasis[0].value.raw.to_string();
+                if first_quasi.starts_with("./") || first_quasi.starts_with("../") {
+                    let prefix = if tpl.expressions.len() > 1 {
+                        // Multiple dynamic segments: use ** to match any nesting depth
+                        format!("{first_quasi}**/")
+                    } else {
+                        first_quasi
+                    };
+                    let suffix = if tpl.quasis.len() > 1 {
+                        let last = &tpl.quasis[tpl.quasis.len() - 1];
+                        let s = last.value.raw.to_string();
+                        if s.is_empty() { None } else { Some(s) }
+                    } else {
+                        None
+                    };
+                    self.dynamic_import_patterns.push(DynamicImportPattern {
+                        prefix,
+                        suffix,
+                        span: expr.span,
+                    });
+                }
+            }
+            Expression::TemplateLiteral(tpl)
+                if !tpl.quasis.is_empty() && tpl.expressions.is_empty() =>
+            {
+                // No-substitution template literal: treat as exact string
+                let value = tpl.quasis[0].value.raw.to_string();
+                if !value.is_empty() {
+                    self.dynamic_imports.push(DynamicImportInfo {
+                        source: value,
+                        span: expr.span,
+                    });
+                }
+            }
+            Expression::BinaryExpression(bin)
+                if bin.operator == oxc_ast::ast::BinaryOperator::Addition =>
+            {
+                if let Some((prefix, suffix)) = extract_concat_parts(bin)
+                    && (prefix.starts_with("./") || prefix.starts_with("../"))
+                {
+                    self.dynamic_import_patterns.push(DynamicImportPattern {
+                        prefix,
+                        suffix,
+                        span: expr.span,
+                    });
+                }
+            }
+            _ => {}
         }
 
         walk::walk_import_expression(self, expr);
@@ -577,6 +748,77 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 source: lit.value.to_string(),
                 span: expr.span,
             });
+        }
+
+        // Detect Object.values(X), Object.keys(X), Object.entries(X) — whole-object use
+        if let Expression::StaticMemberExpression(member) = &expr.callee
+            && let Expression::Identifier(obj) = &member.object
+            && obj.name == "Object"
+            && matches!(member.property.name.as_str(), "values" | "keys" | "entries")
+            && let Some(Argument::Identifier(arg_ident)) = expr.arguments.first()
+        {
+            self.whole_object_uses.push(arg_ident.name.to_string());
+        }
+
+        // Detect import.meta.glob() — Vite pattern
+        if let Expression::StaticMemberExpression(member) = &expr.callee
+            && member.property.name == "glob"
+            && matches!(member.object, Expression::MetaProperty(_))
+            && let Some(first_arg) = expr.arguments.first()
+        {
+            match first_arg {
+                Argument::StringLiteral(lit) => {
+                    let s = lit.value.to_string();
+                    if s.starts_with("./") || s.starts_with("../") {
+                        self.dynamic_import_patterns.push(DynamicImportPattern {
+                            prefix: s,
+                            suffix: None,
+                            span: expr.span,
+                        });
+                    }
+                }
+                Argument::ArrayExpression(arr) => {
+                    for elem in &arr.elements {
+                        if let ArrayExpressionElement::StringLiteral(lit) = elem {
+                            let s = lit.value.to_string();
+                            if s.starts_with("./") || s.starts_with("../") {
+                                self.dynamic_import_patterns.push(DynamicImportPattern {
+                                    prefix: s,
+                                    suffix: None,
+                                    span: expr.span,
+                                });
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        // Detect require.context() — Webpack pattern
+        if let Expression::StaticMemberExpression(member) = &expr.callee
+            && member.property.name == "context"
+            && let Expression::Identifier(obj) = &member.object
+            && obj.name == "require"
+            && let Some(Argument::StringLiteral(dir_lit)) = expr.arguments.first()
+        {
+            let dir = dir_lit.value.to_string();
+            if dir.starts_with("./") || dir.starts_with("../") {
+                let recursive = expr
+                    .arguments
+                    .get(1)
+                    .is_some_and(|arg| matches!(arg, Argument::BooleanLiteral(b) if b.value));
+                let prefix = if recursive {
+                    format!("{dir}/**/")
+                } else {
+                    format!("{dir}/")
+                };
+                self.dynamic_import_patterns.push(DynamicImportPattern {
+                    prefix,
+                    suffix: None,
+                    span: expr.span,
+                });
+            }
         }
 
         walk::walk_call_expression(self, expr);
@@ -648,6 +890,65 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             });
         }
         walk::walk_static_member_expression(self, expr);
+    }
+
+    fn visit_computed_member_expression(&mut self, expr: &ComputedMemberExpression<'a>) {
+        if let Expression::Identifier(obj) = &expr.object {
+            if let Expression::StringLiteral(lit) = &expr.expression {
+                // Computed access with string literal resolves to a specific member
+                self.member_accesses.push(MemberAccess {
+                    object: obj.name.to_string(),
+                    member: lit.value.to_string(),
+                });
+            } else {
+                // Dynamic computed access — mark all members as used
+                self.whole_object_uses.push(obj.name.to_string());
+            }
+        }
+        walk::walk_computed_member_expression(self, expr);
+    }
+
+    fn visit_for_in_statement(&mut self, stmt: &ForInStatement<'a>) {
+        if let Expression::Identifier(ident) = &stmt.right {
+            self.whole_object_uses.push(ident.name.to_string());
+        }
+        walk::walk_for_in_statement(self, stmt);
+    }
+
+    fn visit_spread_element(&mut self, elem: &SpreadElement<'a>) {
+        if let Expression::Identifier(ident) = &elem.argument {
+            self.whole_object_uses.push(ident.name.to_string());
+        }
+        walk::walk_spread_element(self, elem);
+    }
+}
+
+/// Extract static prefix and optional suffix from a binary addition chain.
+fn extract_concat_parts(expr: &BinaryExpression<'_>) -> Option<(String, Option<String>)> {
+    let prefix = extract_leading_string(&expr.left)?;
+    let suffix = extract_trailing_string(&expr.right);
+    Some((prefix, suffix))
+}
+
+fn extract_leading_string(expr: &Expression<'_>) -> Option<String> {
+    match expr {
+        Expression::StringLiteral(lit) => Some(lit.value.to_string()),
+        Expression::BinaryExpression(bin)
+            if bin.operator == oxc_ast::ast::BinaryOperator::Addition =>
+        {
+            extract_leading_string(&bin.left)
+        }
+        _ => None,
+    }
+}
+
+fn extract_trailing_string(expr: &Expression<'_>) -> Option<String> {
+    match expr {
+        Expression::StringLiteral(lit) => {
+            let s = lit.value.to_string();
+            if s.is_empty() { None } else { Some(s) }
+        }
+        _ => None,
     }
 }
 
@@ -984,5 +1285,251 @@ mod tests {
             has_color_red,
             "Should capture Color.Red inside exported function body"
         );
+    }
+
+    // ── Whole-object use detection ──────────────────────────────
+
+    #[test]
+    fn detects_object_values_whole_use() {
+        let info = parse_source("import { Status } from './types';\nObject.values(Status);");
+        assert!(info.whole_object_uses.contains(&"Status".to_string()));
+    }
+
+    #[test]
+    fn detects_object_keys_whole_use() {
+        let info = parse_source("import { Dir } from './types';\nObject.keys(Dir);");
+        assert!(info.whole_object_uses.contains(&"Dir".to_string()));
+    }
+
+    #[test]
+    fn detects_object_entries_whole_use() {
+        let info = parse_source("import { E } from './types';\nObject.entries(E);");
+        assert!(info.whole_object_uses.contains(&"E".to_string()));
+    }
+
+    #[test]
+    fn detects_for_in_whole_use() {
+        let info = parse_source("import { Color } from './types';\nfor (const k in Color) {}");
+        assert!(info.whole_object_uses.contains(&"Color".to_string()));
+    }
+
+    #[test]
+    fn detects_spread_whole_use() {
+        let info = parse_source("import { X } from './types';\nconst y = { ...X };");
+        assert!(info.whole_object_uses.contains(&"X".to_string()));
+    }
+
+    #[test]
+    fn computed_member_string_literal_resolves() {
+        let info = parse_source("import { Status } from './types';\nStatus[\"Active\"];");
+        let has_access = info
+            .member_accesses
+            .iter()
+            .any(|a| a.object == "Status" && a.member == "Active");
+        assert!(
+            has_access,
+            "Status[\"Active\"] should resolve to a static member access"
+        );
+    }
+
+    #[test]
+    fn computed_member_variable_marks_whole_use() {
+        let info = parse_source("import { Status } from './types';\nconst k = 'foo';\nStatus[k];");
+        assert!(info.whole_object_uses.contains(&"Status".to_string()));
+    }
+
+    // ── Dynamic import pattern extraction ───────────────────────
+
+    #[test]
+    fn extracts_template_literal_dynamic_import_pattern() {
+        let info = parse_source("const m = import(`./locales/${lang}.json`);");
+        assert_eq!(info.dynamic_import_patterns.len(), 1);
+        assert_eq!(info.dynamic_import_patterns[0].prefix, "./locales/");
+        assert_eq!(
+            info.dynamic_import_patterns[0].suffix,
+            Some(".json".to_string())
+        );
+    }
+
+    #[test]
+    fn extracts_concat_dynamic_import_pattern() {
+        let info = parse_source("const m = import('./pages/' + name);");
+        assert_eq!(info.dynamic_import_patterns.len(), 1);
+        assert_eq!(info.dynamic_import_patterns[0].prefix, "./pages/");
+        assert!(info.dynamic_import_patterns[0].suffix.is_none());
+    }
+
+    #[test]
+    fn extracts_concat_with_suffix() {
+        let info = parse_source("const m = import('./pages/' + name + '.tsx');");
+        assert_eq!(info.dynamic_import_patterns.len(), 1);
+        assert_eq!(info.dynamic_import_patterns[0].prefix, "./pages/");
+        assert_eq!(
+            info.dynamic_import_patterns[0].suffix,
+            Some(".tsx".to_string())
+        );
+    }
+
+    #[test]
+    fn no_substitution_template_treated_as_exact() {
+        let info = parse_source("const m = import(`./exact-module`);");
+        assert_eq!(info.dynamic_imports.len(), 1);
+        assert_eq!(info.dynamic_imports[0].source, "./exact-module");
+        assert!(info.dynamic_import_patterns.is_empty());
+    }
+
+    #[test]
+    fn fully_dynamic_import_still_ignored() {
+        let info = parse_source("const m = import(variable);");
+        assert!(info.dynamic_imports.is_empty());
+        assert!(info.dynamic_import_patterns.is_empty());
+    }
+
+    #[test]
+    fn non_relative_template_ignored() {
+        let info = parse_source("const m = import(`lodash/${fn}`);");
+        assert!(info.dynamic_import_patterns.is_empty());
+    }
+
+    #[test]
+    fn multi_expression_template_uses_globstar() {
+        // `./plugins/${cat}/${name}.js` has 2 expressions → prefix gets **/
+        let info = parse_source("const m = import(`./plugins/${cat}/${name}.js`);");
+        assert_eq!(info.dynamic_import_patterns.len(), 1);
+        assert_eq!(info.dynamic_import_patterns[0].prefix, "./plugins/**/");
+        assert_eq!(
+            info.dynamic_import_patterns[0].suffix,
+            Some(".js".to_string())
+        );
+    }
+
+    // ── Vue/Svelte SFC parsing ──────────────────────────────────
+
+    fn parse_sfc(source: &str, filename: &str) -> ModuleInfo {
+        parse_source_to_module(FileId(0), Path::new(filename), source, 0)
+    }
+
+    #[test]
+    fn extracts_vue_script_imports() {
+        let info = parse_sfc(
+            r#"
+<script lang="ts">
+import { ref } from 'vue';
+import { helper } from './utils';
+export default {};
+</script>
+<template><div></div></template>
+"#,
+            "App.vue",
+        );
+        assert_eq!(info.imports.len(), 2);
+        assert!(info.imports.iter().any(|i| i.source == "vue"));
+        assert!(info.imports.iter().any(|i| i.source == "./utils"));
+    }
+
+    #[test]
+    fn extracts_vue_script_setup_imports() {
+        let info = parse_sfc(
+            r#"
+<script setup lang="ts">
+import { ref } from 'vue';
+const count = ref(0);
+</script>
+"#,
+            "Comp.vue",
+        );
+        assert_eq!(info.imports.len(), 1);
+        assert_eq!(info.imports[0].source, "vue");
+    }
+
+    #[test]
+    fn extracts_vue_both_scripts() {
+        let info = parse_sfc(
+            r#"
+<script lang="ts">
+import { defineComponent } from 'vue';
+export default defineComponent({});
+</script>
+<script setup lang="ts">
+import { ref } from 'vue';
+const count = ref(0);
+</script>
+"#,
+            "Dual.vue",
+        );
+        assert!(info.imports.len() >= 2);
+    }
+
+    #[test]
+    fn extracts_svelte_script_imports() {
+        let info = parse_sfc(
+            r#"
+<script lang="ts">
+import { onMount } from 'svelte';
+import { helper } from './utils';
+</script>
+<p>Hello</p>
+"#,
+            "App.svelte",
+        );
+        assert_eq!(info.imports.len(), 2);
+        assert!(info.imports.iter().any(|i| i.source == "svelte"));
+        assert!(info.imports.iter().any(|i| i.source == "./utils"));
+    }
+
+    #[test]
+    fn vue_no_script_returns_empty() {
+        let info = parse_sfc(
+            "<template><div></div></template><style>div {}</style>",
+            "NoScript.vue",
+        );
+        assert!(info.imports.is_empty());
+        assert!(info.exports.is_empty());
+    }
+
+    #[test]
+    fn vue_js_default_lang() {
+        let info = parse_sfc(
+            r#"
+<script>
+import { createApp } from 'vue';
+export default {};
+</script>
+"#,
+            "JsVue.vue",
+        );
+        assert_eq!(info.imports.len(), 1);
+    }
+
+    // ── import.meta.glob / require.context ──────────────────────
+
+    #[test]
+    fn extracts_import_meta_glob_pattern() {
+        let info = parse_source("const mods = import.meta.glob('./components/*.tsx');");
+        assert_eq!(info.dynamic_import_patterns.len(), 1);
+        assert_eq!(info.dynamic_import_patterns[0].prefix, "./components/*.tsx");
+    }
+
+    #[test]
+    fn extracts_import_meta_glob_array() {
+        let info =
+            parse_source("const mods = import.meta.glob(['./pages/*.ts', './layouts/*.ts']);");
+        assert_eq!(info.dynamic_import_patterns.len(), 2);
+        assert_eq!(info.dynamic_import_patterns[0].prefix, "./pages/*.ts");
+        assert_eq!(info.dynamic_import_patterns[1].prefix, "./layouts/*.ts");
+    }
+
+    #[test]
+    fn extracts_require_context_pattern() {
+        let info = parse_source("const ctx = require.context('./icons', false);");
+        assert_eq!(info.dynamic_import_patterns.len(), 1);
+        assert_eq!(info.dynamic_import_patterns[0].prefix, "./icons/");
+    }
+
+    #[test]
+    fn extracts_require_context_recursive() {
+        let info = parse_source("const ctx = require.context('./icons', true);");
+        assert_eq!(info.dynamic_import_patterns.len(), 1);
+        assert_eq!(info.dynamic_import_patterns[0].prefix, "./icons/**/");
     }
 }

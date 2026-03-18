@@ -44,7 +44,9 @@ pub struct ResolvedModule {
     pub re_exports: Vec<ResolvedReExport>,
     pub resolved_imports: Vec<ResolvedImport>,
     pub resolved_dynamic_imports: Vec<ResolvedImport>,
+    pub resolved_dynamic_patterns: Vec<(crate::extract::DynamicImportPattern, Vec<FileId>)>,
     pub member_accesses: Vec<crate::extract::MemberAccess>,
+    pub whole_object_uses: Vec<String>,
     pub has_cjs_exports: bool,
 }
 
@@ -138,6 +140,47 @@ pub fn resolve_all_imports(
             let mut all_imports = resolved_imports;
             all_imports.extend(require_imports);
 
+            // Resolve dynamic import patterns via glob matching against discovered files.
+            // Match using paths relative to the importing file's directory.
+            // Canonicalize to handle symlinks (e.g., /var → /private/var on macOS).
+            let from_dir = file_path
+                .parent()
+                .unwrap_or(file_path)
+                .canonicalize()
+                .unwrap_or_else(|_| file_path.parent().unwrap_or(file_path).to_path_buf());
+            let resolved_dynamic_patterns: Vec<(
+                crate::extract::DynamicImportPattern,
+                Vec<FileId>,
+            )> = module
+                .dynamic_import_patterns
+                .iter()
+                .filter_map(|pattern| {
+                    let glob_str = make_glob_from_pattern(pattern);
+                    let matcher = globset::Glob::new(&glob_str)
+                        .ok()
+                        .map(|g| g.compile_matcher())?;
+                    let matched: Vec<FileId> = files
+                        .iter()
+                        .filter(|f| {
+                            // Compute path relative to the importing file's directory
+                            let canonical = f.path.canonicalize().unwrap_or(f.path.clone());
+                            if let Ok(relative) = canonical.strip_prefix(&from_dir) {
+                                let rel_str = format!("./{}", relative.to_string_lossy());
+                                matcher.is_match(&rel_str)
+                            } else {
+                                false
+                            }
+                        })
+                        .map(|f| f.id)
+                        .collect();
+                    if matched.is_empty() {
+                        None
+                    } else {
+                        Some((pattern.clone(), matched))
+                    }
+                })
+                .collect();
+
             Some(ResolvedModule {
                 file_id: module.file_id,
                 path: file_path.clone(),
@@ -145,7 +188,9 @@ pub fn resolve_all_imports(
                 re_exports,
                 resolved_imports: all_imports,
                 resolved_dynamic_imports,
+                resolved_dynamic_patterns,
                 member_accesses: module.member_accesses.clone(),
+                whole_object_uses: module.whole_object_uses.clone(),
                 has_cjs_exports: module.has_cjs_exports,
             })
         })
@@ -165,6 +210,8 @@ fn create_resolver(config: &ResolvedConfig) -> Resolver {
             ".mjs".into(),
             ".cjs".into(),
             ".json".into(),
+            ".vue".into(),
+            ".svelte".into(),
         ],
         // Support TypeScript's node16/nodenext module resolution where .ts files
         // are imported with .js extensions (e.g., `import './api.js'` for `api.ts`).
@@ -290,6 +337,18 @@ fn extract_package_name_from_node_modules_path(path: &Path) -> Option<String> {
         }
     } else {
         Some(after[0].to_string())
+    }
+}
+
+/// Convert a `DynamicImportPattern` to a glob string for file matching.
+fn make_glob_from_pattern(pattern: &crate::extract::DynamicImportPattern) -> String {
+    // If the prefix already contains glob characters (from import.meta.glob), use as-is
+    if pattern.prefix.contains('*') || pattern.prefix.contains('{') {
+        return pattern.prefix.clone();
+    }
+    match &pattern.suffix {
+        Some(suffix) => format!("{}*{}", pattern.prefix, suffix),
+        None => format!("{}*", pattern.prefix),
     }
 }
 

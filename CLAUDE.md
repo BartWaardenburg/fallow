@@ -24,8 +24,8 @@ Pipeline: Config → File Discovery → Parallel Parsing (rayon + oxc_parser) �
 
 Key modules in fallow-core:
 - `discover.rs` — File walking + entry point detection (also workspace-aware)
-- `extract.rs` — AST visitor extracting imports, exports, re-exports, members
-- `resolve.rs` — oxc_resolver-based import resolution
+- `extract.rs` — AST visitor extracting imports, exports, re-exports, members, whole-object uses, dynamic import patterns; SFC (Vue/Svelte) script extraction
+- `resolve.rs` — oxc_resolver-based import resolution + glob-based dynamic import pattern resolution
 - `graph.rs` — Module graph with re-export chain propagation
 - `analyze.rs` — Dead code detection (10 issue types)
 - `plugins/` — Plugin system: `Plugin` trait, registry, AST-based config parsing (23 built-in plugins)
@@ -37,7 +37,7 @@ Key modules in fallow-core:
 
 ```bash
 cargo build --workspace
-cargo test --workspace          # 41 tests (15 unit + 26 integration)
+cargo test --workspace
 cargo clippy --workspace -- -D warnings
 cargo fmt --all -- --check
 cargo run -- check              # Run analysis
@@ -48,10 +48,12 @@ cargo run -- fix --dry-run      # Auto-fix preview
 ## Detection capabilities
 
 1. Unused files, exports, types, dependencies, devDependencies
-2. Unused enum members, class members (structural extraction)
+2. Unused enum members, class members (structural extraction + whole-object-use heuristics for Object.values/keys/entries, for..in, spread, computed access)
 3. Unresolved imports, unlisted dependencies
 4. Duplicate exports across modules
 5. Re-export chain resolution through barrel files
+6. Vue/Svelte SFC parsing (regex-based `<script>` block extraction, `lang="ts"` detection)
+7. Dynamic import pattern resolution (template literals, string concat, import.meta.glob, require.context → glob matching against discovered files)
 
 ## Framework support (23 plugins)
 

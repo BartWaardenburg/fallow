@@ -37,6 +37,7 @@ rayon = "1"
 ignore = "0.4"
 glob = "0.3"
 globset = { version = "0.4", features = ["serde1"] }
+regex = "1"
 
 # Hashing
 xxhash-rust = { version = "0.8", features = ["xxh3"] }

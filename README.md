@@ -252,6 +252,35 @@ fallow supports npm, yarn, and pnpm workspaces out of the box — including `pnp
 
 ### GitHub Actions
 
+The [fallow GitHub Action](https://github.com/BartWaardenburg/fallow) installs fallow, runs analysis, posts a job summary, and optionally uploads SARIF results to Code Scanning or comments on PRs.
+
+**Basic usage (SARIF upload to Code Scanning):**
+
+```yaml
+- uses: BartWaardenburg/fallow@v0
+  with:
+    format: sarif
+```
+
+Requires `security-events: write` permission. Results appear in the **Security** tab under Code Scanning alerts.
+
+**PR-only analysis with comments:**
+
+```yaml
+- uses: actions/checkout@v4
+  with:
+    fetch-depth: 0
+- uses: BartWaardenburg/fallow@v0
+  with:
+    format: json
+    comment: 'true'
+    changed-since: origin/${{ github.base_ref }}
+```
+
+Requires `fetch-depth: 0` on checkout and `pull-requests: write` permission.
+
+**Full workflow example:**
+
 ```yaml
 name: Dead Code Check
 on:
@@ -262,25 +291,40 @@ on:
 permissions:
   contents: read
   security-events: write
+  pull-requests: write
 
 jobs:
   fallow:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: BartWaardenburg/fallow@v1
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: BartWaardenburg/fallow@v0
+        with:
+          format: sarif
+          comment: 'true'
+          changed-since: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || '' }}
 ```
 
-Configure Action inputs:
+<details>
+<summary><strong>Action inputs</strong></summary>
 
-```yaml
-- uses: BartWaardenburg/fallow@v1
-  with:
-    format: sarif
-    fail-on-issues: "true"
-    changed-since: main
-    args: "--quiet --unused-exports"
-```
+| Input | Default | Description |
+|:------|:--------|:------------|
+| `root` | `.` | Project root directory |
+| `format` | `sarif` | Output format: `human`, `json`, `sarif`, `compact` |
+| `fail-on-issues` | `true` | Exit with code 1 if issues are found |
+| `changed-since` | — | Only report issues in files changed since this git ref |
+| `baseline` | — | Path to baseline file for comparison |
+| `version` | `latest` | Fallow version to install |
+| `args` | — | Additional CLI arguments |
+| `comment` | `false` | Post results as a PR comment |
+| `github-token` | `github.token` | Token for PR comments and SARIF upload |
+
+**Outputs:** `results` (JSON file path), `sarif` (SARIF file path), `issues` (count).
+
+</details>
 
 Or run the CLI directly:
 
@@ -289,7 +333,7 @@ Or run the CLI directly:
   run: npx fallow check --format sarif > results.sarif
 
 - name: Upload SARIF
-  uses: github/codeql-action/upload-sarif@v3
+  uses: github/codeql-action/upload-sarif@v4
   with:
     sarif_file: results.sarif
 ```
@@ -338,6 +382,8 @@ Prevent dead code from growing without blocking PRs on existing debt:
 | Baseline comparison | Yes | No |
 | SARIF output | Yes | No |
 | GitHub Action | Yes | — |
+| Vue/Svelte SFC parsing | Yes | Yes |
+| Dynamic import resolution | **Yes (partial)** | No |
 | Framework plugins | 23 | 140+ |
 | Detection types | 10 | 10 |
 
@@ -410,14 +456,40 @@ fallow intentionally covers the same 10 detection types as knip. The difference 
 
 </details>
 
+## Vue and Svelte support
+
+fallow parses `.vue` and `.svelte` single-file components out of the box. `<script>` and `<script setup>` blocks are extracted and analyzed for imports and exports, including TypeScript (`lang="ts"`). This means imports inside Vue/Svelte components correctly mark exports as used, and orphaned `.vue`/`.svelte` files are detected as unused.
+
+> **Note:** Component references in `<template>` blocks are not tracked. An import used only in the template (not in `<script>`) may be reported as unused — the same limitation as knip. Use [`ignore_exports`](#ignoring-specific-exports) to suppress these.
+
+## Smart dynamic import resolution
+
+fallow goes beyond knip by partially resolving dynamic imports with variable paths — no other dead code tool does this:
+
+```typescript
+// Template literals: fallow extracts "./locales/" prefix + ".json" suffix → glob matches all locale files
+const locale = import(`./locales/${lang}.json`);
+
+// String concatenation: fallow extracts "./pages/" prefix → glob matches all page files
+const page = import('./pages/' + pageName);
+
+// Vite import.meta.glob: patterns are used directly as globs
+const modules = import.meta.glob('./components/*.tsx');
+
+// Webpack require.context: directory + recursive flag → glob pattern
+const icons = require.context('./icons', true, /\.svg$/);
+```
+
+Files matched by these patterns are correctly marked as reachable, eliminating false "unused file" reports for code-split and lazy-loaded modules.
+
+Fully dynamic imports with no static prefix (e.g., `import(variable)`) remain unresolvable — this is a fundamental limitation of static analysis.
+
 ## Limitations
 
 fallow uses syntactic analysis only — no type information. This is what makes it fast, but it means:
 
-- **Enum and class member detection is static-only.** fallow detects `Status.Active` style access. Dynamic access like `Status[variable]` is not tracked and may produce false positives.
-- **No `.vue` single-file component parsing.** Nuxt framework support detects entry points and config, but imports inside `<script>` blocks in `.vue` files are not analyzed.
-- **Dynamic imports with variable paths** (e.g., `import(someVar)`) are not resolved.
-- **Type-level dead code** (e.g., unreachable branches via type narrowing) is out of scope — fallow detects unused *exports*, not unreachable *code within functions*.
+- **Type-level dead code** (e.g., unreachable branches via type narrowing) is out of scope — fallow detects unused *exports*, not unreachable *code within functions*. This requires a full type checker and is better handled by `typescript-eslint/no-unnecessary-condition`.
+- **Svelte `export let` props** may be reported as unused exports. Svelte uses `export let` for component props, which looks like an export to static analysis. Use [`ignore_exports`](#ignoring-specific-exports) to suppress these.
 
 If fallow reports a false positive, you can suppress it with [`ignore_exports`](#ignoring-specific-exports) in `fallow.toml`.
 

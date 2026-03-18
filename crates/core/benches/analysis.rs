@@ -298,7 +298,9 @@ fn bench_resolve_re_export_chains(c: &mut Criterion) {
         re_exports: vec![],
         resolved_imports: entry_imports,
         resolved_dynamic_imports: vec![],
+        resolved_dynamic_patterns: vec![],
         member_accesses: vec![],
+        whole_object_uses: vec![],
         has_cjs_exports: false,
     });
 
@@ -366,7 +368,9 @@ fn bench_resolve_re_export_chains(c: &mut Criterion) {
             re_exports,
             resolved_imports: vec![],
             resolved_dynamic_imports: vec![],
+            resolved_dynamic_patterns: vec![],
             member_accesses: vec![],
+            whole_object_uses: vec![],
             has_cjs_exports: false,
         });
     }
@@ -408,7 +412,9 @@ fn bench_resolve_re_export_chains(c: &mut Criterion) {
             re_exports: vec![],
             resolved_imports: vec![],
             resolved_dynamic_imports: vec![],
+            resolved_dynamic_patterns: vec![],
             member_accesses: vec![],
+            whole_object_uses: vec![],
             has_cjs_exports: false,
         });
     }
@@ -584,6 +590,8 @@ fn bench_cache_round_trip(c: &mut Criterion) {
                 member: "log".to_string(),
             },
         ],
+        whole_object_uses: vec![],
+        dynamic_import_patterns: vec![],
         has_cjs_exports: false,
         content_hash: 0xDEAD_BEEF_CAFE_1234,
     };

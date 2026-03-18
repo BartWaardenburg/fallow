@@ -533,6 +533,7 @@ dependencies = [
  "oxc_span",
  "oxc_syntax",
  "rayon",
+ "regex",
  "serde",
  "serde_json",
  "tempfile",

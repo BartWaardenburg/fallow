@@ -236,6 +236,23 @@ impl ModuleGraph {
                     }
                 }
 
+                // Dynamic import patterns (template literals, string concat, import.meta.glob)
+                for (_pattern, matched_ids) in &resolved.resolved_dynamic_patterns {
+                    for target_id in matched_ids {
+                        let idx = target_id.0 as usize;
+                        if idx < total_capacity {
+                            namespace_imported.insert(idx);
+                        }
+                        edges_by_target
+                            .entry(*target_id)
+                            .or_default()
+                            .push(ImportedSymbol {
+                                imported_name: ImportedName::Namespace,
+                                local_name: String::new(),
+                            });
+                    }
+                }
+
                 for (target_id, symbols) in edges_by_target {
                     let is_side_effect = symbols
                         .iter()
@@ -668,7 +685,9 @@ mod tests {
                     target: ResolveResult::InternalModule(FileId(1)),
                 }],
                 resolved_dynamic_imports: vec![],
+                resolved_dynamic_patterns: vec![],
                 member_accesses: vec![],
+                whole_object_uses: vec![],
                 has_cjs_exports: false,
             },
             ResolvedModule {
@@ -693,7 +712,9 @@ mod tests {
                 re_exports: vec![],
                 resolved_imports: vec![],
                 resolved_dynamic_imports: vec![],
+                resolved_dynamic_patterns: vec![],
                 member_accesses: vec![],
+                whole_object_uses: vec![],
                 has_cjs_exports: false,
             },
         ];
@@ -801,7 +822,9 @@ mod tests {
                     target: ResolveResult::InternalModule(FileId(1)),
                 }],
                 resolved_dynamic_imports: vec![],
+                resolved_dynamic_patterns: vec![],
                 member_accesses: vec![],
+                whole_object_uses: vec![],
                 has_cjs_exports: false,
             },
             ResolvedModule {
@@ -817,7 +840,9 @@ mod tests {
                 re_exports: vec![],
                 resolved_imports: vec![],
                 resolved_dynamic_imports: vec![],
+                resolved_dynamic_patterns: vec![],
                 member_accesses: vec![],
+                whole_object_uses: vec![],
                 has_cjs_exports: false,
             },
         ];
@@ -878,7 +903,9 @@ mod tests {
                     target: ResolveResult::InternalModule(FileId(1)),
                 }],
                 resolved_dynamic_imports: vec![],
+                resolved_dynamic_patterns: vec![],
                 member_accesses: vec![],
+                whole_object_uses: vec![],
                 has_cjs_exports: false,
             },
             ResolvedModule {
@@ -894,7 +921,9 @@ mod tests {
                 re_exports: vec![],
                 resolved_imports: vec![],
                 resolved_dynamic_imports: vec![],
+                resolved_dynamic_patterns: vec![],
                 member_accesses: vec![],
+                whole_object_uses: vec![],
                 has_cjs_exports: false,
             },
             ResolvedModule {
@@ -910,7 +939,9 @@ mod tests {
                 re_exports: vec![],
                 resolved_imports: vec![],
                 resolved_dynamic_imports: vec![],
+                resolved_dynamic_patterns: vec![],
                 member_accesses: vec![],
+                whole_object_uses: vec![],
                 has_cjs_exports: false,
             },
         ];
@@ -966,7 +997,9 @@ mod tests {
                 },
             ],
             resolved_dynamic_imports: vec![],
+            resolved_dynamic_patterns: vec![],
             member_accesses: vec![],
+            whole_object_uses: vec![],
             has_cjs_exports: false,
         }];
 
@@ -1020,7 +1053,9 @@ mod tests {
                     target: ResolveResult::InternalModule(FileId(1)),
                 }],
                 resolved_dynamic_imports: vec![],
+                resolved_dynamic_patterns: vec![],
                 member_accesses: vec![],
+                whole_object_uses: vec![],
                 has_cjs_exports: false,
             },
             // barrel re-exports "foo" from source
@@ -1045,7 +1080,9 @@ mod tests {
                 }],
                 resolved_imports: vec![],
                 resolved_dynamic_imports: vec![],
+                resolved_dynamic_patterns: vec![],
                 member_accesses: vec![],
+                whole_object_uses: vec![],
                 has_cjs_exports: false,
             },
             // source has the actual export
@@ -1062,7 +1099,9 @@ mod tests {
                 re_exports: vec![],
                 resolved_imports: vec![],
                 resolved_dynamic_imports: vec![],
+                resolved_dynamic_patterns: vec![],
                 member_accesses: vec![],
+                whole_object_uses: vec![],
                 has_cjs_exports: false,
             },
         ];
@@ -1109,7 +1148,9 @@ mod tests {
             re_exports: vec![],
             resolved_imports: vec![],
             resolved_dynamic_imports: vec![],
+            resolved_dynamic_patterns: vec![],
             member_accesses: vec![],
+            whole_object_uses: vec![],
             has_cjs_exports: true,
         }];
 
@@ -1161,7 +1202,9 @@ mod tests {
                     target: ResolveResult::InternalModule(FileId(1)),
                 }],
                 resolved_dynamic_imports: vec![],
+                resolved_dynamic_patterns: vec![],
                 member_accesses: vec![],
+                whole_object_uses: vec![],
                 has_cjs_exports: false,
             },
             // barrel re-exports "foo" from source (no local exports)
@@ -1180,7 +1223,9 @@ mod tests {
                 }],
                 resolved_imports: vec![],
                 resolved_dynamic_imports: vec![],
+                resolved_dynamic_patterns: vec![],
                 member_accesses: vec![],
+                whole_object_uses: vec![],
                 has_cjs_exports: false,
             },
             ResolvedModule {
@@ -1196,7 +1241,9 @@ mod tests {
                 re_exports: vec![],
                 resolved_imports: vec![],
                 resolved_dynamic_imports: vec![],
+                resolved_dynamic_patterns: vec![],
                 member_accesses: vec![],
+                whole_object_uses: vec![],
                 has_cjs_exports: false,
             },
         ];
@@ -1275,7 +1322,9 @@ mod tests {
                     target: ResolveResult::InternalModule(FileId(1)),
                 }],
                 resolved_dynamic_imports: vec![],
+                resolved_dynamic_patterns: vec![],
                 member_accesses: vec![],
+                whole_object_uses: vec![],
                 has_cjs_exports: false,
             },
             ResolvedModule {
@@ -1304,7 +1353,9 @@ mod tests {
                 ],
                 resolved_imports: vec![],
                 resolved_dynamic_imports: vec![],
+                resolved_dynamic_patterns: vec![],
                 member_accesses: vec![],
+                whole_object_uses: vec![],
                 has_cjs_exports: false,
             },
             ResolvedModule {
@@ -1329,7 +1380,9 @@ mod tests {
                 re_exports: vec![],
                 resolved_imports: vec![],
                 resolved_dynamic_imports: vec![],
+                resolved_dynamic_patterns: vec![],
                 member_accesses: vec![],
+                whole_object_uses: vec![],
                 has_cjs_exports: false,
             },
         ];
@@ -1399,7 +1452,9 @@ mod tests {
                     target: ResolveResult::InternalModule(FileId(1)),
                 }],
                 resolved_dynamic_imports: vec![],
+                resolved_dynamic_patterns: vec![],
                 member_accesses: vec![],
+                whole_object_uses: vec![],
                 has_cjs_exports: false,
             },
             ResolvedModule {
@@ -1428,7 +1483,9 @@ mod tests {
                 ],
                 resolved_imports: vec![],
                 resolved_dynamic_imports: vec![],
+                resolved_dynamic_patterns: vec![],
                 member_accesses: vec![],
+                whole_object_uses: vec![],
                 has_cjs_exports: false,
             },
             ResolvedModule {
@@ -1453,7 +1510,9 @@ mod tests {
                 re_exports: vec![],
                 resolved_imports: vec![],
                 resolved_dynamic_imports: vec![],
+                resolved_dynamic_patterns: vec![],
                 member_accesses: vec![],
+                whole_object_uses: vec![],
                 has_cjs_exports: false,
             },
         ];
@@ -1529,7 +1588,9 @@ mod tests {
                     target: ResolveResult::InternalModule(FileId(1)),
                 }],
                 resolved_dynamic_imports: vec![],
+                resolved_dynamic_patterns: vec![],
                 member_accesses: vec![],
+                whole_object_uses: vec![],
                 has_cjs_exports: false,
             },
             ResolvedModule {
@@ -1547,7 +1608,9 @@ mod tests {
                 }],
                 resolved_imports: vec![],
                 resolved_dynamic_imports: vec![],
+                resolved_dynamic_patterns: vec![],
                 member_accesses: vec![],
+                whole_object_uses: vec![],
                 has_cjs_exports: false,
             },
             ResolvedModule {
@@ -1563,7 +1626,9 @@ mod tests {
                 re_exports: vec![],
                 resolved_imports: vec![],
                 resolved_dynamic_imports: vec![],
+                resolved_dynamic_patterns: vec![],
                 member_accesses: vec![],
+                whole_object_uses: vec![],
                 has_cjs_exports: false,
             },
         ];
@@ -1643,7 +1708,9 @@ mod tests {
                     target: ResolveResult::InternalModule(FileId(1)),
                 }],
                 resolved_dynamic_imports: vec![],
+                resolved_dynamic_patterns: vec![],
                 member_accesses: vec![],
+                whole_object_uses: vec![],
                 has_cjs_exports: false,
             },
             // barrel1 re-exports foo from barrel2
@@ -1662,7 +1729,9 @@ mod tests {
                 }],
                 resolved_imports: vec![],
                 resolved_dynamic_imports: vec![],
+                resolved_dynamic_patterns: vec![],
                 member_accesses: vec![],
+                whole_object_uses: vec![],
                 has_cjs_exports: false,
             },
             // barrel2 re-exports foo from source
@@ -1681,7 +1750,9 @@ mod tests {
                 }],
                 resolved_imports: vec![],
                 resolved_dynamic_imports: vec![],
+                resolved_dynamic_patterns: vec![],
                 member_accesses: vec![],
+                whole_object_uses: vec![],
                 has_cjs_exports: false,
             },
             ResolvedModule {
@@ -1697,7 +1768,9 @@ mod tests {
                 re_exports: vec![],
                 resolved_imports: vec![],
                 resolved_dynamic_imports: vec![],
+                resolved_dynamic_patterns: vec![],
                 member_accesses: vec![],
+                whole_object_uses: vec![],
                 has_cjs_exports: false,
             },
         ];

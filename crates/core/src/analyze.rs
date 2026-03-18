@@ -328,6 +328,15 @@ fn find_unused_exports(
             continue;
         }
 
+        // Svelte files use `export let`/`export const` for component props, which are
+        // consumed by the Svelte runtime rather than imported by other modules. Since we
+        // can't distinguish props from utility exports in the `<script>` block without
+        // Svelte compiler semantics, we skip export analysis entirely for reachable
+        // .svelte files. Unreachable Svelte files are still caught by `find_unused_files`.
+        if module.path.extension().is_some_and(|ext| ext == "svelte") {
+            continue;
+        }
+
         // Check ignore rules — compute relative path and string once per module
         let relative_path = module
             .path
@@ -493,6 +502,10 @@ fn find_unused_members(
     let mut self_accessed_members: HashMap<crate::discover::FileId, HashSet<String>> =
         HashMap::new();
 
+    // Build a set of export names that are used as whole objects (Object.values, for..in, etc.).
+    // All members of these exports should be considered used.
+    let mut whole_object_used_exports: HashSet<String> = HashSet::new();
+
     for resolved in resolved_modules {
         // Build a map from local name -> imported name for this module's imports
         let local_to_imported: HashMap<&str, &str> = resolved
@@ -525,6 +538,15 @@ fn find_unused_members(
                 .unwrap_or(access.object.as_str());
             accessed_members.insert((export_name.to_string(), access.member.clone()));
         }
+
+        // Map whole-object uses from local names to imported names
+        for local_name in &resolved.whole_object_uses {
+            let export_name = local_to_imported
+                .get(local_name.as_str())
+                .copied()
+                .unwrap_or(local_name.as_str());
+            whole_object_used_exports.insert(export_name.to_string());
+        }
     }
 
     for module in &graph.modules {
@@ -546,6 +568,12 @@ fn find_unused_members(
             }
 
             let export_name = export.name.to_string();
+
+            // If this export is used as a whole object (Object.values, for..in, etc.),
+            // all members are considered used — skip individual member analysis.
+            if whole_object_used_exports.contains(&export_name) {
+                continue;
+            }
 
             // Get `this.member` accesses from this file (internal class usage)
             let file_self_accesses = self_accessed_members.get(&module.file_id);

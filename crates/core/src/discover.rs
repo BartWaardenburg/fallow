@@ -39,7 +39,9 @@ pub enum EntryPointSource {
     ManualEntry,
 }
 
-const SOURCE_EXTENSIONS: &[&str] = &["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"];
+const SOURCE_EXTENSIONS: &[&str] = &[
+    "ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs", "vue", "svelte",
+];
 
 /// Discover all source files in the project.
 pub fn discover_files(config: &ResolvedConfig) -> Vec<DiscoveredFile> {

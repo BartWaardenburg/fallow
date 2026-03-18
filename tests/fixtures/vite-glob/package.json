@@ -1,0 +1,1 @@
+{"name": "vite-glob", "main": "src/index.ts", "dependencies": {"vite": "^5.0.0"}}

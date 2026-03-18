@@ -8,7 +8,7 @@ use oxc_span::Span;
 use crate::extract::{ExportName, MemberAccess, MemberKind};
 
 /// Cache version — bump when the cache format changes.
-const CACHE_VERSION: u32 = 4;
+const CACHE_VERSION: u32 = 5;
 
 /// Maximum cache file size to deserialize (256 MB).
 const MAX_CACHE_SIZE: usize = 256 * 1024 * 1024;
@@ -38,6 +38,10 @@ pub struct CachedModule {
     pub require_calls: Vec<CachedRequireCall>,
     /// Static member accesses (e.g., `Status.Active`).
     pub member_accesses: Vec<MemberAccess>,
+    /// Identifiers used as whole objects (Object.values, for..in, spread, etc.).
+    pub whole_object_uses: Vec<String>,
+    /// Dynamic import patterns with partial static resolution.
+    pub dynamic_import_patterns: Vec<CachedDynamicImportPattern>,
     /// Whether this module uses CJS exports.
     pub has_cjs_exports: bool,
 }
@@ -99,6 +103,14 @@ pub struct CachedReExport {
 pub struct CachedMember {
     pub name: String,
     pub kind: String,
+    pub span_start: u32,
+    pub span_end: u32,
+}
+
+#[derive(Debug, Clone, Encode, Decode)]
+pub struct CachedDynamicImportPattern {
+    pub prefix: String,
+    pub suffix: Option<String>,
     pub span_start: u32,
     pub span_end: u32,
 }
@@ -266,14 +278,26 @@ pub fn cached_to_module(
         })
         .collect();
 
+    let dynamic_import_patterns = cached
+        .dynamic_import_patterns
+        .iter()
+        .map(|p| crate::extract::DynamicImportPattern {
+            prefix: p.prefix.clone(),
+            suffix: p.suffix.clone(),
+            span: Span::new(p.span_start, p.span_end),
+        })
+        .collect();
+
     ModuleInfo {
         file_id,
         exports,
         imports,
         re_exports,
         dynamic_imports,
+        dynamic_import_patterns,
         require_calls,
         member_accesses: cached.member_accesses.clone(),
+        whole_object_uses: cached.whole_object_uses.clone(),
         has_cjs_exports: cached.has_cjs_exports,
         content_hash: cached.content_hash,
     }
@@ -366,6 +390,17 @@ pub fn module_to_cached(module: &crate::extract::ModuleInfo) -> CachedModule {
             })
             .collect(),
         member_accesses: module.member_accesses.clone(),
+        whole_object_uses: module.whole_object_uses.clone(),
+        dynamic_import_patterns: module
+            .dynamic_import_patterns
+            .iter()
+            .map(|p| CachedDynamicImportPattern {
+                prefix: p.prefix.clone(),
+                suffix: p.suffix.clone(),
+                span_start: p.span.start,
+                span_end: p.span.end,
+            })
+            .collect(),
         has_cjs_exports: module.has_cjs_exports,
     }
 }
@@ -400,6 +435,8 @@ mod tests {
             dynamic_imports: vec![],
             require_calls: vec![],
             member_accesses: vec![],
+            whole_object_uses: vec![],
+            dynamic_import_patterns: vec![],
             has_cjs_exports: false,
         };
         store.insert(Path::new("test.ts"), module);
@@ -419,6 +456,8 @@ mod tests {
             dynamic_imports: vec![],
             require_calls: vec![],
             member_accesses: vec![],
+            whole_object_uses: vec![],
+            dynamic_import_patterns: vec![],
             has_cjs_exports: false,
         };
         store.insert(Path::new("test.ts"), module);
@@ -442,6 +481,8 @@ mod tests {
             dynamic_imports: vec![],
             require_calls: vec![],
             member_accesses: vec![],
+            whole_object_uses: vec![],
+            dynamic_import_patterns: vec![],
             has_cjs_exports: false,
         };
         let m2 = CachedModule {
@@ -452,6 +493,8 @@ mod tests {
             dynamic_imports: vec![],
             require_calls: vec![],
             member_accesses: vec![],
+            whole_object_uses: vec![],
+            dynamic_import_patterns: vec![],
             has_cjs_exports: false,
         };
         store.insert(Path::new("test.ts"), m1);
@@ -477,6 +520,8 @@ mod tests {
             dynamic_imports: vec![],
             require_calls: vec![],
             member_accesses: vec![],
+            whole_object_uses: vec![],
+            dynamic_import_patterns: vec![],
             has_cjs_exports: false,
             content_hash: 123,
         };
@@ -511,6 +556,8 @@ mod tests {
             dynamic_imports: vec![],
             require_calls: vec![],
             member_accesses: vec![],
+            whole_object_uses: vec![],
+            dynamic_import_patterns: vec![],
             has_cjs_exports: false,
             content_hash: 456,
         };
@@ -560,6 +607,8 @@ mod tests {
             dynamic_imports: vec![],
             require_calls: vec![],
             member_accesses: vec![],
+            whole_object_uses: vec![],
+            dynamic_import_patterns: vec![],
             has_cjs_exports: false,
             content_hash: 789,
         };
@@ -600,6 +649,8 @@ mod tests {
             dynamic_imports: vec![],
             require_calls: vec![],
             member_accesses: vec![],
+            whole_object_uses: vec![],
+            dynamic_import_patterns: vec![],
             has_cjs_exports: false,
             content_hash: 0,
         };
@@ -633,6 +684,8 @@ mod tests {
                 object: "Status".to_string(),
                 member: "Active".to_string(),
             }],
+            whole_object_uses: vec![],
+            dynamic_import_patterns: vec![],
             has_cjs_exports: true,
             content_hash: 0,
         };
@@ -686,6 +739,8 @@ mod tests {
             dynamic_imports: vec![],
             require_calls: vec![],
             member_accesses: vec![],
+            whole_object_uses: vec![],
+            dynamic_import_patterns: vec![],
             has_cjs_exports: false,
             content_hash: 0,
         };
@@ -732,6 +787,8 @@ mod tests {
             dynamic_imports: vec![],
             require_calls: vec![],
             member_accesses: vec![],
+            whole_object_uses: vec![],
+            dynamic_import_patterns: vec![],
             has_cjs_exports: false,
         };
         store.insert(Path::new("test.ts"), module);
@@ -758,6 +815,8 @@ mod tests {
             dynamic_imports: vec![],
             require_calls: vec![],
             member_accesses: vec![],
+            whole_object_uses: vec![],
+            dynamic_import_patterns: vec![],
             has_cjs_exports: false,
         };
         store.insert(Path::new("test.ts"), module);
@@ -768,7 +827,7 @@ mod tests {
 
         // Read raw bytes and modify the version field.
         // With bincode standard config, u32 is varint-encoded.
-        // The version (CACHE_VERSION = 3) is the first encoded field.
+        // The version (CACHE_VERSION) is the first encoded field.
         // Replace the first byte with a different version value (e.g., 255)
         // to simulate a version mismatch.
         let cache_file = dir.join("cache.bin");
@@ -800,6 +859,8 @@ mod tests {
             dynamic_imports: vec![],
             require_calls: vec![],
             member_accesses: vec![],
+            whole_object_uses: vec![],
+            dynamic_import_patterns: vec![],
             has_cjs_exports: false,
             content_hash: 0,
         };

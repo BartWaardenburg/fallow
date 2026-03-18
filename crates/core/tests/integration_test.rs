@@ -475,6 +475,8 @@ fn cache_roundtrip() {
         dynamic_imports: vec![],
         require_calls: vec![],
         member_accesses: vec![],
+        whole_object_uses: vec![],
+        dynamic_import_patterns: vec![],
         has_cjs_exports: false,
     };
 
@@ -1408,5 +1410,277 @@ fn duplicate_code_find_duplicates_in_project_convenience() {
     assert!(
         !report.clone_groups.is_empty(),
         "Convenience function should detect clones"
+    );
+}
+
+// ── Whole-object enum member heuristics ────────────────────────
+
+#[test]
+fn enum_whole_object_uses_no_false_positives() {
+    let root = fixture_path("enum-whole-object");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_enum_member_names: Vec<&str> = results
+        .unused_enum_members
+        .iter()
+        .map(|m| m.member_name.as_str())
+        .collect();
+
+    // Status used via Object.values — no members should be unused
+    assert!(
+        !unused_enum_member_names.contains(&"Active"),
+        "Active should not be unused (Object.values), found: {unused_enum_member_names:?}"
+    );
+    assert!(
+        !unused_enum_member_names.contains(&"Inactive"),
+        "Inactive should not be unused (Object.values), found: {unused_enum_member_names:?}"
+    );
+    assert!(
+        !unused_enum_member_names.contains(&"Pending"),
+        "Pending should not be unused (Object.values), found: {unused_enum_member_names:?}"
+    );
+
+    // Direction used via Object.keys — no members should be unused
+    assert!(
+        !unused_enum_member_names.contains(&"Up"),
+        "Up should not be unused (Object.keys), found: {unused_enum_member_names:?}"
+    );
+    assert!(
+        !unused_enum_member_names.contains(&"Down"),
+        "Down should not be unused (Object.keys), found: {unused_enum_member_names:?}"
+    );
+
+    // Color used via for..in — no members should be unused
+    assert!(
+        !unused_enum_member_names.contains(&"Red"),
+        "Red should not be unused (for..in), found: {unused_enum_member_names:?}"
+    );
+    assert!(
+        !unused_enum_member_names.contains(&"Green"),
+        "Green should not be unused (for..in), found: {unused_enum_member_names:?}"
+    );
+
+    // Priority — only High accessed via computed literal, Low and Medium should be unused
+    assert!(
+        unused_enum_member_names.contains(&"Low"),
+        "Low should be unused (only High accessed via computed), found: {unused_enum_member_names:?}"
+    );
+    assert!(
+        unused_enum_member_names.contains(&"Medium"),
+        "Medium should be unused (only High accessed via computed), found: {unused_enum_member_names:?}"
+    );
+}
+
+// ── Vue SFC parsing ────────────────────────────────────────────
+
+#[test]
+fn vue_project_discovers_vue_files() {
+    let root = fixture_path("vue-project");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_file_names: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|f| f.path.file_name().unwrap().to_string_lossy().to_string())
+        .collect();
+
+    // App.vue is imported by main.ts, should NOT be unused
+    assert!(
+        !unused_file_names.contains(&"App.vue".to_string()),
+        "App.vue should be reachable via import from main.ts, unused: {unused_file_names:?}"
+    );
+
+    // Orphan.vue is not imported by anything, should be unused
+    assert!(
+        unused_file_names.contains(&"Orphan.vue".to_string()),
+        "Orphan.vue should be detected as unused file, found: {unused_file_names:?}"
+    );
+}
+
+#[test]
+fn vue_imports_mark_exports_used() {
+    let root = fixture_path("vue-project");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_export_names: Vec<&str> = results
+        .unused_exports
+        .iter()
+        .map(|e| e.export_name.as_str())
+        .collect();
+
+    // formatDate is imported inside App.vue <script>, should be used
+    assert!(
+        !unused_export_names.contains(&"formatDate"),
+        "formatDate should be used (imported in App.vue), found: {unused_export_names:?}"
+    );
+
+    // unusedUtil is not imported anywhere, should be unused
+    assert!(
+        unused_export_names.contains(&"unusedUtil"),
+        "unusedUtil should be detected as unused export, found: {unused_export_names:?}"
+    );
+}
+
+// ── Svelte SFC parsing ─────────────────────────────────────────
+
+#[test]
+fn svelte_project_discovers_svelte_files() {
+    let root = fixture_path("svelte-project");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_file_names: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|f| f.path.file_name().unwrap().to_string_lossy().to_string())
+        .collect();
+
+    // App.svelte is imported by main.ts, should NOT be unused
+    assert!(
+        !unused_file_names.contains(&"App.svelte".to_string()),
+        "App.svelte should be reachable via import from main.ts, unused: {unused_file_names:?}"
+    );
+
+    // Orphan.svelte is not imported, should be unused
+    assert!(
+        unused_file_names.contains(&"Orphan.svelte".to_string()),
+        "Orphan.svelte should be detected as unused file, found: {unused_file_names:?}"
+    );
+}
+
+#[test]
+fn svelte_imports_mark_exports_used() {
+    let root = fixture_path("svelte-project");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_export_names: Vec<&str> = results
+        .unused_exports
+        .iter()
+        .map(|e| e.export_name.as_str())
+        .collect();
+
+    // formatName is imported inside App.svelte, should be used
+    assert!(
+        !unused_export_names.contains(&"formatName"),
+        "formatName should be used (imported in App.svelte), found: {unused_export_names:?}"
+    );
+
+    // unusedUtil is not imported anywhere, should be unused
+    assert!(
+        unused_export_names.contains(&"unusedUtil"),
+        "unusedUtil should be detected as unused export, found: {unused_export_names:?}"
+    );
+}
+
+// ── Dynamic import pattern resolution ──────────────────────────
+
+#[test]
+fn dynamic_import_pattern_makes_files_reachable() {
+    let root = fixture_path("dynamic-import-patterns");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_file_names: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|f| f.path.file_name().unwrap().to_string_lossy().to_string())
+        .collect();
+
+    // Locale files should be reachable via template literal pattern
+    assert!(
+        !unused_file_names.contains(&"en.ts".to_string()),
+        "en.ts should be reachable via template literal import pattern, unused: {unused_file_names:?}"
+    );
+    assert!(
+        !unused_file_names.contains(&"fr.ts".to_string()),
+        "fr.ts should be reachable via template literal import pattern, unused: {unused_file_names:?}"
+    );
+
+    // Page files should be reachable via string concatenation pattern
+    assert!(
+        !unused_file_names.contains(&"home.ts".to_string()),
+        "home.ts should be reachable via concat import pattern, unused: {unused_file_names:?}"
+    );
+    assert!(
+        !unused_file_names.contains(&"about.ts".to_string()),
+        "about.ts should be reachable via concat import pattern, unused: {unused_file_names:?}"
+    );
+
+    // utils.ts should be reachable via static dynamic import
+    assert!(
+        !unused_file_names.contains(&"utils.ts".to_string()),
+        "utils.ts should be reachable via static dynamic import"
+    );
+
+    // orphan.ts should still be unused
+    assert!(
+        unused_file_names.contains(&"orphan.ts".to_string()),
+        "orphan.ts should be detected as unused file, found: {unused_file_names:?}"
+    );
+}
+
+// ── Vite import.meta.glob ──────────────────────────────────────
+
+#[test]
+fn vite_glob_makes_files_reachable() {
+    let root = fixture_path("vite-glob");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_file_names: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|f| f.path.file_name().unwrap().to_string_lossy().to_string())
+        .collect();
+
+    // Components matched by import.meta.glob('./components/*.ts') should be reachable
+    assert!(
+        !unused_file_names.contains(&"Button.ts".to_string()),
+        "Button.ts should be reachable via import.meta.glob, unused: {unused_file_names:?}"
+    );
+    assert!(
+        !unused_file_names.contains(&"Modal.ts".to_string()),
+        "Modal.ts should be reachable via import.meta.glob, unused: {unused_file_names:?}"
+    );
+
+    // orphan.ts is outside components/, should be unused
+    assert!(
+        unused_file_names.contains(&"orphan.ts".to_string()),
+        "orphan.ts should be unused (not matched by glob), found: {unused_file_names:?}"
+    );
+}
+
+// ── Webpack require.context ────────────────────────────────────
+
+#[test]
+fn webpack_context_makes_files_reachable() {
+    let root = fixture_path("webpack-context");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_file_names: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|f| f.path.file_name().unwrap().to_string_lossy().to_string())
+        .collect();
+
+    // Icons matched by require.context('./icons', false) should be reachable
+    assert!(
+        !unused_file_names.contains(&"arrow.ts".to_string()),
+        "arrow.ts should be reachable via require.context, unused: {unused_file_names:?}"
+    );
+    assert!(
+        !unused_file_names.contains(&"star.ts".to_string()),
+        "star.ts should be reachable via require.context, unused: {unused_file_names:?}"
+    );
+
+    // orphan.ts is outside icons/, should be unused
+    assert!(
+        unused_file_names.contains(&"orphan.ts".to_string()),
+        "orphan.ts should be unused (not in icons/), found: {unused_file_names:?}"
     );
 }
