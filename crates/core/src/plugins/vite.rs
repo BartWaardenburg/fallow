@@ -1,6 +1,7 @@
 //! Vite bundler plugin.
 //!
 //! Detects Vite projects and marks conventional entry points and config files.
+//! Parses vite config to extract entry points, dependency references, and SSR externals.
 
 use std::path::Path;
 
@@ -85,6 +86,84 @@ impl Plugin for VitePlugin {
                 .push(crate::resolve::extract_package_name(dep));
         }
 
+        // optimizeDeps.exclude → referenced dependencies
+        let optimize_exclude = config_parser::extract_config_string_array(
+            source,
+            config_path,
+            &["optimizeDeps", "exclude"],
+        );
+        for dep in &optimize_exclude {
+            result
+                .referenced_dependencies
+                .push(crate::resolve::extract_package_name(dep));
+        }
+
+        // ssr.external → referenced dependencies
+        let ssr_external =
+            config_parser::extract_config_string_array(source, config_path, &["ssr", "external"]);
+        for dep in &ssr_external {
+            result
+                .referenced_dependencies
+                .push(crate::resolve::extract_package_name(dep));
+        }
+
+        // ssr.noExternal → referenced dependencies
+        let ssr_no_external =
+            config_parser::extract_config_string_array(source, config_path, &["ssr", "noExternal"]);
+        for dep in &ssr_no_external {
+            result
+                .referenced_dependencies
+                .push(crate::resolve::extract_package_name(dep));
+        }
+
         result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolve_config_ssr_external() {
+        let source = r#"
+            export default {
+                ssr: {
+                    external: ["lodash", "express"],
+                    noExternal: ["my-ui-lib"]
+                }
+            };
+        "#;
+        let plugin = VitePlugin;
+        let result = plugin.resolve_config(
+            std::path::Path::new("vite.config.ts"),
+            source,
+            std::path::Path::new("/project"),
+        );
+        let deps = &result.referenced_dependencies;
+        assert!(deps.contains(&"lodash".to_string()));
+        assert!(deps.contains(&"express".to_string()));
+        assert!(deps.contains(&"my-ui-lib".to_string()));
+    }
+
+    #[test]
+    fn resolve_config_optimize_deps_exclude() {
+        let source = r#"
+            export default {
+                optimizeDeps: {
+                    include: ["react"],
+                    exclude: ["@my/heavy-dep"]
+                }
+            };
+        "#;
+        let plugin = VitePlugin;
+        let result = plugin.resolve_config(
+            std::path::Path::new("vite.config.ts"),
+            source,
+            std::path::Path::new("/project"),
+        );
+        let deps = &result.referenced_dependencies;
+        assert!(deps.contains(&"react".to_string()));
+        assert!(deps.contains(&"@my/heavy-dep".to_string()));
     }
 }

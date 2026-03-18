@@ -1,8 +1,8 @@
 //! Storybook plugin.
 //!
 //! Detects Storybook projects and marks story files and config as entry points.
-//! Parses .storybook/main config to extract addons, framework, and stories
-//! patterns as referenced dependencies and additional entry patterns.
+//! Parses .storybook/main config to extract addons, framework, stories,
+//! core.builder, and typescript.reactDocgen as referenced dependencies.
 
 use std::path::Path;
 
@@ -117,6 +117,91 @@ impl Plugin for StorybookPlugin {
         let stories = config_parser::extract_config_string_array(source, config_path, &["stories"]);
         result.entry_patterns.extend(stories);
 
+        // core.builder → referenced dependency
+        // Can be a string or an object with a `.name` property
+        if let Some(builder) =
+            config_parser::extract_config_string(source, config_path, &["core", "builder"])
+        {
+            let dep = crate::resolve::extract_package_name(&builder);
+            result.referenced_dependencies.push(dep);
+        } else if let Some(builder_name) =
+            config_parser::extract_config_string(source, config_path, &["core", "builder", "name"])
+        {
+            let dep = crate::resolve::extract_package_name(&builder_name);
+            result.referenced_dependencies.push(dep);
+        }
+
+        // typescript.reactDocgen → referenced dependency
+        if let Some(docgen) = config_parser::extract_config_string(
+            source,
+            config_path,
+            &["typescript", "reactDocgen"],
+        ) && !matches!(docgen.as_str(), "false" | "none")
+        {
+            result.referenced_dependencies.push(docgen);
+        }
+
         result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolve_config_core_builder() {
+        let source = r#"
+            export default {
+                core: { builder: "@storybook/builder-vite" }
+            };
+        "#;
+        let plugin = StorybookPlugin;
+        let result = plugin.resolve_config(
+            std::path::Path::new(".storybook/main.ts"),
+            source,
+            std::path::Path::new("/project"),
+        );
+        assert!(
+            result
+                .referenced_dependencies
+                .contains(&"@storybook/builder-vite".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_config_react_docgen() {
+        let source = r#"
+            export default {
+                typescript: { reactDocgen: "react-docgen-typescript" }
+            };
+        "#;
+        let plugin = StorybookPlugin;
+        let result = plugin.resolve_config(
+            std::path::Path::new(".storybook/main.ts"),
+            source,
+            std::path::Path::new("/project"),
+        );
+        assert!(
+            result
+                .referenced_dependencies
+                .contains(&"react-docgen-typescript".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_config_react_docgen_false_ignored() {
+        let source = r#"
+            export default {
+                typescript: { reactDocgen: "false" }
+            };
+        "#;
+        let plugin = StorybookPlugin;
+        let result = plugin.resolve_config(
+            std::path::Path::new(".storybook/main.ts"),
+            source,
+            std::path::Path::new("/project"),
+        );
+        assert!(!result.referenced_dependencies.iter().any(|d| d == "false"));
     }
 }
