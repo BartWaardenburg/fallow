@@ -54,7 +54,7 @@ function timeRun(cmd, cmdArgs, cwd) {
 
 function timeRunWithMemory(cmd, cmdArgs, cwd) {
   const isLinux = process.platform === 'linux';
-  const timeBin = isLinux ? '/usr/bin/time' : '/usr/bin/time';
+  const timeBin = '/usr/bin/time';
   const timeArgs = isLinux ? ['-v', cmd, ...cmdArgs] : ['-l', cmd, ...cmdArgs];
 
   const start = performance.now();
@@ -84,7 +84,9 @@ function parseIssueCount(stdout) {
 
 function stats(times) {
   const sorted = [...times].sort((a,b) => a-b);
-  return { min: sorted[0], max: sorted.at(-1), mean: sorted.reduce((a,b)=>a+b,0)/sorted.length, median: sorted[Math.floor(sorted.length/2)] };
+  const mid = Math.floor(sorted.length / 2);
+  const median = sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+  return { min: sorted[0], max: sorted.at(-1), mean: sorted.reduce((a,b)=>a+b,0)/sorted.length, median };
 }
 
 function fmt(ms) { return ms < 1000 ? `${ms.toFixed(0)}ms` : `${(ms/1000).toFixed(2)}s`; }

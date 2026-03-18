@@ -41,7 +41,9 @@ jobs:
           key: bench
 
       - name: Run benchmarks
-        run: cargo bench --bench analysis 2>&1 | tee bench-output.txt
+        # Exclude large_scale_benches (1000+ and 5000+ file projects) from CI —
+        # they require 5+ minutes and are meant for local/scheduled runs.
+        run: cargo bench --bench analysis -- "benches/" "dupe_benches/" 2>&1 | tee bench-output.txt
 
       - name: Store benchmark result
         uses: benchmark-action/github-action-benchmark@v1

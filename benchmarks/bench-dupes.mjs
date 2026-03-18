@@ -126,11 +126,13 @@ function parseJscpdCloneCount(reportDir) {
 
 function stats(times) {
   const sorted = [...times].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  const median = sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
   return {
     min: sorted[0],
     max: sorted.at(-1),
     mean: sorted.reduce((a, b) => a + b, 0) / sorted.length,
-    median: sorted[Math.floor(sorted.length / 2)],
+    median,
   };
 }
 
