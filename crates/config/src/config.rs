@@ -45,6 +45,79 @@ pub struct FallowConfig {
     /// Output format.
     #[serde(default)]
     pub output: OutputFormat,
+
+    /// Duplication detection settings.
+    #[serde(default)]
+    pub duplicates: DuplicatesConfig,
+}
+
+/// Configuration for code duplication detection.
+#[derive(Debug, Deserialize, Serialize)]
+pub struct DuplicatesConfig {
+    /// Whether duplication detection is enabled.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+
+    /// Detection mode: strict, mild, weak, or semantic.
+    #[serde(default)]
+    pub mode: DuplicatesMode,
+
+    /// Minimum number of tokens for a clone.
+    #[serde(default = "default_min_tokens")]
+    pub min_tokens: usize,
+
+    /// Minimum number of lines for a clone.
+    #[serde(default = "default_min_lines")]
+    pub min_lines: usize,
+
+    /// Maximum allowed duplication percentage (0 = no limit).
+    #[serde(default)]
+    pub threshold: f64,
+
+    /// Additional ignore patterns for duplication analysis.
+    #[serde(default)]
+    pub ignore: Vec<String>,
+
+    /// Only report cross-directory duplicates.
+    #[serde(default)]
+    pub skip_local: bool,
+}
+
+impl Default for DuplicatesConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            mode: DuplicatesMode::default(),
+            min_tokens: default_min_tokens(),
+            min_lines: default_min_lines(),
+            threshold: 0.0,
+            ignore: vec![],
+            skip_local: false,
+        }
+    }
+}
+
+/// Detection mode for duplication analysis.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DuplicatesMode {
+    /// All tokens preserved (Type-1 only).
+    Strict,
+    /// Skip whitespace/newline tokens (default).
+    #[default]
+    Mild,
+    /// Also skip comment tokens.
+    Weak,
+    /// Blind identifiers and literals (Type-2 detection).
+    Semantic,
+}
+
+const fn default_min_tokens() -> usize {
+    50
+}
+
+const fn default_min_lines() -> usize {
+    5
 }
 
 /// Controls which analyses to run.
@@ -146,6 +219,7 @@ pub struct ResolvedConfig {
     pub no_cache: bool,
     pub ignore_dependencies: Vec<String>,
     pub ignore_export_rules: Vec<IgnoreExportRule>,
+    pub duplicates: DuplicatesConfig,
 }
 
 impl FallowConfig {
@@ -240,6 +314,7 @@ impl FallowConfig {
             no_cache,
             ignore_dependencies: self.ignore_dependencies,
             ignore_export_rules: self.ignore_exports,
+            duplicates: self.duplicates,
         }
     }
 }
@@ -340,6 +415,7 @@ ignore_dependencies = ["autoprefixer", "postcss"]
             ignore_dependencies: vec![],
             ignore_exports: vec![],
             output: OutputFormat::Human,
+            duplicates: DuplicatesConfig::default(),
         };
         let resolved = config.resolve(PathBuf::from("/tmp/test"), 4, true);
 
@@ -365,6 +441,7 @@ ignore_dependencies = ["autoprefixer", "postcss"]
             ignore_dependencies: vec![],
             ignore_exports: vec![],
             output: OutputFormat::Json,
+            duplicates: DuplicatesConfig::default(),
         };
         let resolved = config.resolve(PathBuf::from("/tmp/test"), 4, false);
 
@@ -386,6 +463,7 @@ ignore_dependencies = ["autoprefixer", "postcss"]
             ignore_dependencies: vec![],
             ignore_exports: vec![],
             output: OutputFormat::Human,
+            duplicates: DuplicatesConfig::default(),
         };
         let resolved = config.resolve(PathBuf::from("/tmp/project"), 4, true);
         assert_eq!(resolved.cache_dir, PathBuf::from("/tmp/project/.fallow"));

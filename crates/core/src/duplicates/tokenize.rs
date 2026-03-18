@@ -1,0 +1,766 @@
+use std::path::Path;
+
+use oxc_allocator::Allocator;
+use oxc_ast::ast::*;
+use oxc_ast_visit::Visit;
+use oxc_ast_visit::walk;
+use oxc_parser::Parser;
+use oxc_span::{SourceType, Span};
+use oxc_syntax::scope::ScopeFlags;
+
+/// A single token extracted from the AST with its source location.
+#[derive(Debug, Clone)]
+pub struct SourceToken {
+    /// The kind of token.
+    pub kind: TokenKind,
+    /// Byte offset into the source file.
+    pub span: Span,
+}
+
+/// Normalized token types for clone detection.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum TokenKind {
+    // Keywords
+    Keyword(KeywordType),
+    // Identifiers -- value is the actual name (blinded in semantic mode)
+    Identifier(String),
+    // Literals
+    StringLiteral(String),
+    NumericLiteral(String),
+    BooleanLiteral(bool),
+    NullLiteral,
+    TemplateLiteral,
+    RegExpLiteral,
+    // Operators
+    Operator(OperatorType),
+    // Punctuation / delimiters
+    Punctuation(PunctuationType),
+}
+
+/// JavaScript/TypeScript keyword types.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum KeywordType {
+    Var,
+    Let,
+    Const,
+    Function,
+    Return,
+    If,
+    Else,
+    For,
+    While,
+    Do,
+    Switch,
+    Case,
+    Break,
+    Continue,
+    Default,
+    Throw,
+    Try,
+    Catch,
+    Finally,
+    New,
+    Delete,
+    Typeof,
+    Instanceof,
+    In,
+    Of,
+    Void,
+    This,
+    Super,
+    Class,
+    Extends,
+    Import,
+    Export,
+    From,
+    As,
+    Async,
+    Await,
+    Yield,
+    Static,
+    Get,
+    Set,
+    Type,
+    Interface,
+    Enum,
+    Implements,
+    Abstract,
+    Declare,
+    Readonly,
+    Keyof,
+    Satisfies,
+}
+
+/// Operator categories.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum OperatorType {
+    Assign,
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
+    Exp,
+    Eq,
+    NEq,
+    StrictEq,
+    StrictNEq,
+    Lt,
+    Gt,
+    LtEq,
+    GtEq,
+    And,
+    Or,
+    Not,
+    BitwiseAnd,
+    BitwiseOr,
+    BitwiseXor,
+    BitwiseNot,
+    ShiftLeft,
+    ShiftRight,
+    UnsignedShiftRight,
+    NullishCoalescing,
+    OptionalChaining,
+    Spread,
+    Ternary,
+    Arrow,
+    Comma,
+    AddAssign,
+    SubAssign,
+    MulAssign,
+    DivAssign,
+    ModAssign,
+    ExpAssign,
+    AndAssign,
+    OrAssign,
+    NullishAssign,
+    BitwiseAndAssign,
+    BitwiseOrAssign,
+    BitwiseXorAssign,
+    ShiftLeftAssign,
+    ShiftRightAssign,
+    UnsignedShiftRightAssign,
+    Increment,
+    Decrement,
+    Instanceof,
+    In,
+}
+
+/// Punctuation / delimiter types.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PunctuationType {
+    OpenParen,
+    CloseParen,
+    OpenBrace,
+    CloseBrace,
+    OpenBracket,
+    CloseBracket,
+    Semicolon,
+    Colon,
+    Dot,
+}
+
+/// Result of tokenizing a source file.
+#[derive(Debug, Clone)]
+pub struct FileTokens {
+    /// The extracted token sequence.
+    pub tokens: Vec<SourceToken>,
+    /// Source text (needed for extracting fragments).
+    pub source: String,
+    /// Total number of lines in the source.
+    pub line_count: usize,
+}
+
+/// Tokenize a source file into a sequence of normalized tokens.
+pub fn tokenize_file(path: &Path, source: &str) -> FileTokens {
+    let source_type = SourceType::from_path(path).unwrap_or_default();
+    let allocator = Allocator::default();
+    let parser_return = Parser::new(&allocator, source, source_type).parse();
+
+    let mut extractor = TokenExtractor::new();
+    extractor.visit_program(&parser_return.program);
+
+    let line_count = source.lines().count().max(1);
+
+    FileTokens {
+        tokens: extractor.tokens,
+        source: source.to_string(),
+        line_count,
+    }
+}
+
+/// AST visitor that extracts a flat sequence of normalized tokens.
+struct TokenExtractor {
+    tokens: Vec<SourceToken>,
+}
+
+impl TokenExtractor {
+    fn new() -> Self {
+        Self { tokens: Vec::new() }
+    }
+
+    fn push(&mut self, kind: TokenKind, span: Span) {
+        self.tokens.push(SourceToken { kind, span });
+    }
+
+    fn push_keyword(&mut self, kw: KeywordType, span: Span) {
+        self.push(TokenKind::Keyword(kw), span);
+    }
+
+    fn push_op(&mut self, op: OperatorType, span: Span) {
+        self.push(TokenKind::Operator(op), span);
+    }
+
+    fn push_punc(&mut self, p: PunctuationType, span: Span) {
+        self.push(TokenKind::Punctuation(p), span);
+    }
+}
+
+impl<'a> Visit<'a> for TokenExtractor {
+    // ── Statements ──────────────────────────────────────────
+
+    fn visit_variable_declaration(&mut self, decl: &VariableDeclaration<'a>) {
+        let kw = match decl.kind {
+            VariableDeclarationKind::Var => KeywordType::Var,
+            VariableDeclarationKind::Let => KeywordType::Let,
+            VariableDeclarationKind::Const => KeywordType::Const,
+            VariableDeclarationKind::Using | VariableDeclarationKind::AwaitUsing => {
+                KeywordType::Const
+            }
+        };
+        self.push_keyword(kw, decl.span);
+        walk::walk_variable_declaration(self, decl);
+    }
+
+    fn visit_return_statement(&mut self, stmt: &ReturnStatement<'a>) {
+        self.push_keyword(KeywordType::Return, stmt.span);
+        walk::walk_return_statement(self, stmt);
+    }
+
+    fn visit_if_statement(&mut self, stmt: &IfStatement<'a>) {
+        self.push_keyword(KeywordType::If, stmt.span);
+        self.push_punc(PunctuationType::OpenParen, stmt.span);
+        self.visit_expression(&stmt.test);
+        self.push_punc(PunctuationType::CloseParen, stmt.span);
+        self.visit_statement(&stmt.consequent);
+        if let Some(alt) = &stmt.alternate {
+            self.push_keyword(KeywordType::Else, stmt.span);
+            self.visit_statement(alt);
+        }
+    }
+
+    fn visit_for_statement(&mut self, stmt: &ForStatement<'a>) {
+        self.push_keyword(KeywordType::For, stmt.span);
+        self.push_punc(PunctuationType::OpenParen, stmt.span);
+        walk::walk_for_statement(self, stmt);
+        self.push_punc(PunctuationType::CloseParen, stmt.span);
+    }
+
+    fn visit_for_in_statement(&mut self, stmt: &ForInStatement<'a>) {
+        self.push_keyword(KeywordType::For, stmt.span);
+        self.push_punc(PunctuationType::OpenParen, stmt.span);
+        self.visit_for_statement_left(&stmt.left);
+        self.push_keyword(KeywordType::In, stmt.span);
+        self.visit_expression(&stmt.right);
+        self.push_punc(PunctuationType::CloseParen, stmt.span);
+        self.visit_statement(&stmt.body);
+    }
+
+    fn visit_for_of_statement(&mut self, stmt: &ForOfStatement<'a>) {
+        self.push_keyword(KeywordType::For, stmt.span);
+        self.push_punc(PunctuationType::OpenParen, stmt.span);
+        self.visit_for_statement_left(&stmt.left);
+        self.push_keyword(KeywordType::Of, stmt.span);
+        self.visit_expression(&stmt.right);
+        self.push_punc(PunctuationType::CloseParen, stmt.span);
+        self.visit_statement(&stmt.body);
+    }
+
+    fn visit_while_statement(&mut self, stmt: &WhileStatement<'a>) {
+        self.push_keyword(KeywordType::While, stmt.span);
+        self.push_punc(PunctuationType::OpenParen, stmt.span);
+        walk::walk_while_statement(self, stmt);
+        self.push_punc(PunctuationType::CloseParen, stmt.span);
+    }
+
+    fn visit_do_while_statement(&mut self, stmt: &DoWhileStatement<'a>) {
+        self.push_keyword(KeywordType::Do, stmt.span);
+        walk::walk_do_while_statement(self, stmt);
+    }
+
+    fn visit_switch_statement(&mut self, stmt: &SwitchStatement<'a>) {
+        self.push_keyword(KeywordType::Switch, stmt.span);
+        self.push_punc(PunctuationType::OpenParen, stmt.span);
+        walk::walk_switch_statement(self, stmt);
+        self.push_punc(PunctuationType::CloseParen, stmt.span);
+    }
+
+    fn visit_switch_case(&mut self, case: &SwitchCase<'a>) {
+        if case.test.is_some() {
+            self.push_keyword(KeywordType::Case, case.span);
+        } else {
+            self.push_keyword(KeywordType::Default, case.span);
+        }
+        self.push_punc(PunctuationType::Colon, case.span);
+        walk::walk_switch_case(self, case);
+    }
+
+    fn visit_break_statement(&mut self, stmt: &BreakStatement<'a>) {
+        self.push_keyword(KeywordType::Break, stmt.span);
+    }
+
+    fn visit_continue_statement(&mut self, stmt: &ContinueStatement<'a>) {
+        self.push_keyword(KeywordType::Continue, stmt.span);
+    }
+
+    fn visit_throw_statement(&mut self, stmt: &ThrowStatement<'a>) {
+        self.push_keyword(KeywordType::Throw, stmt.span);
+        walk::walk_throw_statement(self, stmt);
+    }
+
+    fn visit_try_statement(&mut self, stmt: &TryStatement<'a>) {
+        self.push_keyword(KeywordType::Try, stmt.span);
+        walk::walk_try_statement(self, stmt);
+    }
+
+    fn visit_catch_clause(&mut self, clause: &CatchClause<'a>) {
+        self.push_keyword(KeywordType::Catch, clause.span);
+        walk::walk_catch_clause(self, clause);
+    }
+
+    fn visit_block_statement(&mut self, block: &BlockStatement<'a>) {
+        self.push_punc(PunctuationType::OpenBrace, block.span);
+        walk::walk_block_statement(self, block);
+        self.push_punc(PunctuationType::CloseBrace, block.span);
+    }
+
+    // ── Expressions ─────────────────────────────────────────
+
+    fn visit_identifier_reference(&mut self, ident: &IdentifierReference<'a>) {
+        self.push(TokenKind::Identifier(ident.name.to_string()), ident.span);
+    }
+
+    fn visit_binding_identifier(&mut self, ident: &BindingIdentifier<'a>) {
+        self.push(TokenKind::Identifier(ident.name.to_string()), ident.span);
+    }
+
+    fn visit_string_literal(&mut self, lit: &StringLiteral<'a>) {
+        self.push(TokenKind::StringLiteral(lit.value.to_string()), lit.span);
+    }
+
+    fn visit_numeric_literal(&mut self, lit: &NumericLiteral<'a>) {
+        let raw_str = lit
+            .raw
+            .as_ref()
+            .map_or_else(|| lit.value.to_string(), |r| r.to_string());
+        self.push(TokenKind::NumericLiteral(raw_str), lit.span);
+    }
+
+    fn visit_boolean_literal(&mut self, lit: &BooleanLiteral) {
+        self.push(TokenKind::BooleanLiteral(lit.value), lit.span);
+    }
+
+    fn visit_null_literal(&mut self, lit: &NullLiteral) {
+        self.push(TokenKind::NullLiteral, lit.span);
+    }
+
+    fn visit_template_literal(&mut self, lit: &TemplateLiteral<'a>) {
+        self.push(TokenKind::TemplateLiteral, lit.span);
+        walk::walk_template_literal(self, lit);
+    }
+
+    fn visit_reg_exp_literal(&mut self, lit: &RegExpLiteral<'a>) {
+        self.push(TokenKind::RegExpLiteral, lit.span);
+    }
+
+    fn visit_this_expression(&mut self, expr: &ThisExpression) {
+        self.push_keyword(KeywordType::This, expr.span);
+    }
+
+    fn visit_super(&mut self, expr: &Super) {
+        self.push_keyword(KeywordType::Super, expr.span);
+    }
+
+    fn visit_array_expression(&mut self, expr: &ArrayExpression<'a>) {
+        self.push_punc(PunctuationType::OpenBracket, expr.span);
+        walk::walk_array_expression(self, expr);
+        self.push_punc(PunctuationType::CloseBracket, expr.span);
+    }
+
+    fn visit_object_expression(&mut self, expr: &ObjectExpression<'a>) {
+        self.push_punc(PunctuationType::OpenBrace, expr.span);
+        walk::walk_object_expression(self, expr);
+        self.push_punc(PunctuationType::CloseBrace, expr.span);
+    }
+
+    fn visit_call_expression(&mut self, expr: &CallExpression<'a>) {
+        self.visit_expression(&expr.callee);
+        self.push_punc(PunctuationType::OpenParen, expr.span);
+        for arg in &expr.arguments {
+            self.visit_argument(arg);
+            self.push_op(OperatorType::Comma, expr.span);
+        }
+        self.push_punc(PunctuationType::CloseParen, expr.span);
+    }
+
+    fn visit_new_expression(&mut self, expr: &NewExpression<'a>) {
+        self.push_keyword(KeywordType::New, expr.span);
+        self.visit_expression(&expr.callee);
+        self.push_punc(PunctuationType::OpenParen, expr.span);
+        for arg in &expr.arguments {
+            self.visit_argument(arg);
+            self.push_op(OperatorType::Comma, expr.span);
+        }
+        self.push_punc(PunctuationType::CloseParen, expr.span);
+    }
+
+    fn visit_static_member_expression(&mut self, expr: &StaticMemberExpression<'a>) {
+        self.visit_expression(&expr.object);
+        self.push_punc(PunctuationType::Dot, expr.span);
+        self.push(
+            TokenKind::Identifier(expr.property.name.to_string()),
+            expr.property.span,
+        );
+    }
+
+    fn visit_computed_member_expression(&mut self, expr: &ComputedMemberExpression<'a>) {
+        self.visit_expression(&expr.object);
+        self.push_punc(PunctuationType::OpenBracket, expr.span);
+        self.visit_expression(&expr.expression);
+        self.push_punc(PunctuationType::CloseBracket, expr.span);
+    }
+
+    fn visit_assignment_expression(&mut self, expr: &AssignmentExpression<'a>) {
+        self.visit_assignment_target(&expr.left);
+        let op = match expr.operator {
+            AssignmentOperator::Assign => OperatorType::Assign,
+            AssignmentOperator::Addition => OperatorType::AddAssign,
+            AssignmentOperator::Subtraction => OperatorType::SubAssign,
+            AssignmentOperator::Multiplication => OperatorType::MulAssign,
+            AssignmentOperator::Division => OperatorType::DivAssign,
+            AssignmentOperator::Remainder => OperatorType::ModAssign,
+            AssignmentOperator::Exponential => OperatorType::ExpAssign,
+            AssignmentOperator::LogicalAnd => OperatorType::AndAssign,
+            AssignmentOperator::LogicalOr => OperatorType::OrAssign,
+            AssignmentOperator::LogicalNullish => OperatorType::NullishAssign,
+            AssignmentOperator::BitwiseAnd => OperatorType::BitwiseAndAssign,
+            AssignmentOperator::BitwiseOR => OperatorType::BitwiseOrAssign,
+            AssignmentOperator::BitwiseXOR => OperatorType::BitwiseXorAssign,
+            AssignmentOperator::ShiftLeft => OperatorType::ShiftLeftAssign,
+            AssignmentOperator::ShiftRight => OperatorType::ShiftRightAssign,
+            AssignmentOperator::ShiftRightZeroFill => OperatorType::UnsignedShiftRightAssign,
+        };
+        self.push_op(op, expr.span);
+        self.visit_expression(&expr.right);
+    }
+
+    fn visit_binary_expression(&mut self, expr: &BinaryExpression<'a>) {
+        self.visit_expression(&expr.left);
+        let op = match expr.operator {
+            BinaryOperator::Addition => OperatorType::Add,
+            BinaryOperator::Subtraction => OperatorType::Sub,
+            BinaryOperator::Multiplication => OperatorType::Mul,
+            BinaryOperator::Division => OperatorType::Div,
+            BinaryOperator::Remainder => OperatorType::Mod,
+            BinaryOperator::Exponential => OperatorType::Exp,
+            BinaryOperator::Equality => OperatorType::Eq,
+            BinaryOperator::Inequality => OperatorType::NEq,
+            BinaryOperator::StrictEquality => OperatorType::StrictEq,
+            BinaryOperator::StrictInequality => OperatorType::StrictNEq,
+            BinaryOperator::LessThan => OperatorType::Lt,
+            BinaryOperator::GreaterThan => OperatorType::Gt,
+            BinaryOperator::LessEqualThan => OperatorType::LtEq,
+            BinaryOperator::GreaterEqualThan => OperatorType::GtEq,
+            BinaryOperator::BitwiseAnd => OperatorType::BitwiseAnd,
+            BinaryOperator::BitwiseOR => OperatorType::BitwiseOr,
+            BinaryOperator::BitwiseXOR => OperatorType::BitwiseXor,
+            BinaryOperator::ShiftLeft => OperatorType::ShiftLeft,
+            BinaryOperator::ShiftRight => OperatorType::ShiftRight,
+            BinaryOperator::ShiftRightZeroFill => OperatorType::UnsignedShiftRight,
+            BinaryOperator::Instanceof => OperatorType::Instanceof,
+            BinaryOperator::In => OperatorType::In,
+        };
+        self.push_op(op, expr.span);
+        self.visit_expression(&expr.right);
+    }
+
+    fn visit_logical_expression(&mut self, expr: &LogicalExpression<'a>) {
+        self.visit_expression(&expr.left);
+        let op = match expr.operator {
+            LogicalOperator::And => OperatorType::And,
+            LogicalOperator::Or => OperatorType::Or,
+            LogicalOperator::Coalesce => OperatorType::NullishCoalescing,
+        };
+        self.push_op(op, expr.span);
+        self.visit_expression(&expr.right);
+    }
+
+    fn visit_unary_expression(&mut self, expr: &UnaryExpression<'a>) {
+        let op = match expr.operator {
+            UnaryOperator::UnaryPlus => OperatorType::Add,
+            UnaryOperator::UnaryNegation => OperatorType::Sub,
+            UnaryOperator::LogicalNot => OperatorType::Not,
+            UnaryOperator::BitwiseNot => OperatorType::BitwiseNot,
+            UnaryOperator::Typeof => {
+                self.push_keyword(KeywordType::Typeof, expr.span);
+                walk::walk_unary_expression(self, expr);
+                return;
+            }
+            UnaryOperator::Void => {
+                self.push_keyword(KeywordType::Void, expr.span);
+                walk::walk_unary_expression(self, expr);
+                return;
+            }
+            UnaryOperator::Delete => {
+                self.push_keyword(KeywordType::Delete, expr.span);
+                walk::walk_unary_expression(self, expr);
+                return;
+            }
+        };
+        self.push_op(op, expr.span);
+        walk::walk_unary_expression(self, expr);
+    }
+
+    fn visit_update_expression(&mut self, expr: &UpdateExpression<'a>) {
+        let op = match expr.operator {
+            UpdateOperator::Increment => OperatorType::Increment,
+            UpdateOperator::Decrement => OperatorType::Decrement,
+        };
+        if expr.prefix {
+            self.push_op(op, expr.span);
+        }
+        walk::walk_update_expression(self, expr);
+        if !expr.prefix {
+            self.push_op(op, expr.span);
+        }
+    }
+
+    fn visit_conditional_expression(&mut self, expr: &ConditionalExpression<'a>) {
+        self.visit_expression(&expr.test);
+        self.push_op(OperatorType::Ternary, expr.span);
+        self.visit_expression(&expr.consequent);
+        self.push_punc(PunctuationType::Colon, expr.span);
+        self.visit_expression(&expr.alternate);
+    }
+
+    fn visit_arrow_function_expression(&mut self, expr: &ArrowFunctionExpression<'a>) {
+        if expr.r#async {
+            self.push_keyword(KeywordType::Async, expr.span);
+        }
+        self.push_punc(PunctuationType::OpenParen, expr.span);
+        for param in &expr.params.items {
+            self.visit_binding_pattern(&param.pattern);
+            self.push_op(OperatorType::Comma, expr.span);
+        }
+        self.push_punc(PunctuationType::CloseParen, expr.span);
+        self.push_op(OperatorType::Arrow, expr.span);
+        walk::walk_arrow_function_expression(self, expr);
+    }
+
+    fn visit_yield_expression(&mut self, expr: &YieldExpression<'a>) {
+        self.push_keyword(KeywordType::Yield, expr.span);
+        walk::walk_yield_expression(self, expr);
+    }
+
+    fn visit_await_expression(&mut self, expr: &AwaitExpression<'a>) {
+        self.push_keyword(KeywordType::Await, expr.span);
+        walk::walk_await_expression(self, expr);
+    }
+
+    fn visit_spread_element(&mut self, elem: &SpreadElement<'a>) {
+        self.push_op(OperatorType::Spread, elem.span);
+        walk::walk_spread_element(self, elem);
+    }
+
+    fn visit_sequence_expression(&mut self, expr: &SequenceExpression<'a>) {
+        for (i, sub_expr) in expr.expressions.iter().enumerate() {
+            if i > 0 {
+                self.push_op(OperatorType::Comma, expr.span);
+            }
+            self.visit_expression(sub_expr);
+        }
+    }
+
+    // ── Functions ──────────────────────────────────────────
+
+    fn visit_function(&mut self, func: &Function<'a>, flags: ScopeFlags) {
+        if func.r#async {
+            self.push_keyword(KeywordType::Async, func.span);
+        }
+        self.push_keyword(KeywordType::Function, func.span);
+        if let Some(id) = &func.id {
+            self.push(TokenKind::Identifier(id.name.to_string()), id.span);
+        }
+        self.push_punc(PunctuationType::OpenParen, func.span);
+        for param in &func.params.items {
+            self.visit_binding_pattern(&param.pattern);
+            self.push_op(OperatorType::Comma, func.span);
+        }
+        self.push_punc(PunctuationType::CloseParen, func.span);
+        walk::walk_function(self, func, flags);
+    }
+
+    // ── Classes ─────────────────────────────────────────────
+
+    fn visit_class(&mut self, class: &Class<'a>) {
+        self.push_keyword(KeywordType::Class, class.span);
+        if let Some(id) = &class.id {
+            self.push(TokenKind::Identifier(id.name.to_string()), id.span);
+        }
+        if class.super_class.is_some() {
+            self.push_keyword(KeywordType::Extends, class.span);
+        }
+        walk::walk_class(self, class);
+    }
+
+    // ── Import/Export ───────────────────────────────────────
+
+    fn visit_import_declaration(&mut self, decl: &ImportDeclaration<'a>) {
+        self.push_keyword(KeywordType::Import, decl.span);
+        walk::walk_import_declaration(self, decl);
+        self.push_keyword(KeywordType::From, decl.span);
+        self.push(
+            TokenKind::StringLiteral(decl.source.value.to_string()),
+            decl.source.span,
+        );
+    }
+
+    fn visit_export_named_declaration(&mut self, decl: &ExportNamedDeclaration<'a>) {
+        self.push_keyword(KeywordType::Export, decl.span);
+        walk::walk_export_named_declaration(self, decl);
+    }
+
+    fn visit_export_default_declaration(&mut self, decl: &ExportDefaultDeclaration<'a>) {
+        self.push_keyword(KeywordType::Export, decl.span);
+        self.push_keyword(KeywordType::Default, decl.span);
+        walk::walk_export_default_declaration(self, decl);
+    }
+
+    fn visit_export_all_declaration(&mut self, decl: &ExportAllDeclaration<'a>) {
+        self.push_keyword(KeywordType::Export, decl.span);
+        self.push_keyword(KeywordType::From, decl.span);
+        self.push(
+            TokenKind::StringLiteral(decl.source.value.to_string()),
+            decl.source.span,
+        );
+    }
+
+    // ── Misc ────────────────────────────────────────────────
+
+    fn visit_variable_declarator(&mut self, decl: &VariableDeclarator<'a>) {
+        self.visit_binding_pattern(&decl.id);
+        if let Some(init) = &decl.init {
+            self.push_op(OperatorType::Assign, decl.span);
+            self.visit_expression(init);
+        }
+        self.push_punc(PunctuationType::Semicolon, decl.span);
+    }
+
+    fn visit_expression_statement(&mut self, stmt: &ExpressionStatement<'a>) {
+        walk::walk_expression_statement(self, stmt);
+        self.push_punc(PunctuationType::Semicolon, stmt.span);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn tokenize(code: &str) -> Vec<SourceToken> {
+        let path = PathBuf::from("test.ts");
+        tokenize_file(&path, code).tokens
+    }
+
+    #[test]
+    fn tokenize_variable_declaration() {
+        let tokens = tokenize("const x = 42;");
+        assert!(!tokens.is_empty());
+        // Should have: const, x (identifier), = (assign), 42 (numeric), ;
+        assert!(matches!(
+            tokens[0].kind,
+            TokenKind::Keyword(KeywordType::Const)
+        ));
+    }
+
+    #[test]
+    fn tokenize_function_declaration() {
+        let tokens = tokenize("function foo() { return 1; }");
+        assert!(!tokens.is_empty());
+        assert!(matches!(
+            tokens[0].kind,
+            TokenKind::Keyword(KeywordType::Function)
+        ));
+    }
+
+    #[test]
+    fn tokenize_arrow_function() {
+        let tokens = tokenize("const f = (a, b) => a + b;");
+        assert!(!tokens.is_empty());
+        let has_arrow = tokens
+            .iter()
+            .any(|t| matches!(t.kind, TokenKind::Operator(OperatorType::Arrow)));
+        assert!(has_arrow, "Should contain arrow operator");
+    }
+
+    #[test]
+    fn tokenize_if_else() {
+        let tokens = tokenize("if (x) { y; } else { z; }");
+        assert!(!tokens.is_empty());
+        assert!(matches!(
+            tokens[0].kind,
+            TokenKind::Keyword(KeywordType::If)
+        ));
+        let has_else = tokens
+            .iter()
+            .any(|t| matches!(t.kind, TokenKind::Keyword(KeywordType::Else)));
+        assert!(has_else, "Should contain else keyword");
+    }
+
+    #[test]
+    fn tokenize_class() {
+        let tokens = tokenize("class Foo extends Bar { }");
+        assert!(!tokens.is_empty());
+        assert!(matches!(
+            tokens[0].kind,
+            TokenKind::Keyword(KeywordType::Class)
+        ));
+        let has_extends = tokens
+            .iter()
+            .any(|t| matches!(t.kind, TokenKind::Keyword(KeywordType::Extends)));
+        assert!(has_extends, "Should contain extends keyword");
+    }
+
+    #[test]
+    fn tokenize_string_literal() {
+        let tokens = tokenize("const s = \"hello\";");
+        let has_string = tokens
+            .iter()
+            .any(|t| matches!(&t.kind, TokenKind::StringLiteral(s) if s == "hello"));
+        assert!(has_string, "Should contain string literal");
+    }
+
+    #[test]
+    fn tokenize_boolean_literal() {
+        let tokens = tokenize("const b = true;");
+        let has_bool = tokens
+            .iter()
+            .any(|t| matches!(t.kind, TokenKind::BooleanLiteral(true)));
+        assert!(has_bool, "Should contain boolean literal");
+    }
+
+    #[test]
+    fn tokenize_null_literal() {
+        let tokens = tokenize("const n = null;");
+        let has_null = tokens
+            .iter()
+            .any(|t| matches!(t.kind, TokenKind::NullLiteral));
+        assert!(has_null, "Should contain null literal");
+    }
+
+    #[test]
+    fn tokenize_empty_file() {
+        let tokens = tokenize("");
+        assert!(tokens.is_empty());
+    }
+}

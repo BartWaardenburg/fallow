@@ -15,6 +15,7 @@ fn create_test_config(root: std::path::PathBuf) -> fallow_config::ResolvedConfig
         ignore_dependencies: vec![],
         ignore_exports: vec![],
         output: OutputFormat::Human,
+        duplicates: fallow_config::DuplicatesConfig::default(),
     }
     .resolve(root, 4, true)
 }

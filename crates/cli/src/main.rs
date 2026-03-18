@@ -139,8 +139,39 @@ enum Command {
         frameworks: bool,
     },
 
+    /// Find code duplication / clones across the project
+    Dupes {
+        /// Detection mode: strict, mild, weak, or semantic
+        #[arg(long, default_value = "mild")]
+        mode: DupesMode,
+
+        /// Minimum token count for a clone
+        #[arg(long, default_value = "50")]
+        min_tokens: usize,
+
+        /// Minimum line count for a clone
+        #[arg(long, default_value = "5")]
+        min_lines: usize,
+
+        /// Fail if duplication exceeds this percentage (0 = no limit)
+        #[arg(long, default_value = "0")]
+        threshold: f64,
+
+        /// Only report cross-directory duplicates
+        #[arg(long)]
+        skip_local: bool,
+    },
+
     /// Dump the CLI interface as machine-readable JSON for agent introspection
     Schema,
+}
+
+#[derive(Clone, clap::ValueEnum)]
+enum DupesMode {
+    Strict,
+    Mild,
+    Weak,
+    Semantic,
 }
 
 #[derive(Clone, clap::ValueEnum)]
@@ -385,6 +416,25 @@ fn main() -> ExitCode {
             files,
             frameworks,
         ),
+        Command::Dupes {
+            mode,
+            min_tokens,
+            min_lines,
+            threshold,
+            skip_local,
+        } => run_dupes(
+            &root,
+            &cli.config,
+            cli.format.into(),
+            cli.no_cache,
+            threads,
+            cli.quiet,
+            mode,
+            min_tokens,
+            min_lines,
+            threshold,
+            skip_local,
+        ),
         Command::Schema => unreachable!("handled above"),
     }
 }
@@ -624,6 +674,69 @@ fn run_watch(
             }
         }
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_dupes(
+    root: &std::path::Path,
+    config_path: &Option<PathBuf>,
+    output: OutputFormat,
+    no_cache: bool,
+    threads: usize,
+    quiet: bool,
+    mode: DupesMode,
+    min_tokens: usize,
+    min_lines: usize,
+    threshold: f64,
+    skip_local: bool,
+) -> ExitCode {
+    let start = Instant::now();
+
+    let config = match load_config(root, config_path, output.clone(), no_cache, threads) {
+        Ok(c) => c,
+        Err(code) => return code,
+    };
+
+    // Build duplication config: start from fallow.toml, override with CLI args
+    let toml_dupes = &config.duplicates;
+    let dupes_config = fallow_core::duplicates::DuplicatesConfig {
+        enabled: true,
+        mode: match mode {
+            DupesMode::Strict => fallow_core::duplicates::DetectionMode::Strict,
+            DupesMode::Mild => fallow_core::duplicates::DetectionMode::Mild,
+            DupesMode::Weak => fallow_core::duplicates::DetectionMode::Weak,
+            DupesMode::Semantic => fallow_core::duplicates::DetectionMode::Semantic,
+        },
+        min_tokens,
+        min_lines,
+        threshold,
+        ignore: toml_dupes.ignore.clone(),
+        skip_local,
+    };
+
+    // Discover files
+    let files = fallow_core::discover::discover_files(&config);
+
+    // Run duplication detection
+    let report = fallow_core::duplicates::find_duplicates(&config.root, &files, &dupes_config);
+    let elapsed = start.elapsed();
+
+    // Print results
+    let result = report::print_duplication_report(&report, &config, elapsed, quiet, &output);
+    if result != ExitCode::SUCCESS {
+        return result;
+    }
+
+    // Check threshold
+    if threshold > 0.0 && report.stats.duplication_percentage > threshold {
+        eprintln!(
+            "Duplication ({:.1}%) exceeds threshold ({:.1}%)",
+            report.stats.duplication_percentage, threshold
+        );
+        return ExitCode::from(1);
+    }
+
+    ExitCode::SUCCESS
 }
 
 fn run_init(root: &std::path::Path) -> ExitCode {
@@ -989,6 +1102,7 @@ fn load_config(
             ignore_dependencies: vec![],
             ignore_exports: vec![],
             output,
+            duplicates: fallow_config::DuplicatesConfig::default(),
         }
         .resolve(root.to_path_buf(), threads, no_cache),
     })
