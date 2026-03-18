@@ -1,10 +1,15 @@
 use std::path::PathBuf;
+use std::time::Duration;
 
 use criterion::{Criterion, criterion_group, criterion_main};
 
 use fallow_config::{DetectConfig, FallowConfig, OutputFormat};
 
 fn create_test_config(root: std::path::PathBuf) -> fallow_config::ResolvedConfig {
+    make_config(root, true)
+}
+
+fn make_config(root: std::path::PathBuf, no_cache: bool) -> fallow_config::ResolvedConfig {
     FallowConfig {
         schema: None,
         entry: vec![],
@@ -19,7 +24,7 @@ fn create_test_config(root: std::path::PathBuf) -> fallow_config::ResolvedConfig
         rules: fallow_config::RulesConfig::default(),
         production: false,
     }
-    .resolve(root, 4, true)
+    .resolve(root, 4, no_cache)
 }
 
 fn bench_parse_file(c: &mut Criterion) {
@@ -175,6 +180,14 @@ fn create_synthetic_project(
     name: &str,
     file_count: usize,
 ) -> (std::path::PathBuf, fallow_config::ResolvedConfig) {
+    create_synthetic_project_with_cache(name, file_count, true)
+}
+
+fn create_synthetic_project_with_cache(
+    name: &str,
+    file_count: usize,
+    no_cache: bool,
+) -> (std::path::PathBuf, fallow_config::ResolvedConfig) {
     let temp_dir = std::env::temp_dir().join(format!("fallow-bench-{name}"));
     let _ = std::fs::remove_dir_all(&temp_dir);
     std::fs::create_dir_all(temp_dir.join("src")).unwrap();
@@ -210,6 +223,78 @@ export const helper{i} = () => value{i} + 1;
         format!("{}\n{}\n", imports.join("\n"), uses.join("\n")),
     )
     .unwrap();
+
+    let config = make_config(temp_dir.clone(), no_cache);
+    (temp_dir, config)
+}
+
+/// Generate a synthetic project with duplicated code blocks for dupe detection benchmarks.
+/// ~40% of files contain shared code blocks (each ~30 lines), rest is unique.
+fn create_dupe_project(
+    name: &str,
+    file_count: usize,
+) -> (std::path::PathBuf, fallow_config::ResolvedConfig) {
+    let temp_dir = std::env::temp_dir().join(format!("fallow-bench-dupes-{name}"));
+    let _ = std::fs::remove_dir_all(&temp_dir);
+    std::fs::create_dir_all(temp_dir.join("src")).unwrap();
+
+    std::fs::write(
+        temp_dir.join("package.json"),
+        r#"{"name": "bench-dupes", "main": "src/index.ts"}"#,
+    )
+    .unwrap();
+
+    // Generate shared duplicated code blocks (~30 lines each)
+    let dupe_groups = file_count / 25;
+    let blocks: Vec<String> = (0..dupe_groups)
+        .map(|g| {
+            let mut block = String::new();
+            block.push_str(&format!(
+                "export const processData_{g} = (input: string): Record<string, unknown> => {{\n"
+            ));
+            block.push_str("  const result: Record<string, unknown> = {};\n");
+            block.push_str("  const timestamp = Date.now();\n");
+            block.push_str(&format!("  const id = `item_${{timestamp}}_{g}`;\n"));
+            block.push_str("  if (!input) {\n");
+            block.push_str(&format!(
+                "    throw new Error('Input is required for group {g}');\n"
+            ));
+            block.push_str("  }\n");
+            block.push_str("  result.id = id;\n");
+            block.push_str("  result.status = 'active';\n");
+            block.push_str("  result.createdAt = new Date(timestamp).toISOString();\n");
+            block.push_str("  result.updatedAt = new Date(timestamp).toISOString();\n");
+            for line in 0..18 {
+                block.push_str(&format!(
+                    "  result.field_{line} = String(input).slice(0, {});\n",
+                    10 + line * 3
+                ));
+            }
+            block.push_str("  return result;\n};\n");
+            block
+        })
+        .collect();
+
+    // ~40% of files get at least one dupe block, each group appears in 2-3 files
+    let dupe_file_count = file_count * 2 / 5;
+    for i in 0..file_count {
+        let mut content = String::new();
+        // Unique content
+        content.push_str(&format!(
+            "export const unique_{i} = (v: string): string => `${{v}}_{i}`;\n\n"
+        ));
+        // Add dupe block if within dupe range
+        if i < dupe_file_count && !blocks.is_empty() {
+            let group = i % blocks.len();
+            content.push_str(&blocks[group]);
+            content.push('\n');
+        }
+        // More unique filler
+        content.push_str(&format!("export const helper_{i} = {i};\n"));
+        std::fs::write(temp_dir.join(format!("src/module{i}.ts")), content).unwrap();
+    }
+
+    std::fs::write(temp_dir.join("src/index.ts"), "export const main = true;\n").unwrap();
 
     let config = create_test_config(temp_dir.clone());
     (temp_dir, config)
@@ -573,10 +658,14 @@ fn bench_cache_round_trip(c: &mut Criterion) {
         dynamic_imports: vec![DynamicImportInfo {
             source: "./lazy-component".to_string(),
             span: oxc_span::Span::new(900, 940),
+            destructured_names: vec![],
+            local_name: None,
         }],
         require_calls: vec![RequireCallInfo {
             source: "fs".to_string(),
             span: oxc_span::Span::new(950, 970),
+            destructured_names: vec![],
+            local_name: None,
         }],
         member_accesses: vec![
             MemberAccess {
@@ -775,6 +864,80 @@ fn bench_dupe_suffix_array_only(c: &mut Criterion) {
     });
 }
 
+// ── Large-scale benchmarks (1000+ and 5000+ files) ──────────────────
+
+fn bench_full_pipeline_5000(c: &mut Criterion) {
+    let (temp_dir, config) = create_synthetic_project("5000", 5000);
+
+    c.bench_function("full_pipeline_5000_files", |b| {
+        b.iter(|| {
+            let _ = fallow_core::analyze(&config);
+        });
+    });
+
+    let _ = std::fs::remove_dir_all(&temp_dir);
+}
+
+fn bench_full_pipeline_1000_warm(c: &mut Criterion) {
+    let (temp_dir, config) = create_synthetic_project_with_cache("1000-warm", 1000, false);
+
+    // Populate the cache
+    let _ = fallow_core::analyze(&config);
+
+    c.bench_function("full_pipeline_1000_files_warm_cache", |b| {
+        b.iter(|| {
+            let _ = fallow_core::analyze(&config);
+        });
+    });
+
+    let _ = std::fs::remove_dir_all(&temp_dir);
+}
+
+fn bench_full_pipeline_5000_warm(c: &mut Criterion) {
+    let (temp_dir, config) = create_synthetic_project_with_cache("5000-warm", 5000, false);
+
+    // Populate the cache
+    let _ = fallow_core::analyze(&config);
+
+    c.bench_function("full_pipeline_5000_files_warm_cache", |b| {
+        b.iter(|| {
+            let _ = fallow_core::analyze(&config);
+        });
+    });
+
+    let _ = std::fs::remove_dir_all(&temp_dir);
+}
+
+// ── Full-project dupe detection benchmarks ──────────────────────────
+
+fn bench_dupes_full_1000(c: &mut Criterion) {
+    let (temp_dir, config) = create_dupe_project("1000", 1000);
+    let files = fallow_core::discover::discover_files(&config);
+    let dupes_config = fallow_config::DuplicatesConfig::default();
+
+    c.bench_function("dupes_full_pipeline_1000_files", |b| {
+        b.iter(|| {
+            fallow_core::duplicates::find_duplicates(&config.root, &files, &dupes_config);
+        });
+    });
+
+    let _ = std::fs::remove_dir_all(&temp_dir);
+}
+
+fn bench_dupes_full_5000(c: &mut Criterion) {
+    let (temp_dir, config) = create_dupe_project("5000", 5000);
+    let files = fallow_core::discover::discover_files(&config);
+    let dupes_config = fallow_config::DuplicatesConfig::default();
+
+    c.bench_function("dupes_full_pipeline_5000_files", |b| {
+        b.iter(|| {
+            fallow_core::duplicates::find_duplicates(&config.root, &files, &dupes_config);
+        });
+    });
+
+    let _ = std::fs::remove_dir_all(&temp_dir);
+}
+
 criterion_group!(
     benches,
     bench_parse_file,
@@ -795,4 +958,18 @@ criterion_group!(
     bench_dupe_suffix_array_only,
 );
 
-criterion_main!(benches, dupe_benches);
+criterion_group! {
+    name = large_scale_benches;
+    config = Criterion::default()
+        .sample_size(10)
+        .measurement_time(Duration::from_secs(60))
+        .warm_up_time(Duration::from_secs(5));
+    targets =
+        bench_full_pipeline_5000,
+        bench_full_pipeline_1000_warm,
+        bench_full_pipeline_5000_warm,
+        bench_dupes_full_1000,
+        bench_dupes_full_5000,
+}
+
+criterion_main!(benches, dupe_benches, large_scale_benches);

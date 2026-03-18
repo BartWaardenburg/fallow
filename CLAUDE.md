@@ -2,7 +2,7 @@
 
 ## What is this?
 
-Fallow finds unused files, exports, dependencies, types, enum members, class members, unresolved imports, unlisted deps, and duplicate exports in JS/TS projects. It's a Rust alternative to [knip](https://github.com/webpro-nl/knip) that is 25-40x faster on real-world projects by leveraging the Oxc parser ecosystem.
+Fallow finds unused files, exports, dependencies, types, enum members, class members, unresolved imports, unlisted deps, and duplicate exports in JS/TS projects. It's a Rust alternative to [knip](https://github.com/webpro-nl/knip) that is 3-40x faster depending on project size (up to 40x on small projects, 3-10x on 1,000-5,000+ file projects) by leveraging the Oxc parser ecosystem.
 
 ## Project structure
 
@@ -48,6 +48,12 @@ cargo fmt --all -- --check
 cargo run -- check              # Run analysis
 cargo run -- watch              # Watch mode
 cargo run -- fix --dry-run      # Auto-fix preview
+
+# Benchmarks (see BENCHMARKS.md for methodology)
+cargo bench --bench analysis                           # All Criterion benchmarks
+cargo bench --bench analysis -- large_scale_benches/   # 1000+ and 5000+ file benchmarks only
+cd benchmarks && npm run generate && npm run bench     # Comparative benchmarks vs knip
+cd benchmarks && npm run generate:dupes && npm run bench:dupes  # vs jscpd
 ```
 
 ## Detection capabilities

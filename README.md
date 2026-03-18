@@ -14,7 +14,7 @@
 
 ---
 
-Finds unused files, exports, dependencies, and types — plus duplicated code blocks across your entire codebase. Dead code and duplication increase bundle sizes, slow CI, and make codebases harder to navigate. fallow finds both in seconds, not minutes. 25-40x faster than [knip](https://knip.dev) for dead code analysis, 4-75x faster than [jscpd](https://github.com/kucherenko/jscpd) for duplication detection, with no Node.js runtime dependency.
+Finds unused files, exports, dependencies, and types — plus duplicated code blocks across your entire codebase. Dead code and duplication increase bundle sizes, slow CI, and make codebases harder to navigate. fallow finds both in seconds, not minutes. 3-40x faster than [knip](https://knip.dev) for dead code analysis, 4-75x faster than [jscpd](https://github.com/kucherenko/jscpd) for duplication detection, with no Node.js runtime dependency.
 
 ```bash
 npx fallow check    # Dead code analysis
@@ -115,7 +115,7 @@ node bench-dupes.mjs          # Run duplication benchmarks
 
 | | fallow | knip |
 |:--|:-------|:-----|
-| Speed (real-world) | **25-40x faster** | Baseline |
+| Speed (real-world) | **3-40x faster** | Baseline |
 | Dead code detection | 10 issue types | Comparable |
 | Duplication detection | Built-in | Not included |
 | Framework plugins | 40 (20 with config parsing) | 140+ (runtime config loading) |
