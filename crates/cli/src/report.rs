@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use colored::Colorize;
 use fallow_config::{OutputFormat, ResolvedConfig};
+use fallow_core::duplicates::DuplicationReport;
 use fallow_core::results::AnalysisResults;
 
 /// Print analysis results in the configured format.
@@ -674,6 +675,229 @@ fn build_sarif(results: &AnalysisResults, root: &std::path::Path) -> serde_json:
             "results": sarif_results
         }]
     })
+}
+
+// ── Duplication report ────────────────────────────────────────────
+
+/// Print duplication analysis results in the configured format.
+pub fn print_duplication_report(
+    report: &DuplicationReport,
+    config: &ResolvedConfig,
+    elapsed: Duration,
+    quiet: bool,
+    output: &OutputFormat,
+) -> ExitCode {
+    match output {
+        OutputFormat::Human => {
+            print_duplication_human(report, &config.root, elapsed, quiet);
+            ExitCode::SUCCESS
+        }
+        OutputFormat::Json => print_duplication_json(report, elapsed),
+        OutputFormat::Compact => {
+            print_duplication_compact(report, &config.root);
+            ExitCode::SUCCESS
+        }
+        OutputFormat::Sarif => print_duplication_sarif(report, &config.root),
+    }
+}
+
+fn print_duplication_human(
+    report: &DuplicationReport,
+    root: &std::path::Path,
+    elapsed: Duration,
+    quiet: bool,
+) {
+    if !quiet {
+        eprintln!();
+    }
+
+    if report.clone_groups.is_empty() {
+        if !quiet {
+            eprintln!(
+                "{}",
+                format!(
+                    "\u{2713} No code duplication found ({:.2}s)",
+                    elapsed.as_secs_f64()
+                )
+                .green()
+                .bold()
+            );
+        }
+        return;
+    }
+
+    println!("{} {}", "\u{25cf}".cyan(), "Duplicates".cyan().bold());
+    println!();
+
+    for (i, group) in report.clone_groups.iter().enumerate() {
+        let instance_count = group.instances.len();
+        println!(
+            "  {} ({} lines, {} instance{})",
+            format!("Clone group {}", i + 1).bold(),
+            group.line_count,
+            instance_count,
+            if instance_count == 1 { "" } else { "s" }
+        );
+
+        for (j, instance) in group.instances.iter().enumerate() {
+            let relative = instance.file.strip_prefix(root).unwrap_or(&instance.file);
+            let location = format!(
+                "{}:{}-{}",
+                relative.display(),
+                instance.start_line,
+                instance.end_line
+            );
+            let connector = if j == instance_count - 1 {
+                "\u{2514}\u{2500}"
+            } else {
+                "\u{251c}\u{2500}"
+            };
+            println!("  {} {}", connector, location.dimmed());
+        }
+        println!();
+    }
+
+    let stats = &report.stats;
+    if !quiet {
+        eprintln!(
+            "{}",
+            format!(
+                "Found {} clone group{} with {} instance{}",
+                stats.clone_groups,
+                if stats.clone_groups == 1 { "" } else { "s" },
+                stats.clone_instances,
+                if stats.clone_instances == 1 { "" } else { "s" },
+            )
+            .bold()
+        );
+        eprintln!(
+            "{}",
+            format!(
+                "Duplicated: {} lines ({:.1}%) across {} file{}",
+                stats.duplicated_lines,
+                stats.duplication_percentage,
+                stats.files_with_clones,
+                if stats.files_with_clones == 1 {
+                    ""
+                } else {
+                    "s"
+                },
+            )
+            .dimmed()
+        );
+        eprintln!(
+            "{}",
+            format!("Completed in {:.2}s", elapsed.as_secs_f64()).dimmed()
+        );
+    }
+}
+
+fn print_duplication_json(report: &DuplicationReport, elapsed: Duration) -> ExitCode {
+    let mut output = match serde_json::to_value(report) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("Error: failed to serialize duplication report: {e}");
+            return ExitCode::from(2);
+        }
+    };
+
+    if let serde_json::Value::Object(ref mut map) = output {
+        map.insert(
+            "version".to_string(),
+            serde_json::json!(env!("CARGO_PKG_VERSION")),
+        );
+        map.insert(
+            "elapsed_ms".to_string(),
+            serde_json::json!(elapsed.as_millis()),
+        );
+    }
+
+    match serde_json::to_string_pretty(&output) {
+        Ok(json) => {
+            println!("{json}");
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("Error: failed to serialize JSON output: {e}");
+            ExitCode::from(2)
+        }
+    }
+}
+
+fn print_duplication_compact(report: &DuplicationReport, root: &std::path::Path) {
+    for (i, group) in report.clone_groups.iter().enumerate() {
+        for instance in &group.instances {
+            let relative = instance.file.strip_prefix(root).unwrap_or(&instance.file);
+            println!(
+                "clone-group-{}:{}:{}-{}:{}tokens",
+                i + 1,
+                relative.display(),
+                instance.start_line,
+                instance.end_line,
+                group.token_count
+            );
+        }
+    }
+}
+
+fn print_duplication_sarif(report: &DuplicationReport, root: &std::path::Path) -> ExitCode {
+    let mut sarif_results = Vec::new();
+
+    for (i, group) in report.clone_groups.iter().enumerate() {
+        for instance in &group.instances {
+            let uri = normalize_uri(
+                &instance
+                    .file
+                    .strip_prefix(root)
+                    .unwrap_or(&instance.file)
+                    .display()
+                    .to_string(),
+            );
+            sarif_results.push(sarif_result(
+                "fallow/code-duplication",
+                "warning",
+                &format!(
+                    "Code clone group {} ({} lines, {} instances)",
+                    i + 1,
+                    group.line_count,
+                    group.instances.len()
+                ),
+                &uri,
+                Some((instance.start_line as u32, (instance.start_col + 1) as u32)),
+            ));
+        }
+    }
+
+    let sarif = serde_json::json!({
+        "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+        "version": "2.1.0",
+        "runs": [{
+            "tool": {
+                "driver": {
+                    "name": "fallow",
+                    "version": env!("CARGO_PKG_VERSION"),
+                    "informationUri": "https://github.com/bartwaardenburg/fallow",
+                    "rules": [{
+                        "id": "fallow/code-duplication",
+                        "shortDescription": { "text": "Duplicated code block" },
+                        "defaultConfiguration": { "level": "warning" }
+                    }]
+                }
+            },
+            "results": sarif_results
+        }]
+    });
+
+    match serde_json::to_string_pretty(&sarif) {
+        Ok(json) => {
+            println!("{json}");
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("Error: failed to serialize SARIF output: {e}");
+            ExitCode::from(2)
+        }
+    }
 }
 
 #[cfg(test)]

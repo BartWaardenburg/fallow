@@ -16,6 +16,7 @@ oxc_ast_visit = { workspace = true }
 oxc_parser = { workspace = true }
 oxc_resolver = { workspace = true }
 oxc_span = { workspace = true }
+oxc_syntax = { workspace = true }
 
 # Parallelism
 rayon = { workspace = true }
@@ -46,6 +47,7 @@ tracing = { workspace = true }
 [dev-dependencies]
 criterion = { workspace = true }
 tempfile = { workspace = true }
+toml = { workspace = true }
 
 [[bench]]
 name = "analysis"

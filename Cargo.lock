@@ -531,10 +531,12 @@ dependencies = [
  "oxc_parser",
  "oxc_resolver",
  "oxc_span",
+ "oxc_syntax",
  "rayon",
  "serde",
  "serde_json",
  "tempfile",
+ "toml",
  "tracing",
  "xxhash-rust",
 ]

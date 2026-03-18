@@ -1,6 +1,7 @@
 pub mod analyze;
 pub mod cache;
 pub mod discover;
+pub mod duplicates;
 pub mod errors;
 pub mod extract;
 pub mod graph;
@@ -166,7 +167,7 @@ pub fn analyze_project(root: &Path) -> Result<AnalysisResults, FallowError> {
 }
 
 /// Create a default config for a project root.
-fn default_config(root: &Path) -> ResolvedConfig {
+pub(crate) fn default_config(root: &Path) -> ResolvedConfig {
     let user_config = fallow_config::FallowConfig::find_and_load(root)
         .ok()
         .flatten();
@@ -182,6 +183,7 @@ fn default_config(root: &Path) -> ResolvedConfig {
             ignore_dependencies: vec![],
             ignore_exports: vec![],
             output: fallow_config::OutputFormat::Human,
+            duplicates: fallow_config::DuplicatesConfig::default(),
         }
         .resolve(root.to_path_buf(), num_cpus(), false),
     }

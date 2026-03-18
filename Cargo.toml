@@ -20,6 +20,7 @@ oxc_ast_visit = "0.120"
 oxc_parser = "0.120"
 oxc_resolver = "11"
 oxc_span = "0.120"
+oxc_syntax = "0.120"
 
 # CLI
 clap = { version = "4", features = ["derive"] }
