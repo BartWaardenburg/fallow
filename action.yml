@@ -73,6 +73,10 @@ inputs:
     description: 'Only report cross-directory duplicates (dupes command)'
     required: false
     default: 'false'
+  # Workspace
+  workspace:
+    description: 'Scope output to a single workspace package by name (monorepo support)'
+    required: false
   # Fix-specific inputs
   dry-run:
     description: 'Preview changes without modifying files (fix command, default: true for CI safety)'
@@ -130,7 +134,8 @@ runs:
             table_row("Unused class members"; "unused_class_members"),
             table_row("Unresolved imports"; "unresolved_imports"),
             table_row("Unlisted dependencies"; "unlisted_dependencies"),
-            table_row("Duplicate exports"; "duplicate_exports")
+            table_row("Duplicate exports"; "duplicate_exports"),
+            table_row("Type-only dependencies"; "type_only_dependencies")
           ] | join("\n")) +
           "\n\n<details>\n<summary>View details</summary>\n\n" +
           detail_section("Unused files"; "unused_files";
@@ -153,6 +158,8 @@ runs:
             "- `\(.package_name)`\(if (.imported_from | length) > 0 then " (used in \(.imported_from[:3] | join(", ")))" else "" end)") +
           detail_section("Duplicate exports"; "duplicate_exports";
             "- `\(.export_name)` in \(.locations[:5] | join(", "))\(if (.locations | length) > 5 then " *(+\((.locations | length) - 5) more)*" else "" end)") +
+          detail_section("Type-only dependencies"; "type_only_dependencies";
+            "- `\(.package_name)` (move to devDependencies)") +
           "\n\n</details>"
         end
         JQEOF
@@ -241,6 +248,14 @@ runs:
         fi
         echo "Installed fallow $(fallow --version 2>/dev/null || echo 'unknown version')"
 
+    - name: Cache analysis results
+      uses: actions/cache@v4
+      with:
+        path: ${{ inputs.root }}/.fallow
+        key: fallow-cache-${{ runner.os }}-${{ hashFiles(format('{0}/**/package.json', inputs.root)) }}
+        restore-keys: |
+          fallow-cache-${{ runner.os }}-
+
     - name: Run analysis
       id: analyze
       shell: bash
@@ -260,12 +275,24 @@ runs:
         INPUT_THRESHOLD: ${{ inputs.threshold }}
         INPUT_SKIP_LOCAL: ${{ inputs.skip-local }}
         INPUT_DRY_RUN: ${{ inputs.dry-run }}
+        INPUT_WORKSPACE: ${{ inputs.workspace }}
       run: |
         # Validate command
         case "$INPUT_COMMAND" in
           check|dupes|fix) ;;
           *) echo "::error::Invalid command: ${INPUT_COMMAND}. Must be check, dupes, or fix."; exit 2 ;;
         esac
+
+        # Validate numeric inputs
+        for name_val in "min-tokens:$INPUT_MIN_TOKENS" "min-lines:$INPUT_MIN_LINES"; do
+          name="${name_val%%:*}"; val="${name_val#*:}"
+          if [ -n "$val" ] && ! [[ "$val" =~ ^[0-9]+$ ]]; then
+            echo "::error::${name} must be a positive integer, got: ${val}"; exit 2
+          fi
+        done
+        if [ -n "$INPUT_THRESHOLD" ] && ! [[ "$INPUT_THRESHOLD" =~ ^[0-9]+\.?[0-9]*$ ]]; then
+          echo "::error::threshold must be a number, got: ${INPUT_THRESHOLD}"; exit 2
+        fi
 
         # Check for --sarif-file support (check command only)
         HAS_SARIF_FILE=false
@@ -286,6 +313,7 @@ runs:
         [ -n "$INPUT_CHANGED_SINCE" ] && ARGS+=(--changed-since "$INPUT_CHANGED_SINCE")
         [ -n "$INPUT_BASELINE" ] && ARGS+=(--baseline "$INPUT_BASELINE")
         [ -n "$INPUT_SAVE_BASELINE" ] && ARGS+=(--save-baseline "$INPUT_SAVE_BASELINE")
+        [ -n "$INPUT_WORKSPACE" ] && ARGS+=(--workspace "$INPUT_WORKSPACE")
 
         # Command-specific arguments
         case "$INPUT_COMMAND" in
@@ -324,12 +352,15 @@ runs:
         fi
 
         # Fallback SARIF generation (separate run when --sarif-file not available)
-        if [ "$INPUT_FORMAT" = "sarif" ] && [ "$INPUT_COMMAND" != "fix" ] && [ ! -f fallow-results.sarif ]; then
+        if [ "$INPUT_FORMAT" = "sarif" ] && [ "$INPUT_COMMAND" != "fix" ] && \
+           { [ ! -f fallow-results.sarif ] || ! jq -e '.' fallow-results.sarif > /dev/null 2>&1; }; then
           SARIF_ARGS=("$INPUT_COMMAND" --root "$INPUT_ROOT" --quiet --format sarif)
           [ -n "$INPUT_CONFIG" ] && SARIF_ARGS+=(--config "$INPUT_CONFIG")
           [ "$INPUT_PRODUCTION" = "true" ] && SARIF_ARGS+=(--production)
           [ -n "$INPUT_CHANGED_SINCE" ] && SARIF_ARGS+=(--changed-since "$INPUT_CHANGED_SINCE")
           [ -n "$INPUT_BASELINE" ] && SARIF_ARGS+=(--baseline "$INPUT_BASELINE")
+          [ -n "$INPUT_SAVE_BASELINE" ] && SARIF_ARGS+=(--save-baseline "$INPUT_SAVE_BASELINE")
+          [ -n "$INPUT_WORKSPACE" ] && SARIF_ARGS+=(--workspace "$INPUT_WORKSPACE")
 
           # Carry over dupes-specific args for SARIF run
           if [ "$INPUT_COMMAND" = "dupes" ]; then
@@ -428,9 +459,12 @@ runs:
         esac
 
         # Generate comment body
-        COMMENT_BODY="$(jq -r -f "$JQ_FILE" fallow-results.json)
+        if ! COMMENT_BODY="$(jq -r -f "$JQ_FILE" fallow-results.json)
 
-        <!-- fallow-results -->"
+        <!-- fallow-results -->"; then
+          echo "::warning::Failed to generate PR comment body"
+          exit 0
+        fi
 
         # Find existing fallow comment to update (avoids spam on busy PRs)
         COMMENT_ID=$(gh api \
@@ -440,19 +474,25 @@ runs:
           2>/dev/null | head -1)
 
         if [ -n "$COMMENT_ID" ]; then
-          gh api \
+          if ! gh api \
             "repos/${GH_REPO}/issues/comments/${COMMENT_ID}" \
             --method PATCH \
             --field body="$COMMENT_BODY" \
-            > /dev/null
-          echo "Updated existing PR comment"
+            > /dev/null; then
+            echo "::warning::Failed to update PR comment"
+          else
+            echo "Updated existing PR comment"
+          fi
         else
-          gh api \
+          if ! gh api \
             "repos/${GH_REPO}/issues/${PR_NUMBER}/comments" \
             --method POST \
             --field body="$COMMENT_BODY" \
-            > /dev/null
-          echo "Created new PR comment"
+            > /dev/null; then
+            echo "::warning::Failed to create PR comment"
+          else
+            echo "Created new PR comment"
+          fi
         fi
 
     - name: Check threshold

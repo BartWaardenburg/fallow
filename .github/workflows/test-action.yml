@@ -160,6 +160,104 @@ jobs:
           fi
           echo "Clean project reported 0 issues"
 
+  test-dupes:
+    name: Test dupes command
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Run action with dupes command
+        id: fallow
+        uses: ./
+        with:
+          command: dupes
+          root: tests/fixtures/duplicate-code
+          format: json
+          fail-on-issues: false
+
+      - name: Verify dupes JSON results
+        env:
+          RESULTS_PATH: ${{ steps.fallow.outputs.results }}
+          ISSUES: ${{ steps.fallow.outputs.issues }}
+        run: |
+          if [ ! -f "$RESULTS_PATH" ]; then
+            echo "::error::Results output file not found"
+            exit 1
+          fi
+
+          # Validate JSON
+          jq empty "$RESULTS_PATH"
+
+          # Verify dupes-specific fields
+          jq -e '.stats.clone_groups' "$RESULTS_PATH" > /dev/null
+          jq -e '.stats.total_files' "$RESULTS_PATH" > /dev/null
+          echo "Dupes JSON structure validated"
+
+          # Issues output should match clone_groups
+          JSON_GROUPS=$(jq -r '.stats.clone_groups' "$RESULTS_PATH")
+          if [ "$ISSUES" != "$JSON_GROUPS" ]; then
+            echo "::error::Output issues ($ISSUES) does not match stats.clone_groups ($JSON_GROUPS)"
+            exit 1
+          fi
+          echo "Clone groups: $ISSUES"
+
+  test-fix:
+    name: Test fix command (dry-run)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Run action with fix command
+        id: fallow
+        uses: ./
+        with:
+          command: fix
+          root: tests/fixtures/basic-project
+          format: json
+          fail-on-issues: false
+          dry-run: true
+
+      - name: Verify fix JSON results
+        env:
+          RESULTS_PATH: ${{ steps.fallow.outputs.results }}
+          ISSUES: ${{ steps.fallow.outputs.issues }}
+        run: |
+          if [ ! -f "$RESULTS_PATH" ]; then
+            echo "::error::Results output file not found"
+            exit 1
+          fi
+
+          # Validate JSON
+          jq empty "$RESULTS_PATH"
+
+          # Verify fix-specific fields
+          jq -e '.fixes' "$RESULTS_PATH" > /dev/null
+          jq -e '.dry_run' "$RESULTS_PATH" > /dev/null
+          echo "Fix JSON structure validated (dry_run=$(jq -r '.dry_run' "$RESULTS_PATH"))"
+
+          # Verify dry_run is true
+          DRY_RUN=$(jq -r '.dry_run' "$RESULTS_PATH")
+          if [ "$DRY_RUN" != "true" ]; then
+            echo "::error::Expected dry_run=true, got: $DRY_RUN"
+            exit 1
+          fi
+
   test-comment:
     name: Test PR comment
     runs-on: ubuntu-latest

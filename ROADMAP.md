@@ -38,7 +38,6 @@ Fallow is a Rust-native dead code and duplication analyzer for JavaScript/TypeSc
 
 ### Known Limitations
 
-- **No cross-workspace resolution**: Monorepo packages are analyzed independently. Exports used by sibling packages get flagged as unused.
 - **Syntactic analysis only**: No TypeScript type information. Projects using `isolatedModules: true` (required for esbuild/swc/vite) are well-served; legacy tsc-only projects may see false positives on type-only imports.
 - **Config parsing ceiling**: AST-based extraction covers static object literals, string arrays, and simple wrappers like `defineConfig(...)`. Computed values (`getPlugins()`), conditionals (`process.env.NODE_ENV`), and nested config factories are out of reach without JS eval.
 - **Dupes: no cross-language semantic matching yet**: Semantic mode works within JS/TS but doesn't yet detect clones between `.ts` and `.tsx` variants or across language boundaries.
@@ -69,13 +68,15 @@ Add benchmarks on 1,000+ and 5,000+ file projects for both `check` and `dupes`. 
 
 Reach developers where they are: CI, editors, AI tools.
 
-### 2.1 GitHub Action
+### 2.1 GitHub Action ✅
 
-Publish `fallow-action` to the GitHub Marketplace. This is the highest-leverage adoption driver — it's largely a wrapper around existing capabilities:
-- Run `check` and `dupes` on PRs with SARIF upload to Code Scanning
-- Inline annotations on changed lines for both dead code and duplication
-- Configurable: fail on new issues, duplication threshold, report-only mode
-- Cache the fallow binary and analysis cache
+Published as a composite action with multi-command support (`check`, `dupes`, `fix`):
+- SARIF upload to GitHub Code Scanning with inline annotations
+- PR comments with markdown summaries (create or update)
+- Configurable: fail on new issues, duplication threshold, report-only mode, workspace scoping
+- Analysis cache via `actions/cache` for the `.fallow/` incremental cache
+- Job summaries with detailed breakdowns per command
+- Baseline support for incremental CI adoption
 
 ### 2.2 MCP Server
 
@@ -171,7 +172,7 @@ Extend import extraction to `.astro`, `.mdx`, and improve existing `.vue`/`.svel
 - [x] Production mode for CI pipelines
 - [ ] Stable config format with backwards compatibility promise
 - [ ] Stable JSON output schema for CI consumers
-- [ ] GitHub Action published
+- [x] GitHub Action published
 - [ ] MCP server published
 - [ ] VS Code extension published
 - [x] Duplication detection with clone families and baseline tracking

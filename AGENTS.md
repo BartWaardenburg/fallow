@@ -48,7 +48,26 @@ fallow check --format json --quiet --changed-since main
 - `--baseline <path>` -- compare against a saved baseline
 - `--save-baseline <path>` -- save current results as a baseline
 - `--production` -- exclude test/story/dev files, only start/build scripts, report type-only dependencies
+- `--workspace <name>` -- scope output to a single workspace package (monorepo support)
 - Issue type filters: `--unused-files`, `--unused-exports`, `--unused-deps`, `--unused-types`, `--unused-enum-members`, `--unused-class-members`, `--unresolved-imports`, `--unlisted-deps`, `--duplicate-exports`
+
+### `dupes`
+
+Find code duplication / clones across the project.
+
+```bash
+fallow dupes --format json --quiet
+fallow dupes --format json --quiet --mode semantic
+fallow dupes --format json --quiet --threshold 5
+```
+
+**Flags:**
+- `--mode strict|mild|weak|semantic` -- detection mode (default: mild)
+- `--min-tokens <N>` -- minimum token count for a clone (default: 50)
+- `--min-lines <N>` -- minimum line count for a clone (default: 5)
+- `--threshold <PCT>` -- fail if duplication exceeds this percentage (0 = no limit)
+- `--skip-local` -- only report cross-directory duplicates
+- `--baseline <path>` / `--save-baseline <path>` -- incremental CI adoption
 
 ### `fix`
 
@@ -130,6 +149,19 @@ fallow check --format json --quiet --changed-since main --fail-on-issues
 
 ```bash
 fallow check --format json --quiet --production
+```
+
+### Analyze a single workspace package (monorepo)
+
+```bash
+fallow check --format json --quiet --workspace my-package
+```
+
+### Find code duplication
+
+```bash
+fallow dupes --format json --quiet
+fallow dupes --format json --quiet --mode semantic --threshold 5
 ```
 
 ### Safe auto-fix cycle
