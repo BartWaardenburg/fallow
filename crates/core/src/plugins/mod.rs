@@ -852,8 +852,6 @@ const GENERAL_TOOLING_EXACT: &[&str] = &[
 /// Per-plugin tooling dependencies are declared via `Plugin::tooling_dependencies()`
 /// and aggregated separately in `AggregatedPluginResult`.
 pub fn is_known_tooling_dependency(name: &str) -> bool {
-    GENERAL_TOOLING_PREFIXES
-        .iter()
-        .any(|p| name.starts_with(p))
+    GENERAL_TOOLING_PREFIXES.iter().any(|p| name.starts_with(p))
         || GENERAL_TOOLING_EXACT.contains(&name)
 }

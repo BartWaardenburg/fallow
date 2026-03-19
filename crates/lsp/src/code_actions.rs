@@ -814,7 +814,7 @@ mod tests {
     #[test]
     fn end_to_end_duplication_detection_on_fixture() {
         use fallow_core::discover::{DiscoveredFile, FileId};
-        use fallow_core::duplicates::{find_duplicates, DuplicatesConfig};
+        use fallow_core::duplicates::{DuplicatesConfig, find_duplicates};
 
         let fixture_dir =
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/duplicate-code");
@@ -1110,7 +1110,7 @@ function b() {
     #[test]
     fn apply_extract_action_on_real_fixture() {
         use fallow_core::discover::{DiscoveredFile, FileId};
-        use fallow_core::duplicates::{find_duplicates, DuplicatesConfig};
+        use fallow_core::duplicates::{DuplicatesConfig, find_duplicates};
 
         let fixture_dir =
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/duplicate-code");

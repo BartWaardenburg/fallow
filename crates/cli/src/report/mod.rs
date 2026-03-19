@@ -1,0 +1,185 @@
+mod compact;
+mod human;
+mod json;
+mod sarif;
+
+use std::path::Path;
+use std::process::ExitCode;
+use std::time::Duration;
+
+use fallow_config::{OutputFormat, ResolvedConfig, Severity};
+use fallow_core::duplicates::DuplicationReport;
+use fallow_core::results::AnalysisResults;
+use fallow_core::trace::{CloneTrace, DependencyTrace, ExportTrace, FileTrace, PipelineTimings};
+
+/// Strip the project root prefix from a path for display, falling back to the full path.
+fn relative_path<'a>(path: &'a Path, root: &Path) -> &'a Path {
+    path.strip_prefix(root).unwrap_or(path)
+}
+
+/// Compute a SARIF-compatible relative URI from an absolute path and project root.
+fn relative_uri(path: &Path, root: &Path) -> String {
+    normalize_uri(&relative_path(path, root).display().to_string())
+}
+
+/// Normalize a path string to use forward slashes for cross-platform SARIF compatibility.
+fn normalize_uri(path_str: &str) -> String {
+    path_str.replace('\\', "/")
+}
+
+/// Severity level for human-readable output.
+enum Level {
+    Warn,
+    Info,
+    Error,
+}
+
+fn severity_to_level(s: Severity) -> Level {
+    match s {
+        Severity::Error => Level::Error,
+        Severity::Warn => Level::Warn,
+        // Off issues are filtered before reporting; fall back to Info.
+        Severity::Off => Level::Info,
+    }
+}
+
+/// Print analysis results in the configured format.
+/// Returns exit code 2 if serialization fails, SUCCESS otherwise.
+pub fn print_results(
+    results: &AnalysisResults,
+    config: &ResolvedConfig,
+    elapsed: Duration,
+    quiet: bool,
+) -> ExitCode {
+    match config.output {
+        OutputFormat::Human => {
+            human::print_human(results, &config.root, &config.rules, elapsed, quiet);
+            ExitCode::SUCCESS
+        }
+        OutputFormat::Json => json::print_json(results, elapsed),
+        OutputFormat::Compact => {
+            compact::print_compact(results, &config.root);
+            ExitCode::SUCCESS
+        }
+        OutputFormat::Sarif => sarif::print_sarif(results, &config.root, &config.rules),
+    }
+}
+
+// ── Duplication report ────────────────────────────────────────────
+
+/// Print duplication analysis results in the configured format.
+pub fn print_duplication_report(
+    report: &DuplicationReport,
+    config: &ResolvedConfig,
+    elapsed: Duration,
+    quiet: bool,
+    output: &OutputFormat,
+) -> ExitCode {
+    match output {
+        OutputFormat::Human => {
+            human::print_duplication_human(report, &config.root, elapsed, quiet);
+            ExitCode::SUCCESS
+        }
+        OutputFormat::Json => json::print_duplication_json(report, elapsed),
+        OutputFormat::Compact => {
+            compact::print_duplication_compact(report, &config.root);
+            ExitCode::SUCCESS
+        }
+        OutputFormat::Sarif => sarif::print_duplication_sarif(report, &config.root),
+    }
+}
+
+/// Print cross-reference findings (duplicated code that is also dead code).
+///
+/// Only emits output in human format to avoid corrupting structured JSON/SARIF output.
+pub fn print_cross_reference_findings(
+    cross_ref: &fallow_core::cross_reference::CrossReferenceResult,
+    root: &Path,
+    quiet: bool,
+    output: &OutputFormat,
+) {
+    human::print_cross_reference_findings(cross_ref, root, quiet, output);
+}
+
+// ── Trace output ──────────────────────────────────────────────────
+
+/// Print export trace results.
+pub fn print_export_trace(trace: &ExportTrace, format: &OutputFormat) {
+    match format {
+        OutputFormat::Json => json::print_trace_json(trace),
+        _ => human::print_export_trace_human(trace),
+    }
+}
+
+/// Print file trace results.
+pub fn print_file_trace(trace: &FileTrace, format: &OutputFormat) {
+    match format {
+        OutputFormat::Json => json::print_trace_json(trace),
+        _ => human::print_file_trace_human(trace),
+    }
+}
+
+/// Print dependency trace results.
+pub fn print_dependency_trace(trace: &DependencyTrace, format: &OutputFormat) {
+    match format {
+        OutputFormat::Json => json::print_trace_json(trace),
+        _ => human::print_dependency_trace_human(trace),
+    }
+}
+
+/// Print clone trace results.
+pub fn print_clone_trace(trace: &CloneTrace, root: &Path, format: &OutputFormat) {
+    match format {
+        OutputFormat::Json => json::print_trace_json(trace),
+        _ => human::print_clone_trace_human(trace, root),
+    }
+}
+
+/// Print pipeline performance timings.
+/// In JSON mode, outputs to stderr to avoid polluting the JSON analysis output on stdout.
+pub fn print_performance(timings: &PipelineTimings, format: &OutputFormat) {
+    match format {
+        OutputFormat::Json => match serde_json::to_string_pretty(timings) {
+            Ok(json) => eprintln!("{json}"),
+            Err(e) => eprintln!("Error: failed to serialize timings: {e}"),
+        },
+        _ => human::print_performance_human(timings),
+    }
+}
+
+pub(crate) use sarif::build_sarif;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── normalize_uri ────────────────────────────────────────────────
+
+    #[test]
+    fn normalize_uri_forward_slashes_unchanged() {
+        assert_eq!(normalize_uri("src/utils.ts"), "src/utils.ts");
+    }
+
+    #[test]
+    fn normalize_uri_backslashes_replaced() {
+        assert_eq!(normalize_uri("src\\utils\\index.ts"), "src/utils/index.ts");
+    }
+
+    #[test]
+    fn normalize_uri_mixed_slashes() {
+        assert_eq!(normalize_uri("src\\utils/index.ts"), "src/utils/index.ts");
+    }
+
+    #[test]
+    fn normalize_uri_path_with_spaces() {
+        assert_eq!(
+            normalize_uri("src\\my folder\\file.ts"),
+            "src/my folder/file.ts"
+        );
+    }
+
+    #[test]
+    fn normalize_uri_empty_string() {
+        assert_eq!(normalize_uri(""), "");
+    }
+}

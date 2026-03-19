@@ -1496,18 +1496,26 @@ mod tests {
     fn tooling_dep_prefixes() {
         assert!(crate::plugins::is_known_tooling_dependency("@types/node"));
         assert!(crate::plugins::is_known_tooling_dependency("eslint"));
-        assert!(crate::plugins::is_known_tooling_dependency("eslint-plugin-react"));
+        assert!(crate::plugins::is_known_tooling_dependency(
+            "eslint-plugin-react"
+        ));
         assert!(crate::plugins::is_known_tooling_dependency("prettier"));
-        assert!(crate::plugins::is_known_tooling_dependency("@typescript-eslint/parser"));
+        assert!(crate::plugins::is_known_tooling_dependency(
+            "@typescript-eslint/parser"
+        ));
         assert!(crate::plugins::is_known_tooling_dependency("husky"));
         assert!(crate::plugins::is_known_tooling_dependency("lint-staged"));
         assert!(crate::plugins::is_known_tooling_dependency("commitlint"));
-        assert!(crate::plugins::is_known_tooling_dependency("@commitlint/config-conventional"));
+        assert!(crate::plugins::is_known_tooling_dependency(
+            "@commitlint/config-conventional"
+        ));
         assert!(crate::plugins::is_known_tooling_dependency("stylelint"));
         assert!(crate::plugins::is_known_tooling_dependency("postcss"));
         assert!(crate::plugins::is_known_tooling_dependency("autoprefixer"));
         assert!(crate::plugins::is_known_tooling_dependency("tailwindcss"));
-        assert!(crate::plugins::is_known_tooling_dependency("@tailwindcss/forms"));
+        assert!(crate::plugins::is_known_tooling_dependency(
+            "@tailwindcss/forms"
+        ));
     }
 
     #[test]
@@ -1530,7 +1538,9 @@ mod tests {
         assert!(!crate::plugins::is_known_tooling_dependency("next"));
         assert!(!crate::plugins::is_known_tooling_dependency("lodash"));
         assert!(!crate::plugins::is_known_tooling_dependency("express"));
-        assert!(!crate::plugins::is_known_tooling_dependency("@emotion/react"));
+        assert!(!crate::plugins::is_known_tooling_dependency(
+            "@emotion/react"
+        ));
     }
 
     // New tooling dependency tests (Issue 2)
@@ -1539,10 +1549,18 @@ mod tests {
         assert!(crate::plugins::is_known_tooling_dependency("jest"));
         assert!(crate::plugins::is_known_tooling_dependency("vitest"));
         assert!(crate::plugins::is_known_tooling_dependency("@jest/globals"));
-        assert!(crate::plugins::is_known_tooling_dependency("@vitest/coverage-v8"));
-        assert!(crate::plugins::is_known_tooling_dependency("@testing-library/react"));
-        assert!(crate::plugins::is_known_tooling_dependency("@testing-library/jest-dom"));
-        assert!(crate::plugins::is_known_tooling_dependency("@playwright/test"));
+        assert!(crate::plugins::is_known_tooling_dependency(
+            "@vitest/coverage-v8"
+        ));
+        assert!(crate::plugins::is_known_tooling_dependency(
+            "@testing-library/react"
+        ));
+        assert!(crate::plugins::is_known_tooling_dependency(
+            "@testing-library/jest-dom"
+        ));
+        assert!(crate::plugins::is_known_tooling_dependency(
+            "@playwright/test"
+        ));
     }
 
     #[test]
