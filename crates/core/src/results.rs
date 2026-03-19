@@ -20,6 +20,11 @@ pub struct AnalysisResults {
     /// Production dependencies only used via type-only imports (could be devDependencies).
     /// Only populated in production mode.
     pub type_only_dependencies: Vec<TypeOnlyDependency>,
+    /// Usage counts for all exports across the project. Used by the LSP for Code Lens.
+    /// Not included in issue counts — this is metadata, not an issue type.
+    /// Skipped during serialization: this is internal LSP data, not part of the JSON output schema.
+    #[serde(skip)]
+    pub export_usages: Vec<ExportUsage>,
 }
 
 impl AnalysisResults {
@@ -124,6 +129,19 @@ pub struct TypeOnlyDependency {
     pub package_name: String,
     /// Path to the package.json where the dependency is listed.
     pub path: PathBuf,
+}
+
+/// Usage count for an export symbol. Used by the LSP Code Lens to show
+/// reference counts above each export declaration.
+#[derive(Debug, Clone, Serialize)]
+pub struct ExportUsage {
+    pub path: PathBuf,
+    pub export_name: String,
+    /// 1-based line number.
+    pub line: u32,
+    /// 0-based byte column offset.
+    pub col: u32,
+    pub reference_count: usize,
 }
 
 #[cfg(test)]

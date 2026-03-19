@@ -94,6 +94,11 @@ export const activate = async (
     })
   );
 
+  // No-op command used by Code Lens items (display-only, no action on click)
+  context.subscriptions.push(
+    vscode.commands.registerCommand("fallow.noop", () => {})
+  );
+
   // Watch for config changes that affect the LSP
   context.subscriptions.push(
     onConfigChange(async (e) => {

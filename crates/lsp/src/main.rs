@@ -60,6 +60,9 @@ impl LanguageServer for FallowLspServer {
                         ..Default::default()
                     },
                 )),
+                code_lens_provider: Some(CodeLensOptions {
+                    resolve_provider: Some(false),
+                }),
                 ..Default::default()
             },
             ..Default::default()
@@ -269,6 +272,58 @@ impl LanguageServer for FallowLspServer {
             Ok(Some(actions))
         }
     }
+
+    async fn code_lens(&self, params: CodeLensParams) -> Result<Option<Vec<CodeLens>>> {
+        let results = self.results.read().await;
+        let Some(results) = results.as_ref() else {
+            return Ok(None);
+        };
+
+        let file_path = match params.text_document.uri.to_file_path() {
+            Ok(p) => p,
+            Err(_) => return Ok(None),
+        };
+
+        let lenses: Vec<CodeLens> = results
+            .export_usages
+            .iter()
+            .filter(|usage| usage.path == file_path)
+            .map(|usage| {
+                // usage.line is 1-based; LSP positions are 0-based
+                let line = usage.line.saturating_sub(1);
+                let title = if usage.reference_count == 1 {
+                    "1 reference".to_string()
+                } else {
+                    format!("{} references", usage.reference_count)
+                };
+
+                CodeLens {
+                    range: Range {
+                        start: Position {
+                            line,
+                            character: usage.col,
+                        },
+                        end: Position {
+                            line,
+                            character: usage.col,
+                        },
+                    },
+                    command: Some(Command {
+                        title,
+                        command: "fallow.noop".to_string(),
+                        arguments: None,
+                    }),
+                    data: None,
+                }
+            })
+            .collect();
+
+        if lenses.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(lenses))
+        }
+    }
 }
 
 impl FallowLspServer {
@@ -293,6 +348,9 @@ impl FallowLspServer {
             Ok(Ok(results)) => {
                 self.publish_diagnostics(&results, &root).await;
                 *self.results.write().await = Some(results);
+
+                // Notify the client to re-request Code Lenses with the fresh data
+                let _ = self.client.code_lens_refresh().await;
 
                 self.client
                     .log_message(MessageType::INFO, "Analysis complete")

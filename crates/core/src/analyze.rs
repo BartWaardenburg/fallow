@@ -126,6 +126,9 @@ pub fn find_dead_code_full(
         }
     }
 
+    // Collect export usage counts for Code Lens (LSP feature)
+    results.export_usages = collect_export_usages(graph);
+
     results
 }
 
@@ -1352,6 +1355,47 @@ fn is_angular_lifecycle_method(name: &str) -> bool {
             | "writeValue"
             | "setDisabledState"
     )
+}
+
+/// Collect usage counts for all exports in the module graph.
+///
+/// Iterates every module and every export, producing an `ExportUsage` entry with the
+/// reference count. This data is used by the LSP server to show Code Lens annotations
+/// (e.g., "3 references", "0 references") above export declarations.
+fn collect_export_usages(graph: &ModuleGraph) -> Vec<ExportUsage> {
+    let mut usages = Vec::new();
+
+    for module in &graph.modules {
+        // Skip unreachable modules — no point showing Code Lens for files
+        // that aren't reachable from any entry point
+        if !module.is_reachable {
+            continue;
+        }
+
+        // Lazily load source content for byte offset -> line/col conversion
+        let mut source_content: Option<String> = None;
+
+        for export in &module.exports {
+            // Skip synthetic re-export entries (span 0..0) — these are generated
+            // by graph construction, not real local declarations in the source
+            if export.span.start == 0 && export.span.end == 0 {
+                continue;
+            }
+
+            let source = source_content.get_or_insert_with(|| read_source(&module.path));
+            let (line, col) = byte_offset_to_line_col(source, export.span.start);
+
+            usages.push(ExportUsage {
+                path: module.path.clone(),
+                export_name: export.name.to_string(),
+                line,
+                col,
+                reference_count: export.references.len(),
+            });
+        }
+    }
+
+    usages
 }
 
 fn is_react_lifecycle_method(name: &str) -> bool {
