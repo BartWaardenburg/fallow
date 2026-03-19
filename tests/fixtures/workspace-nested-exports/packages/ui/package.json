@@ -1,0 +1,9 @@
+{
+  "name": "@workspace/ui",
+  "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./utils": "./dist/esm/utils.mjs",
+    "./components/Button": "./dist/esm/components/Button.mjs"
+  }
+}

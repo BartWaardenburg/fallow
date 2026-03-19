@@ -81,7 +81,22 @@ pub fn resolve_all_imports(
     modules: &[ModuleInfo],
     config: &ResolvedConfig,
     files: &[DiscoveredFile],
+    workspaces: &[fallow_config::WorkspaceInfo],
 ) -> Vec<ResolvedModule> {
+    // Build workspace name → root index for pnpm store fallback.
+    // Canonicalize roots to match path_to_id (which uses canonical paths).
+    // Without this, macOS /var → /private/var and similar platform symlinks
+    // cause workspace roots to mismatch canonical file paths.
+    let canonical_ws_roots: Vec<PathBuf> = workspaces
+        .iter()
+        .map(|ws| ws.root.canonicalize().unwrap_or_else(|_| ws.root.clone()))
+        .collect();
+    let workspace_roots: HashMap<&str, &Path> = workspaces
+        .iter()
+        .zip(canonical_ws_roots.iter())
+        .map(|(ws, canonical)| (ws.name.as_str(), canonical.as_path()))
+        .collect();
+
     // Pre-compute canonical paths ONCE for all files (avoiding repeated syscalls)
     let canonical_paths: Vec<PathBuf> = files
         .iter()
@@ -135,6 +150,7 @@ pub fn resolve_all_imports(
                         &path_to_id,
                         &raw_path_to_id,
                         &bare_cache,
+                        &workspace_roots,
                     ),
                 })
                 .collect();
@@ -150,6 +166,7 @@ pub fn resolve_all_imports(
                         &path_to_id,
                         &raw_path_to_id,
                         &bare_cache,
+                        &workspace_roots,
                     );
                     if !imp.destructured_names.is_empty() {
                         // `const { a, b } = await import('./x')` → Named imports
@@ -208,6 +225,7 @@ pub fn resolve_all_imports(
                         &path_to_id,
                         &raw_path_to_id,
                         &bare_cache,
+                        &workspace_roots,
                     ),
                 })
                 .collect();
@@ -225,6 +243,7 @@ pub fn resolve_all_imports(
                         &path_to_id,
                         &raw_path_to_id,
                         &bare_cache,
+                        &workspace_roots,
                     );
                     if req.destructured_names.is_empty() {
                         vec![ResolvedImport {
@@ -392,6 +411,7 @@ fn resolve_specifier(
     path_to_id: &HashMap<&Path, FileId>,
     raw_path_to_id: &HashMap<&Path, FileId>,
     bare_cache: &BareSpecifierCache,
+    workspace_roots: &HashMap<&str, &Path>,
 ) -> ResolveResult {
     // URL imports (https://, http://, data:) are valid but can't be resolved locally
     if specifier.contains("://") || specifier.starts_with("data:") {
@@ -422,6 +442,10 @@ fn resolve_specifier(
                         // Exports map resolved to a built output (e.g., dist/utils.js)
                         // but the source file (e.g., src/utils.ts) is what we track.
                         ResolveResult::InternalModule(file_id)
+                    } else if let Some(file_id) =
+                        try_pnpm_workspace_fallback(&canonical, path_to_id, workspace_roots)
+                    {
+                        ResolveResult::InternalModule(file_id)
                     } else if let Some(pkg_name) =
                         extract_package_name_from_node_modules_path(&canonical)
                     {
@@ -433,6 +457,10 @@ fn resolve_specifier(
                 Err(_) => {
                     // Path doesn't exist on disk — try source fallback on the raw path
                     if let Some(file_id) = try_source_fallback(resolved_path, path_to_id) {
+                        ResolveResult::InternalModule(file_id)
+                    } else if let Some(file_id) =
+                        try_pnpm_workspace_fallback(resolved_path, path_to_id, workspace_roots)
+                    {
                         ResolveResult::InternalModule(file_id)
                     } else if let Some(pkg_name) =
                         extract_package_name_from_node_modules_path(resolved_path)
@@ -477,29 +505,43 @@ const SOURCE_EXTS: &[&str] = &["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "c
 /// This handles cross-workspace imports that go through `exports` maps pointing to
 /// built output directories. Since fallow ignores `dist/`, `build/`, etc. by default,
 /// the resolved path won't be in the file set, but the source file will be.
+///
+/// Nested output subdirectories (e.g., `dist/esm/utils.mjs`, `build/cjs/index.cjs`)
+/// are handled by finding the last output directory component (closest to the file,
+/// avoiding false matches on parent directories) and then walking backwards to collect
+/// all consecutive output directory components before it.
 fn try_source_fallback(resolved: &Path, path_to_id: &HashMap<&Path, FileId>) -> Option<FileId> {
     let components: Vec<_> = resolved.components().collect();
 
-    // Find the LAST output directory component (closest to the file).
-    // Using rposition avoids false matches on parent directories that happen to
-    // be named "build", "dist", etc.
-    let output_pos = components.iter().rposition(|c| {
+    let is_output_dir = |c: &std::path::Component| -> bool {
         if let std::path::Component::Normal(s) = c
             && let Some(name) = s.to_str()
         {
             return OUTPUT_DIRS.contains(&name);
         }
         false
-    })?;
+    };
 
-    // Build the path prefix (everything before the output dir)
-    let prefix: PathBuf = components[..output_pos].iter().collect();
+    // Find the LAST output directory component (closest to the file).
+    // Using rposition avoids false matches on parent directories that happen to
+    // be named "build", "dist", etc.
+    let last_output_pos = components.iter().rposition(&is_output_dir)?;
 
-    // Build the relative path after the output dir
-    let suffix: PathBuf = components[output_pos + 1..].iter().collect();
+    // Walk backwards to find the start of consecutive output directory components.
+    // e.g., for `dist/esm/utils.mjs`, rposition finds `esm`, then we walk back to `dist`.
+    let mut first_output_pos = last_output_pos;
+    while first_output_pos > 0 && is_output_dir(&components[first_output_pos - 1]) {
+        first_output_pos -= 1;
+    }
+
+    // Build the path prefix (everything before the first consecutive output dir)
+    let prefix: PathBuf = components[..first_output_pos].iter().collect();
+
+    // Build the relative path after the last consecutive output dir
+    let suffix: PathBuf = components[last_output_pos + 1..].iter().collect();
     suffix.file_stem()?; // Ensure the suffix has a filename
 
-    // Try replacing the output dir with "src" and each source extension
+    // Try replacing the output dirs with "src" and each source extension
     for ext in SOURCE_EXTS {
         let source_candidate = prefix.join("src").join(suffix.with_extension(ext));
         if let Some(&file_id) = path_to_id.get(source_candidate.as_path()) {
@@ -542,6 +584,75 @@ fn extract_package_name_from_node_modules_path(path: &Path) -> Option<String> {
     } else {
         Some(after[0].to_string())
     }
+}
+
+/// Try to map a pnpm virtual store path back to a workspace source file.
+///
+/// When pnpm uses injected dependencies or certain linking strategies, canonical
+/// paths go through `.pnpm`:
+///   `/project/node_modules/.pnpm/@myorg+ui@1.0.0/node_modules/@myorg/ui/dist/index.js`
+///
+/// This function detects such paths, extracts the package name, checks if it
+/// matches a workspace package, and tries to find the source file in that workspace.
+fn try_pnpm_workspace_fallback(
+    path: &Path,
+    path_to_id: &HashMap<&Path, FileId>,
+    workspace_roots: &HashMap<&str, &Path>,
+) -> Option<FileId> {
+    // Only relevant for paths containing .pnpm
+    let components: Vec<&str> = path
+        .components()
+        .filter_map(|c| match c {
+            std::path::Component::Normal(s) => s.to_str(),
+            _ => None,
+        })
+        .collect();
+
+    // Find .pnpm component
+    let pnpm_idx = components.iter().position(|&c| c == ".pnpm")?;
+
+    // After .pnpm, find the inner node_modules (the actual package location)
+    // Structure: .pnpm/<name>@<version>/node_modules/<package>/...
+    let after_pnpm = &components[pnpm_idx + 1..];
+
+    // Find "node_modules" inside the .pnpm directory
+    let inner_nm_idx = after_pnpm.iter().position(|&c| c == "node_modules")?;
+    let after_inner_nm = &after_pnpm[inner_nm_idx + 1..];
+
+    if after_inner_nm.is_empty() {
+        return None;
+    }
+
+    // Extract package name (handle scoped packages)
+    let (pkg_name, pkg_name_components) = if after_inner_nm[0].starts_with('@') {
+        if after_inner_nm.len() >= 2 {
+            (format!("{}/{}", after_inner_nm[0], after_inner_nm[1]), 2)
+        } else {
+            return None;
+        }
+    } else {
+        (after_inner_nm[0].to_string(), 1)
+    };
+
+    // Check if this package is a workspace package
+    let ws_root = workspace_roots.get(pkg_name.as_str())?;
+
+    // Get the relative path within the package (after the package name components)
+    let relative_parts = &after_inner_nm[pkg_name_components..];
+    if relative_parts.is_empty() {
+        return None;
+    }
+
+    let relative_path: PathBuf = relative_parts.iter().collect();
+
+    // Try direct file lookup in workspace root
+    let direct = ws_root.join(&relative_path);
+    if let Some(&file_id) = path_to_id.get(direct.as_path()) {
+        return Some(file_id);
+    }
+
+    // Try source fallback (dist/ → src/ etc.) within the workspace
+    try_source_fallback(&direct, path_to_id)
 }
 
 /// Convert a `DynamicImportPattern` to a glob string for file matching.
@@ -748,6 +859,245 @@ mod tests {
             try_source_fallback(&dist_path, &path_to_id),
             Some(FileId(2)),
             "nested dist path should fall back to nested src path"
+        );
+    }
+
+    #[test]
+    fn test_try_source_fallback_nested_dist_esm() {
+        let src_path = PathBuf::from("/project/packages/ui/src/utils.ts");
+        let mut path_to_id = HashMap::new();
+        path_to_id.insert(src_path.as_path(), FileId(0));
+
+        let dist_path = PathBuf::from("/project/packages/ui/dist/esm/utils.mjs");
+        assert_eq!(
+            try_source_fallback(&dist_path, &path_to_id),
+            Some(FileId(0)),
+            "dist/esm/utils.mjs should fall back to src/utils.ts"
+        );
+    }
+
+    #[test]
+    fn test_try_source_fallback_nested_build_cjs() {
+        let src_path = PathBuf::from("/project/packages/core/src/index.ts");
+        let mut path_to_id = HashMap::new();
+        path_to_id.insert(src_path.as_path(), FileId(1));
+
+        let build_path = PathBuf::from("/project/packages/core/build/cjs/index.cjs");
+        assert_eq!(
+            try_source_fallback(&build_path, &path_to_id),
+            Some(FileId(1)),
+            "build/cjs/index.cjs should fall back to src/index.ts"
+        );
+    }
+
+    #[test]
+    fn test_try_source_fallback_nested_dist_esm_deep_path() {
+        let src_path = PathBuf::from("/project/packages/ui/src/components/Button.ts");
+        let mut path_to_id = HashMap::new();
+        path_to_id.insert(src_path.as_path(), FileId(2));
+
+        let dist_path = PathBuf::from("/project/packages/ui/dist/esm/components/Button.mjs");
+        assert_eq!(
+            try_source_fallback(&dist_path, &path_to_id),
+            Some(FileId(2)),
+            "dist/esm/components/Button.mjs should fall back to src/components/Button.ts"
+        );
+    }
+
+    #[test]
+    fn test_try_source_fallback_triple_nested_output_dirs() {
+        let src_path = PathBuf::from("/project/packages/ui/src/utils.ts");
+        let mut path_to_id = HashMap::new();
+        path_to_id.insert(src_path.as_path(), FileId(0));
+
+        let dist_path = PathBuf::from("/project/packages/ui/out/dist/esm/utils.mjs");
+        assert_eq!(
+            try_source_fallback(&dist_path, &path_to_id),
+            Some(FileId(0)),
+            "out/dist/esm/utils.mjs should fall back to src/utils.ts"
+        );
+    }
+
+    #[test]
+    fn test_try_source_fallback_parent_dir_named_build() {
+        let src_path = PathBuf::from("/home/user/build/my-project/src/utils.ts");
+        let mut path_to_id = HashMap::new();
+        path_to_id.insert(src_path.as_path(), FileId(0));
+
+        let dist_path = PathBuf::from("/home/user/build/my-project/dist/utils.js");
+        assert_eq!(
+            try_source_fallback(&dist_path, &path_to_id),
+            Some(FileId(0)),
+            "should resolve dist/ within project, not match parent 'build' dir"
+        );
+    }
+
+    #[test]
+    fn test_pnpm_store_path_extract_package_name() {
+        // pnpm virtual store paths should correctly extract package name
+        let path =
+            PathBuf::from("/project/node_modules/.pnpm/react@18.2.0/node_modules/react/index.js");
+        assert_eq!(
+            extract_package_name_from_node_modules_path(&path),
+            Some("react".to_string())
+        );
+    }
+
+    #[test]
+    fn test_pnpm_store_path_scoped_package() {
+        let path = PathBuf::from(
+            "/project/node_modules/.pnpm/@babel+core@7.24.0/node_modules/@babel/core/lib/index.js",
+        );
+        assert_eq!(
+            extract_package_name_from_node_modules_path(&path),
+            Some("@babel/core".to_string())
+        );
+    }
+
+    #[test]
+    fn test_pnpm_store_path_with_peer_deps() {
+        let path = PathBuf::from(
+            "/project/node_modules/.pnpm/webpack@5.0.0_esbuild@0.19.0/node_modules/webpack/lib/index.js",
+        );
+        assert_eq!(
+            extract_package_name_from_node_modules_path(&path),
+            Some("webpack".to_string())
+        );
+    }
+
+    #[test]
+    fn test_try_pnpm_workspace_fallback_dist_to_src() {
+        let src_path = PathBuf::from("/project/packages/ui/src/utils.ts");
+        let mut path_to_id = HashMap::new();
+        path_to_id.insert(src_path.as_path(), FileId(0));
+
+        let mut workspace_roots = HashMap::new();
+        let ws_root = PathBuf::from("/project/packages/ui");
+        workspace_roots.insert("@myorg/ui", ws_root.as_path());
+
+        // pnpm virtual store path with dist/ output
+        let pnpm_path = PathBuf::from(
+            "/project/node_modules/.pnpm/@myorg+ui@1.0.0/node_modules/@myorg/ui/dist/utils.js",
+        );
+        assert_eq!(
+            try_pnpm_workspace_fallback(&pnpm_path, &path_to_id, &workspace_roots),
+            Some(FileId(0)),
+            ".pnpm workspace path should fall back to src/utils.ts"
+        );
+    }
+
+    #[test]
+    fn test_try_pnpm_workspace_fallback_direct_source() {
+        let src_path = PathBuf::from("/project/packages/core/src/index.ts");
+        let mut path_to_id = HashMap::new();
+        path_to_id.insert(src_path.as_path(), FileId(1));
+
+        let mut workspace_roots = HashMap::new();
+        let ws_root = PathBuf::from("/project/packages/core");
+        workspace_roots.insert("@myorg/core", ws_root.as_path());
+
+        // pnpm path pointing directly to src/
+        let pnpm_path = PathBuf::from(
+            "/project/node_modules/.pnpm/@myorg+core@workspace/node_modules/@myorg/core/src/index.ts",
+        );
+        assert_eq!(
+            try_pnpm_workspace_fallback(&pnpm_path, &path_to_id, &workspace_roots),
+            Some(FileId(1)),
+            ".pnpm workspace path with src/ should resolve directly"
+        );
+    }
+
+    #[test]
+    fn test_try_pnpm_workspace_fallback_non_workspace_package() {
+        let path_to_id: HashMap<&Path, FileId> = HashMap::new();
+
+        let mut workspace_roots = HashMap::new();
+        let ws_root = PathBuf::from("/project/packages/ui");
+        workspace_roots.insert("@myorg/ui", ws_root.as_path());
+
+        // External package (not a workspace) — should return None
+        let pnpm_path =
+            PathBuf::from("/project/node_modules/.pnpm/react@18.2.0/node_modules/react/index.js");
+        assert_eq!(
+            try_pnpm_workspace_fallback(&pnpm_path, &path_to_id, &workspace_roots),
+            None,
+            "non-workspace package in .pnpm should return None"
+        );
+    }
+
+    #[test]
+    fn test_try_pnpm_workspace_fallback_unscoped_package() {
+        let src_path = PathBuf::from("/project/packages/utils/src/index.ts");
+        let mut path_to_id = HashMap::new();
+        path_to_id.insert(src_path.as_path(), FileId(2));
+
+        let mut workspace_roots = HashMap::new();
+        let ws_root = PathBuf::from("/project/packages/utils");
+        workspace_roots.insert("my-utils", ws_root.as_path());
+
+        // Unscoped workspace package in pnpm store
+        let pnpm_path = PathBuf::from(
+            "/project/node_modules/.pnpm/my-utils@1.0.0/node_modules/my-utils/dist/index.js",
+        );
+        assert_eq!(
+            try_pnpm_workspace_fallback(&pnpm_path, &path_to_id, &workspace_roots),
+            Some(FileId(2)),
+            "unscoped workspace package in .pnpm should resolve"
+        );
+    }
+
+    #[test]
+    fn test_try_pnpm_workspace_fallback_nested_path() {
+        let src_path = PathBuf::from("/project/packages/ui/src/components/Button.ts");
+        let mut path_to_id = HashMap::new();
+        path_to_id.insert(src_path.as_path(), FileId(3));
+
+        let mut workspace_roots = HashMap::new();
+        let ws_root = PathBuf::from("/project/packages/ui");
+        workspace_roots.insert("@myorg/ui", ws_root.as_path());
+
+        // Nested path within the package
+        let pnpm_path = PathBuf::from(
+            "/project/node_modules/.pnpm/@myorg+ui@1.0.0/node_modules/@myorg/ui/dist/components/Button.js",
+        );
+        assert_eq!(
+            try_pnpm_workspace_fallback(&pnpm_path, &path_to_id, &workspace_roots),
+            Some(FileId(3)),
+            "nested .pnpm workspace path should resolve through source fallback"
+        );
+    }
+
+    #[test]
+    fn test_try_pnpm_workspace_fallback_no_pnpm() {
+        let path_to_id: HashMap<&Path, FileId> = HashMap::new();
+        let workspace_roots: HashMap<&str, &Path> = HashMap::new();
+
+        // Regular path without .pnpm — should return None immediately
+        let regular_path = PathBuf::from("/project/node_modules/react/index.js");
+        assert_eq!(
+            try_pnpm_workspace_fallback(&regular_path, &path_to_id, &workspace_roots),
+            None,
+        );
+    }
+
+    #[test]
+    fn test_try_pnpm_workspace_fallback_with_peer_deps() {
+        let src_path = PathBuf::from("/project/packages/ui/src/index.ts");
+        let mut path_to_id = HashMap::new();
+        path_to_id.insert(src_path.as_path(), FileId(4));
+
+        let mut workspace_roots = HashMap::new();
+        let ws_root = PathBuf::from("/project/packages/ui");
+        workspace_roots.insert("@myorg/ui", ws_root.as_path());
+
+        // pnpm path with peer dependency suffix
+        let pnpm_path = PathBuf::from(
+            "/project/node_modules/.pnpm/@myorg+ui@1.0.0_react@18.2.0/node_modules/@myorg/ui/dist/index.js",
+        );
+        assert_eq!(
+            try_pnpm_workspace_fallback(&pnpm_path, &path_to_id, &workspace_roots),
+            Some(FileId(4)),
+            ".pnpm path with peer dep suffix should still resolve"
         );
     }
 }

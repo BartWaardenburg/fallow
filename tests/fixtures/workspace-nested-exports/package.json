@@ -1,0 +1,5 @@
+{
+  "name": "workspace-nested-exports",
+  "private": true,
+  "workspaces": ["packages/*"]
+}
