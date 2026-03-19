@@ -147,10 +147,17 @@ pub fn discover_files(config: &ResolvedConfig) -> Vec<DiscoveredFile> {
     files
 }
 
+/// Known output directory names from exports maps.
+/// When an entry point path is inside one of these directories, we also try
+/// the `src/` equivalent to find the tracked source file.
+const OUTPUT_DIRS: &[&str] = &["dist", "build", "out", "lib", "esm", "cjs"];
+
 /// Resolve a path relative to a base directory, with security check and extension fallback.
 ///
 /// Returns `Some(EntryPoint)` if the path resolves to an existing file within `canonical_root`,
 /// trying source extensions as fallback when the exact path doesn't exist.
+/// Also handles exports map targets in output directories (e.g., `./dist/utils.js`)
+/// by trying to map back to the source file (e.g., `./src/utils.ts`).
 fn resolve_entry_path(
     base: &Path,
     entry: &str,
@@ -164,6 +171,18 @@ fn resolve_entry_path(
         tracing::warn!(path = %entry, "Skipping entry point outside project root");
         return None;
     }
+
+    // If the path is in an output directory (dist/, build/, etc.), try mapping to src/ first.
+    // This handles exports map targets like `./dist/utils.js` → `./src/utils.ts`.
+    // We check this BEFORE the exists() check because even if the dist file exists,
+    // fallow ignores dist/ by default, so we need the source file instead.
+    if let Some(source_path) = try_output_to_source_path(base, entry) {
+        return Some(EntryPoint {
+            path: source_path,
+            source,
+        });
+    }
+
     if resolved.exists() {
         return Some(EntryPoint {
             path: resolved,
@@ -180,6 +199,43 @@ fn resolve_entry_path(
             });
         }
     }
+    None
+}
+
+/// Try to map an entry path from an output directory to its source equivalent.
+///
+/// Given `base=/project/packages/ui` and `entry=./dist/utils.js`, this tries:
+/// - `/project/packages/ui/src/utils.ts`
+/// - `/project/packages/ui/src/utils.tsx`
+/// - etc. for all source extensions
+///
+/// Returns `Some(path)` if a source file is found.
+fn try_output_to_source_path(base: &Path, entry: &str) -> Option<PathBuf> {
+    let entry_path = Path::new(entry);
+    let components: Vec<_> = entry_path.components().collect();
+
+    // Find an output directory component in the entry path
+    let output_pos = components.iter().position(|c| {
+        if let std::path::Component::Normal(s) = c
+            && let Some(name) = s.to_str()
+        {
+            return OUTPUT_DIRS.contains(&name);
+        }
+        false
+    })?;
+
+    // Build the relative path after the output dir (e.g., "utils.js")
+    let suffix: PathBuf = components[output_pos + 1..].iter().collect();
+
+    // Build any prefix before the output dir (e.g., "./" → nothing meaningful)
+    // We join base + "src" + suffix-with-new-extension
+    for ext in SOURCE_EXTENSIONS {
+        let source_candidate = base.join("src").join(suffix.with_extension(ext));
+        if source_candidate.exists() {
+            return Some(source_candidate);
+        }
+    }
+
     None
 }
 

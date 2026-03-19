@@ -2034,3 +2034,83 @@ fn css_apply_marks_tailwind_as_used() {
         "unused.css should be detected as unused: {unused_files:?}"
     );
 }
+
+// ── Workspace exports map resolution ───────────────────────────
+
+#[test]
+fn workspace_exports_map_resolves_subpath_imports() {
+    let root = fixture_path("workspace-exports-map");
+
+    // Set up node_modules symlinks for cross-workspace resolution
+    let nm = root.join("node_modules");
+    let _ = std::fs::create_dir_all(nm.join("@workspace"));
+    #[cfg(unix)]
+    {
+        let _ = std::os::unix::fs::symlink(root.join("packages/ui"), nm.join("@workspace/ui"));
+    }
+
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_file_names: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|f| f.path.file_name().unwrap().to_string_lossy().to_string())
+        .collect();
+
+    // orphan.ts is not exported via exports map and not imported — should be unused
+    assert!(
+        unused_file_names.contains(&"orphan.ts".to_string()),
+        "orphan.ts should be detected as unused file, found: {unused_file_names:?}"
+    );
+
+    // utils.ts is imported via `@workspace/ui/utils` through exports map → should NOT be unused
+    assert!(
+        !unused_file_names.contains(&"utils.ts".to_string()),
+        "utils.ts should be reachable via exports map subpath import, unused: {unused_file_names:?}"
+    );
+
+    // helpers.ts (source) should be reachable via exports map pointing to dist/helpers.js
+    // fallow should map dist/helpers.js back to src/helpers.ts
+    assert!(
+        !unused_file_names.contains(&"helpers.ts".to_string()),
+        "helpers.ts should be reachable via dist→src fallback from exports map, unused: {unused_file_names:?}"
+    );
+
+    // internal.ts is imported by utils.ts, so it should be reachable
+    assert!(
+        !unused_file_names.contains(&"internal.ts".to_string()),
+        "internal.ts should be reachable via import from utils.ts, unused: {unused_file_names:?}"
+    );
+
+    // Unused exports on non-entry-point files should still be detected.
+    // internal.ts is NOT an entry point (not in exports map) but is imported
+    // by utils.ts — so its unused exports should be flagged.
+    let unused_export_names: Vec<&str> = results
+        .unused_exports
+        .iter()
+        .map(|e| e.export_name.as_str())
+        .collect();
+
+    assert!(
+        unused_export_names.contains(&"unusedInternal"),
+        "unusedInternal should be unused (internal.ts is not an entry point), found: {unused_export_names:?}"
+    );
+
+    // Used exports should NOT be flagged
+    assert!(
+        !unused_export_names.contains(&"internalHelper"),
+        "internalHelper should be used (imported by utils.ts)"
+    );
+
+    // No unresolved imports — exports map subpaths should all resolve
+    assert!(
+        results.unresolved_imports.is_empty(),
+        "should have no unresolved imports, found: {:?}",
+        results
+            .unresolved_imports
+            .iter()
+            .map(|i| &i.specifier)
+            .collect::<Vec<_>>()
+    );
+}
