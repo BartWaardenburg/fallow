@@ -68,11 +68,13 @@ pub struct FallowConfig {
     #[serde(default)]
     pub production: bool,
 
-    /// Paths to external plugin files or directories containing plugin TOML files.
+    /// Paths to external plugin files or directories containing plugin files.
+    ///
+    /// Supports TOML, JSON, and JSONC formats.
     ///
     /// In addition to these explicit paths, fallow automatically discovers:
-    /// - `*.toml` files in `.fallow/plugins/`
-    /// - `fallow-plugin-*.toml` files in the project root
+    /// - `*.toml`, `*.json`, `*.jsonc` files in `.fallow/plugins/`
+    /// - `fallow-plugin-*.{toml,json,jsonc}` files in the project root
     #[serde(default)]
     pub plugins: Vec<String>,
 }
@@ -345,7 +347,7 @@ pub struct ResolvedConfig {
     pub rules: RulesConfig,
     /// Whether production mode is active.
     pub production: bool,
-    /// External plugin definitions loaded from TOML files.
+    /// External plugin definitions loaded from plugin files (TOML, JSON, JSONC).
     pub external_plugins: Vec<ExternalPluginDef>,
 }
 

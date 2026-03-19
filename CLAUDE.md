@@ -115,7 +115,7 @@ cd benchmarks && npm run generate:dupes && npm run bench:dupes  # vs jscpd
   - **Rollup**: input entries, external deps
   - **PostCSS**: plugins (object keys, require() calls, string arrays)
 - **Custom framework presets** (`crates/config/src/framework.rs`) — Users can add custom framework definitions via `fallow.toml` for project-specific entry points and rules.
-- **External plugins** (`crates/config/src/external_plugin.rs`) — Standalone TOML plugin definitions (`fallow-plugin-*.toml`) for community-driven framework support without writing Rust code. Discovered from: `plugins` config field, `.fallow/plugins/` directory, and `fallow-plugin-*.toml` files in project root. Supports entry points, always-used files, used exports, config patterns, and tooling dependencies. See `docs/plugin-authoring.md` for the full format.
+- **External plugins** (`crates/config/src/external_plugin.rs`) — Standalone plugin definitions (JSONC, JSON, TOML) for community-driven framework support without writing Rust code. Discovered from: `plugins` config field, `.fallow/plugins/` directory, and `fallow-plugin-*.{jsonc,json,toml}` files in project root. Supports entry points, always-used files, used exports, config patterns, and tooling dependencies. All formats use camelCase field names. `$schema` field supported for IDE autocomplete in JSONC/JSON. See `docs/plugin-authoring.md` for the full format.
 
 ## CLI features
 
@@ -128,6 +128,7 @@ cd benchmarks && npm run generate:dupes && npm run bench:dupes  # vs jscpd
 - `list` — show active plugins, entry points, files (--format json for structured output)
 - `schema` — dump CLI interface as machine-readable JSON for agent introspection
 - `config-schema` — print JSON Schema for fallow config files (enables IDE validation)
+- `plugin-schema` — print JSON Schema for external plugin files (enables IDE validation)
 - Global `--workspace <name>` / `-w` flag scopes output to a single workspace package while keeping the full cross-workspace graph
 - Global `--performance` flag shows pipeline timing breakdown per stage
 

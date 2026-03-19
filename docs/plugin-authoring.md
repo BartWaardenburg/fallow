@@ -1,28 +1,42 @@
 # Plugin Authoring Guide
 
-Fallow supports external plugin definitions that let you add framework and tool support without writing Rust code. External plugins use a simple TOML format and provide the same declarative capabilities as built-in plugins.
+Fallow supports external plugin definitions that let you add framework and tool support without writing Rust code. External plugins provide the same declarative capabilities as built-in plugins.
 
 ## Quick Start
 
-Create a file named `fallow-plugin-<name>.toml` in your project root:
+Create a file named `fallow-plugin-<name>.jsonc` in your project root:
 
-```toml
-name = "my-framework"
-enablers = ["my-framework"]
-entry_points = ["src/routes/**/*.{ts,tsx}"]
-always_used = ["src/setup.ts"]
-tooling_dependencies = ["my-framework-cli"]
-
-[[used_exports]]
-pattern = "src/routes/**/*.{ts,tsx}"
-exports = ["default", "loader", "action"]
+```jsonc
+{
+  "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/plugin-schema.json",
+  "name": "my-framework",
+  "enablers": ["my-framework"],
+  "entryPoints": ["src/routes/**/*.{ts,tsx}"],
+  "alwaysUsed": ["src/setup.ts"],
+  "toolingDependencies": ["my-framework-cli"],
+  "usedExports": [
+    { "pattern": "src/routes/**/*.{ts,tsx}", "exports": ["default", "loader", "action"] }
+  ]
+}
 ```
 
-That's it. Fallow automatically discovers `fallow-plugin-*.toml` files in your project root.
+That's it. Fallow automatically discovers `fallow-plugin-*` files in your project root.
+
+## Supported Formats
+
+| Format | Extension | Comments | `$schema` support |
+|--------|-----------|----------|-------------------|
+| JSONC  | `.jsonc`  | `//` and `/* */` | Yes |
+| JSON   | `.json`   | No | Yes |
+| TOML   | `.toml`   | `#` | No |
+
+All formats use `camelCase` field names. We recommend JSONC for its comment support and `$schema` IDE autocomplete. Generate the schema with:
+
+```bash
+fallow plugin-schema
+```
 
 ## Plugin File Format
-
-External plugins are TOML files with the following fields:
 
 ### Required
 
@@ -35,11 +49,11 @@ External plugins are TOML files with the following fields:
 | Field | Type | Description |
 |-------|------|-------------|
 | `enablers` | string[] | Package names that activate this plugin |
-| `entry_points` | string[] | Glob patterns for framework entry point files |
-| `config_patterns` | string[] | Glob patterns for config files (marked always-used) |
-| `always_used` | string[] | Glob patterns for files always considered used |
-| `tooling_dependencies` | string[] | Packages used via CLI, not source imports |
-| `used_exports` | table[] | Exports always considered used in matching files |
+| `entryPoints` | string[] | Glob patterns for framework entry point files |
+| `configPatterns` | string[] | Glob patterns for config files (marked always-used) |
+| `alwaysUsed` | string[] | Glob patterns for files always considered used |
+| `toolingDependencies` | string[] | Packages used via CLI, not source imports |
+| `usedExports` | object[] | Exports always considered used in matching files |
 
 ### `enablers`
 
@@ -47,68 +61,77 @@ Package names checked against `package.json` dependencies. The plugin activates 
 
 Supports prefix matching with a trailing `/`:
 
-```toml
-enablers = ["@myorg/"]  # matches @myorg/core, @myorg/cli, etc.
+```jsonc
+{
+  "enablers": ["@myorg/"]  // matches @myorg/core, @myorg/cli, etc.
+}
 ```
 
-### `entry_points`
+### `entryPoints`
 
 Glob patterns for files that serve as entry points to your application. These files are never flagged as unused, and their imports are traced through the module graph.
 
-```toml
-entry_points = [
-  "src/routes/**/*.{ts,tsx}",
-  "src/middleware.{ts,js}",
-  "src/plugins/**/*.ts",
-]
+```jsonc
+{
+  "entryPoints": [
+    "src/routes/**/*.{ts,tsx}",
+    "src/middleware.{ts,js}",
+    "src/plugins/**/*.ts"
+  ]
+}
 ```
 
-### `config_patterns`
+### `configPatterns`
 
 Glob patterns for framework config files. When the plugin is active, these files are marked as always-used (they won't be flagged as unused files).
 
-```toml
-config_patterns = [
-  "my-framework.config.{ts,js,mjs}",
-  ".my-frameworkrc.{json,yaml}",
-]
+```jsonc
+{
+  "configPatterns": [
+    "my-framework.config.{ts,js,mjs}",
+    ".my-frameworkrc.{json,yaml}"
+  ]
+}
 ```
 
-### `always_used`
+### `alwaysUsed`
 
 Files that should always be considered used when this plugin is active, even if nothing imports them.
 
-```toml
-always_used = [
-  "src/setup.ts",
-  "public/**/*",
-  "src/global.d.ts",
-]
+```jsonc
+{
+  "alwaysUsed": [
+    "src/setup.ts",
+    "public/**/*",
+    "src/global.d.ts"
+  ]
+}
 ```
 
-### `tooling_dependencies`
+### `toolingDependencies`
 
-Packages that are tooling dependencies — used via CLI commands or config files, not imported in source code. These won't be flagged as unused dev dependencies.
+Packages that are tooling dependencies -- used via CLI commands or config files, not imported in source code. These won't be flagged as unused dev dependencies.
 
-```toml
-tooling_dependencies = [
-  "my-framework-cli",
-  "@my-framework/dev-tools",
-]
+```jsonc
+{
+  "toolingDependencies": [
+    "my-framework-cli",
+    "@my-framework/dev-tools"
+  ]
+}
 ```
 
-### `used_exports`
+### `usedExports`
 
 Exports that are always considered used for files matching a glob pattern. Use this for convention-based frameworks where specific export names have special meaning.
 
-```toml
-[[used_exports]]
-pattern = "src/routes/**/*.{ts,tsx}"
-exports = ["default", "loader", "action", "meta"]
-
-[[used_exports]]
-pattern = "src/middleware.ts"
-exports = ["default"]
+```jsonc
+{
+  "usedExports": [
+    { "pattern": "src/routes/**/*.{ts,tsx}", "exports": ["default", "loader", "action", "meta"] },
+    { "pattern": "src/middleware.ts", "exports": ["default"] }
+  ]
+}
 ```
 
 ## Discovery
@@ -116,8 +139,8 @@ exports = ["default"]
 Fallow discovers external plugins in this order (first occurrence of a plugin name wins):
 
 1. **Explicit paths** from the `plugins` config field
-2. **`.fallow/plugins/`** directory — all `*.toml` files
-3. **Project root** — `fallow-plugin-*.toml` files
+2. **`.fallow/plugins/`** directory -- all `*.jsonc`, `*.json`, `*.toml` files
+3. **Project root** -- `fallow-plugin-*.{jsonc,json,toml}` files
 
 ### Using the `plugins` config field
 
@@ -128,29 +151,22 @@ Point to specific plugin files or directories:
 {
   "plugins": [
     "tools/fallow-plugins/",
-    "vendor/my-plugin.toml"
+    "vendor/my-plugin.jsonc",
+    "vendor/another-plugin.json"
   ]
 }
 ```
 
-```toml
-# fallow.toml
-plugins = [
-  "tools/fallow-plugins/",
-  "vendor/my-plugin.toml",
-]
-```
-
 ### Using `.fallow/plugins/`
 
-Place plugin TOML files in `.fallow/plugins/` for automatic discovery:
+Place plugin files in `.fallow/plugins/` for automatic discovery:
 
 ```
 my-project/
   .fallow/
     plugins/
-      my-framework.toml
-      custom-tool.toml
+      my-framework.jsonc
+      custom-tool.json
   src/
   package.json
 ```
@@ -161,7 +177,8 @@ Name plugin files with the `fallow-plugin-` prefix:
 
 ```
 my-project/
-  fallow-plugin-my-framework.toml
+  fallow-plugin-my-framework.jsonc
+  fallow-plugin-custom-tool.json
   src/
   package.json
 ```
@@ -170,84 +187,92 @@ my-project/
 
 ### React Router / TanStack Router
 
-```toml
-name = "react-router"
-enablers = ["react-router", "@tanstack/react-router"]
-
-entry_points = [
-  "src/routes/**/*.{ts,tsx}",
-  "app/routes/**/*.{ts,tsx}",
-]
-
-config_patterns = [
-  "react-router.config.{ts,js}",
-]
-
-tooling_dependencies = ["@react-router/dev"]
-
-[[used_exports]]
-pattern = "src/routes/**/*.{ts,tsx}"
-exports = ["default", "loader", "action", "meta", "handle", "shouldRevalidate"]
-
-[[used_exports]]
-pattern = "app/routes/**/*.{ts,tsx}"
-exports = ["default", "loader", "action", "meta", "handle", "shouldRevalidate"]
+```jsonc
+{
+  "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/plugin-schema.json",
+  "name": "react-router",
+  "enablers": ["react-router", "@tanstack/react-router"],
+  "entryPoints": [
+    "src/routes/**/*.{ts,tsx}",
+    "app/routes/**/*.{ts,tsx}"
+  ],
+  "configPatterns": [
+    "react-router.config.{ts,js}"
+  ],
+  "toolingDependencies": ["@react-router/dev"],
+  "usedExports": [
+    { "pattern": "src/routes/**/*.{ts,tsx}", "exports": ["default", "loader", "action", "meta", "handle", "shouldRevalidate"] },
+    { "pattern": "app/routes/**/*.{ts,tsx}", "exports": ["default", "loader", "action", "meta", "handle", "shouldRevalidate"] }
+  ]
+}
 ```
 
 ### Custom CMS
 
-```toml
-name = "my-cms"
-enablers = ["@my-cms/core"]
-
-entry_points = [
-  "content/**/*.{ts,tsx}",
-  "schemas/**/*.ts",
-]
-
-always_used = [
-  "cms.config.ts",
-  "content/**/*.mdx",
-]
-
-config_patterns = ["cms.config.{ts,js}"]
-tooling_dependencies = ["@my-cms/cli"]
-
-[[used_exports]]
-pattern = "content/**/*.{ts,tsx}"
-exports = ["default", "metadata", "getStaticProps"]
+```jsonc
+{
+  "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/plugin-schema.json",
+  "name": "my-cms",
+  "enablers": ["@my-cms/core"],
+  "entryPoints": ["content/**/*.{ts,tsx}", "schemas/**/*.ts"],
+  "alwaysUsed": ["cms.config.ts", "content/**/*.mdx"],
+  "configPatterns": ["cms.config.{ts,js}"],
+  "toolingDependencies": ["@my-cms/cli"],
+  "usedExports": [
+    { "pattern": "content/**/*.{ts,tsx}", "exports": ["default", "metadata", "getStaticProps"] }
+  ]
+}
 ```
 
 ### Internal Tooling
 
-```toml
-name = "our-build-system"
-enablers = ["@internal/build"]
-
-config_patterns = [
-  "build.config.{ts,js}",
-  ".buildrc",
-]
-
-always_used = [
-  "scripts/build/**/*.ts",
-  "config/**/*.ts",
-]
-
-tooling_dependencies = [
-  "@internal/build",
-  "@internal/lint-rules",
-  "@internal/test-utils",
-]
+```jsonc
+{
+  // Internal build system plugin
+  "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/plugin-schema.json",
+  "name": "our-build-system",
+  "enablers": ["@internal/build"],
+  "configPatterns": [
+    "build.config.{ts,js}",
+    ".buildrc"
+  ],
+  "alwaysUsed": [
+    "scripts/build/**/*.ts",
+    "config/**/*.ts"
+  ],
+  "toolingDependencies": [
+    "@internal/build",
+    "@internal/lint-rules",
+    "@internal/test-utils"
+  ]
+}
 ```
 
 ## Sharing Plugins
 
-External plugins are plain TOML files — share them however you share config:
+External plugins are plain files -- share them however you share config:
 
-- **Git**: check `fallow-plugin-*.toml` files into your repo
+- **Git**: check `fallow-plugin-*` files into your repo
 - **Monorepo**: put shared plugins in a central `tools/` directory and reference via `plugins` config
-- **npm package**: publish a package containing plugin TOML files, then reference them: `plugins = ["node_modules/@my-org/fallow-plugins/"]`
+- **npm package**: publish a package containing plugin files, then reference them: `plugins = ["node_modules/@my-org/fallow-plugins/"]`
+
+## JSON Schema
+
+Generate the JSON Schema for plugin files to enable IDE autocomplete and validation:
+
+```bash
+fallow plugin-schema > plugin-schema.json
+```
+
+Reference it in your plugin files:
+
+```jsonc
+{
+  "$schema": "./plugin-schema.json",
+  "name": "my-plugin",
+  "enablers": ["my-pkg"]
+}
+```
 
 ## Built-in vs External Plugins
 

@@ -3,7 +3,9 @@ use std::process::ExitCode;
 use std::time::Instant;
 
 use clap::{CommandFactory, Parser, Subcommand};
-use fallow_config::{FallowConfig, OutputFormat, RulesConfig, Severity, discover_workspaces};
+use fallow_config::{
+    ExternalPluginDef, FallowConfig, OutputFormat, RulesConfig, Severity, discover_workspaces,
+};
 
 mod baseline;
 mod fix;
@@ -170,6 +172,9 @@ enum Command {
 
     /// Print the JSON Schema for fallow configuration files
     ConfigSchema,
+
+    /// Print the JSON Schema for external plugin files
+    PluginSchema,
 
     /// List discovered entry points and files
     List {
@@ -568,6 +573,9 @@ fn main() -> ExitCode {
     if matches!(cli.command, Some(Command::ConfigSchema)) {
         return run_config_schema();
     }
+    if matches!(cli.command, Some(Command::PluginSchema)) {
+        return run_plugin_schema();
+    }
 
     // Resolve output format: CLI flag > FALLOW_FORMAT env var > default ("human").
     // clap sets the default to "human", so we only override with the env var
@@ -733,6 +741,7 @@ fn main() -> ExitCode {
         }),
         Command::Init { toml } => run_init(&root, toml),
         Command::ConfigSchema => run_config_schema(),
+        Command::PluginSchema => run_plugin_schema(),
         Command::List {
             entry_points,
             files,
@@ -1496,6 +1505,20 @@ fn run_config_schema() -> ExitCode {
         }
         Err(e) => {
             eprintln!("Error: failed to serialize schema: {e}");
+            ExitCode::from(2)
+        }
+    }
+}
+
+fn run_plugin_schema() -> ExitCode {
+    let schema = ExternalPluginDef::json_schema();
+    match serde_json::to_string_pretty(&schema) {
+        Ok(json) => {
+            println!("{json}");
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("Error: failed to serialize plugin schema: {e}");
             ExitCode::from(2)
         }
     }
