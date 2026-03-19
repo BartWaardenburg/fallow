@@ -678,11 +678,15 @@ mod tests {
         assert!(super::super::predicates::is_implicit_dependency(
             "@next/font"
         ));
-        assert!(super::super::predicates::is_implicit_dependency("@next/mdx"));
+        assert!(super::super::predicates::is_implicit_dependency(
+            "@next/mdx"
+        ));
         assert!(super::super::predicates::is_implicit_dependency(
             "@next/bundle-analyzer"
         ));
-        assert!(super::super::predicates::is_implicit_dependency("@next/env"));
+        assert!(super::super::predicates::is_implicit_dependency(
+            "@next/env"
+        ));
     }
 
     #[test]

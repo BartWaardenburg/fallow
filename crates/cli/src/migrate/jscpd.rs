@@ -1,4 +1,4 @@
-use super::{string_or_array, MigrationWarning};
+use super::{MigrationWarning, string_or_array};
 
 /// jscpd fields that cannot be mapped and generate warnings.
 const JSCPD_UNMAPPABLE_FIELDS: &[(&str, &str, Option<&str>)] = &[

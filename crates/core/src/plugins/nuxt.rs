@@ -220,3 +220,240 @@ impl Plugin for NuxtPlugin {
         result
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn enabler_is_nuxt() {
+        let plugin = NuxtPlugin;
+        assert_eq!(plugin.enablers(), &["nuxt"]);
+    }
+
+    #[test]
+    fn is_enabled_with_nuxt_dep() {
+        let plugin = NuxtPlugin;
+        let deps = vec!["nuxt".to_string()];
+        assert!(plugin.is_enabled_with_deps(&deps, Path::new("/project")));
+    }
+
+    #[test]
+    fn is_not_enabled_without_nuxt() {
+        let plugin = NuxtPlugin;
+        let deps = vec!["vue".to_string()];
+        assert!(!plugin.is_enabled_with_deps(&deps, Path::new("/project")));
+    }
+
+    #[test]
+    fn entry_patterns_include_nuxt_conventions() {
+        let plugin = NuxtPlugin;
+        let patterns = plugin.entry_patterns();
+        assert!(patterns.iter().any(|p| p.starts_with("pages/")));
+        assert!(patterns.iter().any(|p| p.starts_with("layouts/")));
+        assert!(patterns.iter().any(|p| p.starts_with("server/api/")));
+        assert!(patterns.iter().any(|p| p.starts_with("composables/")));
+        assert!(patterns.iter().any(|p| p.starts_with("components/")));
+    }
+
+    #[test]
+    fn entry_patterns_include_app_dir_variants() {
+        let plugin = NuxtPlugin;
+        let patterns = plugin.entry_patterns();
+        assert!(
+            patterns.iter().any(|p| p.starts_with("app/pages/")),
+            "should include Nuxt 3 app/ directory variants"
+        );
+    }
+
+    #[test]
+    fn virtual_module_prefixes_includes_hash() {
+        let plugin = NuxtPlugin;
+        assert_eq!(plugin.virtual_module_prefixes(), &["#"]);
+    }
+
+    #[test]
+    fn used_exports_for_server_api() {
+        let plugin = NuxtPlugin;
+        let exports = plugin.used_exports();
+        let api_entry = exports
+            .iter()
+            .find(|(pat, _)| *pat == "server/api/**/*.{ts,js}");
+        assert!(api_entry.is_some());
+        let (_, names) = api_entry.unwrap();
+        assert!(names.contains(&"default"));
+        assert!(names.contains(&"defineEventHandler"));
+    }
+
+    // ── resolve_config tests ─────────────────────────────────────
+
+    #[test]
+    fn resolve_config_modules_as_deps() {
+        let source = r#"
+            export default defineNuxtConfig({
+                modules: ["@nuxtjs/tailwindcss", "@pinia/nuxt"]
+            });
+        "#;
+        let plugin = NuxtPlugin;
+        let result =
+            plugin.resolve_config(Path::new("nuxt.config.ts"), source, Path::new("/project"));
+        assert!(
+            result
+                .referenced_dependencies
+                .contains(&"@nuxtjs/tailwindcss".to_string())
+        );
+        assert!(
+            result
+                .referenced_dependencies
+                .contains(&"@pinia/nuxt".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_config_css_tilde_resolves_to_root() {
+        // Without an `app/` dir, `~/` resolves to project root
+        let source = r#"
+            export default defineNuxtConfig({
+                css: ["~/assets/main.css"]
+            });
+        "#;
+        let plugin = NuxtPlugin;
+        let result = plugin.resolve_config(
+            Path::new("nuxt.config.ts"),
+            source,
+            Path::new("/nonexistent"),
+        );
+        assert!(
+            result
+                .always_used_files
+                .contains(&"assets/main.css".to_string()),
+            "~/assets/main.css should resolve to assets/main.css without app/ dir: {:?}",
+            result.always_used_files
+        );
+    }
+
+    #[test]
+    fn resolve_config_css_double_tilde_always_root() {
+        let source = r#"
+            export default defineNuxtConfig({
+                css: ["~~/shared/global.css"]
+            });
+        "#;
+        let plugin = NuxtPlugin;
+        let result = plugin.resolve_config(
+            Path::new("nuxt.config.ts"),
+            source,
+            Path::new("/nonexistent"),
+        );
+        assert!(
+            result
+                .always_used_files
+                .contains(&"shared/global.css".to_string()),
+            "~~/shared/global.css should resolve to shared/global.css"
+        );
+    }
+
+    #[test]
+    fn resolve_config_css_npm_package() {
+        let source = r#"
+            export default defineNuxtConfig({
+                css: ["@unocss/reset/tailwind.css"]
+            });
+        "#;
+        let plugin = NuxtPlugin;
+        let result =
+            plugin.resolve_config(Path::new("nuxt.config.ts"), source, Path::new("/project"));
+        assert!(
+            result
+                .referenced_dependencies
+                .contains(&"@unocss/reset".to_string()),
+            "npm package CSS should be tracked as referenced dependency"
+        );
+    }
+
+    #[test]
+    fn resolve_config_postcss_plugins_as_deps() {
+        let source = r#"
+            export default defineNuxtConfig({
+                postcss: {
+                    plugins: {
+                        autoprefixer: {},
+                        "postcss-nested": {}
+                    }
+                }
+            });
+        "#;
+        let plugin = NuxtPlugin;
+        let result =
+            plugin.resolve_config(Path::new("nuxt.config.ts"), source, Path::new("/project"));
+        assert!(
+            result
+                .referenced_dependencies
+                .contains(&"autoprefixer".to_string())
+        );
+        assert!(
+            result
+                .referenced_dependencies
+                .contains(&"postcss-nested".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_config_extends_as_deps() {
+        let source = r#"
+            export default defineNuxtConfig({
+                extends: ["@nuxt/ui-pro"]
+            });
+        "#;
+        let plugin = NuxtPlugin;
+        let result =
+            plugin.resolve_config(Path::new("nuxt.config.ts"), source, Path::new("/project"));
+        assert!(
+            result
+                .referenced_dependencies
+                .contains(&"@nuxt/ui-pro".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_config_import_sources_as_deps() {
+        let source = r#"
+            import { defineNuxtConfig } from "nuxt/config";
+            export default defineNuxtConfig({});
+        "#;
+        let plugin = NuxtPlugin;
+        let result =
+            plugin.resolve_config(Path::new("nuxt.config.ts"), source, Path::new("/project"));
+        assert!(
+            result.referenced_dependencies.contains(&"nuxt".to_string()),
+            "import source should be extracted as a referenced dependency"
+        );
+    }
+
+    #[test]
+    fn resolve_config_empty_source() {
+        let plugin = NuxtPlugin;
+        let result = plugin.resolve_config(Path::new("nuxt.config.ts"), "", Path::new("/project"));
+        assert!(result.referenced_dependencies.is_empty());
+        assert!(result.always_used_files.is_empty());
+        assert!(result.entry_patterns.is_empty());
+    }
+
+    #[test]
+    fn resolve_config_css_relative_path() {
+        let source = r#"
+            export default defineNuxtConfig({
+                css: ["./assets/global.css"]
+            });
+        "#;
+        let plugin = NuxtPlugin;
+        let result =
+            plugin.resolve_config(Path::new("nuxt.config.ts"), source, Path::new("/project"));
+        assert!(
+            result
+                .always_used_files
+                .contains(&"./assets/global.css".to_string()),
+            "relative CSS path should be an always-used file"
+        );
+    }
+}

@@ -550,3 +550,619 @@ pub(crate) fn run_check(opts: &CheckOptions<'_>) -> ExitCode {
         ExitCode::SUCCESS
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use fallow_core::extract::MemberKind;
+    use fallow_core::results::*;
+    use std::path::PathBuf;
+
+    // ── Helper: build populated AnalysisResults ──────────────────
+
+    fn make_results() -> AnalysisResults {
+        let mut r = AnalysisResults::default();
+        r.unused_files.push(UnusedFile {
+            path: PathBuf::from("/project/src/a.ts"),
+        });
+        r.unused_exports.push(UnusedExport {
+            path: PathBuf::from("/project/src/b.ts"),
+            export_name: "foo".into(),
+            is_type_only: false,
+            line: 1,
+            col: 0,
+            span_start: 0,
+            is_re_export: false,
+        });
+        r.unused_types.push(UnusedExport {
+            path: PathBuf::from("/project/src/c.ts"),
+            export_name: "MyType".into(),
+            is_type_only: true,
+            line: 5,
+            col: 0,
+            span_start: 0,
+            is_re_export: false,
+        });
+        r.unused_dependencies.push(UnusedDependency {
+            package_name: "lodash".into(),
+            location: DependencyLocation::Dependencies,
+            path: PathBuf::from("/project/package.json"),
+        });
+        r.unused_dev_dependencies.push(UnusedDependency {
+            package_name: "jest".into(),
+            location: DependencyLocation::DevDependencies,
+            path: PathBuf::from("/project/package.json"),
+        });
+        r.unused_enum_members.push(UnusedMember {
+            path: PathBuf::from("/project/src/d.ts"),
+            parent_name: "Status".into(),
+            member_name: "Pending".into(),
+            kind: MemberKind::EnumMember,
+            line: 3,
+            col: 0,
+        });
+        r.unused_class_members.push(UnusedMember {
+            path: PathBuf::from("/project/src/e.ts"),
+            parent_name: "Service".into(),
+            member_name: "helper".into(),
+            kind: MemberKind::ClassMethod,
+            line: 10,
+            col: 0,
+        });
+        r.unresolved_imports.push(UnresolvedImport {
+            path: PathBuf::from("/project/src/f.ts"),
+            specifier: "./missing".into(),
+            line: 1,
+            col: 0,
+        });
+        r.unlisted_dependencies.push(UnlistedDependency {
+            package_name: "chalk".into(),
+            imported_from: vec![PathBuf::from("/project/src/g.ts")],
+        });
+        r.duplicate_exports.push(DuplicateExport {
+            export_name: "helper".into(),
+            locations: vec![
+                PathBuf::from("/project/src/h.ts"),
+                PathBuf::from("/project/src/i.ts"),
+            ],
+        });
+        r
+    }
+
+    fn no_filters() -> IssueFilters {
+        IssueFilters {
+            unused_files: false,
+            unused_exports: false,
+            unused_deps: false,
+            unused_types: false,
+            unused_enum_members: false,
+            unused_class_members: false,
+            unresolved_imports: false,
+            unlisted_deps: false,
+            duplicate_exports: false,
+        }
+    }
+
+    // ── IssueFilters::any_active ─────────────────────────────────
+
+    #[test]
+    fn no_filters_means_none_active() {
+        assert!(!no_filters().any_active());
+    }
+
+    #[test]
+    fn single_filter_is_active() {
+        let mut f = no_filters();
+        f.unused_files = true;
+        assert!(f.any_active());
+    }
+
+    #[test]
+    fn each_filter_flag_registers_as_active() {
+        let flags: Vec<fn(&mut IssueFilters)> = vec![
+            |f| f.unused_files = true,
+            |f| f.unused_exports = true,
+            |f| f.unused_deps = true,
+            |f| f.unused_types = true,
+            |f| f.unused_enum_members = true,
+            |f| f.unused_class_members = true,
+            |f| f.unresolved_imports = true,
+            |f| f.unlisted_deps = true,
+            |f| f.duplicate_exports = true,
+        ];
+        for setter in flags {
+            let mut f = no_filters();
+            setter(&mut f);
+            assert!(f.any_active());
+        }
+    }
+
+    // ── IssueFilters::apply ──────────────────────────────────────
+
+    #[test]
+    fn apply_no_active_filters_preserves_all_results() {
+        let mut results = make_results();
+        let original_total = results.total_issues();
+        no_filters().apply(&mut results);
+        assert_eq!(results.total_issues(), original_total);
+    }
+
+    #[test]
+    fn apply_unused_files_filter_keeps_only_unused_files() {
+        let mut results = make_results();
+        let mut f = no_filters();
+        f.unused_files = true;
+        f.apply(&mut results);
+
+        assert_eq!(results.unused_files.len(), 1);
+        assert!(results.unused_exports.is_empty());
+        assert!(results.unused_types.is_empty());
+        assert!(results.unused_dependencies.is_empty());
+        assert!(results.unused_dev_dependencies.is_empty());
+        assert!(results.unused_enum_members.is_empty());
+        assert!(results.unused_class_members.is_empty());
+        assert!(results.unresolved_imports.is_empty());
+        assert!(results.unlisted_dependencies.is_empty());
+        assert!(results.duplicate_exports.is_empty());
+    }
+
+    #[test]
+    fn apply_unused_deps_filter_keeps_both_dep_types() {
+        let mut results = make_results();
+        let mut f = no_filters();
+        f.unused_deps = true;
+        f.apply(&mut results);
+
+        assert_eq!(results.unused_dependencies.len(), 1);
+        assert_eq!(results.unused_dev_dependencies.len(), 1);
+        assert!(results.unused_files.is_empty());
+        assert!(results.unused_exports.is_empty());
+    }
+
+    #[test]
+    fn apply_multiple_filters_keeps_selected_types() {
+        let mut results = make_results();
+        let mut f = no_filters();
+        f.unused_files = true;
+        f.unresolved_imports = true;
+        f.apply(&mut results);
+
+        assert_eq!(results.unused_files.len(), 1);
+        assert_eq!(results.unresolved_imports.len(), 1);
+        assert!(results.unused_exports.is_empty());
+        assert!(results.unused_types.is_empty());
+        assert!(results.duplicate_exports.is_empty());
+    }
+
+    // ── TraceOptions::any_active ─────────────────────────────────
+
+    #[test]
+    fn no_trace_options_means_none_active() {
+        let t = TraceOptions {
+            trace_export: None,
+            trace_file: None,
+            trace_dependency: None,
+            performance: false,
+        };
+        assert!(!t.any_active());
+    }
+
+    #[test]
+    fn trace_export_is_active() {
+        let t = TraceOptions {
+            trace_export: Some("src/foo.ts:bar".into()),
+            trace_file: None,
+            trace_dependency: None,
+            performance: false,
+        };
+        assert!(t.any_active());
+    }
+
+    #[test]
+    fn trace_file_is_active() {
+        let t = TraceOptions {
+            trace_export: None,
+            trace_file: Some("src/foo.ts".into()),
+            trace_dependency: None,
+            performance: false,
+        };
+        assert!(t.any_active());
+    }
+
+    #[test]
+    fn trace_dependency_is_active() {
+        let t = TraceOptions {
+            trace_export: None,
+            trace_file: None,
+            trace_dependency: Some("lodash".into()),
+            performance: false,
+        };
+        assert!(t.any_active());
+    }
+
+    #[test]
+    fn performance_flag_is_active() {
+        let t = TraceOptions {
+            trace_export: None,
+            trace_file: None,
+            trace_dependency: None,
+            performance: true,
+        };
+        assert!(t.any_active());
+    }
+
+    // ── apply_rules ──────────────────────────────────────────────
+
+    #[test]
+    fn apply_rules_default_error_preserves_all() {
+        let mut results = make_results();
+        let rules = RulesConfig::default();
+        let original_total = results.total_issues();
+        apply_rules(&mut results, &rules);
+        assert_eq!(results.total_issues(), original_total);
+    }
+
+    #[test]
+    fn apply_rules_off_clears_that_issue_type() {
+        let mut results = make_results();
+        let mut rules = RulesConfig::default();
+        rules.unused_files = Severity::Off;
+        apply_rules(&mut results, &rules);
+        assert!(results.unused_files.is_empty());
+        // Other types are preserved
+        assert!(!results.unused_exports.is_empty());
+    }
+
+    #[test]
+    fn apply_rules_warn_preserves_issues() {
+        let mut results = make_results();
+        let mut rules = RulesConfig::default();
+        rules.unused_exports = Severity::Warn;
+        apply_rules(&mut results, &rules);
+        assert_eq!(results.unused_exports.len(), 1);
+    }
+
+    #[test]
+    fn apply_rules_all_off_clears_everything() {
+        let mut results = make_results();
+        let rules = RulesConfig {
+            unused_files: Severity::Off,
+            unused_exports: Severity::Off,
+            unused_types: Severity::Off,
+            unused_dependencies: Severity::Off,
+            unused_dev_dependencies: Severity::Off,
+            unused_enum_members: Severity::Off,
+            unused_class_members: Severity::Off,
+            unresolved_imports: Severity::Off,
+            unlisted_dependencies: Severity::Off,
+            duplicate_exports: Severity::Off,
+        };
+        apply_rules(&mut results, &rules);
+        assert_eq!(results.total_issues(), 0);
+    }
+
+    #[test]
+    fn apply_rules_off_each_type_individually() {
+        // Verify every rule field maps to its corresponding results field
+        let field_setters: Vec<(fn(&mut RulesConfig), fn(&AnalysisResults) -> bool)> = vec![
+            (
+                |r| r.unused_files = Severity::Off,
+                |res| res.unused_files.is_empty(),
+            ),
+            (
+                |r| r.unused_exports = Severity::Off,
+                |res| res.unused_exports.is_empty(),
+            ),
+            (
+                |r| r.unused_types = Severity::Off,
+                |res| res.unused_types.is_empty(),
+            ),
+            (
+                |r| r.unused_dependencies = Severity::Off,
+                |res| res.unused_dependencies.is_empty(),
+            ),
+            (
+                |r| r.unused_dev_dependencies = Severity::Off,
+                |res| res.unused_dev_dependencies.is_empty(),
+            ),
+            (
+                |r| r.unused_enum_members = Severity::Off,
+                |res| res.unused_enum_members.is_empty(),
+            ),
+            (
+                |r| r.unused_class_members = Severity::Off,
+                |res| res.unused_class_members.is_empty(),
+            ),
+            (
+                |r| r.unresolved_imports = Severity::Off,
+                |res| res.unresolved_imports.is_empty(),
+            ),
+            (
+                |r| r.unlisted_dependencies = Severity::Off,
+                |res| res.unlisted_dependencies.is_empty(),
+            ),
+            (
+                |r| r.duplicate_exports = Severity::Off,
+                |res| res.duplicate_exports.is_empty(),
+            ),
+        ];
+
+        for (set_off, check_empty) in field_setters {
+            let mut results = make_results();
+            let mut rules = RulesConfig::default();
+            set_off(&mut rules);
+            apply_rules(&mut results, &rules);
+            assert!(
+                check_empty(&results),
+                "Setting a rule to Off should clear the corresponding results"
+            );
+        }
+    }
+
+    // ── has_error_severity_issues ────────────────────────────────
+
+    #[test]
+    fn empty_results_no_error_issues() {
+        let results = AnalysisResults::default();
+        let rules = RulesConfig::default();
+        assert!(!has_error_severity_issues(&results, &rules));
+    }
+
+    #[test]
+    fn error_severity_with_issues_returns_true() {
+        let results = make_results();
+        let rules = RulesConfig::default(); // all Error
+        assert!(has_error_severity_issues(&results, &rules));
+    }
+
+    #[test]
+    fn warn_severity_with_issues_returns_false() {
+        let results = make_results();
+        let rules = RulesConfig {
+            unused_files: Severity::Warn,
+            unused_exports: Severity::Warn,
+            unused_types: Severity::Warn,
+            unused_dependencies: Severity::Warn,
+            unused_dev_dependencies: Severity::Warn,
+            unused_enum_members: Severity::Warn,
+            unused_class_members: Severity::Warn,
+            unresolved_imports: Severity::Warn,
+            unlisted_dependencies: Severity::Warn,
+            duplicate_exports: Severity::Warn,
+        };
+        assert!(!has_error_severity_issues(&results, &rules));
+    }
+
+    #[test]
+    fn mixed_severity_returns_true_for_error_with_issues() {
+        let mut results = AnalysisResults::default();
+        results.unused_files.push(UnusedFile {
+            path: PathBuf::from("/project/src/a.ts"),
+        });
+        let mut rules = RulesConfig {
+            unused_files: Severity::Warn,
+            unused_exports: Severity::Warn,
+            unused_types: Severity::Warn,
+            unused_dependencies: Severity::Warn,
+            unused_dev_dependencies: Severity::Warn,
+            unused_enum_members: Severity::Warn,
+            unused_class_members: Severity::Warn,
+            unresolved_imports: Severity::Warn,
+            unlisted_dependencies: Severity::Warn,
+            duplicate_exports: Severity::Warn,
+        };
+        // Only unused_files present, but set to Warn — should not trigger
+        assert!(!has_error_severity_issues(&results, &rules));
+
+        // Promote unused_files to Error — should now trigger
+        rules.unused_files = Severity::Error;
+        assert!(has_error_severity_issues(&results, &rules));
+    }
+
+    #[test]
+    fn off_severity_with_issues_returns_false() {
+        let mut results = AnalysisResults::default();
+        results.unresolved_imports.push(UnresolvedImport {
+            path: PathBuf::from("/project/src/a.ts"),
+            specifier: "./missing".into(),
+            line: 1,
+            col: 0,
+        });
+        let mut rules = RulesConfig::default();
+        rules.unresolved_imports = Severity::Off;
+        // Other fields are default (Error) but have no issues
+        assert!(!has_error_severity_issues(&results, &rules));
+    }
+
+    // ── filter_to_workspace ──────────────────────────────────────
+
+    #[test]
+    fn filter_to_workspace_keeps_files_under_ws_root() {
+        let mut results = AnalysisResults::default();
+        results.unused_files.push(UnusedFile {
+            path: PathBuf::from("/project/packages/ui/src/button.ts"),
+        });
+        results.unused_files.push(UnusedFile {
+            path: PathBuf::from("/project/packages/api/src/handler.ts"),
+        });
+
+        let ws_root = PathBuf::from("/project/packages/ui");
+        filter_to_workspace(&mut results, &ws_root);
+
+        assert_eq!(results.unused_files.len(), 1);
+        assert_eq!(
+            results.unused_files[0].path,
+            PathBuf::from("/project/packages/ui/src/button.ts")
+        );
+    }
+
+    #[test]
+    fn filter_to_workspace_scopes_dependencies_to_ws_package_json() {
+        let mut results = AnalysisResults::default();
+        results.unused_dependencies.push(UnusedDependency {
+            package_name: "lodash".into(),
+            location: DependencyLocation::Dependencies,
+            path: PathBuf::from("/project/package.json"),
+        });
+        results.unused_dependencies.push(UnusedDependency {
+            package_name: "react".into(),
+            location: DependencyLocation::Dependencies,
+            path: PathBuf::from("/project/packages/ui/package.json"),
+        });
+        results.unused_dev_dependencies.push(UnusedDependency {
+            package_name: "vitest".into(),
+            location: DependencyLocation::DevDependencies,
+            path: PathBuf::from("/project/packages/ui/package.json"),
+        });
+
+        let ws_root = PathBuf::from("/project/packages/ui");
+        filter_to_workspace(&mut results, &ws_root);
+
+        assert_eq!(results.unused_dependencies.len(), 1);
+        assert_eq!(results.unused_dependencies[0].package_name, "react");
+        assert_eq!(results.unused_dev_dependencies.len(), 1);
+        assert_eq!(results.unused_dev_dependencies[0].package_name, "vitest");
+    }
+
+    #[test]
+    fn filter_to_workspace_scopes_unlisted_deps_by_importer() {
+        let mut results = AnalysisResults::default();
+        results.unlisted_dependencies.push(UnlistedDependency {
+            package_name: "chalk".into(),
+            imported_from: vec![PathBuf::from("/project/packages/ui/src/a.ts")],
+        });
+        results.unlisted_dependencies.push(UnlistedDependency {
+            package_name: "debug".into(),
+            imported_from: vec![PathBuf::from("/project/packages/api/src/b.ts")],
+        });
+
+        let ws_root = PathBuf::from("/project/packages/ui");
+        filter_to_workspace(&mut results, &ws_root);
+
+        assert_eq!(results.unlisted_dependencies.len(), 1);
+        assert_eq!(results.unlisted_dependencies[0].package_name, "chalk");
+    }
+
+    #[test]
+    fn filter_to_workspace_drops_duplicate_exports_below_two_locations() {
+        let mut results = AnalysisResults::default();
+        results.duplicate_exports.push(DuplicateExport {
+            export_name: "helper".into(),
+            locations: vec![
+                PathBuf::from("/project/packages/ui/src/a.ts"),
+                PathBuf::from("/project/packages/api/src/b.ts"),
+            ],
+        });
+        results.duplicate_exports.push(DuplicateExport {
+            export_name: "utils".into(),
+            locations: vec![
+                PathBuf::from("/project/packages/ui/src/c.ts"),
+                PathBuf::from("/project/packages/ui/src/d.ts"),
+            ],
+        });
+
+        let ws_root = PathBuf::from("/project/packages/ui");
+        filter_to_workspace(&mut results, &ws_root);
+
+        // "helper" had only 1 location in workspace — dropped
+        // "utils" had 2 locations in workspace — kept
+        assert_eq!(results.duplicate_exports.len(), 1);
+        assert_eq!(results.duplicate_exports[0].export_name, "utils");
+    }
+
+    #[test]
+    fn filter_to_workspace_scopes_exports_and_types() {
+        let mut results = AnalysisResults::default();
+        results.unused_exports.push(UnusedExport {
+            path: PathBuf::from("/project/packages/ui/src/a.ts"),
+            export_name: "A".into(),
+            is_type_only: false,
+            line: 1,
+            col: 0,
+            span_start: 0,
+            is_re_export: false,
+        });
+        results.unused_exports.push(UnusedExport {
+            path: PathBuf::from("/project/packages/api/src/b.ts"),
+            export_name: "B".into(),
+            is_type_only: false,
+            line: 2,
+            col: 0,
+            span_start: 0,
+            is_re_export: false,
+        });
+        results.unused_types.push(UnusedExport {
+            path: PathBuf::from("/project/packages/ui/src/types.ts"),
+            export_name: "T".into(),
+            is_type_only: true,
+            line: 1,
+            col: 0,
+            span_start: 0,
+            is_re_export: false,
+        });
+
+        let ws_root = PathBuf::from("/project/packages/ui");
+        filter_to_workspace(&mut results, &ws_root);
+
+        assert_eq!(results.unused_exports.len(), 1);
+        assert_eq!(results.unused_exports[0].export_name, "A");
+        assert_eq!(results.unused_types.len(), 1);
+        assert_eq!(results.unused_types[0].export_name, "T");
+    }
+
+    #[test]
+    fn filter_to_workspace_scopes_type_only_dependencies() {
+        let mut results = AnalysisResults::default();
+        results.type_only_dependencies.push(TypeOnlyDependency {
+            package_name: "zod".into(),
+            path: PathBuf::from("/project/packages/ui/package.json"),
+        });
+        results.type_only_dependencies.push(TypeOnlyDependency {
+            package_name: "yup".into(),
+            path: PathBuf::from("/project/package.json"),
+        });
+
+        let ws_root = PathBuf::from("/project/packages/ui");
+        filter_to_workspace(&mut results, &ws_root);
+
+        assert_eq!(results.type_only_dependencies.len(), 1);
+        assert_eq!(results.type_only_dependencies[0].package_name, "zod");
+    }
+
+    #[test]
+    fn filter_to_workspace_scopes_enum_and_class_members() {
+        let mut results = AnalysisResults::default();
+        results.unused_enum_members.push(UnusedMember {
+            path: PathBuf::from("/project/packages/ui/src/enums.ts"),
+            parent_name: "Color".into(),
+            member_name: "Red".into(),
+            kind: MemberKind::EnumMember,
+            line: 2,
+            col: 0,
+        });
+        results.unused_enum_members.push(UnusedMember {
+            path: PathBuf::from("/project/packages/api/src/enums.ts"),
+            parent_name: "Status".into(),
+            member_name: "Active".into(),
+            kind: MemberKind::EnumMember,
+            line: 3,
+            col: 0,
+        });
+        results.unused_class_members.push(UnusedMember {
+            path: PathBuf::from("/project/packages/ui/src/service.ts"),
+            parent_name: "Svc".into(),
+            member_name: "init".into(),
+            kind: MemberKind::ClassMethod,
+            line: 5,
+            col: 0,
+        });
+
+        let ws_root = PathBuf::from("/project/packages/ui");
+        filter_to_workspace(&mut results, &ws_root);
+
+        assert_eq!(results.unused_enum_members.len(), 1);
+        assert_eq!(results.unused_enum_members[0].member_name, "Red");
+        assert_eq!(results.unused_class_members.len(), 1);
+        assert_eq!(results.unused_class_members[0].member_name, "init");
+    }
+}

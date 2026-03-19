@@ -152,6 +152,7 @@ pub(crate) use sarif::build_sarif;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     // ── normalize_uri ────────────────────────────────────────────────
 
@@ -181,5 +182,74 @@ mod tests {
     #[test]
     fn normalize_uri_empty_string() {
         assert_eq!(normalize_uri(""), "");
+    }
+
+    // ── relative_path ────────────────────────────────────────────────
+
+    #[test]
+    fn relative_path_strips_root_prefix() {
+        let root = Path::new("/project");
+        let path = Path::new("/project/src/utils.ts");
+        assert_eq!(relative_path(path, root), Path::new("src/utils.ts"));
+    }
+
+    #[test]
+    fn relative_path_returns_full_path_when_no_prefix() {
+        let root = Path::new("/other");
+        let path = Path::new("/project/src/utils.ts");
+        assert_eq!(relative_path(path, root), path);
+    }
+
+    #[test]
+    fn relative_path_at_root_returns_empty_or_file() {
+        let root = Path::new("/project");
+        let path = Path::new("/project/file.ts");
+        assert_eq!(relative_path(path, root), Path::new("file.ts"));
+    }
+
+    #[test]
+    fn relative_path_deeply_nested() {
+        let root = Path::new("/project");
+        let path = Path::new("/project/packages/ui/src/components/Button.tsx");
+        assert_eq!(
+            relative_path(path, root),
+            Path::new("packages/ui/src/components/Button.tsx")
+        );
+    }
+
+    // ── relative_uri ─────────────────────────────────────────────────
+
+    #[test]
+    fn relative_uri_produces_forward_slash_path() {
+        let root = PathBuf::from("/project");
+        let path = root.join("src").join("utils.ts");
+        let uri = relative_uri(&path, &root);
+        assert_eq!(uri, "src/utils.ts");
+    }
+
+    #[test]
+    fn relative_uri_no_common_prefix_returns_full() {
+        let root = PathBuf::from("/other");
+        let path = PathBuf::from("/project/src/utils.ts");
+        let uri = relative_uri(&path, &root);
+        assert!(uri.contains("project"));
+        assert!(uri.contains("utils.ts"));
+    }
+
+    // ── severity_to_level ────────────────────────────────────────────
+
+    #[test]
+    fn severity_error_maps_to_level_error() {
+        assert!(matches!(severity_to_level(Severity::Error), Level::Error));
+    }
+
+    #[test]
+    fn severity_warn_maps_to_level_warn() {
+        assert!(matches!(severity_to_level(Severity::Warn), Level::Warn));
+    }
+
+    #[test]
+    fn severity_off_maps_to_level_info() {
+        assert!(matches!(severity_to_level(Severity::Off), Level::Info));
     }
 }

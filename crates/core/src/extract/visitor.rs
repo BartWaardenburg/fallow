@@ -806,3 +806,433 @@ fn extract_trailing_string(expr: &Expression<'_>) -> Option<String> {
         _ => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::discover::FileId;
+    use crate::extract::parse::parse_source_to_module;
+    use std::path::Path;
+
+    /// Helper: parse TypeScript source and return ModuleInfo.
+    fn parse(source: &str) -> super::super::ModuleInfo {
+        parse_source_to_module(FileId(0), Path::new("test.ts"), source, 0)
+    }
+
+    // ── into_module_info transfers all fields ────────────────────
+
+    #[test]
+    fn into_module_info_transfers_exports() {
+        let info = parse("export const a = 1; export function b() {}");
+        assert_eq!(info.exports.len(), 2);
+        assert_eq!(info.file_id, FileId(0));
+    }
+
+    #[test]
+    fn into_module_info_transfers_imports() {
+        let info = parse("import { foo } from './bar'; import baz from 'baz';");
+        assert_eq!(info.imports.len(), 2);
+    }
+
+    #[test]
+    fn into_module_info_transfers_re_exports() {
+        let info = parse("export { foo } from './bar'; export * from './baz';");
+        assert_eq!(info.re_exports.len(), 2);
+    }
+
+    #[test]
+    fn into_module_info_transfers_dynamic_imports() {
+        let info = parse("const m = import('./lazy');");
+        assert_eq!(info.dynamic_imports.len(), 1);
+    }
+
+    #[test]
+    fn into_module_info_transfers_require_calls() {
+        let info = parse("const x = require('./util');");
+        assert_eq!(info.require_calls.len(), 1);
+    }
+
+    #[test]
+    fn into_module_info_transfers_whole_object_uses() {
+        let info = parse(
+            "import { Status } from './types';\nObject.values(Status);\nconst y = { ...Status };",
+        );
+        // Object.values + spread = 2 whole-object uses
+        assert!(info.whole_object_uses.len() >= 2);
+    }
+
+    #[test]
+    fn into_module_info_transfers_member_accesses() {
+        let info = parse("import { Obj } from './x';\nObj.method();");
+        assert!(
+            info.member_accesses
+                .iter()
+                .any(|a| a.object == "Obj" && a.member == "method")
+        );
+    }
+
+    #[test]
+    fn into_module_info_transfers_cjs_flag() {
+        let info = parse("module.exports = {};");
+        assert!(info.has_cjs_exports);
+    }
+
+    // ── merge_into extends (not replaces) ────────────────────────
+
+    #[test]
+    fn merge_into_extends_imports() {
+        let mut base = parse("import { a } from './a';");
+        let _extra = parse("import { b } from './b';");
+
+        // Build a second extractor from parsing and merge
+        let allocator = oxc_allocator::Allocator::default();
+        let source_type =
+            oxc_span::SourceType::from_path(Path::new("extra.ts")).unwrap_or_default();
+        let parser_return =
+            oxc_parser::Parser::new(&allocator, "import { c } from './c';", source_type).parse();
+        let mut extractor = ModuleInfoExtractor::new();
+        oxc_ast_visit::Visit::visit_program(&mut extractor, &parser_return.program);
+        extractor.merge_into(&mut base);
+
+        assert!(
+            base.imports.len() >= 2,
+            "merge_into should add to existing imports, not replace"
+        );
+    }
+
+    #[test]
+    fn merge_into_ors_cjs_flag() {
+        let mut base = parse("export const x = 1;");
+        assert!(!base.has_cjs_exports);
+
+        let allocator = oxc_allocator::Allocator::default();
+        let source_type = oxc_span::SourceType::from_path(Path::new("cjs.ts")).unwrap_or_default();
+        let parser_return =
+            oxc_parser::Parser::new(&allocator, "module.exports = {};", source_type).parse();
+        let mut extractor = ModuleInfoExtractor::new();
+        oxc_ast_visit::Visit::visit_program(&mut extractor, &parser_return.program);
+        extractor.merge_into(&mut base);
+
+        assert!(base.has_cjs_exports, "merge_into should OR the cjs flag");
+    }
+
+    // ── Class member extraction ──────────────────────────────────
+
+    #[test]
+    fn extracts_public_class_methods_and_properties() {
+        let info = parse(
+            r#"
+            export class MyService {
+                name: string;
+                getValue() { return 1; }
+            }
+            "#,
+        );
+        let class_export = info
+            .exports
+            .iter()
+            .find(|e| matches!(&e.name, ExportName::Named(n) if n == "MyService"));
+        assert!(class_export.is_some());
+        let members = &class_export.unwrap().members;
+        assert!(
+            members
+                .iter()
+                .any(|m| m.name == "name" && m.kind == MemberKind::ClassProperty),
+            "should extract 'name' property"
+        );
+        assert!(
+            members
+                .iter()
+                .any(|m| m.name == "getValue" && m.kind == MemberKind::ClassMethod),
+            "should extract 'getValue' method"
+        );
+    }
+
+    #[test]
+    fn skips_constructor_in_class_members() {
+        let info = parse(
+            r#"
+            export class Foo {
+                constructor() {}
+                doWork() {}
+            }
+            "#,
+        );
+        let class_export = info
+            .exports
+            .iter()
+            .find(|e| matches!(&e.name, ExportName::Named(n) if n == "Foo"));
+        let members = &class_export.unwrap().members;
+        assert!(
+            !members.iter().any(|m| m.name == "constructor"),
+            "constructor should be skipped"
+        );
+        assert!(members.iter().any(|m| m.name == "doWork"));
+    }
+
+    #[test]
+    fn skips_private_and_protected_members() {
+        let info = parse(
+            r#"
+            export class Foo {
+                private secret: string;
+                protected internal(): void {}
+                public visible: number;
+            }
+            "#,
+        );
+        let class_export = info
+            .exports
+            .iter()
+            .find(|e| matches!(&e.name, ExportName::Named(n) if n == "Foo"));
+        let members = &class_export.unwrap().members;
+        assert!(
+            !members.iter().any(|m| m.name == "secret"),
+            "private members should be skipped"
+        );
+        assert!(
+            !members.iter().any(|m| m.name == "internal"),
+            "protected members should be skipped"
+        );
+        assert!(
+            members.iter().any(|m| m.name == "visible"),
+            "public members should be included"
+        );
+    }
+
+    #[test]
+    fn class_member_with_decorator_flagged() {
+        let info = parse(
+            r#"
+            function Injectable() { return (target: any) => target; }
+            export class Service {
+                @Injectable()
+                handler() {}
+            }
+            "#,
+        );
+        let class_export = info
+            .exports
+            .iter()
+            .find(|e| matches!(&e.name, ExportName::Named(n) if n == "Service"));
+        let members = &class_export.unwrap().members;
+        let handler = members.iter().find(|m| m.name == "handler");
+        assert!(handler.is_some());
+        assert!(
+            handler.unwrap().has_decorator,
+            "decorated member should have has_decorator = true"
+        );
+    }
+
+    // ── Enum member extraction ───────────────────────────────────
+
+    #[test]
+    fn extracts_enum_members() {
+        let info = parse(
+            r#"
+            export enum Direction {
+                Up,
+                Down,
+                Left,
+                Right
+            }
+            "#,
+        );
+        let enum_export = info
+            .exports
+            .iter()
+            .find(|e| matches!(&e.name, ExportName::Named(n) if n == "Direction"));
+        assert!(enum_export.is_some());
+        let members = &enum_export.unwrap().members;
+        assert_eq!(members.len(), 4);
+        assert!(members.iter().all(|m| m.kind == MemberKind::EnumMember));
+        assert!(members.iter().any(|m| m.name == "Up"));
+        assert!(members.iter().any(|m| m.name == "Right"));
+    }
+
+    // ── Whole-object use patterns ────────────────────────────────
+
+    #[test]
+    fn object_values_marks_whole_use() {
+        let info = parse("import { E } from './e';\nObject.values(E);");
+        assert!(info.whole_object_uses.contains(&"E".to_string()));
+    }
+
+    #[test]
+    fn object_keys_marks_whole_use() {
+        let info = parse("import { E } from './e';\nObject.keys(E);");
+        assert!(info.whole_object_uses.contains(&"E".to_string()));
+    }
+
+    #[test]
+    fn object_entries_marks_whole_use() {
+        let info = parse("import { E } from './e';\nObject.entries(E);");
+        assert!(info.whole_object_uses.contains(&"E".to_string()));
+    }
+
+    #[test]
+    fn for_in_marks_whole_use() {
+        let info = parse("import { E } from './e';\nfor (const k in E) {}");
+        assert!(info.whole_object_uses.contains(&"E".to_string()));
+    }
+
+    #[test]
+    fn spread_marks_whole_use() {
+        let info = parse("import { E } from './e';\nconst x = { ...E };");
+        assert!(info.whole_object_uses.contains(&"E".to_string()));
+    }
+
+    #[test]
+    fn dynamic_computed_access_marks_whole_use() {
+        let info = parse("import { E } from './e';\nconst k = 'x';\nE[k];");
+        assert!(info.whole_object_uses.contains(&"E".to_string()));
+    }
+
+    // ── this.member tracking ─────────────────────────────────────
+
+    #[test]
+    fn this_member_access_tracked() {
+        let info = parse(
+            r#"
+            export class Foo {
+                bar: number;
+                baz() { return this.bar; }
+            }
+            "#,
+        );
+        assert!(
+            info.member_accesses
+                .iter()
+                .any(|a| a.object == "this" && a.member == "bar"),
+            "this.bar should be tracked as a member access"
+        );
+    }
+
+    #[test]
+    fn this_assignment_tracked() {
+        let info = parse(
+            r#"
+            export class Foo {
+                bar: number;
+                init() { this.bar = 42; }
+            }
+            "#,
+        );
+        assert!(
+            info.member_accesses
+                .iter()
+                .any(|a| a.object == "this" && a.member == "bar"),
+            "this.bar = ... should be tracked as a member access"
+        );
+    }
+
+    // ── CJS export patterns ──────────────────────────────────────
+
+    #[test]
+    fn module_exports_object_extracts_keys() {
+        let info = parse("module.exports = { foo: 1, bar: 2 };");
+        assert!(info.has_cjs_exports);
+        assert!(
+            info.exports
+                .iter()
+                .any(|e| matches!(&e.name, ExportName::Named(n) if n == "foo"))
+        );
+        assert!(
+            info.exports
+                .iter()
+                .any(|e| matches!(&e.name, ExportName::Named(n) if n == "bar"))
+        );
+    }
+
+    #[test]
+    fn exports_dot_property() {
+        let info = parse("exports.myFunc = function() {};");
+        assert!(info.has_cjs_exports);
+        assert!(
+            info.exports
+                .iter()
+                .any(|e| { matches!(&e.name, ExportName::Named(n) if n == "myFunc") })
+        );
+    }
+
+    // ── Destructured require/import ──────────────────────────────
+
+    #[test]
+    fn destructured_require_captures_names() {
+        let info = parse("const { readFile, writeFile } = require('fs');");
+        assert_eq!(info.require_calls.len(), 1);
+        let call = &info.require_calls[0];
+        assert_eq!(call.source, "fs");
+        assert!(call.destructured_names.contains(&"readFile".to_string()));
+        assert!(call.destructured_names.contains(&"writeFile".to_string()));
+    }
+
+    #[test]
+    fn namespace_require_has_local_name() {
+        let info = parse("const fs = require('fs');");
+        assert_eq!(info.require_calls.len(), 1);
+        assert_eq!(info.require_calls[0].local_name, Some("fs".to_string()));
+        assert!(info.require_calls[0].destructured_names.is_empty());
+    }
+
+    #[test]
+    fn destructured_await_import_captures_names() {
+        let info = parse("const { foo, bar } = await import('./mod');");
+        assert_eq!(info.dynamic_imports.len(), 1);
+        let imp = &info.dynamic_imports[0];
+        assert_eq!(imp.source, "./mod");
+        assert!(imp.destructured_names.contains(&"foo".to_string()));
+        assert!(imp.destructured_names.contains(&"bar".to_string()));
+    }
+
+    #[test]
+    fn namespace_await_import_has_local_name() {
+        let info = parse("const mod = await import('./mod');");
+        assert_eq!(info.dynamic_imports.len(), 1);
+        assert_eq!(info.dynamic_imports[0].local_name, Some("mod".to_string()));
+    }
+
+    // ── new URL pattern ──────────────────────────────────────────
+
+    #[test]
+    fn new_url_with_import_meta_url_tracked() {
+        let info = parse("const w = new URL('./worker.js', import.meta.url);");
+        assert!(
+            info.dynamic_imports
+                .iter()
+                .any(|d| d.source == "./worker.js"),
+            "new URL('./worker.js', import.meta.url) should be tracked as dynamic import"
+        );
+    }
+
+    // ── import.meta.glob ─────────────────────────────────────────
+
+    #[test]
+    fn import_meta_glob_string_pattern() {
+        let info = parse("const mods = import.meta.glob('./modules/*.ts');");
+        assert_eq!(info.dynamic_import_patterns.len(), 1);
+        assert_eq!(info.dynamic_import_patterns[0].prefix, "./modules/*.ts");
+    }
+
+    #[test]
+    fn import_meta_glob_array_patterns() {
+        let info = parse("const mods = import.meta.glob(['./a/*.ts', './b/*.ts']);");
+        assert_eq!(info.dynamic_import_patterns.len(), 2);
+    }
+
+    // ── require.context ──────────────────────────────────────────
+
+    #[test]
+    fn require_context_non_recursive() {
+        let info = parse("const ctx = require.context('./components', false);");
+        assert_eq!(info.dynamic_import_patterns.len(), 1);
+        assert_eq!(info.dynamic_import_patterns[0].prefix, "./components/");
+    }
+
+    #[test]
+    fn require_context_recursive() {
+        let info = parse("const ctx = require.context('./components', true);");
+        assert_eq!(info.dynamic_import_patterns.len(), 1);
+        assert_eq!(info.dynamic_import_patterns[0].prefix, "./components/**/");
+    }
+}

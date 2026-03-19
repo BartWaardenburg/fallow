@@ -440,10 +440,7 @@ mod tests {
     fn duplicate_exports_no_duplicates_single_module() {
         let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/utils.ts", false)]);
         graph.modules[1].is_reachable = true;
-        graph.modules[1].exports = vec![
-            make_export("foo", 10, 20),
-            make_export("bar", 30, 40),
-        ];
+        graph.modules[1].exports = vec![make_export("foo", 10, 20), make_export("bar", 30, 40)];
         let config = test_config();
         let suppressions = HashMap::new();
         let result = find_duplicate_exports(&graph, &config, &suppressions);
@@ -677,10 +674,7 @@ mod tests {
     #[test]
     fn collect_usages_multiple_exports_same_module() {
         let mut graph = build_graph(&[("/src/utils.ts", true)]);
-        graph.modules[0].exports = vec![
-            make_export("alpha", 10, 20),
-            make_export("beta", 30, 40),
-        ];
+        graph.modules[0].exports = vec![make_export("alpha", 10, 20), make_export("beta", 30, 40)];
         let result = collect_export_usages(&graph);
         assert_eq!(result.len(), 2);
         let names: HashSet<&str> = result.iter().map(|u| u.export_name.as_str()).collect();

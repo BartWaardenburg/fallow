@@ -421,10 +421,7 @@ mod tests {
         let d = &file_diags[0];
         assert_eq!(d.severity, Some(DiagnosticSeverity::WARNING));
         assert_eq!(d.range, ZERO_RANGE);
-        assert_eq!(
-            d.message,
-            "File is not reachable from any entry point"
-        );
+        assert_eq!(d.message, "File is not reachable from any entry point");
         assert_eq!(
             d.code,
             Some(NumberOrString::String("unused-file".to_string()))

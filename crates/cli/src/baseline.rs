@@ -203,3 +203,362 @@ fn recompute_stats(report: &DuplicationReport) -> fallow_core::duplicates::Dupli
         },
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use fallow_core::duplicates::{CloneGroup, CloneInstance, DuplicationReport, DuplicationStats};
+    use fallow_core::results::{
+        AnalysisResults, DependencyLocation, UnusedDependency, UnusedExport, UnusedFile,
+    };
+    use std::path::PathBuf;
+
+    fn make_results() -> AnalysisResults {
+        AnalysisResults {
+            unused_files: vec![
+                UnusedFile {
+                    path: PathBuf::from("src/old.ts"),
+                },
+                UnusedFile {
+                    path: PathBuf::from("src/dead.ts"),
+                },
+            ],
+            unused_exports: vec![UnusedExport {
+                path: PathBuf::from("src/utils.ts"),
+                export_name: "helperA".to_string(),
+                is_type_only: false,
+                line: 5,
+                col: 0,
+                span_start: 40,
+                is_re_export: false,
+            }],
+            unused_types: vec![UnusedExport {
+                path: PathBuf::from("src/types.ts"),
+                export_name: "OldType".to_string(),
+                is_type_only: true,
+                line: 10,
+                col: 0,
+                span_start: 100,
+                is_re_export: false,
+            }],
+            unused_dependencies: vec![UnusedDependency {
+                package_name: "lodash".to_string(),
+                location: DependencyLocation::Dependencies,
+                path: PathBuf::from("package.json"),
+            }],
+            unused_dev_dependencies: vec![UnusedDependency {
+                package_name: "jest".to_string(),
+                location: DependencyLocation::DevDependencies,
+                path: PathBuf::from("package.json"),
+            }],
+            ..Default::default()
+        }
+    }
+
+    // ── BaselineData round-trip ──────────────────────────────────
+
+    #[test]
+    fn baseline_from_results_captures_all_fields() {
+        let results = make_results();
+        let baseline = BaselineData::from_results(&results);
+        assert_eq!(baseline.unused_files.len(), 2);
+        assert!(baseline.unused_files.contains(&"src/old.ts".to_string()));
+        assert!(baseline.unused_files.contains(&"src/dead.ts".to_string()));
+        assert_eq!(baseline.unused_exports, vec!["src/utils.ts:helperA"]);
+        assert_eq!(baseline.unused_types, vec!["src/types.ts:OldType"]);
+        assert_eq!(baseline.unused_dependencies, vec!["lodash"]);
+        assert_eq!(baseline.unused_dev_dependencies, vec!["jest"]);
+    }
+
+    #[test]
+    fn baseline_serialization_roundtrip() {
+        let results = make_results();
+        let baseline = BaselineData::from_results(&results);
+        let json = serde_json::to_string(&baseline).unwrap();
+        let deserialized: BaselineData = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.unused_files, baseline.unused_files);
+        assert_eq!(deserialized.unused_exports, baseline.unused_exports);
+        assert_eq!(deserialized.unused_types, baseline.unused_types);
+        assert_eq!(
+            deserialized.unused_dependencies,
+            baseline.unused_dependencies
+        );
+        assert_eq!(
+            deserialized.unused_dev_dependencies,
+            baseline.unused_dev_dependencies
+        );
+    }
+
+    // ── filter_new_issues ────────────────────────────────────────
+
+    #[test]
+    fn filter_removes_baseline_issues() {
+        let results = make_results();
+        let baseline = BaselineData::from_results(&results);
+        let filtered = filter_new_issues(results, &baseline);
+        assert!(
+            filtered.unused_files.is_empty(),
+            "all files were in baseline"
+        );
+        assert!(
+            filtered.unused_exports.is_empty(),
+            "all exports were in baseline"
+        );
+        assert!(
+            filtered.unused_types.is_empty(),
+            "all types were in baseline"
+        );
+        assert!(
+            filtered.unused_dependencies.is_empty(),
+            "all deps were in baseline"
+        );
+        assert!(
+            filtered.unused_dev_dependencies.is_empty(),
+            "all dev deps were in baseline"
+        );
+    }
+
+    #[test]
+    fn filter_keeps_new_issues_not_in_baseline() {
+        let baseline = BaselineData {
+            unused_files: vec!["src/old.ts".to_string()],
+            unused_exports: vec![],
+            unused_types: vec![],
+            unused_dependencies: vec![],
+            unused_dev_dependencies: vec![],
+        };
+        let results = AnalysisResults {
+            unused_files: vec![
+                UnusedFile {
+                    path: PathBuf::from("src/old.ts"),
+                },
+                UnusedFile {
+                    path: PathBuf::from("src/new-dead.ts"),
+                },
+            ],
+            ..Default::default()
+        };
+        let filtered = filter_new_issues(results, &baseline);
+        assert_eq!(filtered.unused_files.len(), 1);
+        assert_eq!(
+            filtered.unused_files[0].path,
+            PathBuf::from("src/new-dead.ts")
+        );
+    }
+
+    #[test]
+    fn filter_with_empty_baseline_keeps_all() {
+        let baseline = BaselineData {
+            unused_files: vec![],
+            unused_exports: vec![],
+            unused_types: vec![],
+            unused_dependencies: vec![],
+            unused_dev_dependencies: vec![],
+        };
+        let results = make_results();
+        let filtered = filter_new_issues(results, &baseline);
+        assert_eq!(filtered.unused_files.len(), 2);
+        assert_eq!(filtered.unused_exports.len(), 1);
+    }
+
+    #[test]
+    fn filter_new_exports_by_file_and_name() {
+        let baseline = BaselineData {
+            unused_files: vec![],
+            unused_exports: vec!["src/utils.ts:helperA".to_string()],
+            unused_types: vec![],
+            unused_dependencies: vec![],
+            unused_dev_dependencies: vec![],
+        };
+        let results = AnalysisResults {
+            unused_exports: vec![
+                UnusedExport {
+                    path: PathBuf::from("src/utils.ts"),
+                    export_name: "helperA".to_string(),
+                    is_type_only: false,
+                    line: 5,
+                    col: 0,
+                    span_start: 40,
+                    is_re_export: false,
+                },
+                UnusedExport {
+                    path: PathBuf::from("src/utils.ts"),
+                    export_name: "helperB".to_string(),
+                    is_type_only: false,
+                    line: 10,
+                    col: 0,
+                    span_start: 80,
+                    is_re_export: false,
+                },
+            ],
+            ..Default::default()
+        };
+        let filtered = filter_new_issues(results, &baseline);
+        assert_eq!(filtered.unused_exports.len(), 1);
+        assert_eq!(filtered.unused_exports[0].export_name, "helperB");
+    }
+
+    // ── DuplicationBaselineData ──────────────────────────────────
+
+    fn make_clone_group(instances: Vec<(&str, usize, usize)>) -> CloneGroup {
+        CloneGroup {
+            instances: instances
+                .into_iter()
+                .map(|(file, start, end)| CloneInstance {
+                    file: PathBuf::from(file),
+                    start_line: start,
+                    end_line: end,
+                    start_col: 0,
+                    end_col: 0,
+                    fragment: String::new(),
+                })
+                .collect(),
+            token_count: 50,
+            line_count: 10,
+        }
+    }
+
+    fn make_duplication_report(groups: Vec<CloneGroup>) -> DuplicationReport {
+        DuplicationReport {
+            clone_groups: groups,
+            clone_families: vec![],
+            stats: DuplicationStats {
+                total_files: 10,
+                files_with_clones: 2,
+                total_lines: 1000,
+                duplicated_lines: 100,
+                total_tokens: 5000,
+                duplicated_tokens: 500,
+                clone_groups: 1,
+                clone_instances: 2,
+                duplication_percentage: 10.0,
+            },
+        }
+    }
+
+    #[test]
+    fn clone_group_key_is_deterministic() {
+        let root = Path::new("/project");
+        let group = make_clone_group(vec![
+            ("/project/src/a.ts", 1, 10),
+            ("/project/src/b.ts", 5, 15),
+        ]);
+        let key1 = clone_group_key(&group, root);
+        let key2 = clone_group_key(&group, root);
+        assert_eq!(key1, key2);
+    }
+
+    #[test]
+    fn clone_group_key_is_sorted() {
+        let root = Path::new("/project");
+        // Order of instances in group shouldn't matter for the key
+        let group_ab = make_clone_group(vec![
+            ("/project/src/a.ts", 1, 10),
+            ("/project/src/b.ts", 5, 15),
+        ]);
+        let group_ba = make_clone_group(vec![
+            ("/project/src/b.ts", 5, 15),
+            ("/project/src/a.ts", 1, 10),
+        ]);
+        assert_eq!(
+            clone_group_key(&group_ab, root),
+            clone_group_key(&group_ba, root),
+            "key should be stable regardless of instance order"
+        );
+    }
+
+    #[test]
+    fn duplication_baseline_roundtrip() {
+        let root = Path::new("/project");
+        let group = make_clone_group(vec![
+            ("/project/src/a.ts", 1, 10),
+            ("/project/src/b.ts", 5, 15),
+        ]);
+        let report = make_duplication_report(vec![group]);
+        let baseline = DuplicationBaselineData::from_report(&report, root);
+        let json = serde_json::to_string(&baseline).unwrap();
+        let deserialized: DuplicationBaselineData = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.clone_groups, baseline.clone_groups);
+    }
+
+    #[test]
+    fn filter_new_clone_groups_removes_baseline() {
+        let root = Path::new("/project");
+        let group = make_clone_group(vec![
+            ("/project/src/a.ts", 1, 10),
+            ("/project/src/b.ts", 5, 15),
+        ]);
+        let report = make_duplication_report(vec![group.clone()]);
+        let baseline = DuplicationBaselineData::from_report(&report, root);
+        let filtered = filter_new_clone_groups(report, &baseline, root);
+        assert!(
+            filtered.clone_groups.is_empty(),
+            "baseline group should be filtered out"
+        );
+    }
+
+    #[test]
+    fn filter_new_clone_groups_keeps_new_groups() {
+        let root = Path::new("/project");
+        let baseline_group = make_clone_group(vec![
+            ("/project/src/a.ts", 1, 10),
+            ("/project/src/b.ts", 5, 15),
+        ]);
+        let new_group = make_clone_group(vec![
+            ("/project/src/c.ts", 20, 30),
+            ("/project/src/d.ts", 25, 35),
+        ]);
+        let baseline_report = make_duplication_report(vec![baseline_group]);
+        let baseline = DuplicationBaselineData::from_report(&baseline_report, root);
+
+        let report = make_duplication_report(vec![
+            make_clone_group(vec![
+                ("/project/src/a.ts", 1, 10),
+                ("/project/src/b.ts", 5, 15),
+            ]),
+            new_group,
+        ]);
+        let filtered = filter_new_clone_groups(report, &baseline, root);
+        assert_eq!(
+            filtered.clone_groups.len(),
+            1,
+            "only the new group should remain"
+        );
+    }
+
+    #[test]
+    fn recompute_stats_after_filtering() {
+        let root = Path::new("/project");
+        let group = make_clone_group(vec![
+            ("/project/src/a.ts", 1, 10),
+            ("/project/src/b.ts", 5, 15),
+        ]);
+        let report = make_duplication_report(vec![group]);
+        let baseline = DuplicationBaselineData::from_report(&report, root);
+        let filtered = filter_new_clone_groups(report, &baseline, root);
+        assert_eq!(filtered.stats.clone_groups, 0);
+        assert_eq!(filtered.stats.clone_instances, 0);
+        assert_eq!(filtered.stats.duplicated_lines, 0);
+    }
+
+    #[test]
+    fn recompute_stats_zero_total_lines() {
+        let report = DuplicationReport {
+            clone_groups: vec![],
+            clone_families: vec![],
+            stats: DuplicationStats {
+                total_files: 0,
+                files_with_clones: 0,
+                total_lines: 0,
+                duplicated_lines: 0,
+                total_tokens: 0,
+                duplicated_tokens: 0,
+                clone_groups: 0,
+                clone_instances: 0,
+                duplication_percentage: 0.0,
+            },
+        };
+        let stats = super::recompute_stats(&report);
+        assert_eq!(stats.duplication_percentage, 0.0);
+    }
+}

@@ -322,7 +322,10 @@ mod tests {
             find_unused_members(&graph, &config, &[], &HashMap::new());
         assert_eq!(enum_members.len(), 2);
         assert!(class_members.is_empty());
-        let names: HashSet<&str> = enum_members.iter().map(|m| m.member_name.as_str()).collect();
+        let names: HashSet<&str> = enum_members
+            .iter()
+            .map(|m| m.member_name.as_str())
+            .collect();
         assert!(names.contains("Active"));
         assert!(names.contains("Inactive"));
     }
@@ -433,8 +436,7 @@ mod tests {
         )];
         let config = test_config();
 
-        let (_, class_members) =
-            find_unused_members(&graph, &config, &[], &HashMap::new());
+        let (_, class_members) = find_unused_members(&graph, &config, &[], &HashMap::new());
         assert!(class_members.is_empty());
     }
 
@@ -453,8 +455,7 @@ mod tests {
         )];
         let config = test_config();
 
-        let (_, class_members) =
-            find_unused_members(&graph, &config, &[], &HashMap::new());
+        let (_, class_members) = find_unused_members(&graph, &config, &[], &HashMap::new());
         // Only customMethod should be flagged
         assert_eq!(class_members.len(), 1);
         assert_eq!(class_members[0].member_name, "customMethod");
@@ -475,8 +476,7 @@ mod tests {
         )];
         let config = test_config();
 
-        let (_, class_members) =
-            find_unused_members(&graph, &config, &[], &HashMap::new());
+        let (_, class_members) = find_unused_members(&graph, &config, &[], &HashMap::new());
         assert_eq!(class_members.len(), 1);
         assert_eq!(class_members[0].member_name, "myHelper");
     }
@@ -531,8 +531,7 @@ mod tests {
         )];
         let config = test_config();
 
-        let (enum_members, _) =
-            find_unused_members(&graph, &config, &[], &HashMap::new());
+        let (enum_members, _) = find_unused_members(&graph, &config, &[], &HashMap::new());
         // Member analysis skipped because export itself is unreferenced
         assert!(enum_members.is_empty());
     }
@@ -606,11 +605,15 @@ mod tests {
             find_unused_members(&graph, &config, &[], &HashMap::new());
         assert!(enum_members.is_empty());
         assert_eq!(class_members.len(), 2);
-        assert!(class_members
-            .iter()
-            .any(|m| m.kind == MemberKind::ClassMethod));
-        assert!(class_members
-            .iter()
-            .any(|m| m.kind == MemberKind::ClassProperty));
+        assert!(
+            class_members
+                .iter()
+                .any(|m| m.kind == MemberKind::ClassMethod)
+        );
+        assert!(
+            class_members
+                .iter()
+                .any(|m| m.kind == MemberKind::ClassProperty)
+        );
     }
 }

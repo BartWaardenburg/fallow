@@ -224,3 +224,175 @@ impl Plugin for NextJsPlugin {
         result
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn enabler_is_next() {
+        let plugin = NextJsPlugin;
+        assert_eq!(plugin.enablers(), &["next"]);
+    }
+
+    #[test]
+    fn is_enabled_with_next_dep() {
+        let plugin = NextJsPlugin;
+        let deps = vec!["next".to_string(), "react".to_string()];
+        assert!(plugin.is_enabled_with_deps(&deps, Path::new("/project")));
+    }
+
+    #[test]
+    fn is_not_enabled_without_next() {
+        let plugin = NextJsPlugin;
+        let deps = vec!["react".to_string(), "react-dom".to_string()];
+        assert!(!plugin.is_enabled_with_deps(&deps, Path::new("/project")));
+    }
+
+    #[test]
+    fn entry_patterns_include_app_router_and_pages() {
+        let plugin = NextJsPlugin;
+        let patterns = plugin.entry_patterns();
+        assert!(patterns.iter().any(|p| p.contains("app/**/page")));
+        assert!(patterns.iter().any(|p| p.contains("pages/**/*")));
+        assert!(patterns.iter().any(|p| p.contains("middleware")));
+    }
+
+    #[test]
+    fn entry_patterns_include_src_variants() {
+        let plugin = NextJsPlugin;
+        let patterns = plugin.entry_patterns();
+        assert!(patterns.iter().any(|p| p.starts_with("src/app")));
+        assert!(patterns.iter().any(|p| p.starts_with("src/pages")));
+        assert!(patterns.contains(&"src/middleware.{ts,js}"));
+    }
+
+    #[test]
+    fn config_patterns_match_next_config() {
+        let plugin = NextJsPlugin;
+        let patterns = plugin.config_patterns();
+        assert_eq!(patterns, &["next.config.{ts,js,mjs,cjs}"]);
+    }
+
+    #[test]
+    fn used_exports_includes_route_http_methods() {
+        let plugin = NextJsPlugin;
+        let exports = plugin.used_exports();
+        let route_entry = exports
+            .iter()
+            .find(|(pat, _)| *pat == "app/**/route.{ts,tsx,js,jsx}");
+        assert!(route_entry.is_some(), "should have route file used exports");
+        let (_, methods) = route_entry.unwrap();
+        assert!(methods.contains(&"GET"));
+        assert!(methods.contains(&"POST"));
+        assert!(methods.contains(&"DELETE"));
+    }
+
+    // ── resolve_config tests ─────────────────────────────────────
+
+    #[test]
+    fn resolve_config_page_extensions() {
+        let source = r#"
+            export default {
+                pageExtensions: ["tsx", "mdx"]
+            };
+        "#;
+        let plugin = NextJsPlugin;
+        let result =
+            plugin.resolve_config(Path::new("next.config.ts"), source, Path::new("/project"));
+        // Should generate entry patterns with the custom extensions
+        assert!(
+            !result.entry_patterns.is_empty(),
+            "pageExtensions should generate entry patterns"
+        );
+        assert!(
+            result.entry_patterns.iter().any(|p| p.contains("tsx,mdx")),
+            "entry patterns should use the custom extensions: {:?}",
+            result.entry_patterns
+        );
+        assert!(
+            result
+                .entry_patterns
+                .iter()
+                .any(|p| p.starts_with("app/**/page")),
+            "should include app router page pattern"
+        );
+    }
+
+    #[test]
+    fn resolve_config_page_extensions_includes_src_variants() {
+        let source = r#"
+            export default {
+                pageExtensions: ["tsx"]
+            };
+        "#;
+        let plugin = NextJsPlugin;
+        let result =
+            plugin.resolve_config(Path::new("next.config.ts"), source, Path::new("/project"));
+        assert!(
+            result
+                .entry_patterns
+                .iter()
+                .any(|p| p.starts_with("src/app")),
+            "should include src/ variants"
+        );
+        assert!(
+            result
+                .entry_patterns
+                .iter()
+                .any(|p| p.starts_with("src/pages")),
+            "should include src/pages variants"
+        );
+    }
+
+    #[test]
+    fn resolve_config_extracts_import_deps() {
+        let source = r#"
+            import withMDX from "@next/mdx";
+            export default withMDX({});
+        "#;
+        let plugin = NextJsPlugin;
+        let result =
+            plugin.resolve_config(Path::new("next.config.mjs"), source, Path::new("/project"));
+        assert!(
+            result
+                .referenced_dependencies
+                .contains(&"@next/mdx".to_string()),
+            "should extract @next/mdx as a referenced dependency"
+        );
+    }
+
+    #[test]
+    fn resolve_config_empty_source() {
+        let source = "";
+        let plugin = NextJsPlugin;
+        let result =
+            plugin.resolve_config(Path::new("next.config.ts"), source, Path::new("/project"));
+        assert!(result.entry_patterns.is_empty());
+        assert!(result.referenced_dependencies.is_empty());
+    }
+
+    #[test]
+    fn resolve_config_no_page_extensions() {
+        let source = r#"
+            export default {
+                reactStrictMode: true
+            };
+        "#;
+        let plugin = NextJsPlugin;
+        let result =
+            plugin.resolve_config(Path::new("next.config.ts"), source, Path::new("/project"));
+        assert!(
+            result.entry_patterns.is_empty(),
+            "no pageExtensions means no extra entry patterns"
+        );
+    }
+
+    #[test]
+    fn tooling_dependencies_include_server_client_only() {
+        let plugin = NextJsPlugin;
+        let tooling = plugin.tooling_dependencies();
+        assert!(tooling.contains(&"server-only"));
+        assert!(tooling.contains(&"client-only"));
+    }
+}

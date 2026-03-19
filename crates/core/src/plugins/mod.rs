@@ -735,3 +735,456 @@ impl Default for PluginRegistry {
         Self::new(vec![])
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use fallow_config::{ExternalPluginDef, ExternalUsedExport, PluginDetection};
+    use std::collections::HashMap;
+
+    /// Helper: build a PackageJson with given dependency names.
+    fn make_pkg(deps: &[&str]) -> PackageJson {
+        let map: HashMap<String, String> =
+            deps.iter().map(|d| (d.to_string(), "*".into())).collect();
+        PackageJson {
+            dependencies: Some(map),
+            ..Default::default()
+        }
+    }
+
+    /// Helper: build a PackageJson with dev dependencies.
+    fn make_pkg_dev(deps: &[&str]) -> PackageJson {
+        let map: HashMap<String, String> =
+            deps.iter().map(|d| (d.to_string(), "*".into())).collect();
+        PackageJson {
+            dev_dependencies: Some(map),
+            ..Default::default()
+        }
+    }
+
+    // ── Plugin detection via enablers ────────────────────────────
+
+    #[test]
+    fn nextjs_detected_when_next_in_deps() {
+        let registry = PluginRegistry::default();
+        let pkg = make_pkg(&["next", "react"]);
+        let result = registry.run(&pkg, Path::new("/project"), &[]);
+        assert!(
+            result.active_plugins.contains(&"nextjs".to_string()),
+            "nextjs plugin should be active when 'next' is in deps"
+        );
+    }
+
+    #[test]
+    fn nextjs_not_detected_without_next() {
+        let registry = PluginRegistry::default();
+        let pkg = make_pkg(&["react", "react-dom"]);
+        let result = registry.run(&pkg, Path::new("/project"), &[]);
+        assert!(
+            !result.active_plugins.contains(&"nextjs".to_string()),
+            "nextjs plugin should not be active without 'next' in deps"
+        );
+    }
+
+    #[test]
+    fn prefix_enabler_matches_scoped_packages() {
+        // Storybook uses "@storybook/" prefix matcher
+        let registry = PluginRegistry::default();
+        let pkg = make_pkg(&["@storybook/react"]);
+        let result = registry.run(&pkg, Path::new("/project"), &[]);
+        assert!(
+            result.active_plugins.contains(&"storybook".to_string()),
+            "storybook should activate via prefix match on @storybook/react"
+        );
+    }
+
+    #[test]
+    fn prefix_enabler_does_not_match_without_slash() {
+        // "storybook" (exact) should match, but "@storybook" (without /) should not match via prefix
+        let registry = PluginRegistry::default();
+        // This only has a package called "@storybookish" — it should NOT match
+        let mut map = HashMap::new();
+        map.insert("@storybookish".to_string(), "*".to_string());
+        let pkg = PackageJson {
+            dependencies: Some(map),
+            ..Default::default()
+        };
+        let result = registry.run(&pkg, Path::new("/project"), &[]);
+        assert!(
+            !result.active_plugins.contains(&"storybook".to_string()),
+            "storybook should not activate for '@storybookish' (no slash prefix match)"
+        );
+    }
+
+    #[test]
+    fn multiple_plugins_detected_simultaneously() {
+        let registry = PluginRegistry::default();
+        let pkg = make_pkg(&["next", "vitest", "typescript"]);
+        let result = registry.run(&pkg, Path::new("/project"), &[]);
+        assert!(result.active_plugins.contains(&"nextjs".to_string()));
+        assert!(result.active_plugins.contains(&"vitest".to_string()));
+        assert!(result.active_plugins.contains(&"typescript".to_string()));
+    }
+
+    #[test]
+    fn no_plugins_for_empty_deps() {
+        let registry = PluginRegistry::default();
+        let pkg = PackageJson::default();
+        let result = registry.run(&pkg, Path::new("/project"), &[]);
+        assert!(
+            result.active_plugins.is_empty(),
+            "no plugins should activate with empty package.json"
+        );
+    }
+
+    // ── Aggregation: entry patterns, tooling deps ────────────────
+
+    #[test]
+    fn active_plugin_contributes_entry_patterns() {
+        let registry = PluginRegistry::default();
+        let pkg = make_pkg(&["next"]);
+        let result = registry.run(&pkg, Path::new("/project"), &[]);
+        // Next.js should contribute App Router entry patterns
+        assert!(
+            result
+                .entry_patterns
+                .iter()
+                .any(|p| p.contains("app/**/page")),
+            "nextjs plugin should add app/**/page entry pattern"
+        );
+    }
+
+    #[test]
+    fn inactive_plugin_does_not_contribute_entry_patterns() {
+        let registry = PluginRegistry::default();
+        let pkg = make_pkg(&["react"]);
+        let result = registry.run(&pkg, Path::new("/project"), &[]);
+        // Next.js patterns should not be present
+        assert!(
+            !result
+                .entry_patterns
+                .iter()
+                .any(|p| p.contains("app/**/page")),
+            "nextjs patterns should not appear when plugin is inactive"
+        );
+    }
+
+    #[test]
+    fn active_plugin_contributes_tooling_deps() {
+        let registry = PluginRegistry::default();
+        let pkg = make_pkg(&["next"]);
+        let result = registry.run(&pkg, Path::new("/project"), &[]);
+        assert!(
+            result.tooling_dependencies.contains(&"next".to_string()),
+            "nextjs plugin should list 'next' as a tooling dependency"
+        );
+    }
+
+    #[test]
+    fn dev_deps_also_trigger_plugins() {
+        let registry = PluginRegistry::default();
+        let pkg = make_pkg_dev(&["vitest"]);
+        let result = registry.run(&pkg, Path::new("/project"), &[]);
+        assert!(
+            result.active_plugins.contains(&"vitest".to_string()),
+            "vitest should activate from devDependencies"
+        );
+    }
+
+    // ── External plugins ─────────────────────────────────────────
+
+    #[test]
+    fn external_plugin_detected_by_enablers() {
+        let ext = ExternalPluginDef {
+            schema: None,
+            name: "my-framework".to_string(),
+            detection: None,
+            enablers: vec!["my-framework".to_string()],
+            entry_points: vec!["src/routes/**/*.ts".to_string()],
+            config_patterns: vec![],
+            always_used: vec!["my.config.ts".to_string()],
+            tooling_dependencies: vec!["my-framework-cli".to_string()],
+            used_exports: vec![],
+        };
+        let registry = PluginRegistry::new(vec![ext]);
+        let pkg = make_pkg(&["my-framework"]);
+        let result = registry.run(&pkg, Path::new("/project"), &[]);
+        assert!(result.active_plugins.contains(&"my-framework".to_string()));
+        assert!(
+            result
+                .entry_patterns
+                .contains(&"src/routes/**/*.ts".to_string())
+        );
+        assert!(
+            result
+                .tooling_dependencies
+                .contains(&"my-framework-cli".to_string())
+        );
+    }
+
+    #[test]
+    fn external_plugin_not_detected_when_dep_missing() {
+        let ext = ExternalPluginDef {
+            schema: None,
+            name: "my-framework".to_string(),
+            detection: None,
+            enablers: vec!["my-framework".to_string()],
+            entry_points: vec!["src/routes/**/*.ts".to_string()],
+            config_patterns: vec![],
+            always_used: vec![],
+            tooling_dependencies: vec![],
+            used_exports: vec![],
+        };
+        let registry = PluginRegistry::new(vec![ext]);
+        let pkg = make_pkg(&["react"]);
+        let result = registry.run(&pkg, Path::new("/project"), &[]);
+        assert!(!result.active_plugins.contains(&"my-framework".to_string()));
+        assert!(
+            !result
+                .entry_patterns
+                .contains(&"src/routes/**/*.ts".to_string())
+        );
+    }
+
+    #[test]
+    fn external_plugin_prefix_enabler() {
+        let ext = ExternalPluginDef {
+            schema: None,
+            name: "custom-plugin".to_string(),
+            detection: None,
+            enablers: vec!["@custom/".to_string()],
+            entry_points: vec!["custom/**/*.ts".to_string()],
+            config_patterns: vec![],
+            always_used: vec![],
+            tooling_dependencies: vec![],
+            used_exports: vec![],
+        };
+        let registry = PluginRegistry::new(vec![ext]);
+        let pkg = make_pkg(&["@custom/core"]);
+        let result = registry.run(&pkg, Path::new("/project"), &[]);
+        assert!(result.active_plugins.contains(&"custom-plugin".to_string()));
+    }
+
+    #[test]
+    fn external_plugin_detection_dependency() {
+        let ext = ExternalPluginDef {
+            schema: None,
+            name: "detected-plugin".to_string(),
+            detection: Some(PluginDetection::Dependency {
+                package: "special-dep".to_string(),
+            }),
+            enablers: vec![],
+            entry_points: vec!["special/**/*.ts".to_string()],
+            config_patterns: vec![],
+            always_used: vec![],
+            tooling_dependencies: vec![],
+            used_exports: vec![],
+        };
+        let registry = PluginRegistry::new(vec![ext]);
+        let pkg = make_pkg(&["special-dep"]);
+        let result = registry.run(&pkg, Path::new("/project"), &[]);
+        assert!(
+            result
+                .active_plugins
+                .contains(&"detected-plugin".to_string())
+        );
+    }
+
+    #[test]
+    fn external_plugin_detection_any_combinator() {
+        let ext = ExternalPluginDef {
+            schema: None,
+            name: "any-plugin".to_string(),
+            detection: Some(PluginDetection::Any {
+                conditions: vec![
+                    PluginDetection::Dependency {
+                        package: "pkg-a".to_string(),
+                    },
+                    PluginDetection::Dependency {
+                        package: "pkg-b".to_string(),
+                    },
+                ],
+            }),
+            enablers: vec![],
+            entry_points: vec!["any/**/*.ts".to_string()],
+            config_patterns: vec![],
+            always_used: vec![],
+            tooling_dependencies: vec![],
+            used_exports: vec![],
+        };
+        let registry = PluginRegistry::new(vec![ext]);
+        // Only pkg-b present — should still match via Any
+        let pkg = make_pkg(&["pkg-b"]);
+        let result = registry.run(&pkg, Path::new("/project"), &[]);
+        assert!(result.active_plugins.contains(&"any-plugin".to_string()));
+    }
+
+    #[test]
+    fn external_plugin_detection_all_combinator_fails_partial() {
+        let ext = ExternalPluginDef {
+            schema: None,
+            name: "all-plugin".to_string(),
+            detection: Some(PluginDetection::All {
+                conditions: vec![
+                    PluginDetection::Dependency {
+                        package: "pkg-a".to_string(),
+                    },
+                    PluginDetection::Dependency {
+                        package: "pkg-b".to_string(),
+                    },
+                ],
+            }),
+            enablers: vec![],
+            entry_points: vec![],
+            config_patterns: vec![],
+            always_used: vec![],
+            tooling_dependencies: vec![],
+            used_exports: vec![],
+        };
+        let registry = PluginRegistry::new(vec![ext]);
+        // Only pkg-a present — All requires both
+        let pkg = make_pkg(&["pkg-a"]);
+        let result = registry.run(&pkg, Path::new("/project"), &[]);
+        assert!(!result.active_plugins.contains(&"all-plugin".to_string()));
+    }
+
+    #[test]
+    fn external_plugin_used_exports_aggregated() {
+        let ext = ExternalPluginDef {
+            schema: None,
+            name: "ue-plugin".to_string(),
+            detection: None,
+            enablers: vec!["ue-dep".to_string()],
+            entry_points: vec![],
+            config_patterns: vec![],
+            always_used: vec![],
+            tooling_dependencies: vec![],
+            used_exports: vec![ExternalUsedExport {
+                pattern: "pages/**/*.tsx".to_string(),
+                exports: vec!["default".to_string(), "getServerSideProps".to_string()],
+            }],
+        };
+        let registry = PluginRegistry::new(vec![ext]);
+        let pkg = make_pkg(&["ue-dep"]);
+        let result = registry.run(&pkg, Path::new("/project"), &[]);
+        assert!(result.used_exports.iter().any(|(pat, exports)| {
+            pat == "pages/**/*.tsx" && exports.contains(&"default".to_string())
+        }));
+    }
+
+    #[test]
+    fn external_plugin_without_enablers_or_detection_stays_inactive() {
+        let ext = ExternalPluginDef {
+            schema: None,
+            name: "orphan-plugin".to_string(),
+            detection: None,
+            enablers: vec![],
+            entry_points: vec!["orphan/**/*.ts".to_string()],
+            config_patterns: vec![],
+            always_used: vec![],
+            tooling_dependencies: vec![],
+            used_exports: vec![],
+        };
+        let registry = PluginRegistry::new(vec![ext]);
+        let pkg = make_pkg(&["anything"]);
+        let result = registry.run(&pkg, Path::new("/project"), &[]);
+        assert!(!result.active_plugins.contains(&"orphan-plugin".to_string()));
+    }
+
+    // ── is_enabled_with_deps edge cases ──────────────────────────
+
+    #[test]
+    fn is_enabled_with_deps_exact_match() {
+        let plugin = nextjs::NextJsPlugin;
+        let deps = vec!["next".to_string()];
+        assert!(plugin.is_enabled_with_deps(&deps, Path::new("/project")));
+    }
+
+    #[test]
+    fn is_enabled_with_deps_no_match() {
+        let plugin = nextjs::NextJsPlugin;
+        let deps = vec!["react".to_string()];
+        assert!(!plugin.is_enabled_with_deps(&deps, Path::new("/project")));
+    }
+
+    #[test]
+    fn is_enabled_with_empty_deps() {
+        let plugin = nextjs::NextJsPlugin;
+        let deps: Vec<String> = vec![];
+        assert!(!plugin.is_enabled_with_deps(&deps, Path::new("/project")));
+    }
+
+    // ── Virtual module prefixes ──────────────────────────────────
+
+    #[test]
+    fn nuxt_contributes_virtual_module_prefixes() {
+        let registry = PluginRegistry::default();
+        let pkg = make_pkg(&["nuxt"]);
+        let result = registry.run(&pkg, Path::new("/project"), &[]);
+        assert!(
+            result.virtual_module_prefixes.contains(&"#".to_string()),
+            "nuxt should contribute '#' virtual module prefix"
+        );
+    }
+
+    // ── PluginResult::is_empty ───────────────────────────────────
+
+    #[test]
+    fn plugin_result_is_empty_when_default() {
+        let r = PluginResult::default();
+        assert!(r.is_empty());
+    }
+
+    #[test]
+    fn plugin_result_not_empty_with_entry_patterns() {
+        let r = PluginResult {
+            entry_patterns: vec!["*.ts".to_string()],
+            ..Default::default()
+        };
+        assert!(!r.is_empty());
+    }
+
+    #[test]
+    fn plugin_result_not_empty_with_referenced_deps() {
+        let r = PluginResult {
+            referenced_dependencies: vec!["lodash".to_string()],
+            ..Default::default()
+        };
+        assert!(!r.is_empty());
+    }
+
+    #[test]
+    fn plugin_result_not_empty_with_setup_files() {
+        let r = PluginResult {
+            setup_files: vec![PathBuf::from("/setup.ts")],
+            ..Default::default()
+        };
+        assert!(!r.is_empty());
+    }
+
+    // ── Precompile config matchers ───────────────────────────────
+
+    #[test]
+    fn precompile_config_matchers_returns_entries() {
+        let registry = PluginRegistry::default();
+        let matchers = registry.precompile_config_matchers();
+        // At minimum, nextjs, vite, jest, typescript, etc. all have config patterns
+        assert!(
+            !matchers.is_empty(),
+            "precompile_config_matchers should return entries for plugins with config patterns"
+        );
+    }
+
+    #[test]
+    fn precompile_config_matchers_only_for_plugins_with_patterns() {
+        let registry = PluginRegistry::default();
+        let matchers = registry.precompile_config_matchers();
+        for (plugin, _) in &matchers {
+            assert!(
+                !plugin.config_patterns().is_empty(),
+                "plugin '{}' in matchers should have config patterns",
+                plugin.name()
+            );
+        }
+    }
+}

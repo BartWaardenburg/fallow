@@ -120,3 +120,147 @@ pub fn is_known_tooling_dependency(name: &str) -> bool {
     GENERAL_TOOLING_PREFIXES.iter().any(|p| name.starts_with(p))
         || GENERAL_TOOLING_EXACT.contains(&name)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── Prefix matching ──────────────────────────────────────────
+
+    #[test]
+    fn types_prefix_matches_scoped() {
+        assert!(is_known_tooling_dependency("@types/node"));
+        assert!(is_known_tooling_dependency("@types/react"));
+        assert!(is_known_tooling_dependency("@types/express"));
+    }
+
+    #[test]
+    fn types_prefix_does_not_match_similar_names() {
+        // "type-fest" should NOT match "@types/" prefix
+        assert!(!is_known_tooling_dependency("type-fest"));
+        assert!(!is_known_tooling_dependency("typesafe-actions"));
+    }
+
+    #[test]
+    fn storybook_prefix_matches() {
+        assert!(is_known_tooling_dependency("@storybook/react"));
+        assert!(is_known_tooling_dependency("@storybook/addon-essentials"));
+        assert!(is_known_tooling_dependency("storybook"));
+    }
+
+    #[test]
+    fn testing_library_prefix_matches() {
+        assert!(is_known_tooling_dependency("@testing-library/react"));
+        assert!(is_known_tooling_dependency("@testing-library/jest-dom"));
+    }
+
+    #[test]
+    fn babel_prefix_matches() {
+        assert!(is_known_tooling_dependency("@babel/core"));
+        assert!(is_known_tooling_dependency("babel-loader"));
+        assert!(is_known_tooling_dependency("babel-jest"));
+    }
+
+    #[test]
+    fn vitest_prefix_matches() {
+        assert!(is_known_tooling_dependency("@vitest/coverage-v8"));
+        assert!(is_known_tooling_dependency("@vitest/ui"));
+    }
+
+    #[test]
+    fn eslint_prefix_matches() {
+        assert!(is_known_tooling_dependency("eslint"));
+        assert!(is_known_tooling_dependency("eslint-plugin-react"));
+        assert!(is_known_tooling_dependency("eslint-config-next"));
+    }
+
+    #[test]
+    fn biomejs_prefix_matches() {
+        assert!(is_known_tooling_dependency("@biomejs/biome"));
+    }
+
+    // ── Exact matching ───────────────────────────────────────────
+
+    #[test]
+    fn exact_typescript_matches() {
+        assert!(is_known_tooling_dependency("typescript"));
+    }
+
+    #[test]
+    fn exact_prettier_matches() {
+        assert!(is_known_tooling_dependency("prettier"));
+    }
+
+    #[test]
+    fn exact_vitest_matches() {
+        assert!(is_known_tooling_dependency("vitest"));
+    }
+
+    #[test]
+    fn exact_jest_matches() {
+        assert!(is_known_tooling_dependency("jest"));
+    }
+
+    #[test]
+    fn exact_vite_matches() {
+        assert!(is_known_tooling_dependency("vite"));
+    }
+
+    #[test]
+    fn exact_esbuild_matches() {
+        assert!(is_known_tooling_dependency("esbuild"));
+    }
+
+    #[test]
+    fn exact_tsup_matches() {
+        assert!(is_known_tooling_dependency("tsup"));
+    }
+
+    #[test]
+    fn exact_turbo_matches() {
+        assert!(is_known_tooling_dependency("turbo"));
+    }
+
+    // ── Non-tooling dependencies ─────────────────────────────────
+
+    #[test]
+    fn common_runtime_deps_not_tooling() {
+        assert!(!is_known_tooling_dependency("react"));
+        assert!(!is_known_tooling_dependency("react-dom"));
+        assert!(!is_known_tooling_dependency("express"));
+        assert!(!is_known_tooling_dependency("lodash"));
+        assert!(!is_known_tooling_dependency("next"));
+        assert!(!is_known_tooling_dependency("vue"));
+        assert!(!is_known_tooling_dependency("axios"));
+    }
+
+    #[test]
+    fn empty_string_not_tooling() {
+        assert!(!is_known_tooling_dependency(""));
+    }
+
+    #[test]
+    fn near_miss_not_tooling() {
+        // These look similar to tooling but should NOT match
+        assert!(!is_known_tooling_dependency("type-fest"));
+        assert!(!is_known_tooling_dependency("typestyle"));
+        assert!(!is_known_tooling_dependency("prettier-bytes")); // not the exact "prettier"
+        // Note: "prettier-bytes" starts with "prettier" but only prefix matches
+        // check the prefixes list — "prettier" is NOT in GENERAL_TOOLING_PREFIXES,
+        // it's in GENERAL_TOOLING_EXACT. So "prettier-bytes" should not match.
+    }
+
+    #[test]
+    fn sass_variants_are_tooling() {
+        assert!(is_known_tooling_dependency("sass"));
+        assert!(is_known_tooling_dependency("sass-embedded"));
+    }
+
+    #[test]
+    fn prettier_plugins_are_tooling() {
+        assert!(is_known_tooling_dependency(
+            "@ianvs/prettier-plugin-sort-imports"
+        ));
+        assert!(is_known_tooling_dependency("prettier-plugin-tailwindcss"));
+    }
+}

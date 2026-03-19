@@ -1,4 +1,4 @@
-use super::{string_or_array, MigrationWarning};
+use super::{MigrationWarning, string_or_array};
 
 /// Knip rule names mapped to fallow rule names.
 const KNIP_RULE_MAP: &[(&str, &str)] = &[

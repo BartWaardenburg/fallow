@@ -149,7 +149,8 @@ mod tests {
 
     #[test]
     fn multiline_import_with_braces() {
-        let source = "import {\n  Chart,\n  Table,\n  Graph\n} from './components'\n\n# Dashboard\n";
+        let source =
+            "import {\n  Chart,\n  Table,\n  Graph\n} from './components'\n\n# Dashboard\n";
         let result = extract_mdx_statements(source);
         assert!(result.contains("Chart"));
         assert!(result.contains("Table"));
@@ -177,7 +178,8 @@ mod tests {
 
     #[test]
     fn prose_lines_excluded() {
-        let source = "import { A } from './a'\n\n# Title\n\nSome **markdown** text.\n\n- List item\n";
+        let source =
+            "import { A } from './a'\n\n# Title\n\nSome **markdown** text.\n\n- List item\n";
         let result = extract_mdx_statements(source);
         assert!(!result.contains("Title"));
         assert!(!result.contains("markdown"));

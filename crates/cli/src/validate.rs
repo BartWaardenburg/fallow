@@ -151,7 +151,10 @@ mod tests {
             err.contains("disallowed character"),
             "Error should mention disallowed character, got: {err}"
         );
-        assert!(err.contains(':'), "Error should mention the colon, got: {err}");
+        assert!(
+            err.contains(':'),
+            "Error should mention the colon, got: {err}"
+        );
     }
 
     #[test]
@@ -190,10 +193,7 @@ mod tests {
 
     #[test]
     fn git_ref_allows_commit_sha() {
-        assert_eq!(
-            validate_git_ref("abc123def456").unwrap(),
-            "abc123def456"
-        );
+        assert_eq!(validate_git_ref("abc123def456").unwrap(), "abc123def456");
     }
 
     #[test]

@@ -244,8 +244,7 @@ const count = 0;
 
     #[test]
     fn script_src_detected() {
-        let scripts =
-            extract_sfc_scripts(r#"<script src="./component.ts" lang="ts"></script>"#);
+        let scripts = extract_sfc_scripts(r#"<script src="./component.ts" lang="ts"></script>"#);
         assert_eq!(scripts.len(), 1);
         assert_eq!(scripts[0].src.as_deref(), Some("./component.ts"));
     }
