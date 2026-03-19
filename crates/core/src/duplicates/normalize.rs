@@ -1,7 +1,7 @@
 use xxhash_rust::xxh3::xxh3_64;
 
 use super::tokenize::{SourceToken, TokenKind};
-use fallow_config::DetectionMode;
+use fallow_config::{DetectionMode, ResolvedNormalization};
 
 /// A token with a precomputed hash for use in the detection engine.
 #[derive(Debug, Clone)]
@@ -17,79 +17,61 @@ pub struct HashedToken {
 /// Returns a vector of `HashedToken` values ready for the Rabin-Karp sliding window.
 /// Tokens that should be skipped (based on mode) are excluded from the output.
 pub fn normalize_and_hash(tokens: &[SourceToken], mode: DetectionMode) -> Vec<HashedToken> {
+    let resolved = ResolvedNormalization::resolve(mode, &Default::default());
+    normalize_and_hash_resolved(tokens, &resolved)
+}
+
+/// Normalize and hash with explicit resolved normalization flags.
+///
+/// This is the primary normalization entry point when using configurable overrides.
+pub fn normalize_and_hash_resolved(
+    tokens: &[SourceToken],
+    normalization: &ResolvedNormalization,
+) -> Vec<HashedToken> {
     let mut result = Vec::with_capacity(tokens.len());
 
     for (i, token) in tokens.iter().enumerate() {
-        let normalized = normalize_token(&token.kind, mode);
-        if let Some(hash) = normalized {
-            result.push(HashedToken {
-                hash,
-                original_index: i,
-            });
-        }
+        let hash = hash_token_resolved(&token.kind, normalization);
+        result.push(HashedToken {
+            hash,
+            original_index: i,
+        });
     }
 
     result
 }
 
-/// Normalize a single token and compute its hash.
-/// Returns `None` if the token should be skipped in the given mode.
-fn normalize_token(kind: &TokenKind, mode: DetectionMode) -> Option<u64> {
-    match mode {
-        DetectionMode::Strict | DetectionMode::Mild => Some(hash_token_strict(kind)),
-        DetectionMode::Weak => Some(hash_token_weak(kind)),
-        DetectionMode::Semantic => Some(hash_token_semantic(kind)),
-    }
-}
-
-/// Hash a token preserving its full identity (strict/mild/weak modes).
-fn hash_token_strict(kind: &TokenKind) -> u64 {
+/// Hash a single token using resolved normalization flags.
+fn hash_token_resolved(kind: &TokenKind, norm: &ResolvedNormalization) -> u64 {
     match kind {
         TokenKind::Keyword(kw) => hash_bytes(&[0, *kw as u8]),
         TokenKind::Identifier(name) => {
-            let mut buf = vec![1];
-            buf.extend_from_slice(name.as_bytes());
-            hash_bytes(&buf)
+            if norm.ignore_identifiers {
+                hash_bytes(&[1, 0])
+            } else {
+                let mut buf = vec![1];
+                buf.extend_from_slice(name.as_bytes());
+                hash_bytes(&buf)
+            }
         }
         TokenKind::StringLiteral(val) => {
-            let mut buf = vec![2];
-            buf.extend_from_slice(val.as_bytes());
-            hash_bytes(&buf)
+            if norm.ignore_string_values {
+                hash_bytes(&[2, 0])
+            } else {
+                let mut buf = vec![2];
+                buf.extend_from_slice(val.as_bytes());
+                hash_bytes(&buf)
+            }
         }
         TokenKind::NumericLiteral(val) => {
-            let mut buf = vec![3];
-            buf.extend_from_slice(val.as_bytes());
-            hash_bytes(&buf)
+            if norm.ignore_numeric_values {
+                hash_bytes(&[3, 0])
+            } else {
+                let mut buf = vec![3];
+                buf.extend_from_slice(val.as_bytes());
+                hash_bytes(&buf)
+            }
         }
-        TokenKind::BooleanLiteral(val) => hash_bytes(&[4, *val as u8]),
-        TokenKind::NullLiteral => hash_bytes(&[5]),
-        TokenKind::TemplateLiteral => hash_bytes(&[6]),
-        TokenKind::RegExpLiteral => hash_bytes(&[7]),
-        TokenKind::Operator(op) => hash_bytes(&[8, *op as u8]),
-        TokenKind::Punctuation(p) => hash_bytes(&[9, *p as u8]),
-    }
-}
-
-/// Hash a token with string literals blinded (weak mode).
-fn hash_token_weak(kind: &TokenKind) -> u64 {
-    match kind {
-        // Blind string literals only — keep identifiers and numeric literals
-        TokenKind::StringLiteral(_) => hash_bytes(&[2, 0]),
-        other => hash_token_strict(other),
-    }
-}
-
-/// Hash a token with identifiers and literals blinded (semantic mode).
-fn hash_token_semantic(kind: &TokenKind) -> u64 {
-    match kind {
-        TokenKind::Keyword(kw) => hash_bytes(&[0, *kw as u8]),
-        // All identifiers map to the same hash
-        TokenKind::Identifier(_) => hash_bytes(&[1, 0]),
-        // All string literals map to the same hash
-        TokenKind::StringLiteral(_) => hash_bytes(&[2, 0]),
-        // All numeric literals map to the same hash
-        TokenKind::NumericLiteral(_) => hash_bytes(&[3, 0]),
-        // Booleans are kept as-is (structurally significant)
         TokenKind::BooleanLiteral(val) => hash_bytes(&[4, *val as u8]),
         TokenKind::NullLiteral => hash_bytes(&[5]),
         TokenKind::TemplateLiteral => hash_bytes(&[6]),
@@ -233,5 +215,120 @@ mod tests {
 
         let hashed = normalize_and_hash(&tokens, DetectionMode::Strict);
         assert_ne!(hashed[0].hash, hashed[1].hash);
+    }
+
+    // ── Configurable normalization tests ──────────────────────────
+
+    #[test]
+    fn resolved_strict_with_ignore_identifiers_override() {
+        // Strict mode normally preserves identifiers, but override blinds them
+        let norm = ResolvedNormalization {
+            ignore_identifiers: true,
+            ignore_string_values: false,
+            ignore_numeric_values: false,
+        };
+        let tokens = vec![
+            make_token(TokenKind::Identifier("foo".to_string())),
+            make_token(TokenKind::Identifier("bar".to_string())),
+        ];
+
+        let hashed = normalize_and_hash_resolved(&tokens, &norm);
+        assert_eq!(hashed.len(), 2);
+        // Identifiers should be blinded
+        assert_eq!(hashed[0].hash, hashed[1].hash);
+    }
+
+    #[test]
+    fn resolved_strict_with_ignore_strings_override() {
+        let norm = ResolvedNormalization {
+            ignore_identifiers: false,
+            ignore_string_values: true,
+            ignore_numeric_values: false,
+        };
+        let tokens = vec![
+            make_token(TokenKind::StringLiteral("hello".to_string())),
+            make_token(TokenKind::StringLiteral("world".to_string())),
+        ];
+
+        let hashed = normalize_and_hash_resolved(&tokens, &norm);
+        assert_eq!(hashed[0].hash, hashed[1].hash);
+    }
+
+    #[test]
+    fn resolved_strict_with_ignore_numbers_override() {
+        let norm = ResolvedNormalization {
+            ignore_identifiers: false,
+            ignore_string_values: false,
+            ignore_numeric_values: true,
+        };
+        let tokens = vec![
+            make_token(TokenKind::NumericLiteral("42".to_string())),
+            make_token(TokenKind::NumericLiteral("99".to_string())),
+        ];
+
+        let hashed = normalize_and_hash_resolved(&tokens, &norm);
+        assert_eq!(hashed[0].hash, hashed[1].hash);
+    }
+
+    #[test]
+    fn resolved_semantic_with_preserve_identifiers_override() {
+        // Semantic mode normally blinds identifiers, but override preserves them
+        let norm = ResolvedNormalization {
+            ignore_identifiers: false,
+            ignore_string_values: true,
+            ignore_numeric_values: true,
+        };
+        let tokens = vec![
+            make_token(TokenKind::Identifier("foo".to_string())),
+            make_token(TokenKind::Identifier("bar".to_string())),
+        ];
+
+        let hashed = normalize_and_hash_resolved(&tokens, &norm);
+        // Identifiers should be preserved (different hashes)
+        assert_ne!(hashed[0].hash, hashed[1].hash);
+    }
+
+    #[test]
+    fn resolved_normalization_from_mode_defaults() {
+        use fallow_config::NormalizationConfig;
+
+        // Strict mode defaults: preserve everything
+        let norm =
+            ResolvedNormalization::resolve(DetectionMode::Strict, &NormalizationConfig::default());
+        assert!(!norm.ignore_identifiers);
+        assert!(!norm.ignore_string_values);
+        assert!(!norm.ignore_numeric_values);
+
+        // Weak mode defaults: blind strings only
+        let norm =
+            ResolvedNormalization::resolve(DetectionMode::Weak, &NormalizationConfig::default());
+        assert!(!norm.ignore_identifiers);
+        assert!(norm.ignore_string_values);
+        assert!(!norm.ignore_numeric_values);
+
+        // Semantic mode defaults: blind all
+        let norm = ResolvedNormalization::resolve(
+            DetectionMode::Semantic,
+            &NormalizationConfig::default(),
+        );
+        assert!(norm.ignore_identifiers);
+        assert!(norm.ignore_string_values);
+        assert!(norm.ignore_numeric_values);
+    }
+
+    #[test]
+    fn resolved_normalization_overrides_mode_defaults() {
+        use fallow_config::NormalizationConfig;
+
+        // Strict mode with explicit override to blind identifiers
+        let overrides = NormalizationConfig {
+            ignore_identifiers: Some(true),
+            ignore_string_values: None, // Use mode default (false)
+            ignore_numeric_values: None,
+        };
+        let norm = ResolvedNormalization::resolve(DetectionMode::Strict, &overrides);
+        assert!(norm.ignore_identifiers); // Overridden
+        assert!(!norm.ignore_string_values); // Mode default
+        assert!(!norm.ignore_numeric_values); // Mode default
     }
 }

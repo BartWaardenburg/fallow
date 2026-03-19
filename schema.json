@@ -87,7 +87,9 @@
         "minLines": 5,
         "threshold": 0.0,
         "ignore": [],
-        "skipLocal": false
+        "skipLocal": false,
+        "crossLanguage": false,
+        "normalization": {}
       }
     },
     "rules": {
@@ -438,6 +440,16 @@
           "description": "Only report cross-directory duplicates.",
           "type": "boolean",
           "default": false
+        },
+        "crossLanguage": {
+          "description": "Enable cross-language clone detection by stripping type annotations.\n\nWhen enabled, TypeScript type annotations (parameter types, return types,\ngenerics, interfaces, type aliases) are stripped from the token stream,\nallowing detection of clones between `.ts` and `.js` files.",
+          "type": "boolean",
+          "default": false
+        },
+        "normalization": {
+          "description": "Fine-grained normalization overrides on top of the detection mode.",
+          "$ref": "#/$defs/NormalizationConfig",
+          "default": {}
         }
       }
     },
@@ -465,6 +477,33 @@
           "const": "semantic"
         }
       ]
+    },
+    "NormalizationConfig": {
+      "description": "Fine-grained normalization overrides.\n\nEach option, when set to `Some(true)`, forces that normalization regardless of\nthe detection mode. When set to `Some(false)`, it forces preservation. When\n`None`, the detection mode's default behavior applies.",
+      "type": "object",
+      "properties": {
+        "ignoreIdentifiers": {
+          "description": "Blind all identifiers (variable names, function names, etc.) to the same hash.\nDefault in `semantic` mode.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "ignoreStringValues": {
+          "description": "Blind string literal values to the same hash.\nDefault in `weak` and `semantic` modes.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "ignoreNumericValues": {
+          "description": "Blind numeric literal values to the same hash.\nDefault in `semantic` mode.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      }
     },
     "RulesConfig": {
       "description": "Per-issue-type severity configuration.\n\nControls which issue types cause CI failure, are reported as warnings,\nor are suppressed entirely. All fields default to `Severity::Error`\nfor backwards compatibility.",

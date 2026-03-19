@@ -1017,6 +1017,76 @@ fn print_duplication_sarif(report: &DuplicationReport, root: &Path) -> ExitCode 
     }
 }
 
+/// Print cross-reference findings (duplicated code that is also dead code).
+///
+/// Only emits output in human format to avoid corrupting structured JSON/SARIF output.
+pub fn print_cross_reference_findings(
+    cross_ref: &fallow_core::cross_reference::CrossReferenceResult,
+    root: &Path,
+    quiet: bool,
+    output: &OutputFormat,
+) {
+    use fallow_core::cross_reference::DeadCodeKind;
+
+    if cross_ref.combined_findings.is_empty() {
+        return;
+    }
+
+    // Only emit human-readable output; structured formats (JSON, SARIF, Compact)
+    // should not have unstructured text mixed into stdout.
+    if !matches!(output, OutputFormat::Human) {
+        return;
+    }
+
+    if quiet {
+        return;
+    }
+
+    println!();
+    println!(
+        "{} {}",
+        "\u{25cf}".yellow(),
+        "Duplicated + Unused (safe to delete)".yellow().bold()
+    );
+    println!();
+
+    for finding in &cross_ref.combined_findings {
+        let relative = relative_path(&finding.clone_instance.file, root);
+        let location = format!(
+            "{}:{}-{}",
+            relative.display(),
+            finding.clone_instance.start_line,
+            finding.clone_instance.end_line
+        );
+
+        let reason = match &finding.dead_code_kind {
+            DeadCodeKind::UnusedFile => "entire file is unused".to_string(),
+            DeadCodeKind::UnusedExport { export_name } => {
+                format!("export '{export_name}' is unused")
+            }
+            DeadCodeKind::UnusedType { type_name } => {
+                format!("type '{type_name}' is unused")
+            }
+        };
+
+        println!("  {} {}", location.bold(), format!("({reason})").dimmed());
+    }
+
+    println!();
+    let total = cross_ref.total();
+    let files = cross_ref.clones_in_unused_files;
+    let exports = cross_ref.clones_with_unused_exports;
+    eprintln!(
+        "  {} combined finding{}: {} in unused file{}, {} overlapping unused export{}",
+        total,
+        if total == 1 { "" } else { "s" },
+        files,
+        if files == 1 { "" } else { "s" },
+        exports,
+        if exports == 1 { "" } else { "s" },
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

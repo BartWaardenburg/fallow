@@ -124,6 +124,10 @@ enum Command {
         /// Only report duplicate exports
         #[arg(long)]
         duplicate_exports: bool,
+
+        /// Also run duplication analysis and cross-reference with dead code
+        #[arg(long)]
+        include_dupes: bool,
     },
 
     /// Watch for changes and re-run analysis
@@ -182,6 +186,10 @@ enum Command {
         /// Only report cross-directory duplicates
         #[arg(long)]
         skip_local: bool,
+
+        /// Enable cross-language detection (strip TS type annotations for TS↔JS matching)
+        #[arg(long)]
+        cross_language: bool,
     },
 
     /// Dump the CLI interface as machine-readable JSON for agent introspection
@@ -500,6 +508,7 @@ fn main() -> ExitCode {
         unresolved_imports: false,
         unlisted_deps: false,
         duplicate_exports: false,
+        include_dupes: false,
     }) {
         Command::Check {
             fail_on_issues,
@@ -513,6 +522,7 @@ fn main() -> ExitCode {
             unresolved_imports,
             unlisted_deps,
             duplicate_exports,
+            include_dupes,
         } => {
             let filters = IssueFilters {
                 unused_files,
@@ -540,6 +550,7 @@ fn main() -> ExitCode {
                 sarif_file.as_deref(),
                 cli.production,
                 cli.workspace.as_deref(),
+                include_dupes,
             )
         }
         Command::Watch => run_watch(
@@ -583,6 +594,7 @@ fn main() -> ExitCode {
             min_lines,
             threshold,
             skip_local,
+            cross_language,
         } => run_dupes(
             &root,
             &cli.config,
@@ -595,6 +607,7 @@ fn main() -> ExitCode {
             min_lines,
             threshold,
             skip_local,
+            cross_language,
             cli.baseline.as_deref(),
             cli.save_baseline.as_deref(),
             cli.production,
@@ -621,6 +634,7 @@ fn run_check(
     sarif_file: Option<&std::path::Path>,
     production: bool,
     workspace: Option<&str>,
+    include_dupes: bool,
 ) -> ExitCode {
     let start = Instant::now();
 
@@ -673,11 +687,20 @@ fn run_check(
             .retain(|i| changed.contains(&i.path));
     }
 
-    // Apply issue type filters (CLI --unused-files etc.)
-    filters.apply(&mut results);
-
     // Apply rules: remove issues with Severity::Off
     apply_rules(&mut results, &config.rules);
+
+    // Snapshot results for cross-reference AFTER rules/workspace/changed-files filtering
+    // but BEFORE CLI issue-type filters (--unused-files etc.), so combined findings
+    // respect the user's severity config but aren't limited by per-invocation filters.
+    let unfiltered_results = if include_dupes && config.duplicates.enabled {
+        Some(results.clone())
+    } else {
+        None
+    };
+
+    // Apply issue type filters (CLI --unused-files etc.)
+    filters.apply(&mut results);
 
     // Save baseline if requested
     if let Some(baseline_path) = save_baseline {
@@ -773,6 +796,20 @@ fn run_check(
     let report_code = report::print_results(&results, &config, elapsed, quiet);
     if report_code != ExitCode::SUCCESS {
         return report_code;
+    }
+
+    // Cross-reference with duplication analysis if --include-dupes is set.
+    // Uses unfiltered results so combined findings reflect all dead code,
+    // not just the CLI-filtered subset.
+    if let Some(ref unfiltered) = unfiltered_results {
+        let files = fallow_core::discover::discover_files(&config);
+        let dupe_report =
+            fallow_core::duplicates::find_duplicates(&config.root, &files, &config.duplicates);
+        let cross_ref = fallow_core::cross_reference::cross_reference(&dupe_report, unfiltered);
+
+        if cross_ref.has_findings() {
+            report::print_cross_reference_findings(&cross_ref, &config.root, quiet, &config.output);
+        }
     }
 
     if has_error_severity_issues(&results, &effective_rules) {
@@ -961,6 +998,7 @@ fn run_dupes(
     min_lines: usize,
     threshold: f64,
     skip_local: bool,
+    cross_language: bool,
     baseline_path: Option<&std::path::Path>,
     save_baseline_path: Option<&std::path::Path>,
     production: bool,
@@ -994,6 +1032,8 @@ fn run_dupes(
         threshold,
         ignore: toml_dupes.ignore.clone(),
         skip_local,
+        cross_language: cross_language || toml_dupes.cross_language,
+        normalization: toml_dupes.normalization.clone(),
     };
 
     // Discover files

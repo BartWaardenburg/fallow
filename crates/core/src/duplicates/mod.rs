@@ -18,8 +18,8 @@ use globset::{Glob, GlobSet, GlobSetBuilder};
 use rayon::prelude::*;
 
 use detect::CloneDetector;
-use normalize::normalize_and_hash;
-use tokenize::tokenize_file;
+use normalize::normalize_and_hash_resolved;
+use tokenize::{tokenize_file, tokenize_file_cross_language};
 pub use types::{
     CloneFamily, CloneGroup, CloneInstance, DetectionMode, DuplicatesConfig, DuplicationReport,
     DuplicationStats, RefactoringKind, RefactoringSuggestion,
@@ -45,6 +45,12 @@ pub fn find_duplicates(
 
     // Build extra ignore patterns for duplication analysis
     let extra_ignores = build_ignore_set(&config.ignore);
+
+    // Resolve normalization: mode defaults + user overrides
+    let normalization =
+        fallow_config::ResolvedNormalization::resolve(config.mode, &config.normalization);
+
+    let strip_types = config.cross_language;
 
     // Step 1 & 2: Tokenize and normalize all files in parallel, also parse suppressions
     let file_data: Vec<(
@@ -74,14 +80,18 @@ pub fn find_duplicates(
                 return None;
             }
 
-            // Tokenize
-            let file_tokens = tokenize_file(&file.path, &source);
+            // Tokenize (with optional type stripping for cross-language detection)
+            let file_tokens = if strip_types {
+                tokenize_file_cross_language(&file.path, &source, true)
+            } else {
+                tokenize_file(&file.path, &source)
+            };
             if file_tokens.tokens.is_empty() {
                 return None;
             }
 
-            // Normalize and hash
-            let hashed = normalize_and_hash(&file_tokens.tokens, config.mode);
+            // Normalize and hash using resolved normalization flags
+            let hashed = normalize_and_hash_resolved(&file_tokens.tokens, &normalization);
             if hashed.len() < config.min_tokens {
                 return None;
             }
