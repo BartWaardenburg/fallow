@@ -4,24 +4,16 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use fallow_config::OutputFormat;
+use tempfile::NamedTempFile;
 
 /// Atomically write content to a file via a temporary file and rename.
 fn atomic_write(path: &Path, content: &[u8]) -> std::io::Result<()> {
-    let tmp_path = path.with_extension("fallow-tmp");
-    let result = (|| -> std::io::Result<()> {
-        let mut file = std::fs::File::create(&tmp_path)?;
-        file.write_all(content)?;
-        file.sync_all()?;
-        std::fs::rename(&tmp_path, path)?;
-        Ok(())
-    })();
-
-    if result.is_err() {
-        // Clean up temp file if write or rename failed
-        let _ = std::fs::remove_file(&tmp_path);
-    }
-
-    result
+    let dir = path.parent().unwrap_or(Path::new("."));
+    let mut tmp = NamedTempFile::new_in(dir)?;
+    tmp.write_all(content)?;
+    tmp.as_file().sync_all()?;
+    tmp.persist(path).map_err(|e| e.error)?;
+    Ok(())
 }
 
 struct ExportFix {
@@ -419,8 +411,13 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("test.ts");
         atomic_write(&path, b"data").unwrap();
-        let tmp_path = path.with_extension("fallow-tmp");
-        assert!(!tmp_path.exists());
+        // Only the target file should exist — no stray temp files
+        let entries: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .collect();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].file_name(), "test.ts");
     }
 
     // ── apply_export_fixes (dry run) ─────────────────────────────

@@ -10,8 +10,16 @@ Fallow finds unused files, exports, dependencies, types, enum members, class mem
 crates/
   config/   — Configuration types, custom framework presets, package.json parsing, workspace discovery
   core/     — Analysis engine: discovery, parsing, resolution, graph, plugins, caching, progress
-  cli/      — CLI binary (check, dupes, watch, fix, init, migrate, list, schema commands)
-  lsp/      — LSP server with diagnostics, code actions, Code Lens
+    extract/    — AST extraction (mod.rs types+API, visitor.rs, sfc.rs, astro.rs, mdx.rs, css.rs, parse.rs)
+    analyze/    — Dead code detection (mod.rs orchestration, predicates.rs, unused_files/exports/deps/members.rs)
+    plugins/    — Plugin system + tooling.rs (general tooling dependency detection)
+    duplicates/ — Clone detection (families, normalize, tokenize)
+  cli/      — CLI binary, split into per-command modules
+    check.rs, dupes.rs, watch.rs, fix.rs, init.rs, list.rs, schema.rs, validate.rs
+    report/     — Output formatting (mod.rs dispatch, human.rs, json.rs, sarif.rs, compact.rs)
+    migrate/    — Config migration (mod.rs, knip.rs, jscpd.rs)
+  lsp/      — LSP server, split into modules
+    main.rs, diagnostics.rs, code_actions.rs, code_lens.rs
   mcp/      — MCP server for AI agent integration (stdio transport, wraps CLI)
 editors/
   vscode/   — VS Code extension (LSP client, tree views, status bar, auto-download)
@@ -28,21 +36,54 @@ Pipeline: Config → File Discovery → Incremental Parallel Parsing (rayon + ox
 Key modules in fallow-core:
 - `project.rs` — `ProjectState` struct: owns the file registry (stable FileIds sorted by path) and workspace metadata. Foundation for cross-workspace resolution and future incremental analysis.
 - `discover.rs` — File walking + entry point detection (also workspace-aware). FileIds are assigned deterministically by path sort order (not size) for stability across runs. Hidden directory allowlist (`.storybook`, `.well-known`, `.changeset`, `.github`, `.expo`) — other dotdirs are skipped. Only root-level `build/` is ignored (not nested `test/build/` etc.).
-- `extract.rs` — AST visitor extracting imports, exports, re-exports, members, whole-object uses, dynamic import patterns; SFC (Vue/Svelte) script extraction (HTML comment filtering, `<script src="...">` support); Astro frontmatter extraction; MDX import/export extraction; CSS Module class name extraction (`.module.css`/`.module.scss` → named exports). Returns `ParseResult` with modules + cache hit/miss statistics for incremental analysis visibility.
+- `extract/` — Module split into focused submodules:
+  - `mod.rs` — Public types (`ModuleInfo`, `ExportInfo`, `ImportInfo`, etc.) and `parse_all_files()` API (parallel rayon dispatch, cache-aware). Returns `ParseResult` with modules + cache hit/miss statistics.
+  - `visitor.rs` — Oxc AST visitor extracting imports, exports, re-exports, members, whole-object uses, dynamic import patterns
+  - `sfc.rs` — Vue/Svelte SFC script extraction (HTML comment filtering, `<script src="...">` support, `lang="ts"`/`lang="tsx"` detection)
+  - `astro.rs` — Astro frontmatter extraction between `---` delimiters
+  - `mdx.rs` — MDX import/export extraction with multi-line brace tracking
+  - `css.rs` — CSS Module class name extraction (`.module.css`/`.module.scss` → named exports)
+  - `parse.rs` — File type dispatcher: routes files to the appropriate parser (JS/TS, SFC, Astro, MDX, CSS)
 - `resolve.rs` — oxc_resolver-based import resolution + glob-based dynamic import pattern resolution + DashMap-backed bare specifier cache for lock-free parallel lookups. Cross-workspace imports resolve through node_modules symlinks via canonicalize. Pnpm content-addressable store detection: `.pnpm` virtual store paths are mapped back to workspace source files for injected dependencies. React Native platform extensions (`.web`/`.ios`/`.android`/`.native`) resolved via `resolve_file` fallback. Per-file tsconfig path alias resolution (`TsconfigDiscovery::Auto`) finds the nearest tsconfig.json for each file.
-- `graph.rs` — Module graph with re-export chain propagation
-- `analyze.rs` — Dead code detection (10 issue types) with inline suppression filtering
+- `graph.rs` — Module graph with re-export chain propagation. `ModuleGraph::build` delegates to `populate_edges`, `populate_references`, and `mark_reachable` phase methods.
+- `analyze/` — Module split into focused submodules:
+  - `mod.rs` — Orchestration: runs all detectors, collects `AnalysisResults`
+  - `predicates.rs` — Lookup tables and helper predicates for detection logic
+  - `unused_files.rs` — Unused file detection
+  - `unused_exports.rs` — Unused export/type/duplicate export detection
+  - `unused_deps.rs` — Unused dependencies, unlisted dependencies, unresolved imports, type-only dependency detection
+  - `unused_members.rs` — Unused enum/class member detection
+- `results.rs` — `AnalysisResults` struct and all issue types (extracted from analyze)
 - `scripts.rs` — Shell command parser for package.json scripts: extracts binary names (mapped to package names for dependency usage detection), `--config` args (entry points), and file path args; handles env wrappers, package manager runners, node runners
 - `suppress.rs` — Inline suppression comment parsing (`fallow-ignore-next-line`, `fallow-ignore-file`); 11 issue kinds including `code-duplication`
 - `duplicates/families.rs` — Clone family grouping (groups by shared file set) and refactoring suggestion generation (extract function/module)
 - `duplicates/normalize.rs` — Configurable token normalization with `ResolvedNormalization`: mode defaults (strict/mild/weak/semantic) merged with user-specified overrides (`ignore_identifiers`, `ignore_string_values`, `ignore_numeric_values`)
 - `duplicates/tokenize.rs` — AST-based tokenizer with optional type annotation stripping (`strip_types` flag) for cross-language clone detection between `.ts` and `.js` files
 - `cross_reference.rs` — Cross-references duplication findings with dead code analysis: identifies clone instances that are also unused (in unused files or overlapping unused exports) as high-priority combined findings
-- `plugins/` — Plugin system: `Plugin` trait, registry (47 built-in plugins, ~20 with AST-based config parsing); `config_parser.rs` provides Oxc-based helpers for extracting imports, string arrays, object keys, require() sources, and string-or-array values from JS/TS/JSON config files
+- `plugins/` — Plugin system: `Plugin` trait, registry (47 built-in plugins, ~20 with AST-based config parsing); `config_parser.rs` provides Oxc-based helpers for extracting imports, string arrays, object keys, require() sources, and string-or-array values from JS/TS/JSON config files; `tooling.rs` contains general tooling dependency detection (`is_known_tooling_dependency`) for dev deps not tied to any single plugin
 - `trace.rs` — Debug & trace tooling: trace export usage (`trace_export`), file edges (`trace_file`), dependency usage (`trace_dependency`), clone location (`trace_clone`), and `PipelineTimings` struct for `--performance` output
 - `cache.rs` — Incremental bincode cache with xxh3 hashing. Unchanged files skip AST parsing and load from cache; only changed/new files are parsed. Cache is pruned of stale entries (deleted files) on each run. `--performance` output shows cache hit/miss stats.
 - `progress.rs` — indicatif progress bars
 - `errors.rs` — Error types
+
+Key modules in fallow-cli:
+- `main.rs` — CLI definition (clap) + command dispatch. Each subcommand is in its own module.
+- `check.rs` — `check` command: analysis pipeline, tracing, filtering, output
+- `dupes.rs` — `dupes` command: duplication detection, baseline, cross-reference
+- `watch.rs` — `watch` command: file watcher with debounced re-analysis
+- `fix.rs` — `fix` command: auto-remove unused exports/deps
+- `init.rs` — `init` command: generate config files
+- `list.rs` — `list` command: show plugins, entry points, files
+- `schema.rs` — `schema` + `config-schema` + `plugin-schema` commands
+- `validate.rs` — Input validation (control characters, path sanitization)
+- `report/` — Output formatting: `mod.rs` (format dispatch), `human.rs`, `json.rs`, `sarif.rs`, `compact.rs`
+- `migrate/` — Config migration: `mod.rs` (orchestration), `knip.rs` (knip config), `jscpd.rs` (jscpd config)
+
+Key modules in fallow-lsp:
+- `main.rs` — LSP server setup, `LanguageServer` trait impl, event handling
+- `diagnostics.rs` — Diagnostic generation for all issue types
+- `code_actions.rs` — Quick-fix and refactor code actions
+- `code_lens.rs` — Reference count Code Lens above export declarations
 
 ## Building & Testing
 
