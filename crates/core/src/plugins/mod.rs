@@ -183,9 +183,13 @@ mod docusaurus;
 mod drizzle;
 mod eslint;
 mod expo;
+mod gatsby;
 mod graphql_codegen;
+mod husky;
 mod jest;
 mod knex;
+mod lefthook;
+mod lint_staged;
 mod mocha;
 mod msw;
 mod nestjs;
@@ -199,10 +203,12 @@ mod react_native;
 mod react_router;
 mod remix;
 mod rollup;
+mod rspack;
 mod semantic_release;
 mod sentry;
 mod storybook;
 mod stylelint;
+mod sveltekit;
 mod tailwind;
 mod tsup;
 mod turborepo;
@@ -258,10 +264,13 @@ impl PluginRegistry {
             Box::new(expo::ExpoPlugin),
             Box::new(nestjs::NestJsPlugin),
             Box::new(docusaurus::DocusaurusPlugin),
+            Box::new(gatsby::GatsbyPlugin),
+            Box::new(sveltekit::SvelteKitPlugin),
             // Bundlers
             Box::new(vite::VitePlugin),
             Box::new(webpack::WebpackPlugin),
             Box::new(rollup::RollupPlugin),
+            Box::new(rspack::RspackPlugin),
             Box::new(tsup::TsupPlugin),
             // Testing
             Box::new(vitest::VitestPlugin),
@@ -295,6 +304,10 @@ impl PluginRegistry {
             // Deployment
             Box::new(wrangler::WranglerPlugin),
             Box::new(sentry::SentryPlugin),
+            // Git hooks
+            Box::new(husky::HuskyPlugin),
+            Box::new(lint_staged::LintStagedPlugin),
+            Box::new(lefthook::LefthookPlugin),
             // Other tools
             Box::new(graphql_codegen::GraphqlCodegenPlugin),
             Box::new(msw::MswPlugin),

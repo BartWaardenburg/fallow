@@ -26,7 +26,7 @@ Pipeline: Config → File Discovery → Parallel Parsing (rayon + oxc_parser) �
 Key modules in fallow-core:
 - `project.rs` — `ProjectState` struct: owns the file registry (stable FileIds sorted by path) and workspace metadata. Foundation for cross-workspace resolution and future incremental analysis.
 - `discover.rs` — File walking + entry point detection (also workspace-aware). FileIds are assigned deterministically by path sort order (not size) for stability across runs.
-- `extract.rs` — AST visitor extracting imports, exports, re-exports, members, whole-object uses, dynamic import patterns; SFC (Vue/Svelte) script extraction; Astro frontmatter extraction; MDX import/export extraction
+- `extract.rs` — AST visitor extracting imports, exports, re-exports, members, whole-object uses, dynamic import patterns; SFC (Vue/Svelte) script extraction (HTML comment filtering, `<script src="...">` support); Astro frontmatter extraction; MDX import/export extraction
 - `resolve.rs` — oxc_resolver-based import resolution + glob-based dynamic import pattern resolution + DashMap-backed bare specifier cache for lock-free parallel lookups. Cross-workspace imports resolve through node_modules symlinks via canonicalize.
 - `graph.rs` — Module graph with re-export chain propagation
 - `analyze.rs` — Dead code detection (10 issue types) with inline suppression filtering
@@ -36,7 +36,7 @@ Key modules in fallow-core:
 - `duplicates/normalize.rs` — Configurable token normalization with `ResolvedNormalization`: mode defaults (strict/mild/weak/semantic) merged with user-specified overrides (`ignore_identifiers`, `ignore_string_values`, `ignore_numeric_values`)
 - `duplicates/tokenize.rs` — AST-based tokenizer with optional type annotation stripping (`strip_types` flag) for cross-language clone detection between `.ts` and `.js` files
 - `cross_reference.rs` — Cross-references duplication findings with dead code analysis: identifies clone instances that are also unused (in unused files or overlapping unused exports) as high-priority combined findings
-- `plugins/` — Plugin system: `Plugin` trait, registry (40 built-in plugins, ~20 with AST-based config parsing); `config_parser.rs` provides Oxc-based helpers for extracting imports, string arrays, object keys, require() sources, and string-or-array values from JS/TS/JSON config files
+- `plugins/` — Plugin system: `Plugin` trait, registry (46 built-in plugins, ~20 with AST-based config parsing); `config_parser.rs` provides Oxc-based helpers for extracting imports, string arrays, object keys, require() sources, and string-or-array values from JS/TS/JSON config files
 - `cache.rs` — Incremental bincode cache with xxh3 hashing
 - `progress.rs` — indicatif progress bars
 - `errors.rs` — Error types
@@ -67,7 +67,7 @@ cd benchmarks && npm run generate:dupes && npm run bench:dupes  # vs jscpd
 3. Unresolved imports, unlisted dependencies
 4. Duplicate exports across modules
 5. Re-export chain resolution through barrel files
-6. Vue/Svelte SFC parsing (regex-based `<script>` block extraction, `lang="ts"`/`lang="tsx"` detection, handles `>` in quoted attributes like `generic="T extends Foo<Bar>"`)
+6. Vue/Svelte SFC parsing (regex-based `<script>` block extraction, `lang="ts"`/`lang="tsx"` detection, handles `>` in quoted attributes like `generic="T extends Foo<Bar>"`, `<script src="...">` external script support, HTML comment filtering to avoid false matches)
 7. Astro component parsing (frontmatter extraction between `---` delimiters, parsed as TypeScript)
 8. MDX file parsing (line-based import/export statement extraction with multi-line brace tracking, parsed as JSX)
 9. Dynamic import pattern resolution (template literals, string concat, import.meta.glob, require.context → glob matching against discovered files)
@@ -80,10 +80,10 @@ cd benchmarks && npm run generate:dupes && npm run bench:dupes  # vs jscpd
 16. Configurable normalization: fine-grained overrides (`ignore_identifiers`, `ignore_string_values`, `ignore_numeric_values`) on top of detection mode defaults for custom "semantic equivalence" definitions
 17. Dead code × duplication cross-reference (`check --include-dupes`): identifies clone instances in unused files or overlapping unused exports as combined high-priority findings
 
-## Framework support (40 plugins)
+## Framework support (46 plugins)
 
-**Frameworks**: Next.js, Nuxt, Remix, Astro, Angular, React Router, React Native, Expo, NestJS, Docusaurus
-**Bundlers**: Vite, Webpack, Rollup, Tsup
+**Frameworks**: Next.js, Nuxt, Remix, SvelteKit, Gatsby, Astro, Angular, React Router, React Native, Expo, NestJS, Docusaurus
+**Bundlers**: Vite, Webpack, Rspack, Rollup, Tsup
 **Testing**: Vitest, Jest, Playwright, Cypress, Mocha, Ava, Storybook
 **Linting**: ESLint, Biome, Stylelint, Commitlint
 **Transpilation**: TypeScript, Babel
@@ -92,6 +92,7 @@ cd benchmarks && npm run generate:dupes && npm run bench:dupes  # vs jscpd
 **Monorepo**: Turborepo, Nx, Changesets
 **CI/CD**: semantic-release
 **Deployment**: Wrangler (Cloudflare), Sentry
+**Git hooks**: husky, lint-staged, lefthook
 **Other**: GraphQL Codegen, MSW
 
 - **Plugins** (`crates/core/src/plugins/`) — Single source of truth for all built-in framework support. Each plugin implements the `Plugin` trait with enablers (package.json detection), static patterns (entry points, always-used files, used exports, tooling dependencies), and optional `resolve_config()` for AST-based config parsing via Oxc.
@@ -114,12 +115,16 @@ cd benchmarks && npm run generate:dupes && npm run bench:dupes  # vs jscpd
 - `check` — analyze with --format (human/json/sarif/compact), --changed-since, --baseline, --save-baseline, --fail-on-issues, --include-dupes (cross-reference with duplication), issue type filters (--unused-files, --unused-exports, etc.)
 - `dupes` — find code duplication with clone families, refactoring suggestions, --baseline/--save-baseline, --mode (strict/mild/weak/semantic), --min-tokens, --min-lines, --threshold, --skip-local, --cross-language
 - `watch` — file watcher with debounced re-analysis
-- `fix` — auto-remove unused exports and deps (--dry-run, --format json for structured output)
+- `fix` — auto-remove unused exports and deps (--dry-run, --yes/--force for non-TTY confirmation, --format json for structured output)
 - `init` — create fallow.jsonc (default) or fallow.toml (`--toml`), includes `$schema` for IDE autocomplete
 - `list` — show active plugins, entry points, files (--format json for structured output)
 - `schema` — dump CLI interface as machine-readable JSON for agent introspection
 - `config-schema` — print JSON Schema for fallow config files (enables IDE validation)
 - Global `--workspace <name>` / `-w` flag scopes output to a single workspace package while keeping the full cross-workspace graph
+
+- Environment variables: `FALLOW_FORMAT` (default output format), `FALLOW_QUIET` (suppress progress), `FALLOW_BIN` (binary path for MCP)
+- Structured JSON errors on stdout when `--format json` is active (exit code 2 errors include `{"error": true, "message": "...", "exit_code": 2}`)
+- Control character validation on `--changed-since`, `--workspace`, `--config` string inputs
 
 See `AGENTS.md` for AI agent integration guide.
 
@@ -132,7 +137,7 @@ See `AGENTS.md` for AI agent integration guide.
 - `check_changed` — incremental analysis of changed files (wraps `fallow check --changed-since`)
 - `find_dupes` — code duplication detection (wraps `fallow dupes --format json`)
 - `fix_preview` — dry-run auto-fix preview (wraps `fallow fix --dry-run --format json`)
-- `fix_apply` — apply auto-fixes (wraps `fallow fix --format json`) — destructive
+- `fix_apply` — apply auto-fixes (wraps `fallow fix --yes --format json`) — destructive
 - `project_info` — project metadata: plugins, files, entry points (wraps `fallow list --format json`)
 
 **Configuration:** Set `FALLOW_BIN` env var to point to the fallow binary (defaults to `fallow` in PATH).
@@ -206,7 +211,7 @@ unresolved_imports = "error"
 ## Key design decisions
 
 - **No TypeScript compiler dependency**: Syntactic analysis only via Oxc. This is the speed advantage.
-- **Plugin system**: Single source of truth for framework support. Rust trait-based plugins with static patterns for common cases and optional AST-based config parsing via Oxc for ~20 plugins (no JavaScript evaluation), 15 with rich config extraction (entry points, dependencies, setup files from config objects). 40 built-in plugins covering the most popular JS/TS frameworks.
+- **Plugin system**: Single source of truth for framework support. Rust trait-based plugins with static patterns for common cases and optional AST-based config parsing via Oxc for ~20 plugins (no JavaScript evaluation), 15 with rich config extraction (entry points, dependencies, setup files from config objects). 46 built-in plugins covering the most popular JS/TS frameworks.
 - **Flat edge storage**: Contiguous `Vec<Edge>` with range indices for cache-friendly traversal.
 - **Lock-free parallel resolution**: Bare specifier cache uses `DashMap` (sharded concurrent map) for contention-free reads under rayon work-stealing.
 - **Re-export chain resolution**: Iterative propagation through barrel files with cycle detection.

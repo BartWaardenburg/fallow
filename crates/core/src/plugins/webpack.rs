@@ -103,7 +103,7 @@ impl Plugin for WebpackPlugin {
 /// - `{ use: ['style-loader', 'css-loader'] }`
 /// - `{ use: [{ loader: 'css-loader', options: {} }] }`
 /// - `{ oneOf: [...rules] }`
-fn parse_webpack_loaders(source: &str, path: &Path, result: &mut PluginResult) {
+pub(super) fn parse_webpack_loaders(source: &str, path: &Path, result: &mut PluginResult) {
     use oxc_allocator::Allocator;
     use oxc_ast::ast::*;
     use oxc_parser::Parser;

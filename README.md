@@ -169,7 +169,7 @@ TOML is also supported (`fallow init --toml` creates `fallow.toml`). See the [fu
 
 ## Framework support
 
-40 built-in plugins covering frameworks (Next.js, Nuxt, Remix, Astro, Angular, React Router, React Native, Expo, NestJS, Docusaurus), bundlers (Vite, Webpack, Rollup, Tsup), testing (Vitest, Jest, Playwright, Cypress, Mocha, Ava, Storybook), linting (ESLint, Biome, Stylelint, Commitlint), transpilation (TypeScript, Babel), CSS (Tailwind, PostCSS), databases (Prisma, Drizzle, Knex), monorepos (Turborepo, Nx, Changesets), CI/CD (semantic-release), deployment (Wrangler, Sentry), and more (GraphQL Codegen, MSW). If your framework isn't listed, you can add a [custom preset](https://github.com/fallow-rs/fallow/wiki/Custom-Presets) in your config file.
+46 built-in plugins covering frameworks (Next.js, Nuxt, Remix, SvelteKit, Gatsby, Astro, Angular, React Router, React Native, Expo, NestJS, Docusaurus), bundlers (Vite, Webpack, Rspack, Rollup, Tsup), testing (Vitest, Jest, Playwright, Cypress, Mocha, Ava, Storybook), linting (ESLint, Biome, Stylelint, Commitlint), transpilation (TypeScript, Babel), CSS (Tailwind, PostCSS), databases (Prisma, Drizzle, Knex), monorepos (Turborepo, Nx, Changesets), CI/CD (semantic-release), deployment (Wrangler, Sentry), git hooks (husky, lint-staged, lefthook), and more (GraphQL Codegen, MSW). If your framework isn't listed, you can add a [custom preset](https://github.com/fallow-rs/fallow/wiki/Custom-Presets) in your config file.
 
 ## CI integration
 
