@@ -1,0 +1,106 @@
+name: Ecosystem CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'crates/**/*.rs'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/ecosystem.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'crates/**/*.rs'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/ecosystem.yml'
+
+concurrency:
+  group: ecosystem-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  FALLOW_QUIET: "1"
+
+jobs:
+  ecosystem:
+    name: Ecosystem (${{ matrix.project.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        project:
+          - name: vite
+            repo: vitejs/vite
+            ref: main
+            path: packages/vite
+          - name: create-t3-app
+            repo: t3-oss/create-t3-app
+            ref: main
+            path: cli
+          - name: next.js-with-typescript
+            repo: vercel/next.js
+            ref: canary
+            path: examples/with-typescript
+            sparse: examples/with-typescript
+          - name: sveltekit-template
+            repo: sveltejs/kit
+            ref: main
+            path: packages/create-svelte/templates/default
+          - name: remix-indie-stack
+            repo: remix-run/indie-stack
+            ref: main
+            path: .
+
+    steps:
+      - name: Checkout fallow
+        uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ecosystem
+
+      - name: Build fallow (release)
+        run: cargo build --release -p fallow-cli
+
+      - name: Clone target project
+        env:
+          PROJECT_REPO: ${{ matrix.project.repo }}
+          PROJECT_REF: ${{ matrix.project.ref }}
+          PROJECT_SPARSE: ${{ matrix.project.sparse }}
+        run: |
+          if [ -n "$PROJECT_SPARSE" ]; then
+            git clone --depth 1 --filter=blob:none --sparse \
+              --branch "$PROJECT_REF" \
+              "https://github.com/$PROJECT_REPO.git" \
+              ecosystem-project
+            cd ecosystem-project
+            git sparse-checkout set "$PROJECT_SPARSE"
+          else
+            git clone --depth 1 \
+              --branch "$PROJECT_REF" \
+              "https://github.com/$PROJECT_REPO.git" \
+              ecosystem-project
+          fi
+
+      - name: Run fallow check
+        # Never fail the workflow — this is for monitoring, not gating
+        continue-on-error: true
+        env:
+          PROJECT_NAME: ${{ matrix.project.name }}
+          PROJECT_PATH: ${{ matrix.project.path }}
+        run: |
+          cd "ecosystem-project/$PROJECT_PATH"
+          "$GITHUB_WORKSPACE/target/release/fallow" check --format json \
+            > "$GITHUB_WORKSPACE/ecosystem-$PROJECT_NAME.json" 2>&1 || true
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: ecosystem-${{ matrix.project.name }}
+          path: ecosystem-${{ matrix.project.name }}.json
+          retention-days: 30
