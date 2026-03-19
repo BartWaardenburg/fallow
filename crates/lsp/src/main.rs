@@ -37,9 +37,17 @@ struct FallowLspServer {
 #[tower_lsp::async_trait]
 impl LanguageServer for FallowLspServer {
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
-        if let Some(root_uri) = params.root_uri
-            && let Ok(path) = root_uri.to_file_path()
-        {
+        let root = params
+            .root_uri
+            .and_then(|u| u.to_file_path().ok())
+            .or_else(|| {
+                params
+                    .workspace_folders
+                    .as_deref()
+                    .and_then(|fs| fs.first())
+                    .and_then(|f| f.uri.to_file_path().ok())
+            });
+        if let Some(path) = root {
             *self.root.write().await = Some(path);
         }
 
@@ -91,15 +99,18 @@ impl LanguageServer for FallowLspServer {
         // Debounce: skip if last analysis was less than 500ms ago
         let now = Instant::now();
         {
-            let mut last = self.last_analysis.lock().await;
+            let last = self.last_analysis.lock().await;
             if now.duration_since(*last) < std::time::Duration::from_millis(500) {
                 return;
             }
-            *last = now;
         }
 
         // Re-run analysis on save
         self.run_analysis().await;
+
+        // Update timestamp AFTER analysis completes so long-running analyses
+        // don't cause subsequent save events to be silently skipped
+        *self.last_analysis.lock().await = Instant::now();
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
