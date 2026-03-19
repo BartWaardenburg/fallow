@@ -54,30 +54,37 @@ jobs:
           - target: x86_64-apple-darwin
             os: macos-latest
             binary: fallow
+            lsp_binary: fallow-lsp
             npm_dir: darwin-x64
           - target: aarch64-apple-darwin
             os: macos-latest
             binary: fallow
+            lsp_binary: fallow-lsp
             npm_dir: darwin-arm64
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
             binary: fallow
+            lsp_binary: fallow-lsp
             npm_dir: linux-x64-gnu
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
             binary: fallow
+            lsp_binary: fallow-lsp
             npm_dir: linux-arm64-gnu
           - target: x86_64-unknown-linux-musl
             os: ubuntu-latest
             binary: fallow
+            lsp_binary: fallow-lsp
             npm_dir: linux-x64-musl
           - target: aarch64-unknown-linux-musl
             os: ubuntu-latest
             binary: fallow
+            lsp_binary: fallow-lsp
             npm_dir: linux-arm64-musl
           - target: x86_64-pc-windows-msvc
             os: windows-latest
             binary: fallow.exe
+            lsp_binary: fallow-lsp.exe
             npm_dir: win32-x64-msvc
 
     steps:
@@ -103,29 +110,41 @@ jobs:
         with:
           key: ${{ matrix.target }}
 
-      - name: Build release binary
+      - name: Build CLI release binary
         run: cargo build --release --target ${{ matrix.target }} -p fallow-cli
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-gnu-gcc
 
-      - name: Package binary (unix)
+      - name: Build LSP release binary
+        run: cargo build --release --target ${{ matrix.target }} -p fallow-lsp
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-gnu-gcc
+
+      - name: Package binaries (unix)
         if: runner.os != 'Windows'
         run: |
           cd target/${{ matrix.target }}/release
-          tar czf ../../../fallow-${{ matrix.target }}.tar.gz ${{ matrix.binary }}
+          tar czf ../../../fallow-${{ matrix.target }}.tar.gz ${{ matrix.binary }} ${{ matrix.lsp_binary }}
 
-      - name: Package binary (windows)
+      - name: Package binaries (windows)
         if: runner.os == 'Windows'
         run: |
           cd target/${{ matrix.target }}/release
-          7z a ../../../fallow-${{ matrix.target }}.zip ${{ matrix.binary }}
+          7z a ../../../fallow-${{ matrix.target }}.zip ${{ matrix.binary }} ${{ matrix.lsp_binary }}
 
       - name: Upload release artifact
         uses: actions/upload-artifact@v7
         with:
           name: fallow-${{ matrix.target }}
           path: fallow-${{ matrix.target }}.*
+
+      - name: Upload LSP artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: fallow-lsp-${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/${{ matrix.lsp_binary }}
 
       - name: Upload npm binary
         uses: actions/upload-artifact@v7
@@ -267,3 +286,46 @@ jobs:
 
       - name: Publish fallow
         run: npm publish ./npm/fallow --access public --provenance --ignore-scripts
+
+  vscode-publish:
+    name: Publish VS Code Extension
+    needs: build
+    runs-on: ubuntu-latest
+    env:
+      TAG_REF: ${{ github.ref }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: cd editors/vscode && npm ci
+
+      - name: Update extension version
+        run: |
+          VERSION="${TAG_REF#refs/tags/v}"
+          node -e "
+            const fs = require('fs');
+            const pkg = JSON.parse(fs.readFileSync('editors/vscode/package.json', 'utf8'));
+            pkg.version = '$VERSION';
+            fs.writeFileSync('editors/vscode/package.json', JSON.stringify(pkg, null, 2) + '\n');
+          "
+
+      - name: Build and package extension
+        run: |
+          cd editors/vscode
+          npm run build
+          npm run package
+
+      - name: Publish to VS Code Marketplace
+        run: cd editors/vscode && npx vsce publish --no-dependencies
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+
+      - name: Upload VSIX artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: fallow-vscode
+          path: editors/vscode/*.vsix

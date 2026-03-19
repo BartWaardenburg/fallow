@@ -53,6 +53,19 @@ jobs:
           components: rustfmt
       - run: cargo fmt --all -- --check
 
+  vscode:
+    name: VS Code Extension
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - run: cd editors/vscode && npm ci
+      - run: cd editors/vscode && npm run lint
+      - run: cd editors/vscode && npm run build
+      - run: cd editors/vscode && npm run package
+
   audit:
     name: Security Audit
     runs-on: ubuntu-latest
