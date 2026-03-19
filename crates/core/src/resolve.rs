@@ -418,6 +418,10 @@ fn resolve_specifier(
                 Ok(canonical) => {
                     if let Some(&file_id) = path_to_id.get(canonical.as_path()) {
                         ResolveResult::InternalModule(file_id)
+                    } else if let Some(file_id) = try_source_fallback(&canonical, path_to_id) {
+                        // Exports map resolved to a built output (e.g., dist/utils.js)
+                        // but the source file (e.g., src/utils.ts) is what we track.
+                        ResolveResult::InternalModule(file_id)
                     } else if let Some(pkg_name) =
                         extract_package_name_from_node_modules_path(&canonical)
                     {
@@ -427,7 +431,10 @@ fn resolve_specifier(
                     }
                 }
                 Err(_) => {
-                    if let Some(pkg_name) =
+                    // Path doesn't exist on disk — try source fallback on the raw path
+                    if let Some(file_id) = try_source_fallback(resolved_path, path_to_id) {
+                        ResolveResult::InternalModule(file_id)
+                    } else if let Some(pkg_name) =
                         extract_package_name_from_node_modules_path(resolved_path)
                     {
                         ResolveResult::NpmPackage(pkg_name)
@@ -453,6 +460,52 @@ fn resolve_specifier(
     }
 
     result
+}
+
+/// Known output directory names that may appear in exports map targets.
+/// When an exports map points to `./dist/utils.js`, we try replacing these
+/// prefixes with `src/` (the conventional source directory) to find the tracked
+/// source file.
+const OUTPUT_DIRS: &[&str] = &["dist", "build", "out", "lib", "esm", "cjs"];
+
+/// Source extensions to try when mapping a built output file back to source.
+const SOURCE_EXTS: &[&str] = &["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"];
+
+/// Try to map a resolved output path (e.g., `packages/ui/dist/utils.js`) back to
+/// the corresponding source file (e.g., `packages/ui/src/utils.ts`).
+///
+/// This handles cross-workspace imports that go through `exports` maps pointing to
+/// built output directories. Since fallow ignores `dist/`, `build/`, etc. by default,
+/// the resolved path won't be in the file set, but the source file will be.
+fn try_source_fallback(resolved: &Path, path_to_id: &HashMap<&Path, FileId>) -> Option<FileId> {
+    let components: Vec<_> = resolved.components().collect();
+
+    // Find the position of an output directory component
+    let output_pos = components.iter().position(|c| {
+        if let std::path::Component::Normal(s) = c
+            && let Some(name) = s.to_str()
+        {
+            return OUTPUT_DIRS.contains(&name);
+        }
+        false
+    })?;
+
+    // Build the path prefix (everything before the output dir)
+    let prefix: PathBuf = components[..output_pos].iter().collect();
+
+    // Build the relative path after the output dir
+    let suffix: PathBuf = components[output_pos + 1..].iter().collect();
+    suffix.file_stem()?; // Ensure the suffix has a filename
+
+    // Try replacing the output dir with "src" and each source extension
+    for ext in SOURCE_EXTS {
+        let source_candidate = prefix.join("src").join(suffix.with_extension(ext));
+        if let Some(&file_id) = path_to_id.get(source_candidate.as_path()) {
+            return Some(file_id);
+        }
+    }
+
+    None
 }
 
 /// Extract npm package name from a resolved path inside `node_modules`.
@@ -624,6 +677,75 @@ mod tests {
         assert_eq!(
             extract_package_name_from_node_modules_path(&path),
             Some("next".to_string())
+        );
+    }
+
+    #[test]
+    fn test_try_source_fallback_dist_to_src() {
+        let src_path = PathBuf::from("/project/packages/ui/src/utils.ts");
+        let mut path_to_id = HashMap::new();
+        path_to_id.insert(src_path.as_path(), FileId(0));
+
+        let dist_path = PathBuf::from("/project/packages/ui/dist/utils.js");
+        assert_eq!(
+            try_source_fallback(&dist_path, &path_to_id),
+            Some(FileId(0)),
+            "dist/utils.js should fall back to src/utils.ts"
+        );
+    }
+
+    #[test]
+    fn test_try_source_fallback_build_to_src() {
+        let src_path = PathBuf::from("/project/packages/core/src/index.tsx");
+        let mut path_to_id = HashMap::new();
+        path_to_id.insert(src_path.as_path(), FileId(1));
+
+        let build_path = PathBuf::from("/project/packages/core/build/index.js");
+        assert_eq!(
+            try_source_fallback(&build_path, &path_to_id),
+            Some(FileId(1)),
+            "build/index.js should fall back to src/index.tsx"
+        );
+    }
+
+    #[test]
+    fn test_try_source_fallback_no_match() {
+        let path_to_id: HashMap<&Path, FileId> = HashMap::new();
+
+        let dist_path = PathBuf::from("/project/packages/ui/dist/utils.js");
+        assert_eq!(
+            try_source_fallback(&dist_path, &path_to_id),
+            None,
+            "should return None when no source file exists"
+        );
+    }
+
+    #[test]
+    fn test_try_source_fallback_non_output_dir() {
+        let src_path = PathBuf::from("/project/packages/ui/src/utils.ts");
+        let mut path_to_id = HashMap::new();
+        path_to_id.insert(src_path.as_path(), FileId(0));
+
+        // A path that's not in an output directory should not trigger fallback
+        let normal_path = PathBuf::from("/project/packages/ui/scripts/utils.js");
+        assert_eq!(
+            try_source_fallback(&normal_path, &path_to_id),
+            None,
+            "non-output directory path should not trigger fallback"
+        );
+    }
+
+    #[test]
+    fn test_try_source_fallback_nested_path() {
+        let src_path = PathBuf::from("/project/packages/ui/src/components/Button.ts");
+        let mut path_to_id = HashMap::new();
+        path_to_id.insert(src_path.as_path(), FileId(2));
+
+        let dist_path = PathBuf::from("/project/packages/ui/dist/components/Button.js");
+        assert_eq!(
+            try_source_fallback(&dist_path, &path_to_id),
+            Some(FileId(2)),
+            "nested dist path should fall back to nested src path"
         );
     }
 }
