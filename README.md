@@ -238,7 +238,7 @@ Issue type tokens: `unused-file`, `unused-export`, `unused-type`, `unused-depend
 
 ## Limitations
 
-fallow uses syntactic analysis only — no type information. This is what makes it fast, but it means type-level dead code is out of scope, and some edge cases (Svelte `export let` props, Vue/Svelte template-only imports) may produce false positives. Use [inline suppression comments](#inline-suppression-comments) or [`ignore_exports`](https://github.com/fallow-rs/fallow/wiki/Configuration#ignoring-specific-exports) to suppress these.
+fallow uses syntactic analysis only — no type information. This is what makes it fast, but it means type-level dead code is out of scope. Svelte files skip individual export analysis (props can't be distinguished from utility exports without compiler semantics), so unused exports in `.svelte` files may go undetected. Use [inline suppression comments](#inline-suppression-comments) or [`ignore_exports`](https://github.com/fallow-rs/fallow/wiki/Configuration#ignoring-specific-exports) for any remaining edge cases.
 
 ## Custom plugins
 
