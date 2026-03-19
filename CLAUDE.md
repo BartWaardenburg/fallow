@@ -13,6 +13,8 @@ crates/
   cli/      — CLI binary (check, dupes, watch, fix, init, list, schema commands)
   lsp/      — LSP server with diagnostics, code actions
   mcp/      — MCP server for AI agent integration (stdio transport, wraps CLI)
+editors/
+  vscode/   — VS Code extension (LSP client, tree views, status bar, auto-download)
 npm/
   fallow/   — npm wrapper package with optionalDependencies pattern
 tests/
@@ -146,6 +148,29 @@ See `AGENTS.md` for AI agent integration guide.
 **Configuration:** Set `FALLOW_BIN` env var to point to the fallow binary (defaults to `fallow` in PATH).
 
 **Architecture:** Built with `rmcp` (official Rust MCP SDK). Thin subprocess wrapper — all analysis logic stays in the CLI, the MCP crate only handles protocol framing and argument mapping.
+
+## VS Code extension
+
+`editors/vscode/` is a VS Code extension that wraps the `fallow-lsp` binary and provides additional UI features.
+
+**Features:**
+- LSP client with auto-detection and auto-download of the `fallow-lsp` binary
+- Real-time diagnostics for all 10 dead code issue types via the LSP
+- Quick-fix code actions (remove unused export, delete unused file)
+- Tree views in the sidebar: dead code grouped by issue type, duplicates grouped by clone family
+- Status bar showing issue count and duplication percentage
+- Commands: full analysis, auto-fix, dry-run preview, LSP restart
+
+**Settings:** `fallow.lspPath`, `fallow.autoDownload`, `fallow.issueTypes`, `fallow.duplication.threshold`, `fallow.duplication.mode`, `fallow.production`, `fallow.trace.server`
+
+**Development:**
+```bash
+cd editors/vscode
+npm install
+npm run build    # esbuild production bundle
+npm run lint     # tsc --noEmit
+npm run package  # vsce package
+```
 
 ## Production mode
 

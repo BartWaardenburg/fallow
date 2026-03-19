@@ -1,0 +1,182 @@
+{
+  "name": "fallow-vscode",
+  "displayName": "Fallow",
+  "description": "Dead code and duplication analyzer for JavaScript/TypeScript",
+  "version": "0.3.0",
+  "publisher": "fallow-rs",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/fallow-rs/fallow",
+    "directory": "editors/vscode"
+  },
+  "homepage": "https://github.com/fallow-rs/fallow",
+  "bugs": {
+    "url": "https://github.com/fallow-rs/fallow/issues"
+  },
+  "categories": [
+    "Linters",
+    "Programming Languages"
+  ],
+  "keywords": [
+    "dead-code",
+    "unused",
+    "exports",
+    "dependencies",
+    "duplication",
+    "typescript",
+    "javascript"
+  ],
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "activationEvents": [
+    "workspaceContains:**/package.json"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "fallow.analyze",
+        "title": "Fallow: Run Analysis",
+        "icon": "$(search)"
+      },
+      {
+        "command": "fallow.fix",
+        "title": "Fallow: Auto-Fix Unused Exports & Dependencies"
+      },
+      {
+        "command": "fallow.fixDryRun",
+        "title": "Fallow: Preview Fixes (Dry Run)"
+      },
+      {
+        "command": "fallow.restart",
+        "title": "Fallow: Restart Language Server"
+      },
+      {
+        "command": "fallow.showOutput",
+        "title": "Fallow: Show Output Channel"
+      }
+    ],
+    "configuration": {
+      "title": "Fallow",
+      "properties": {
+        "fallow.lspPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the fallow-lsp binary. Leave empty for auto-detection."
+        },
+        "fallow.autoDownload": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically download the fallow-lsp binary if not found."
+        },
+        "fallow.issueTypes": {
+          "type": "object",
+          "default": {
+            "unusedFiles": true,
+            "unusedExports": true,
+            "unusedTypes": true,
+            "unusedDependencies": true,
+            "unusedDevDependencies": true,
+            "unusedEnumMembers": true,
+            "unusedClassMembers": true,
+            "unresolvedImports": true,
+            "unlistedDependencies": true,
+            "duplicateExports": true
+          },
+          "description": "Toggle individual issue types on or off.",
+          "properties": {
+            "unusedFiles": { "type": "boolean" },
+            "unusedExports": { "type": "boolean" },
+            "unusedTypes": { "type": "boolean" },
+            "unusedDependencies": { "type": "boolean" },
+            "unusedDevDependencies": { "type": "boolean" },
+            "unusedEnumMembers": { "type": "boolean" },
+            "unusedClassMembers": { "type": "boolean" },
+            "unresolvedImports": { "type": "boolean" },
+            "unlistedDependencies": { "type": "boolean" },
+            "duplicateExports": { "type": "boolean" }
+          }
+        },
+        "fallow.duplication.threshold": {
+          "type": "number",
+          "default": 5,
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Duplication threshold percentage."
+        },
+        "fallow.duplication.mode": {
+          "type": "string",
+          "default": "mild",
+          "enum": ["strict", "mild", "weak", "semantic"],
+          "description": "Duplication detection mode.",
+          "enumDescriptions": [
+            "Exact token matching",
+            "Normalized syntax (default)",
+            "Ignores different literals",
+            "Renames variables for semantic matching"
+          ]
+        },
+        "fallow.production": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable production mode (excludes test/dev files, only production scripts)."
+        },
+        "fallow.trace.server": {
+          "type": "string",
+          "default": "off",
+          "enum": ["off", "messages", "verbose"],
+          "description": "Trace level for the LSP server communication."
+        }
+      }
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "fallow",
+          "title": "Fallow",
+          "icon": "$(search)"
+        }
+      ]
+    },
+    "views": {
+      "fallow": [
+        {
+          "id": "fallow.deadCode",
+          "name": "Dead Code"
+        },
+        {
+          "id": "fallow.duplicates",
+          "name": "Duplicates"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "fallow.analyze",
+          "when": "view == fallow.deadCode || view == fallow.duplicates",
+          "group": "navigation"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "lint": "tsc --noEmit",
+    "package": "vsce package --no-dependencies",
+    "publish": "vsce publish --no-dependencies"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.0.0",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.7.0"
+  }
+}

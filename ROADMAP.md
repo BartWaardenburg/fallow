@@ -134,13 +134,13 @@ Extend import extraction to `.astro`, `.mdx`, and improve existing `.vue`/`.svel
 
 **Phase B (fine-grained incremental, post-1.0)**: Patch the graph in place, track export-level dependencies, incremental re-export chain propagation. This requires redesigning the flat `Vec<Edge>` storage to support insertion/removal.
 
-### 3.2 VS Code Extension
+### 3.2 VS Code Extension ✅
 
-- Auto-download the `fallow-lsp` binary (platform-specific)
-- Settings UI for toggling issue types and duplication thresholds
-- Status bar: dead code count + duplication %
-- Tree view: dead code by type, duplicated blocks by clone family
-- One-click fix actions
+- [x] Auto-download the `fallow-lsp` binary (platform-specific)
+- [x] Settings UI for toggling issue types and duplication thresholds
+- [x] Status bar: dead code count + duplication %
+- [x] Tree view: dead code by type, duplicated blocks by clone family
+- [x] One-click fix actions
 
 ### 3.3 Enhanced Code Actions & Code Lens
 
@@ -174,7 +174,7 @@ Extend import extraction to `.astro`, `.mdx`, and improve existing `.vue`/`.svel
 - [ ] Stable JSON output schema for CI consumers
 - [x] GitHub Action published
 - [ ] MCP server published
-- [ ] VS Code extension published
+- [x] VS Code extension published
 - [x] Duplication detection with clone families and baseline tracking
 - [ ] Large-scale benchmarks published (1000+ files, warm/cold cache, memory)
 - [ ] Migration guide from knip with worked examples + `fallow migrate` CLI command
