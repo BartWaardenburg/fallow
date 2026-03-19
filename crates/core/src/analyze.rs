@@ -489,6 +489,13 @@ fn find_unused_dependencies(
     // Collect workspace package names — these are internal deps, not npm packages
     let workspace_names: HashSet<&str> = workspaces.iter().map(|ws| ws.name.as_str()).collect();
 
+    // Pre-compute ignore deps as HashSet for O(1) lookups instead of O(n) linear scan
+    let ignore_deps: HashSet<&str> = config
+        .ignore_dependencies
+        .iter()
+        .map(|s| s.as_str())
+        .collect();
+
     // Build per-package set of files that use it (globally)
     let used_packages: HashSet<&str> = graph.package_usage.keys().map(|s| s.as_str()).collect();
 
@@ -502,7 +509,7 @@ fn find_unused_dependencies(
         .filter(|dep| !script_used.contains(dep.as_str()))
         .filter(|dep| !is_implicit_dependency(dep))
         .filter(|dep| !plugin_referenced.contains(dep.as_str()))
-        .filter(|dep| !config.ignore_dependencies.iter().any(|d| d == dep))
+        .filter(|dep| !ignore_deps.contains(dep.as_str()))
         .filter(|dep| !workspace_names.contains(dep.as_str()))
         .map(|dep| UnusedDependency {
             package_name: dep,
@@ -519,7 +526,7 @@ fn find_unused_dependencies(
         .filter(|dep| !is_tooling_dependency(dep))
         .filter(|dep| !plugin_tooling.contains(dep.as_str()))
         .filter(|dep| !plugin_referenced.contains(dep.as_str()))
-        .filter(|dep| !config.ignore_dependencies.iter().any(|d| d == dep))
+        .filter(|dep| !ignore_deps.contains(dep.as_str()))
         .filter(|dep| !workspace_names.contains(dep.as_str()))
         .map(|dep| UnusedDependency {
             package_name: dep,
@@ -543,21 +550,17 @@ fn find_unused_dependencies(
             Err(_) => continue,
         };
 
-        let canonical_ws = ws.root.canonicalize().unwrap_or_else(|_| ws.root.clone());
-
-        // Helper: check if a dependency is used by any file within this workspace
+        // Helper: check if a dependency is used by any file within this workspace.
+        // Uses raw path comparison (module paths are absolute, workspace root is absolute)
+        // to avoid per-file canonicalize() syscalls.
+        let ws_root = &ws.root;
         let is_used_in_workspace = |dep: &str| -> bool {
             if let Some(file_ids) = graph.package_usage.get(dep) {
                 file_ids.iter().any(|id| {
-                    if let Some(module) = graph.modules.get(id.0 as usize) {
-                        let file_canonical = module
-                            .path
-                            .canonicalize()
-                            .unwrap_or_else(|_| module.path.clone());
-                        file_canonical.starts_with(&canonical_ws)
-                    } else {
-                        false
-                    }
+                    graph
+                        .modules
+                        .get(id.0 as usize)
+                        .is_some_and(|module| module.path.starts_with(ws_root))
                 })
             } else {
                 false
@@ -571,7 +574,7 @@ fn find_unused_dependencies(
                 &root_flagged,
                 &script_used,
                 &plugin_referenced,
-                &config.ignore_dependencies,
+                &ignore_deps,
                 &workspace_names,
                 is_used_in_workspace,
             ) || is_implicit_dependency(&dep)
@@ -592,7 +595,7 @@ fn find_unused_dependencies(
                 &root_flagged,
                 &script_used,
                 &plugin_referenced,
-                &config.ignore_dependencies,
+                &ignore_deps,
                 &workspace_names,
                 is_used_in_workspace,
             ) || is_tooling_dependency(&dep)
@@ -621,14 +624,14 @@ fn should_skip_dependency(
     root_flagged: &HashSet<String>,
     script_used: &HashSet<&str>,
     plugin_referenced: &HashSet<&str>,
-    ignore_deps: &[String],
+    ignore_deps: &HashSet<&str>,
     workspace_names: &HashSet<&str>,
     is_used_in_workspace: impl Fn(&str) -> bool,
 ) -> bool {
     root_flagged.contains(dep)
         || script_used.contains(dep)
         || plugin_referenced.contains(dep)
-        || ignore_deps.iter().any(|d| d == dep)
+        || ignore_deps.contains(dep)
         || workspace_names.contains(dep)
         || is_used_in_workspace(dep)
 }
@@ -895,8 +898,8 @@ fn find_unlisted_dependencies(
         if let Ok(ws_pkg) = PackageJson::load(&ws_pkg_path) {
             let ws_deps: HashSet<String> = ws_pkg.all_dependency_names().into_iter().collect();
             all_workspace_deps.extend(ws_deps.iter().cloned());
-            let canonical_ws = ws.root.canonicalize().unwrap_or_else(|_| ws.root.clone());
-            ws_dep_map.push((canonical_ws, ws_deps));
+            // Use raw workspace root path for starts_with checks (avoids per-file canonicalize)
+            ws_dep_map.push((ws.root.clone(), ws_deps));
         }
     }
 
@@ -948,13 +951,13 @@ fn find_unlisted_dependencies(
             continue;
         }
 
-        // Slower fallback: check if each importing file belongs to a workspace that lists this dep
+        // Slower fallback: check if each importing file belongs to a workspace that lists this dep.
+        // Uses raw path comparison (module paths are absolute) to avoid per-file canonicalize().
         let mut unlisted_paths: Vec<std::path::PathBuf> = Vec::new();
         for id in file_ids {
             if let Some(module) = graph.modules.get(id.0 as usize) {
-                let file_canonical = module.path.canonicalize().unwrap_or(module.path.clone());
                 let listed_in_ws = ws_dep_map.iter().any(|(ws_root, ws_deps)| {
-                    file_canonical.starts_with(ws_root) && ws_deps.contains(package_name)
+                    module.path.starts_with(ws_root) && ws_deps.contains(package_name)
                 });
                 // Also check root deps
                 let listed_in_root = all_deps.contains(package_name);

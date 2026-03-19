@@ -9,6 +9,7 @@
 //! - **Dynamic resolution**: Parse tool config files to discover additional entries,
 //!   referenced dependencies, and setup files
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use fallow_config::{ExternalPluginDef, PackageJson, PluginDetection};
@@ -50,6 +51,12 @@ pub trait Plugin: Send + Sync {
     /// Default implementation checks `enablers()` against package.json dependencies.
     fn is_enabled(&self, pkg: &PackageJson, _root: &Path) -> bool {
         let deps = pkg.all_dependency_names();
+        self.is_enabled_with_deps(&deps, _root)
+    }
+
+    /// Fast variant of `is_enabled` that accepts a pre-computed deps list.
+    /// Avoids repeated `all_dependency_names()` allocation when checking many plugins.
+    fn is_enabled_with_deps(&self, deps: &[String], _root: &Path) -> bool {
         let enablers = self.enablers();
         if enablers.is_empty() {
             return false;
@@ -371,10 +378,12 @@ impl PluginRegistry {
         let mut result = AggregatedPluginResult::default();
 
         // Phase 1: Determine which plugins are active
+        // Compute deps once to avoid repeated Vec<String> allocation per plugin
+        let all_deps = pkg.all_dependency_names();
         let active: Vec<&dyn Plugin> = self
             .plugins
             .iter()
-            .filter(|p| p.is_enabled(pkg, root))
+            .filter(|p| p.is_enabled_with_deps(&all_deps, root))
             .map(|p| p.as_ref())
             .collect();
 
@@ -418,7 +427,7 @@ impl PluginRegistry {
         }
 
         // Phase 2b: Process external plugins (includes inline framework definitions)
-        let all_deps = pkg.all_dependency_names();
+        // Reuse `all_deps` from Phase 1 (already computed above)
         let all_dep_refs: Vec<&str> = all_deps.iter().map(|s| s.as_str()).collect();
         for ext in &self.external_plugins {
             let is_active = if let Some(detection) = &ext.detection {
@@ -555,6 +564,132 @@ impl PluginRegistry {
         }
 
         result
+    }
+
+    /// Fast variant of `run()` for workspace packages.
+    ///
+    /// Reuses pre-compiled config matchers and pre-computed relative files from the root
+    /// project run, avoiding repeated glob compilation and path computation per workspace.
+    /// Skips external plugins (they only activate at root level) and package.json inline
+    /// config (workspace packages rarely have inline configs).
+    pub fn run_workspace_fast(
+        &self,
+        pkg: &PackageJson,
+        root: &Path,
+        precompiled_config_matchers: &[(&dyn Plugin, Vec<globset::GlobMatcher>)],
+        relative_files: &[(&PathBuf, String)],
+    ) -> AggregatedPluginResult {
+        let _span = tracing::info_span!("run_plugins").entered();
+        let mut result = AggregatedPluginResult::default();
+
+        // Phase 1: Determine which plugins are active (with pre-computed deps)
+        let all_deps = pkg.all_dependency_names();
+        let active: Vec<&dyn Plugin> = self
+            .plugins
+            .iter()
+            .filter(|p| p.is_enabled_with_deps(&all_deps, root))
+            .map(|p| p.as_ref())
+            .collect();
+
+        tracing::info!(
+            plugins = active
+                .iter()
+                .map(|p| p.name())
+                .collect::<Vec<_>>()
+                .join(", "),
+            "active plugins"
+        );
+
+        // Early exit if no plugins are active (common for leaf workspace packages)
+        if active.is_empty() {
+            return result;
+        }
+
+        // Phase 2: Collect static patterns from active plugins
+        for plugin in &active {
+            result.active_plugins.push(plugin.name().to_string());
+
+            for pat in plugin.entry_patterns() {
+                result.entry_patterns.push((*pat).to_string());
+            }
+            for pat in plugin.config_patterns() {
+                result.config_patterns.push((*pat).to_string());
+            }
+            for pat in plugin.always_used() {
+                result.always_used.push((*pat).to_string());
+            }
+            for (file_pat, exports) in plugin.used_exports() {
+                result.used_exports.push((
+                    file_pat.to_string(),
+                    exports.iter().map(|s| s.to_string()).collect(),
+                ));
+            }
+            for dep in plugin.tooling_dependencies() {
+                result.tooling_dependencies.push((*dep).to_string());
+            }
+            for prefix in plugin.virtual_module_prefixes() {
+                result.virtual_module_prefixes.push((*prefix).to_string());
+            }
+            for (prefix, replacement) in plugin.path_aliases(root) {
+                result.path_aliases.push((prefix.to_string(), replacement));
+            }
+        }
+
+        // Phase 3: Find and parse config files using pre-compiled matchers
+        // Only check matchers for plugins that are active in this workspace
+        let active_names: HashSet<&str> = active.iter().map(|p| p.name()).collect();
+        let workspace_matchers: Vec<_> = precompiled_config_matchers
+            .iter()
+            .filter(|(p, _)| active_names.contains(p.name()))
+            .collect();
+
+        if !workspace_matchers.is_empty() {
+            for (plugin, matchers) in workspace_matchers {
+                for (abs_path, rel_path) in relative_files {
+                    if matchers.iter().any(|m| m.is_match(rel_path.as_str()))
+                        && let Ok(source) = std::fs::read_to_string(abs_path)
+                    {
+                        let plugin_result = plugin.resolve_config(abs_path, &source, root);
+                        if !plugin_result.is_empty() {
+                            tracing::debug!(
+                                plugin = plugin.name(),
+                                config = rel_path.as_str(),
+                                entries = plugin_result.entry_patterns.len(),
+                                deps = plugin_result.referenced_dependencies.len(),
+                                "resolved config"
+                            );
+                            result.entry_patterns.extend(plugin_result.entry_patterns);
+                            result
+                                .referenced_dependencies
+                                .extend(plugin_result.referenced_dependencies);
+                            result
+                                .discovered_always_used
+                                .extend(plugin_result.always_used_files);
+                            result.setup_files.extend(plugin_result.setup_files);
+                        }
+                    }
+                }
+            }
+        }
+
+        result
+    }
+
+    /// Pre-compile config pattern glob matchers for all plugins that have config patterns.
+    /// Returns a vec of (plugin, matchers) pairs that can be reused across multiple `run_workspace_fast` calls.
+    pub fn precompile_config_matchers(&self) -> Vec<(&dyn Plugin, Vec<globset::GlobMatcher>)> {
+        self.plugins
+            .iter()
+            .filter(|p| !p.config_patterns().is_empty())
+            .map(|p| {
+                let matchers: Vec<globset::GlobMatcher> = p
+                    .config_patterns()
+                    .iter()
+                    .filter_map(|pat| globset::Glob::new(pat).ok().map(|g| g.compile_matcher()))
+                    .collect();
+                (p.as_ref(), matchers)
+            })
+            .collect()
     }
 }
 

@@ -358,12 +358,20 @@ pub fn discover_entry_points(config: &ResolvedConfig, files: &[DiscoveredFile]) 
         })
         .collect();
 
-    // 1. Manual entries from config — pre-compile all patterns
-    for pattern in &config.entry_patterns {
-        if let Ok(glob) = globset::Glob::new(pattern) {
-            let matcher = glob.compile_matcher();
+    // 1. Manual entries from config — batch all patterns into a single GlobSet
+    // for O(files) matching instead of O(patterns × files).
+    {
+        let mut builder = globset::GlobSetBuilder::new();
+        for pattern in &config.entry_patterns {
+            if let Ok(glob) = globset::Glob::new(pattern) {
+                builder.add(glob);
+            }
+        }
+        if let Ok(glob_set) = builder.build()
+            && !glob_set.is_empty()
+        {
             for (idx, rel) in relative_paths.iter().enumerate() {
-                if matcher.is_match(rel) {
+                if glob_set.is_match(rel) {
                     entries.push(EntryPoint {
                         path: files[idx].path.clone(),
                         source: EntryPointSource::ManualEntry,
@@ -374,9 +382,10 @@ pub fn discover_entry_points(config: &ResolvedConfig, files: &[DiscoveredFile]) 
     }
 
     // 2. Package.json entries
+    // Pre-compute canonical root once for all resolve_entry_path calls
+    let canonical_root = config.root.canonicalize().unwrap_or(config.root.clone());
     let pkg_path = config.root.join("package.json");
     if let Ok(pkg) = PackageJson::load(&pkg_path) {
-        let canonical_root = config.root.canonicalize().unwrap_or(config.root.clone());
         for entry_path in pkg.entry_points() {
             if let Some(ep) = resolve_entry_path(
                 &config.root,
@@ -410,7 +419,7 @@ pub fn discover_entry_points(config: &ResolvedConfig, files: &[DiscoveredFile]) 
     // 4. Auto-discover nested package.json entry points
     // For monorepo-like structures without explicit workspace config, scan for
     // package.json files in subdirectories and use their main/exports as entries.
-    discover_nested_package_entries(&config.root, files, &mut entries);
+    discover_nested_package_entries(&config.root, files, &mut entries, &canonical_root);
 
     // 5. Default index files (if no other entries found)
     if entries.is_empty() {
@@ -433,8 +442,8 @@ fn discover_nested_package_entries(
     root: &Path,
     _files: &[DiscoveredFile],
     entries: &mut Vec<EntryPoint>,
+    canonical_root: &Path,
 ) {
-    let canonical_root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
 
     // Walk common monorepo patterns to find nested package.json files
     let search_dirs = ["packages", "apps", "libs", "modules", "plugins"];
@@ -460,7 +469,7 @@ fn discover_nested_package_entries(
                 if let Some(ep) = resolve_entry_path(
                     &pkg_dir,
                     &entry_path,
-                    &canonical_root,
+                    canonical_root,
                     EntryPointSource::PackageJsonExports,
                 ) {
                     entries.push(ep);
@@ -473,7 +482,7 @@ fn discover_nested_package_entries(
                         if let Some(ep) = resolve_entry_path(
                             &pkg_dir,
                             &file_ref,
-                            &canonical_root,
+                            canonical_root,
                             EntryPointSource::PackageJsonScript,
                         ) {
                             entries.push(ep);
@@ -656,28 +665,31 @@ pub fn discover_plugin_entry_points(
         })
         .collect();
 
-    // Match plugin entry patterns against files
-    let all_patterns: Vec<&str> = plugin_result
+    // Match plugin entry patterns against files using a single GlobSet
+    // for O(files) matching instead of O(patterns × files).
+    let mut builder = globset::GlobSetBuilder::new();
+    for pattern in plugin_result
         .entry_patterns
         .iter()
         .chain(plugin_result.discovered_always_used.iter())
         .chain(plugin_result.always_used.iter())
-        .map(|s| s.as_str())
-        .collect();
-
-    let matchers: Vec<globset::GlobMatcher> = all_patterns
-        .iter()
-        .filter_map(|p| globset::Glob::new(p).ok().map(|g| g.compile_matcher()))
-        .collect();
-
-    for (idx, rel) in relative_paths.iter().enumerate() {
-        if matchers.iter().any(|m| m.is_match(rel)) {
-            entries.push(EntryPoint {
-                path: files[idx].path.clone(),
-                source: EntryPointSource::Plugin {
-                    name: "plugin".to_string(),
-                },
-            });
+    {
+        if let Ok(glob) = globset::Glob::new(pattern) {
+            builder.add(glob);
+        }
+    }
+    if let Ok(glob_set) = builder.build()
+        && !glob_set.is_empty()
+    {
+        for (idx, rel) in relative_paths.iter().enumerate() {
+            if glob_set.is_match(rel) {
+                entries.push(EntryPoint {
+                    path: files[idx].path.clone(),
+                    source: EntryPointSource::Plugin {
+                        name: "plugin".to_string(),
+                    },
+                });
+            }
         }
     }
 

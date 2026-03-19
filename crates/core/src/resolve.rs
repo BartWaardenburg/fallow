@@ -89,7 +89,7 @@ pub fn resolve_all_imports(
     // Without this, macOS /var → /private/var and similar platform symlinks
     // cause workspace roots to mismatch canonical file paths.
     let canonical_ws_roots: Vec<PathBuf> = workspaces
-        .iter()
+        .par_iter()
         .map(|ws| ws.root.canonicalize().unwrap_or_else(|_| ws.root.clone()))
         .collect();
     let workspace_roots: HashMap<&str, &Path> = workspaces
@@ -98,9 +98,10 @@ pub fn resolve_all_imports(
         .map(|(ws, canonical)| (ws.name.as_str(), canonical.as_path()))
         .collect();
 
-    // Pre-compute canonical paths ONCE for all files (avoiding repeated syscalls)
+    // Pre-compute canonical paths ONCE for all files in parallel (avoiding repeated syscalls).
+    // Each canonicalize() is a syscall — parallelizing over rayon reduces wall time.
     let canonical_paths: Vec<PathBuf> = files
-        .iter()
+        .par_iter()
         .map(|f| f.path.canonicalize().unwrap_or_else(|_| f.path.clone()))
         .collect();
 
@@ -115,8 +116,8 @@ pub fn resolve_all_imports(
     let raw_path_to_id: HashMap<&Path, FileId> =
         files.iter().map(|f| (f.path.as_path(), f.id)).collect();
 
-    let file_id_to_path: HashMap<FileId, &Path> =
-        files.iter().map(|f| (f.id, f.path.as_path())).collect();
+    // FileIds are sequential 0..n, so direct array indexing is faster than HashMap.
+    let file_paths: Vec<&Path> = files.iter().map(|f| f.path.as_path()).collect();
 
     // Create resolver ONCE and share across threads (oxc_resolver::Resolver is Send + Sync)
     let resolver = create_resolver(active_plugins);
@@ -128,7 +129,7 @@ pub fn resolve_all_imports(
     modules
         .par_iter()
         .filter_map(|module| {
-            let file_path = match file_id_to_path.get(&module.file_id) {
+            let file_path = match file_paths.get(module.file_id.0 as usize) {
                 Some(p) => p,
                 None => {
                     tracing::warn!(

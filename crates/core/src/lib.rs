@@ -285,7 +285,7 @@ fn run_plugins(
     let registry = plugins::PluginRegistry::new(config.external_plugins.clone());
     let file_paths: Vec<std::path::PathBuf> = files.iter().map(|f| f.path.clone()).collect();
 
-    // Run plugins for root project
+    // Run plugins for root project (full run with external plugins, inline config, etc.)
     let pkg_path = config.root.join("package.json");
     let mut result = if let Ok(pkg) = PackageJson::load(&pkg_path) {
         registry.run(&pkg, &config.root, &file_paths)
@@ -293,11 +293,41 @@ fn run_plugins(
         plugins::AggregatedPluginResult::default()
     };
 
-    // Run plugins for each workspace package too
+    if workspaces.is_empty() {
+        return result;
+    }
+
+    // Pre-compile config matchers and relative files once for all workspace runs.
+    // This avoids re-compiling glob patterns and re-computing relative paths per workspace
+    // (previously O(workspaces × plugins × files) glob compilations).
+    let precompiled_matchers = registry.precompile_config_matchers();
+    let relative_files: Vec<(&std::path::PathBuf, String)> = file_paths
+        .iter()
+        .map(|f| {
+            let rel = f
+                .strip_prefix(&config.root)
+                .unwrap_or(f)
+                .to_string_lossy()
+                .into_owned();
+            (f, rel)
+        })
+        .collect();
+
+    // Run plugins for each workspace package using the fast path
     for ws in workspaces {
         let ws_pkg_path = ws.root.join("package.json");
         if let Ok(ws_pkg) = PackageJson::load(&ws_pkg_path) {
-            let ws_result = registry.run(&ws_pkg, &ws.root, &file_paths);
+            let ws_result = registry.run_workspace_fast(
+                &ws_pkg,
+                &ws.root,
+                &precompiled_matchers,
+                &relative_files,
+            );
+
+            // Early skip if workspace produced no results (common for leaf packages)
+            if ws_result.active_plugins.is_empty() {
+                continue;
+            }
 
             // Workspace plugin patterns are relative to the workspace root (e.g., `jest.setup.ts`),
             // but `discover_plugin_entry_points` matches against paths relative to the monorepo root

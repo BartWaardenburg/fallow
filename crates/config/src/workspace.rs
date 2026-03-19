@@ -60,6 +60,7 @@ pub fn discover_workspaces(root: &Path) -> Vec<WorkspaceInfo> {
         .collect();
 
     // Expand patterns to find workspace directories
+    // Pre-compute canonical root once for security checks in expand_workspace_glob
     let canonical_root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
     let mut workspaces = Vec::new();
     for pattern in &positive {
@@ -77,7 +78,7 @@ pub fn discover_workspaces(root: &Path) -> Vec<WorkspaceInfo> {
         };
 
         // Walk directories matching the glob
-        let matched_dirs = expand_workspace_glob(root, &glob_pattern);
+        let matched_dirs = expand_workspace_glob(root, &glob_pattern, &canonical_root);
         for dir in matched_dirs {
             // Skip workspace entries that point to the project root itself
             // (e.g. pnpm-workspace.yaml listing `.` as a workspace)
@@ -100,16 +101,22 @@ pub fn discover_workspaces(root: &Path) -> Vec<WorkspaceInfo> {
             if ws_pkg_path.exists()
                 && let Ok(pkg) = PackageJson::load(&ws_pkg_path)
             {
+                // Collect dependency names during initial load to avoid
+                // re-reading package.json in step 5.
+                let dep_names = pkg.all_dependency_names();
                 let name = pkg.name.unwrap_or_else(|| {
                     dir.file_name()
                         .map(|n| n.to_string_lossy().to_string())
                         .unwrap_or_default()
                 });
-                workspaces.push(WorkspaceInfo {
-                    root: dir,
-                    name,
-                    is_internal_dependency: false,
-                });
+                workspaces.push((
+                    WorkspaceInfo {
+                        root: dir,
+                        name,
+                        is_internal_dependency: false,
+                    },
+                    dep_names,
+                ));
             }
         }
     }
@@ -119,33 +126,31 @@ pub fn discover_workspaces(root: &Path) -> Vec<WorkspaceInfo> {
     // same directory, causing duplicate workspace entries and double-reported issues.
     {
         let mut seen = std::collections::HashSet::new();
-        workspaces.retain(|ws| {
+        workspaces.retain(|(ws, _)| {
             let canonical = ws.root.canonicalize().unwrap_or_else(|_| ws.root.clone());
             seen.insert(canonical)
         });
     }
 
-    // 5. Mark workspaces that are depended on by other workspaces
-    let all_dep_names: Vec<String> = workspaces
+    // 5. Mark workspaces that are depended on by other workspaces.
+    // Uses dep names collected during initial package.json load (step 3)
+    // to avoid re-reading all workspace package.json files.
+    let all_dep_names: std::collections::HashSet<String> = workspaces
         .iter()
-        .flat_map(|ws| {
-            let ws_pkg_path = ws.root.join("package.json");
-            PackageJson::load(&ws_pkg_path)
-                .map(|pkg| pkg.all_dependency_names())
-                .unwrap_or_default()
-        })
+        .flat_map(|(_, deps)| deps.iter().cloned())
         .collect();
-    for ws in &mut workspaces {
+    for (ws, _) in &mut workspaces {
         ws.is_internal_dependency = all_dep_names.contains(&ws.name);
     }
 
-    workspaces
+    workspaces.into_iter().map(|(ws, _)| ws).collect()
 }
 
 /// Expand a workspace glob pattern to matching directories.
 ///
 /// Uses the `glob` crate for full glob support including `**` (deep matching).
-fn expand_workspace_glob(root: &Path, pattern: &str) -> Vec<PathBuf> {
+/// `canonical_root` is pre-computed to avoid repeated canonicalize() syscalls.
+fn expand_workspace_glob(root: &Path, pattern: &str, canonical_root: &Path) -> Vec<PathBuf> {
     let full_pattern = root.join(pattern).to_string_lossy().to_string();
     match glob::glob(&full_pattern) {
         Ok(paths) => paths
@@ -155,8 +160,7 @@ fn expand_workspace_glob(root: &Path, pattern: &str) -> Vec<PathBuf> {
                 // Security: ensure workspace directory is within project root
                 p.canonicalize()
                     .ok()
-                    .and_then(|cp| root.canonicalize().ok().map(|cr| cp.starts_with(cr)))
-                    .unwrap_or(false)
+                    .is_some_and(|cp| cp.starts_with(canonical_root))
             })
             .collect(),
         Err(e) => {
