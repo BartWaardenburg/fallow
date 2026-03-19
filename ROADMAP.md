@@ -43,7 +43,7 @@ Fallow is a Rust-native dead code and duplication analyzer for JavaScript/TypeSc
 ### Integrations
 - **CLI commands**: check, dupes, watch, fix, init, migrate, list, schema, config-schema
 - **Config format**: JSONC (default), JSON, TOML — with `$schema` support for IDE autocomplete/validation
-- **LSP server**: diagnostics for all 10 dead code issue types, quick-fix code actions, Code Lens with export reference counts
+- **LSP server**: diagnostics for all 10 dead code issue types + code duplication, quick-fix code actions, "Extract duplicate into function" refactor action, Code Lens with export reference counts and click-to-navigate (opens Peek References panel)
 - **VS Code extension**: tree views for dead code and duplicates, status bar, Code Lens, auto-download of LSP binary, one-click fixes
 - **MCP server**: AI agent integration via stdio transport (analyze, check_changed, find_dupes, fix_preview, fix_apply, project_info)
 - **GitHub Action**: SARIF upload, PR comments, baseline support, analysis caching
@@ -66,6 +66,7 @@ Fallow is a Rust-native dead code and duplication analyzer for JavaScript/TypeSc
 
 - **Syntactic analysis only**: No TypeScript type information. Projects using `isolatedModules: true` (required for esbuild/swc/vite) are well-served; legacy tsc-only projects may see false positives on type-only imports.
 - **Config parsing ceiling**: AST-based extraction covers static object literals, string arrays, and simple wrappers like `defineConfig(...)`. Computed values (`getPlugins()`), conditionals (`process.env.NODE_ENV`), and nested config factories are out of reach without JS eval.
+- **Svelte export false negatives**: All exports from `.svelte` files are skipped in analysis because props (`export let`) can't be distinguished from utility exports without Svelte compiler semantics. Genuinely unused utility exports in `.svelte` files go undetected.
 - **CSS/SCSS parsing is regex-based**: Handles `@import`, `@use`, `@forward`, `@apply`, `@tailwind` with comment stripping, and CSS Module class name extraction (strings and `url()` content are stripped before extraction). Does not parse full CSS syntax — CSS Modules `composes:` declarations and `:global()`/`:local()` pseudo-selectors are not tracked. SCSS partials (`_variables.scss` from `@use "variables"`) rely on the resolver, not SCSS-specific partial resolution.
 - **LSP column offsets are byte-based**: Diagnostics and Code Lens use byte column offsets from the Oxc parser, but the LSP spec requires UTF-16 code unit offsets. Identical for ASCII; may be off for non-ASCII characters before the target position on the same line.
 
@@ -75,16 +76,12 @@ Fallow is a Rust-native dead code and duplication analyzer for JavaScript/TypeSc
 
 ### Enhanced Code Actions
 
-- "Extract duplicate" — for duplication: offer to extract a clone family into a shared function
 - Hover: show where an export is used, or show other locations of a duplicate block
-- Code Lens: click to navigate to reference locations (reference counts are shown but not yet clickable)
 
 ### Cross-Workspace: Remaining Edge Cases
 
-The basic cross-workspace resolution works (unified module graph, `--workspace` scoping, symlink resolution via `canonicalize`, `exports` field subpath resolution with output→source mapping). Remaining work:
-- pnpm content-addressable store: detect `.pnpm` paths and map them back to workspace sources
+The basic cross-workspace resolution works (unified module graph, `--workspace` scoping, symlink resolution via `canonicalize`, `exports` field subpath resolution with output→source mapping, pnpm `.pnpm` store detection). Remaining work:
 - tsconfig project references
-- Conditional exports with nested output subdirectories (e.g., `"./utils": { "import": "./dist/esm/utils.mjs" }` — the `esm/` subdirectory inside `dist/` is not stripped during source fallback)
 
 ### 1.0 Criteria
 

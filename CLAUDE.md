@@ -29,7 +29,7 @@ Key modules in fallow-core:
 - `project.rs` — `ProjectState` struct: owns the file registry (stable FileIds sorted by path) and workspace metadata. Foundation for cross-workspace resolution and future incremental analysis.
 - `discover.rs` — File walking + entry point detection (also workspace-aware). FileIds are assigned deterministically by path sort order (not size) for stability across runs.
 - `extract.rs` — AST visitor extracting imports, exports, re-exports, members, whole-object uses, dynamic import patterns; SFC (Vue/Svelte) script extraction (HTML comment filtering, `<script src="...">` support); Astro frontmatter extraction; MDX import/export extraction; CSS Module class name extraction (`.module.css`/`.module.scss` → named exports). Returns `ParseResult` with modules + cache hit/miss statistics for incremental analysis visibility.
-- `resolve.rs` — oxc_resolver-based import resolution + glob-based dynamic import pattern resolution + DashMap-backed bare specifier cache for lock-free parallel lookups. Cross-workspace imports resolve through node_modules symlinks via canonicalize.
+- `resolve.rs` — oxc_resolver-based import resolution + glob-based dynamic import pattern resolution + DashMap-backed bare specifier cache for lock-free parallel lookups. Cross-workspace imports resolve through node_modules symlinks via canonicalize. Pnpm content-addressable store detection: `.pnpm` virtual store paths are mapped back to workspace source files for injected dependencies.
 - `graph.rs` — Module graph with re-export chain propagation
 - `analyze.rs` — Dead code detection (10 issue types) with inline suppression filtering
 - `scripts.rs` — Shell command parser for package.json scripts: extracts binary names (mapped to package names for dependency usage detection), `--config` args (entry points), and file path args; handles env wrappers, package manager runners, node runners
@@ -84,7 +84,8 @@ cd benchmarks && npm run generate:dupes && npm run bench:dupes  # vs jscpd
 17. Dead code × duplication cross-reference (`check --include-dupes`): identifies clone instances in unused files or overlapping unused exports as combined high-priority findings
 18. Debug & trace tooling: `--trace FILE:EXPORT` (trace export usage chain), `--trace-file PATH` (all edges for a file), `--trace-dependency PACKAGE` (where a dep is used), `dupes --trace FILE:LINE` (trace all clones at a location), `--performance` (pipeline timing breakdown). Human and JSON output.
 19. CSS Modules (`.module.css`/`.module.scss`): class names extracted as named exports. Default imports (`import styles from '...'`) resolve member accesses (`styles.className`) to named exports via graph-level narrowing. Handles spread/`Object.values` conservatively.
-20. Package.json `exports` field subpath resolution: cross-workspace imports through exports maps (e.g., `"./utils": "./dist/utils.js"`) resolve correctly. Output directories (`dist/`, `build/`, `out/`, `esm/`, `cjs/`) are mapped back to `src/` equivalents with source extension fallback, since fallow ignores output directories by default.
+20. Package.json `exports` field subpath resolution: cross-workspace imports through exports maps (e.g., `"./utils": "./dist/utils.js"`) resolve correctly. Output directories (`dist/`, `build/`, `out/`, `esm/`, `cjs/`) are mapped back to `src/` equivalents with source extension fallback, including nested output subdirectories (e.g., `dist/esm/utils.mjs` → `src/utils.ts`), since fallow ignores output directories by default.
+21. Pnpm content-addressable store detection: `.pnpm` virtual store paths (e.g., `node_modules/.pnpm/@myorg+ui@1.0.0/node_modules/@myorg/ui/dist/index.js`) are mapped back to workspace source files. Handles injected dependencies, scoped/unscoped packages, and peer dependency suffixes.
 
 ## Framework support (46 plugins)
 
@@ -160,7 +161,9 @@ See `AGENTS.md` for AI agent integration guide.
 - LSP client with auto-detection and auto-download of the `fallow-lsp` binary
 - Real-time diagnostics for all 10 dead code issue types via the LSP
 - Quick-fix code actions (remove unused export, delete unused file)
-- Code Lens showing reference counts above each export declaration
+- Refactor code action: "Extract duplicate into function" for code duplication (extracts clone instances into shared functions, replaces all instances in the file)
+- Duplication diagnostics with related locations (links to all other instances of the same clone group)
+- Code Lens showing reference counts above each export declaration with click-to-navigate (opens Peek References panel via `editor.action.showReferences`)
 - Tree views in the sidebar: dead code grouped by issue type, duplicates grouped by clone family
 - Status bar showing issue count and duplication percentage
 - Commands: full analysis, auto-fix, dry-run preview, LSP restart
@@ -247,7 +250,7 @@ unresolved_imports = "error"
 - **Flat edge storage**: Contiguous `Vec<Edge>` with range indices for cache-friendly traversal.
 - **Lock-free parallel resolution**: Bare specifier cache uses `DashMap` (sharded concurrent map) for contention-free reads under rayon work-stealing.
 - **Re-export chain resolution**: Iterative propagation through barrel files with cycle detection.
-- **Cross-workspace resolution**: Unified module graph across npm/yarn/pnpm workspaces (pnpm-workspace.yaml). Cross-package imports resolve through node_modules symlinks via `canonicalize()`. Package.json `exports` field subpath imports resolve via oxc_resolver with output→source fallback (dist/build/out/esm/cjs → src). `--workspace <name>` scopes output to one package while keeping the full graph. `ProjectState` struct owns the file registry with stable FileIds (path-sorted) for future incremental analysis.
+- **Cross-workspace resolution**: Unified module graph across npm/yarn/pnpm workspaces (pnpm-workspace.yaml). Cross-package imports resolve through node_modules symlinks via `canonicalize()`. Package.json `exports` field subpath imports resolve via oxc_resolver with output→source fallback (dist/build/out/esm/cjs → src). Pnpm content-addressable store paths (`.pnpm` virtual store) are detected and mapped back to workspace source files, handling injected dependencies where `canonicalize()` resolves through the `.pnpm` directory. `--workspace <name>` scopes output to one package while keeping the full graph. `ProjectState` struct owns the file registry with stable FileIds (path-sorted) for future incremental analysis.
 
 ## Git conventions
 

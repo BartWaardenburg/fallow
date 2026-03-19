@@ -94,7 +94,7 @@ export const activate = async (
     })
   );
 
-  // No-op command used by Code Lens items (display-only, no action on click)
+  // Fallback command for Code Lens items with 0 references (display-only)
   context.subscriptions.push(
     vscode.commands.registerCommand("fallow.noop", () => {})
   );

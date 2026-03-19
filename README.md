@@ -205,7 +205,7 @@ Supports `--changed-since main` for PR-only analysis, `--baseline` for failing o
 - **Watch mode** — `fallow watch` re-analyzes on file changes
 - **Auto-fix** — `fallow fix` removes unused exports and dependencies (`--dry-run` to preview)
 - **VS Code extension** — tree views for dead code and duplicates, status bar, auto-download of the LSP binary, one-click fixes ([`editors/vscode`](editors/vscode))
-- **LSP server** — real-time diagnostics, "remove unused export" code actions, and Code Lens showing reference counts above exports
+- **LSP server** — real-time diagnostics, "remove unused export" code actions, and Code Lens with clickable reference counts above exports (opens Peek References panel)
 - **Workspace support** — npm, yarn, and pnpm workspaces (including `pnpm-workspace.yaml`) with `exports` field subpath resolution
 - **Script binary analysis** — parses `package.json` scripts to detect CLI tool usage, reducing false positives in unused dependency detection
 - **Dynamic import resolution** — partial resolution of template literals, `import.meta.glob`, and `require.context`
