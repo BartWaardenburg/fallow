@@ -12,6 +12,7 @@ crates/
   core/     — Analysis engine: discovery, parsing, resolution, graph, plugins, caching, progress
   cli/      — CLI binary (check, dupes, watch, fix, init, list, schema commands)
   lsp/      — LSP server with diagnostics, code actions
+  mcp/      — MCP server for AI agent integration (stdio transport, wraps CLI)
 npm/
   fallow/   — npm wrapper package with optionalDependencies pattern
 tests/
@@ -120,6 +121,22 @@ cd benchmarks && npm run generate:dupes && npm run bench:dupes  # vs jscpd
 - Global `--workspace <name>` / `-w` flag scopes output to a single workspace package while keeping the full cross-workspace graph
 
 See `AGENTS.md` for AI agent integration guide.
+
+## MCP server
+
+`fallow-mcp` is an MCP (Model Context Protocol) server that exposes fallow's analysis as tools for AI agents. It uses stdio transport and wraps the `fallow` CLI binary via subprocess.
+
+**Tools:**
+- `analyze` — full dead code analysis (wraps `fallow check --format json`)
+- `check_changed` — incremental analysis of changed files (wraps `fallow check --changed-since`)
+- `find_dupes` — code duplication detection (wraps `fallow dupes --format json`)
+- `fix_preview` — dry-run auto-fix preview (wraps `fallow fix --dry-run --format json`)
+- `fix_apply` — apply auto-fixes (wraps `fallow fix --format json`) — destructive
+- `project_info` — project metadata: plugins, files, entry points (wraps `fallow list --format json`)
+
+**Configuration:** Set `FALLOW_BIN` env var to point to the fallow binary (defaults to `fallow` in PATH).
+
+**Architecture:** Built with `rmcp` (official Rust MCP SDK). Thin subprocess wrapper — all analysis logic stays in the CLI, the MCP crate only handles protocol framing and argument mapping.
 
 ## Production mode
 
