@@ -26,6 +26,9 @@ npm/linux-x64-musl/fallow
 npm/linux-arm64-musl/fallow
 npm/win32-x64-msvc/fallow.exe
 
+# Internal planning docs
+.internal-*
+
 # Claude
 .claude/*
 !.claude/settings.json

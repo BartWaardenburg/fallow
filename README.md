@@ -86,6 +86,10 @@ Measured on real-world open-source projects (median of 5 runs, 2 warmup). fallow
 | [zod](https://github.com/colinhacks/zod) | 174 | **16ms** | 582ms | **35.8x** |
 | [fastify](https://github.com/fastify/fastify) | 286 | **20ms** | 804ms | **39.4x** |
 | [preact](https://github.com/preactjs/preact) | 244 | **29ms** | 771ms | **26.6x** |
+| synthetic (large) | 1,000 | **45ms** | 378ms | **8.4x** |
+| synthetic (xlarge) | 5,000 | **200ms** | — | — |
+
+The speedup narrows on larger projects as actual analysis time dominates over startup: 25-40x on small projects, 8-10x on 1,000+ file projects. fallow stays sub-second even at 5,000 files.
 
 fallow uses the [Oxc](https://oxc.rs) parser for syntactic analysis and [rayon](https://github.com/rayon-rs/rayon) for parallel parsing — no TypeScript compiler, no Node.js runtime. Dead code detection is a graph problem on import/export edges; you don't need type information for that.
 
