@@ -110,6 +110,14 @@
       "description": "Production mode: exclude test/dev files, only start/build scripts.",
       "type": "boolean",
       "default": false
+    },
+    "plugins": {
+      "description": "Paths to external plugin files or directories containing plugin TOML files.\n\nIn addition to these explicit paths, fallow automatically discovers:\n- `*.toml` files in `.fallow/plugins/`\n- `fallow-plugin-*.toml` files in the project root",
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
     }
   },
   "additionalProperties": false,

@@ -225,11 +225,30 @@ Issue type tokens: `unused-file`, `unused-export`, `unused-type`, `unused-depend
 
 fallow uses syntactic analysis only — no type information. This is what makes it fast, but it means type-level dead code is out of scope, and some edge cases (Svelte `export let` props, Vue/Svelte template-only imports) may produce false positives. Use [inline suppression comments](#inline-suppression-comments) or [`ignore_exports`](https://github.com/fallow-rs/fallow/wiki/Configuration#ignoring-specific-exports) to suppress these.
 
+## Custom plugins
+
+Need support for an internal framework? Create a `fallow-plugin-<name>.toml` file:
+
+```toml
+name = "my-framework"
+enablers = ["my-framework"]
+entry_points = ["src/routes/**/*.{ts,tsx}"]
+always_used = ["src/setup.ts"]
+tooling_dependencies = ["my-framework-cli"]
+
+[[used_exports]]
+pattern = "src/routes/**/*.{ts,tsx}"
+exports = ["default", "loader", "action"]
+```
+
+Fallow auto-discovers `fallow-plugin-*.toml` files in your project root and `.fallow/plugins/` directory. See the [Plugin Authoring Guide](docs/plugin-authoring.md) for the full format and examples.
+
 ## Learn more
 
 - [Documentation](https://github.com/fallow-rs/fallow/wiki)
 - [Migrating from knip](https://github.com/fallow-rs/fallow/wiki/Migrating-from-Knip)
 - [Full plugin list](https://github.com/fallow-rs/fallow/wiki/Frameworks)
+- [Plugin Authoring Guide](docs/plugin-authoring.md)
 
 ## Contributing
 

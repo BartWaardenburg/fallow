@@ -23,6 +23,7 @@ fn make_config(root: std::path::PathBuf, no_cache: bool) -> fallow_config::Resol
         duplicates: fallow_config::DuplicatesConfig::default(),
         rules: fallow_config::RulesConfig::default(),
         production: false,
+        plugins: vec![],
     }
     .resolve(root, 4, no_cache)
 }

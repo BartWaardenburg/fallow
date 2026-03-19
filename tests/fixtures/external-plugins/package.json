@@ -1,0 +1,10 @@
+{
+  "name": "external-plugins-test",
+  "main": "src/index.ts",
+  "dependencies": {
+    "my-framework": "^1.0.0"
+  },
+  "devDependencies": {
+    "my-framework-cli": "^1.0.0"
+  }
+}

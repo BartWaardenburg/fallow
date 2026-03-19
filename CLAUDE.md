@@ -100,6 +100,7 @@ cd benchmarks && npm run generate:dupes && npm run bench:dupes  # vs jscpd
   - **Rollup**: input entries, external deps
   - **PostCSS**: plugins (object keys, require() calls, string arrays)
 - **Custom framework presets** (`crates/config/src/framework.rs`) — Users can add custom framework definitions via `fallow.toml` for project-specific entry points and rules.
+- **External plugins** (`crates/config/src/external_plugin.rs`) — Standalone TOML plugin definitions (`fallow-plugin-*.toml`) for community-driven framework support without writing Rust code. Discovered from: `plugins` config field, `.fallow/plugins/` directory, and `fallow-plugin-*.toml` files in project root. Supports entry points, always-used files, used exports, config patterns, and tooling dependencies. See `docs/plugin-authoring.md` for the full format.
 
 ## CLI features
 

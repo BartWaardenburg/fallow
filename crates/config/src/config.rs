@@ -5,6 +5,7 @@ use globset::{Glob, GlobSet, GlobSetBuilder};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::external_plugin::{ExternalPluginDef, discover_external_plugins};
 use crate::framework::FrameworkPreset;
 use crate::workspace::WorkspaceConfig;
 
@@ -66,6 +67,14 @@ pub struct FallowConfig {
     /// Production mode: exclude test/dev files, only start/build scripts.
     #[serde(default)]
     pub production: bool,
+
+    /// Paths to external plugin files or directories containing plugin TOML files.
+    ///
+    /// In addition to these explicit paths, fallow automatically discovers:
+    /// - `*.toml` files in `.fallow/plugins/`
+    /// - `fallow-plugin-*.toml` files in the project root
+    #[serde(default)]
+    pub plugins: Vec<String>,
 }
 
 /// Configuration for code duplication detection.
@@ -273,6 +282,8 @@ pub struct ResolvedConfig {
     pub rules: RulesConfig,
     /// Whether production mode is active.
     pub production: bool,
+    /// External plugin definitions loaded from TOML files.
+    pub external_plugins: Vec<ExternalPluginDef>,
 }
 
 /// Detect config format from file extension.
@@ -411,6 +422,8 @@ impl FallowConfig {
             rules.unused_dev_dependencies = Severity::Off;
         }
 
+        let external_plugins = discover_external_plugins(&root, &self.plugins);
+
         ResolvedConfig {
             root,
             entry_patterns: self.entry,
@@ -426,6 +439,7 @@ impl FallowConfig {
             duplicates: self.duplicates,
             rules,
             production,
+            external_plugins,
         }
     }
 }
@@ -653,6 +667,7 @@ ignoreDependencies = ["autoprefixer", "postcss"]
             duplicates: DuplicatesConfig::default(),
             rules: RulesConfig::default(),
             production: false,
+            plugins: vec![],
         };
         let resolved = config.resolve(PathBuf::from("/tmp/test"), 4, true);
 
@@ -681,6 +696,7 @@ ignoreDependencies = ["autoprefixer", "postcss"]
             duplicates: DuplicatesConfig::default(),
             rules: RulesConfig::default(),
             production: false,
+            plugins: vec![],
         };
         let resolved = config.resolve(PathBuf::from("/tmp/test"), 4, false);
 
@@ -705,6 +721,7 @@ ignoreDependencies = ["autoprefixer", "postcss"]
             duplicates: DuplicatesConfig::default(),
             rules: RulesConfig::default(),
             production: false,
+            plugins: vec![],
         };
         let resolved = config.resolve(PathBuf::from("/tmp/project"), 4, true);
         assert_eq!(resolved.cache_dir, PathBuf::from("/tmp/project/.fallow"));

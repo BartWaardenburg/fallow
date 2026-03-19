@@ -1192,7 +1192,7 @@ fn run_list(
     let plugin_result = if plugins || show_all {
         let disc = fallow_core::discover::discover_files(&config);
         let file_paths: Vec<std::path::PathBuf> = disc.iter().map(|f| f.path.clone()).collect();
-        let registry = fallow_core::plugins::PluginRegistry::new();
+        let registry = fallow_core::plugins::PluginRegistry::new(config.external_plugins.clone());
 
         let pkg_path = root.join("package.json");
         let mut result = if let Ok(pkg) = fallow_config::PackageJson::load(&pkg_path) {
@@ -1594,6 +1594,7 @@ fn load_config(
             duplicates: fallow_config::DuplicatesConfig::default(),
             rules: fallow_config::RulesConfig::default(),
             production,
+            plugins: vec![],
         }
         .resolve(root.to_path_buf(), threads, no_cache),
     })

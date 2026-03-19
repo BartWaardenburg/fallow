@@ -207,7 +207,7 @@ fn run_plugins(
     files: &[discover::DiscoveredFile],
     workspaces: &[fallow_config::WorkspaceInfo],
 ) -> plugins::AggregatedPluginResult {
-    let registry = plugins::PluginRegistry::new();
+    let registry = plugins::PluginRegistry::new(config.external_plugins.clone());
     let file_paths: Vec<std::path::PathBuf> = files.iter().map(|f| f.path.clone()).collect();
 
     // Run plugins for root project
@@ -296,6 +296,7 @@ pub(crate) fn default_config(root: &Path) -> ResolvedConfig {
             duplicates: fallow_config::DuplicatesConfig::default(),
             rules: fallow_config::RulesConfig::default(),
             production: false,
+            plugins: vec![],
         }
         .resolve(root.to_path_buf(), num_cpus(), false),
     }

@@ -11,7 +11,7 @@
 
 use std::path::{Path, PathBuf};
 
-use fallow_config::PackageJson;
+use fallow_config::{ExternalPluginDef, PackageJson};
 
 /// Result of resolving a plugin's config file.
 #[derive(Debug, Default)]
@@ -212,9 +212,10 @@ mod vitest;
 mod webpack;
 mod wrangler;
 
-/// Registry of all available plugins.
+/// Registry of all available plugins (built-in + external).
 pub struct PluginRegistry {
     plugins: Vec<Box<dyn Plugin>>,
+    external_plugins: Vec<ExternalPluginDef>,
 }
 
 /// Aggregated results from all active plugins for a project.
@@ -243,8 +244,8 @@ pub struct AggregatedPluginResult {
 }
 
 impl PluginRegistry {
-    /// Create a registry with all built-in plugins.
-    pub fn new() -> Self {
+    /// Create a registry with all built-in plugins and optional external plugins.
+    pub fn new(external: Vec<ExternalPluginDef>) -> Self {
         let plugins: Vec<Box<dyn Plugin>> = vec![
             // Frameworks
             Box::new(nextjs::NextJsPlugin),
@@ -298,7 +299,10 @@ impl PluginRegistry {
             Box::new(graphql_codegen::GraphqlCodegenPlugin),
             Box::new(msw::MswPlugin),
         ];
-        Self { plugins }
+        Self {
+            plugins,
+            external_plugins: external,
+        }
     }
 
     /// Run all plugins against a project, returning aggregated results.
@@ -352,6 +356,39 @@ impl PluginRegistry {
             }
             for dep in plugin.tooling_dependencies() {
                 result.tooling_dependencies.push((*dep).to_string());
+            }
+        }
+
+        // Phase 2b: Process external plugins
+        let all_deps = pkg.all_dependency_names();
+        for ext in &self.external_plugins {
+            let is_active = if ext.enablers.is_empty() {
+                false
+            } else {
+                ext.enablers.iter().any(|enabler| {
+                    if enabler.ends_with('/') {
+                        all_deps.iter().any(|d| d.starts_with(enabler))
+                    } else {
+                        all_deps.iter().any(|d| d == enabler)
+                    }
+                })
+            };
+            if is_active {
+                result.active_plugins.push(ext.name.clone());
+                result.entry_patterns.extend(ext.entry_points.clone());
+                // Track config patterns for introspection (not used for AST parsing —
+                // external plugins cannot do resolve_config())
+                result.config_patterns.extend(ext.config_patterns.clone());
+                result.always_used.extend(ext.config_patterns.clone());
+                result.always_used.extend(ext.always_used.clone());
+                result
+                    .tooling_dependencies
+                    .extend(ext.tooling_dependencies.clone());
+                for ue in &ext.used_exports {
+                    result
+                        .used_exports
+                        .push((ue.pattern.clone(), ue.exports.clone()));
+                }
             }
         }
 
@@ -419,6 +456,6 @@ impl PluginRegistry {
 
 impl Default for PluginRegistry {
     fn default() -> Self {
-        Self::new()
+        Self::new(vec![])
     }
 }
