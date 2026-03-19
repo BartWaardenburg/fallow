@@ -325,3 +325,366 @@ pub(crate) fn collect_export_usages(graph: &ModuleGraph) -> Vec<ExportUsage> {
 
     usages
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
+    use crate::extract::ExportName;
+    use crate::graph::{ExportSymbol, ModuleGraph, ReExportEdge, SymbolReference};
+    use crate::resolve::ResolvedModule;
+    use oxc_span::Span;
+    use std::path::PathBuf;
+
+    /// Build a minimal ModuleGraph via the build() constructor.
+    fn build_graph(file_specs: &[(&str, bool)]) -> ModuleGraph {
+        let files: Vec<DiscoveredFile> = file_specs
+            .iter()
+            .enumerate()
+            .map(|(i, (path, _))| DiscoveredFile {
+                id: FileId(i as u32),
+                path: PathBuf::from(path),
+                size_bytes: 0,
+            })
+            .collect();
+
+        let entry_points: Vec<EntryPoint> = file_specs
+            .iter()
+            .filter(|(_, is_entry)| *is_entry)
+            .map(|(path, _)| EntryPoint {
+                path: PathBuf::from(path),
+                source: EntryPointSource::ManualEntry,
+            })
+            .collect();
+
+        let resolved_modules: Vec<ResolvedModule> = files
+            .iter()
+            .map(|f| ResolvedModule {
+                file_id: f.id,
+                path: f.path.clone(),
+                exports: vec![],
+                re_exports: vec![],
+                resolved_imports: vec![],
+                resolved_dynamic_imports: vec![],
+                resolved_dynamic_patterns: vec![],
+                member_accesses: vec![],
+                whole_object_uses: vec![],
+                has_cjs_exports: false,
+            })
+            .collect();
+
+        ModuleGraph::build(&resolved_modules, &entry_points, &files)
+    }
+
+    /// Build a default ResolvedConfig for tests.
+    fn test_config() -> ResolvedConfig {
+        fallow_config::FallowConfig {
+            schema: None,
+            entry: vec![],
+            ignore: vec![],
+            detect: fallow_config::DetectConfig::default(),
+            framework: vec![],
+            workspaces: None,
+            ignore_dependencies: vec![],
+            ignore_exports: vec![],
+            output: fallow_config::OutputFormat::Human,
+            duplicates: fallow_config::DuplicatesConfig::default(),
+            rules: fallow_config::RulesConfig::default(),
+            production: false,
+            plugins: vec![],
+        }
+        .resolve(PathBuf::from("/tmp/test"), 1, true)
+    }
+
+    fn make_export(name: &str, span_start: u32, span_end: u32) -> ExportSymbol {
+        ExportSymbol {
+            name: ExportName::Named(name.to_string()),
+            is_type_only: false,
+            span: Span::new(span_start, span_end),
+            references: vec![],
+            members: vec![],
+        }
+    }
+
+    fn make_referenced_export(
+        name: &str,
+        span_start: u32,
+        span_end: u32,
+        from: u32,
+    ) -> ExportSymbol {
+        ExportSymbol {
+            name: ExportName::Named(name.to_string()),
+            is_type_only: false,
+            span: Span::new(span_start, span_end),
+            references: vec![SymbolReference {
+                from_file: FileId(from),
+                kind: crate::graph::ReferenceKind::NamedImport,
+                import_span: Span::new(0, 10),
+            }],
+            members: vec![],
+        }
+    }
+
+    // ---- find_duplicate_exports tests ----
+
+    #[test]
+    fn duplicate_exports_empty_graph() {
+        let graph = build_graph(&[]);
+        let config = test_config();
+        let suppressions = HashMap::new();
+        let result = find_duplicate_exports(&graph, &config, &suppressions);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn duplicate_exports_no_duplicates_single_module() {
+        let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/utils.ts", false)]);
+        graph.modules[1].is_reachable = true;
+        graph.modules[1].exports = vec![
+            make_export("foo", 10, 20),
+            make_export("bar", 30, 40),
+        ];
+        let config = test_config();
+        let suppressions = HashMap::new();
+        let result = find_duplicate_exports(&graph, &config, &suppressions);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn duplicate_exports_detects_same_name_in_two_modules() {
+        let mut graph = build_graph(&[
+            ("/src/entry.ts", true),
+            ("/src/a.ts", false),
+            ("/src/b.ts", false),
+        ]);
+        graph.modules[1].is_reachable = true;
+        graph.modules[1].exports = vec![make_export("helper", 10, 20)];
+        graph.modules[2].is_reachable = true;
+        graph.modules[2].exports = vec![make_export("helper", 10, 20)];
+        let config = test_config();
+        let suppressions = HashMap::new();
+        let result = find_duplicate_exports(&graph, &config, &suppressions);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].export_name, "helper");
+        assert_eq!(result[0].locations.len(), 2);
+    }
+
+    #[test]
+    fn duplicate_exports_skips_default_exports() {
+        let mut graph = build_graph(&[
+            ("/src/entry.ts", true),
+            ("/src/a.ts", false),
+            ("/src/b.ts", false),
+        ]);
+        graph.modules[1].is_reachable = true;
+        graph.modules[1].exports = vec![ExportSymbol {
+            name: ExportName::Default,
+            is_type_only: false,
+            span: Span::new(10, 20),
+            references: vec![],
+            members: vec![],
+        }];
+        graph.modules[2].is_reachable = true;
+        graph.modules[2].exports = vec![ExportSymbol {
+            name: ExportName::Default,
+            is_type_only: false,
+            span: Span::new(10, 20),
+            references: vec![],
+            members: vec![],
+        }];
+        let config = test_config();
+        let suppressions = HashMap::new();
+        let result = find_duplicate_exports(&graph, &config, &suppressions);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn duplicate_exports_skips_synthetic_re_export_entries() {
+        let mut graph = build_graph(&[
+            ("/src/entry.ts", true),
+            ("/src/a.ts", false),
+            ("/src/b.ts", false),
+        ]);
+        graph.modules[1].is_reachable = true;
+        graph.modules[1].exports = vec![make_export("helper", 0, 0)]; // synthetic
+        graph.modules[2].is_reachable = true;
+        graph.modules[2].exports = vec![make_export("helper", 10, 20)]; // real
+        let config = test_config();
+        let suppressions = HashMap::new();
+        let result = find_duplicate_exports(&graph, &config, &suppressions);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn duplicate_exports_skips_unreachable_modules() {
+        let mut graph = build_graph(&[
+            ("/src/entry.ts", true),
+            ("/src/a.ts", false),
+            ("/src/b.ts", false),
+        ]);
+        graph.modules[1].is_reachable = true;
+        graph.modules[1].exports = vec![make_export("helper", 10, 20)];
+        // Module 2 stays unreachable
+        graph.modules[2].exports = vec![make_export("helper", 10, 20)];
+        let config = test_config();
+        let suppressions = HashMap::new();
+        let result = find_duplicate_exports(&graph, &config, &suppressions);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn duplicate_exports_skips_entry_points() {
+        let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/b.ts", false)]);
+        graph.modules[0].exports = vec![make_export("helper", 10, 20)];
+        graph.modules[1].is_reachable = true;
+        graph.modules[1].exports = vec![make_export("helper", 10, 20)];
+        let config = test_config();
+        let suppressions = HashMap::new();
+        let result = find_duplicate_exports(&graph, &config, &suppressions);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn duplicate_exports_filters_re_export_chains() {
+        let mut graph = build_graph(&[
+            ("/src/entry.ts", true),
+            ("/src/index.ts", false),
+            ("/src/helper.ts", false),
+        ]);
+        graph.modules[1].is_reachable = true;
+        graph.modules[1].exports = vec![make_export("helper", 10, 20)];
+        graph.modules[1].re_exports = vec![ReExportEdge {
+            source_file: FileId(2),
+            imported_name: "helper".to_string(),
+            exported_name: "helper".to_string(),
+            is_type_only: false,
+        }];
+        graph.modules[2].is_reachable = true;
+        graph.modules[2].exports = vec![make_export("helper", 5, 15)];
+        let config = test_config();
+        let suppressions = HashMap::new();
+        let result = find_duplicate_exports(&graph, &config, &suppressions);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn duplicate_exports_suppressed_file_wide() {
+        let mut graph = build_graph(&[
+            ("/src/entry.ts", true),
+            ("/src/a.ts", false),
+            ("/src/b.ts", false),
+        ]);
+        graph.modules[1].is_reachable = true;
+        graph.modules[1].exports = vec![make_export("helper", 10, 20)];
+        graph.modules[2].is_reachable = true;
+        graph.modules[2].exports = vec![make_export("helper", 10, 20)];
+        let config = test_config();
+
+        let supp = vec![Suppression {
+            line: 0,
+            kind: Some(IssueKind::DuplicateExport),
+        }];
+        let mut suppressions: HashMap<FileId, &[Suppression]> = HashMap::new();
+        suppressions.insert(FileId(2), &supp);
+
+        let result = find_duplicate_exports(&graph, &config, &suppressions);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn duplicate_exports_three_modules_same_name() {
+        let mut graph = build_graph(&[
+            ("/src/entry.ts", true),
+            ("/src/a.ts", false),
+            ("/src/b.ts", false),
+            ("/src/c.ts", false),
+        ]);
+        for i in 1..=3 {
+            graph.modules[i].is_reachable = true;
+            graph.modules[i].exports = vec![make_export("sharedFn", 10, 20)];
+        }
+        let config = test_config();
+        let suppressions = HashMap::new();
+        let result = find_duplicate_exports(&graph, &config, &suppressions);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].export_name, "sharedFn");
+        assert_eq!(result[0].locations.len(), 3);
+    }
+
+    #[test]
+    fn duplicate_exports_different_names_not_duplicated() {
+        let mut graph = build_graph(&[
+            ("/src/entry.ts", true),
+            ("/src/a.ts", false),
+            ("/src/b.ts", false),
+        ]);
+        graph.modules[1].is_reachable = true;
+        graph.modules[1].exports = vec![make_export("foo", 10, 20)];
+        graph.modules[2].is_reachable = true;
+        graph.modules[2].exports = vec![make_export("bar", 10, 20)];
+        let config = test_config();
+        let suppressions = HashMap::new();
+        let result = find_duplicate_exports(&graph, &config, &suppressions);
+        assert!(result.is_empty());
+    }
+
+    // ---- collect_export_usages tests ----
+
+    #[test]
+    fn collect_usages_empty_graph() {
+        let graph = build_graph(&[]);
+        let result = collect_export_usages(&graph);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn collect_usages_skips_unreachable_modules() {
+        let mut graph = build_graph(&[("/src/dead.ts", false)]);
+        graph.modules[0].exports = vec![make_export("unused", 10, 20)];
+        let result = collect_export_usages(&graph);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn collect_usages_skips_synthetic_exports() {
+        let mut graph = build_graph(&[("/src/barrel.ts", true)]);
+        graph.modules[0].exports = vec![make_export("reexported", 0, 0)];
+        let result = collect_export_usages(&graph);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn collect_usages_counts_references() {
+        let mut graph = build_graph(&[("/src/utils.ts", true), ("/src/app.ts", false)]);
+        graph.modules[0].exports = vec![make_referenced_export("helper", 10, 20, 1)];
+        let result = collect_export_usages(&graph);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].export_name, "helper");
+        assert_eq!(result[0].reference_count, 1);
+    }
+
+    #[test]
+    fn collect_usages_zero_references_still_reported() {
+        let mut graph = build_graph(&[("/src/utils.ts", true)]);
+        graph.modules[0].exports = vec![make_export("unused", 10, 20)];
+        let result = collect_export_usages(&graph);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].export_name, "unused");
+        assert_eq!(result[0].reference_count, 0);
+        assert!(result[0].reference_locations.is_empty());
+    }
+
+    #[test]
+    fn collect_usages_multiple_exports_same_module() {
+        let mut graph = build_graph(&[("/src/utils.ts", true)]);
+        graph.modules[0].exports = vec![
+            make_export("alpha", 10, 20),
+            make_export("beta", 30, 40),
+        ];
+        let result = collect_export_usages(&graph);
+        assert_eq!(result.len(), 2);
+        let names: HashSet<&str> = result.iter().map(|u| u.export_name.as_str()).collect();
+        assert!(names.contains("alpha"));
+        assert!(names.contains("beta"));
+    }
+}

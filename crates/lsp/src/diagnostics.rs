@@ -298,3 +298,481 @@ pub(crate) fn build_diagnostics(
 
     diagnostics_by_file
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    use fallow_core::duplicates::{CloneGroup, CloneInstance, DuplicationStats};
+    use fallow_core::extract::MemberKind;
+    use fallow_core::results::{
+        DependencyLocation, DuplicateExport, UnlistedDependency, UnresolvedImport,
+        UnusedDependency, UnusedExport, UnusedFile, UnusedMember,
+    };
+
+    fn empty_duplication() -> DuplicationReport {
+        DuplicationReport {
+            clone_groups: vec![],
+            clone_families: vec![],
+            stats: DuplicationStats {
+                total_files: 0,
+                files_with_clones: 0,
+                total_lines: 0,
+                duplicated_lines: 0,
+                total_tokens: 0,
+                duplicated_tokens: 0,
+                clone_groups: 0,
+                clone_instances: 0,
+                duplication_percentage: 0.0,
+            },
+        }
+    }
+
+    #[test]
+    fn empty_results_produce_no_diagnostics() {
+        let results = AnalysisResults::default();
+        let duplication = empty_duplication();
+        let root = Path::new("/tmp/project");
+
+        let diags = build_diagnostics(&results, &duplication, root);
+        assert!(diags.is_empty());
+    }
+
+    #[test]
+    fn unused_export_produces_hint_diagnostic() {
+        let mut results = AnalysisResults::default();
+        results.unused_exports.push(UnusedExport {
+            path: PathBuf::from("/tmp/project/src/utils.ts"),
+            export_name: "helper".to_string(),
+            is_type_only: false,
+            line: 5,
+            col: 7,
+            span_start: 40,
+            is_re_export: false,
+        });
+
+        let duplication = empty_duplication();
+        let diags = build_diagnostics(&results, &duplication, Path::new("/tmp/project"));
+
+        let uri = Url::from_file_path("/tmp/project/src/utils.ts").unwrap();
+        let file_diags = diags.get(&uri).expect("should have diagnostics for file");
+        assert_eq!(file_diags.len(), 1);
+
+        let d = &file_diags[0];
+        assert_eq!(d.severity, Some(DiagnosticSeverity::HINT));
+        assert_eq!(d.message, "Export 'helper' is unused");
+        assert_eq!(
+            d.code,
+            Some(NumberOrString::String("unused-export".to_string()))
+        );
+        assert_eq!(d.source, Some("fallow".to_string()));
+        // Line is 1-based in results, 0-based in LSP
+        assert_eq!(d.range.start.line, 4);
+        assert_eq!(d.range.start.character, 7);
+        // End character = col + export_name.len()
+        assert_eq!(d.range.end.character, 7 + "helper".len() as u32);
+        assert_eq!(d.tags, Some(vec![DiagnosticTag::UNNECESSARY]));
+    }
+
+    #[test]
+    fn unused_type_produces_hint_diagnostic() {
+        let mut results = AnalysisResults::default();
+        results.unused_types.push(UnusedExport {
+            path: PathBuf::from("/tmp/project/src/types.ts"),
+            export_name: "MyType".to_string(),
+            is_type_only: true,
+            line: 10,
+            col: 0,
+            span_start: 100,
+            is_re_export: false,
+        });
+
+        let duplication = empty_duplication();
+        let diags = build_diagnostics(&results, &duplication, Path::new("/tmp/project"));
+
+        let uri = Url::from_file_path("/tmp/project/src/types.ts").unwrap();
+        let file_diags = diags.get(&uri).unwrap();
+        assert_eq!(file_diags.len(), 1);
+
+        let d = &file_diags[0];
+        assert_eq!(d.severity, Some(DiagnosticSeverity::HINT));
+        assert_eq!(d.message, "Type export 'MyType' is unused");
+        assert_eq!(
+            d.code,
+            Some(NumberOrString::String("unused-type".to_string()))
+        );
+    }
+
+    #[test]
+    fn unused_file_produces_warning_at_zero_range() {
+        let mut results = AnalysisResults::default();
+        results.unused_files.push(UnusedFile {
+            path: PathBuf::from("/tmp/project/src/dead.ts"),
+        });
+
+        let duplication = empty_duplication();
+        let diags = build_diagnostics(&results, &duplication, Path::new("/tmp/project"));
+
+        let uri = Url::from_file_path("/tmp/project/src/dead.ts").unwrap();
+        let file_diags = diags.get(&uri).unwrap();
+        assert_eq!(file_diags.len(), 1);
+
+        let d = &file_diags[0];
+        assert_eq!(d.severity, Some(DiagnosticSeverity::WARNING));
+        assert_eq!(d.range, ZERO_RANGE);
+        assert_eq!(
+            d.message,
+            "File is not reachable from any entry point"
+        );
+        assert_eq!(
+            d.code,
+            Some(NumberOrString::String("unused-file".to_string()))
+        );
+    }
+
+    #[test]
+    fn unresolved_import_produces_error_diagnostic() {
+        let mut results = AnalysisResults::default();
+        results.unresolved_imports.push(UnresolvedImport {
+            path: PathBuf::from("/tmp/project/src/app.ts"),
+            specifier: "./missing-module".to_string(),
+            line: 3,
+            col: 20,
+        });
+
+        let duplication = empty_duplication();
+        let diags = build_diagnostics(&results, &duplication, Path::new("/tmp/project"));
+
+        let uri = Url::from_file_path("/tmp/project/src/app.ts").unwrap();
+        let file_diags = diags.get(&uri).unwrap();
+        assert_eq!(file_diags.len(), 1);
+
+        let d = &file_diags[0];
+        assert_eq!(d.severity, Some(DiagnosticSeverity::ERROR));
+        assert_eq!(d.message, "Cannot resolve import './missing-module'");
+        assert_eq!(d.range.start.line, 2); // 1-based → 0-based
+        assert_eq!(d.range.start.character, 20);
+    }
+
+    #[test]
+    fn unused_dependency_produces_warning_at_package_json() {
+        let mut results = AnalysisResults::default();
+        results.unused_dependencies.push(UnusedDependency {
+            package_name: "lodash".to_string(),
+            location: DependencyLocation::Dependencies,
+            path: PathBuf::from("/tmp/project/package.json"),
+        });
+
+        let duplication = empty_duplication();
+        let diags = build_diagnostics(&results, &duplication, Path::new("/tmp/project"));
+
+        let uri = Url::from_file_path("/tmp/project/package.json").unwrap();
+        let file_diags = diags.get(&uri).unwrap();
+        assert_eq!(file_diags.len(), 1);
+
+        let d = &file_diags[0];
+        assert_eq!(d.severity, Some(DiagnosticSeverity::WARNING));
+        assert_eq!(d.message, "Unused dependency: lodash");
+        assert_eq!(d.range, ZERO_RANGE);
+    }
+
+    #[test]
+    fn unused_dev_dependency_produces_warning() {
+        let mut results = AnalysisResults::default();
+        results.unused_dev_dependencies.push(UnusedDependency {
+            package_name: "prettier".to_string(),
+            location: DependencyLocation::DevDependencies,
+            path: PathBuf::from("/tmp/project/package.json"),
+        });
+
+        let duplication = empty_duplication();
+        let diags = build_diagnostics(&results, &duplication, Path::new("/tmp/project"));
+
+        let uri = Url::from_file_path("/tmp/project/package.json").unwrap();
+        let file_diags = diags.get(&uri).unwrap();
+        assert_eq!(file_diags.len(), 1);
+
+        let d = &file_diags[0];
+        assert_eq!(d.severity, Some(DiagnosticSeverity::WARNING));
+        assert_eq!(d.message, "Unused devDependency: prettier");
+    }
+
+    #[test]
+    fn unlisted_dependency_uses_root_package_json() {
+        let mut results = AnalysisResults::default();
+        results.unlisted_dependencies.push(UnlistedDependency {
+            package_name: "chalk".to_string(),
+            imported_from: vec![PathBuf::from("/tmp/project/src/cli.ts")],
+        });
+
+        let duplication = empty_duplication();
+        let diags = build_diagnostics(&results, &duplication, Path::new("/tmp/project"));
+
+        let uri = Url::from_file_path("/tmp/project/package.json").unwrap();
+        let file_diags = diags.get(&uri).unwrap();
+        assert_eq!(file_diags.len(), 1);
+
+        let d = &file_diags[0];
+        assert_eq!(d.severity, Some(DiagnosticSeverity::WARNING));
+        assert!(d.message.contains("chalk"));
+        assert!(d.message.contains("Unlisted dependency"));
+    }
+
+    #[test]
+    fn unused_enum_member_produces_hint() {
+        let mut results = AnalysisResults::default();
+        results.unused_enum_members.push(UnusedMember {
+            path: PathBuf::from("/tmp/project/src/enums.ts"),
+            parent_name: "Color".to_string(),
+            member_name: "Blue".to_string(),
+            kind: MemberKind::EnumMember,
+            line: 4,
+            col: 2,
+        });
+
+        let duplication = empty_duplication();
+        let diags = build_diagnostics(&results, &duplication, Path::new("/tmp/project"));
+
+        let uri = Url::from_file_path("/tmp/project/src/enums.ts").unwrap();
+        let file_diags = diags.get(&uri).unwrap();
+        assert_eq!(file_diags.len(), 1);
+
+        let d = &file_diags[0];
+        assert_eq!(d.severity, Some(DiagnosticSeverity::HINT));
+        assert_eq!(d.message, "Enum member 'Color.Blue' is unused");
+        assert_eq!(
+            d.code,
+            Some(NumberOrString::String("unused-enum-member".to_string()))
+        );
+        assert_eq!(d.range.start.line, 3);
+        assert_eq!(d.range.start.character, 2);
+        assert_eq!(d.range.end.character, 2 + "Blue".len() as u32);
+    }
+
+    #[test]
+    fn unused_class_member_produces_hint() {
+        let mut results = AnalysisResults::default();
+        results.unused_class_members.push(UnusedMember {
+            path: PathBuf::from("/tmp/project/src/service.ts"),
+            parent_name: "UserService".to_string(),
+            member_name: "reset".to_string(),
+            kind: MemberKind::ClassMethod,
+            line: 20,
+            col: 4,
+        });
+
+        let duplication = empty_duplication();
+        let diags = build_diagnostics(&results, &duplication, Path::new("/tmp/project"));
+
+        let uri = Url::from_file_path("/tmp/project/src/service.ts").unwrap();
+        let file_diags = diags.get(&uri).unwrap();
+        assert_eq!(file_diags.len(), 1);
+
+        let d = &file_diags[0];
+        assert_eq!(d.severity, Some(DiagnosticSeverity::HINT));
+        assert_eq!(d.message, "Class member 'UserService.reset' is unused");
+        assert_eq!(
+            d.code,
+            Some(NumberOrString::String("unused-class-member".to_string()))
+        );
+    }
+
+    #[test]
+    fn duplicate_export_produces_warning_with_related_files() {
+        let mut results = AnalysisResults::default();
+        results.duplicate_exports.push(DuplicateExport {
+            export_name: "formatDate".to_string(),
+            locations: vec![
+                PathBuf::from("/tmp/project/src/utils.ts"),
+                PathBuf::from("/tmp/project/src/helpers.ts"),
+            ],
+        });
+
+        let duplication = empty_duplication();
+        let diags = build_diagnostics(&results, &duplication, Path::new("/tmp/project"));
+
+        // Both files should have a diagnostic
+        let uri_utils = Url::from_file_path("/tmp/project/src/utils.ts").unwrap();
+        let uri_helpers = Url::from_file_path("/tmp/project/src/helpers.ts").unwrap();
+
+        let utils_diags = diags.get(&uri_utils).unwrap();
+        assert_eq!(utils_diags.len(), 1);
+        let d = &utils_diags[0];
+        assert_eq!(d.severity, Some(DiagnosticSeverity::WARNING));
+        assert!(d.message.contains("formatDate"));
+        assert!(d.message.contains("/tmp/project/src/helpers.ts"));
+        assert_eq!(d.range, ZERO_RANGE);
+
+        let helpers_diags = diags.get(&uri_helpers).unwrap();
+        assert_eq!(helpers_diags.len(), 1);
+        let dh = &helpers_diags[0];
+        assert!(dh.message.contains("/tmp/project/src/utils.ts"));
+    }
+
+    #[test]
+    fn duplication_diagnostic_has_related_information() {
+        let results = AnalysisResults::default();
+        let duplication = DuplicationReport {
+            clone_groups: vec![CloneGroup {
+                instances: vec![
+                    CloneInstance {
+                        file: PathBuf::from("/tmp/project/src/a.ts"),
+                        start_line: 10,
+                        end_line: 15,
+                        start_col: 0,
+                        end_col: 20,
+                        fragment: "duplicated code".to_string(),
+                    },
+                    CloneInstance {
+                        file: PathBuf::from("/tmp/project/src/b.ts"),
+                        start_line: 20,
+                        end_line: 25,
+                        start_col: 4,
+                        end_col: 24,
+                        fragment: "duplicated code".to_string(),
+                    },
+                ],
+                token_count: 50,
+                line_count: 6,
+            }],
+            clone_families: vec![],
+            stats: DuplicationStats {
+                total_files: 2,
+                files_with_clones: 2,
+                total_lines: 100,
+                duplicated_lines: 12,
+                total_tokens: 500,
+                duplicated_tokens: 100,
+                clone_groups: 1,
+                clone_instances: 2,
+                duplication_percentage: 12.0,
+            },
+        };
+
+        let diags = build_diagnostics(&results, &duplication, Path::new("/tmp/project"));
+
+        // File a.ts should have a diagnostic with related info pointing to b.ts
+        let uri_a = Url::from_file_path("/tmp/project/src/a.ts").unwrap();
+        let diags_a = diags.get(&uri_a).unwrap();
+        assert_eq!(diags_a.len(), 1);
+
+        let d = &diags_a[0];
+        assert_eq!(d.severity, Some(DiagnosticSeverity::HINT));
+        assert_eq!(
+            d.code,
+            Some(NumberOrString::String("code-duplication".to_string()))
+        );
+        assert!(d.message.contains("6 lines"));
+        assert!(d.message.contains("2 instances"));
+
+        // Check related info
+        let related = d.related_information.as_ref().unwrap();
+        assert_eq!(related.len(), 1);
+        assert_eq!(related[0].message, "Also duplicated here");
+        let related_uri = Url::from_file_path("/tmp/project/src/b.ts").unwrap();
+        assert_eq!(related[0].location.uri, related_uri);
+        // b.ts start_line = 20 (1-based) → 19 (0-based)
+        assert_eq!(related[0].location.range.start.line, 19);
+        assert_eq!(related[0].location.range.start.character, 4);
+
+        // File b.ts should have related info pointing to a.ts
+        let uri_b = Url::from_file_path("/tmp/project/src/b.ts").unwrap();
+        let diags_b = diags.get(&uri_b).unwrap();
+        assert_eq!(diags_b.len(), 1);
+        let related_b = diags_b[0].related_information.as_ref().unwrap();
+        assert_eq!(related_b.len(), 1);
+        assert_eq!(related_b[0].location.uri, uri_a);
+    }
+
+    #[test]
+    fn multiple_issues_same_file_aggregate() {
+        let mut results = AnalysisResults::default();
+        let path = PathBuf::from("/tmp/project/src/mod.ts");
+        results.unused_exports.push(UnusedExport {
+            path: path.clone(),
+            export_name: "foo".to_string(),
+            is_type_only: false,
+            line: 1,
+            col: 0,
+            span_start: 0,
+            is_re_export: false,
+        });
+        results.unused_exports.push(UnusedExport {
+            path: path.clone(),
+            export_name: "bar".to_string(),
+            is_type_only: false,
+            line: 5,
+            col: 0,
+            span_start: 50,
+            is_re_export: false,
+        });
+        results.unresolved_imports.push(UnresolvedImport {
+            path: path.clone(),
+            specifier: "./gone".to_string(),
+            line: 10,
+            col: 0,
+        });
+
+        let duplication = empty_duplication();
+        let diags = build_diagnostics(&results, &duplication, Path::new("/tmp/project"));
+
+        let uri = Url::from_file_path(&path).unwrap();
+        let file_diags = diags.get(&uri).unwrap();
+        assert_eq!(file_diags.len(), 3);
+    }
+
+    #[test]
+    fn all_diagnostics_have_fallow_source() {
+        let mut results = AnalysisResults::default();
+        results.unused_files.push(UnusedFile {
+            path: PathBuf::from("/tmp/project/src/a.ts"),
+        });
+        results.unused_exports.push(UnusedExport {
+            path: PathBuf::from("/tmp/project/src/b.ts"),
+            export_name: "x".to_string(),
+            is_type_only: false,
+            line: 1,
+            col: 0,
+            span_start: 0,
+            is_re_export: false,
+        });
+        results.unresolved_imports.push(UnresolvedImport {
+            path: PathBuf::from("/tmp/project/src/c.ts"),
+            specifier: "./nope".to_string(),
+            line: 1,
+            col: 0,
+        });
+
+        let duplication = empty_duplication();
+        let diags = build_diagnostics(&results, &duplication, Path::new("/tmp/project"));
+
+        for (_, file_diags) in &diags {
+            for d in file_diags {
+                assert_eq!(d.source, Some("fallow".to_string()));
+            }
+        }
+    }
+
+    #[test]
+    fn line_conversion_saturates_at_zero() {
+        // Line 0 in results (unusual) should become 0 in LSP, not underflow
+        let mut results = AnalysisResults::default();
+        results.unused_exports.push(UnusedExport {
+            path: PathBuf::from("/tmp/project/src/edge.ts"),
+            export_name: "x".to_string(),
+            is_type_only: false,
+            line: 0,
+            col: 0,
+            span_start: 0,
+            is_re_export: false,
+        });
+
+        let duplication = empty_duplication();
+        let diags = build_diagnostics(&results, &duplication, Path::new("/tmp/project"));
+
+        let uri = Url::from_file_path("/tmp/project/src/edge.ts").unwrap();
+        let d = &diags.get(&uri).unwrap()[0];
+        assert_eq!(d.range.start.line, 0);
+    }
+}

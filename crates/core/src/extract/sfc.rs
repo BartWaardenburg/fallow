@@ -143,3 +143,237 @@ pub(super) fn parse_sfc_to_module(file_id: FileId, source: &str, content_hash: u
 
     combined
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── is_sfc_file ──────────────────────────────────────────────
+
+    #[test]
+    fn is_sfc_file_vue() {
+        assert!(is_sfc_file(Path::new("App.vue")));
+    }
+
+    #[test]
+    fn is_sfc_file_svelte() {
+        assert!(is_sfc_file(Path::new("Counter.svelte")));
+    }
+
+    #[test]
+    fn is_sfc_file_rejects_ts() {
+        assert!(!is_sfc_file(Path::new("utils.ts")));
+    }
+
+    #[test]
+    fn is_sfc_file_rejects_jsx() {
+        assert!(!is_sfc_file(Path::new("App.jsx")));
+    }
+
+    #[test]
+    fn is_sfc_file_rejects_astro() {
+        assert!(!is_sfc_file(Path::new("Layout.astro")));
+    }
+
+    // ── extract_sfc_scripts: single script block ─────────────────
+
+    #[test]
+    fn single_plain_script() {
+        let scripts = extract_sfc_scripts("<script>const x = 1;</script>");
+        assert_eq!(scripts.len(), 1);
+        assert_eq!(scripts[0].body, "const x = 1;");
+        assert!(!scripts[0].is_typescript);
+        assert!(!scripts[0].is_jsx);
+        assert!(scripts[0].src.is_none());
+    }
+
+    #[test]
+    fn single_ts_script() {
+        let scripts = extract_sfc_scripts(r#"<script lang="ts">const x: number = 1;</script>"#);
+        assert_eq!(scripts.len(), 1);
+        assert!(scripts[0].is_typescript);
+        assert!(!scripts[0].is_jsx);
+    }
+
+    #[test]
+    fn single_tsx_script() {
+        let scripts = extract_sfc_scripts(r#"<script lang="tsx">const el = <div />;</script>"#);
+        assert_eq!(scripts.len(), 1);
+        assert!(scripts[0].is_typescript);
+        assert!(scripts[0].is_jsx);
+    }
+
+    #[test]
+    fn single_jsx_script() {
+        let scripts = extract_sfc_scripts(r#"<script lang="jsx">const el = <div />;</script>"#);
+        assert_eq!(scripts.len(), 1);
+        assert!(!scripts[0].is_typescript);
+        assert!(scripts[0].is_jsx);
+    }
+
+    // ── Multiple script blocks ───────────────────────────────────
+
+    #[test]
+    fn two_script_blocks() {
+        let source = r#"
+<script lang="ts">
+export default {};
+</script>
+<script setup lang="ts">
+const count = 0;
+</script>
+"#;
+        let scripts = extract_sfc_scripts(source);
+        assert_eq!(scripts.len(), 2);
+        assert!(scripts[0].body.contains("export default"));
+        assert!(scripts[1].body.contains("count"));
+    }
+
+    // ── <script setup> ───────────────────────────────────────────
+
+    #[test]
+    fn script_setup_extracted() {
+        let scripts =
+            extract_sfc_scripts(r#"<script setup lang="ts">import { ref } from 'vue';</script>"#);
+        assert_eq!(scripts.len(), 1);
+        assert!(scripts[0].body.contains("import"));
+        assert!(scripts[0].is_typescript);
+    }
+
+    // ── <script src="..."> external script ───────────────────────
+
+    #[test]
+    fn script_src_detected() {
+        let scripts =
+            extract_sfc_scripts(r#"<script src="./component.ts" lang="ts"></script>"#);
+        assert_eq!(scripts.len(), 1);
+        assert_eq!(scripts[0].src.as_deref(), Some("./component.ts"));
+    }
+
+    #[test]
+    fn data_src_not_treated_as_src() {
+        let scripts =
+            extract_sfc_scripts(r#"<script lang="ts" data-src="./nope.ts">const x = 1;</script>"#);
+        assert_eq!(scripts.len(), 1);
+        assert!(scripts[0].src.is_none());
+    }
+
+    // ── HTML comment filtering ───────────────────────────────────
+
+    #[test]
+    fn script_inside_html_comment_filtered() {
+        let source = r#"
+<!-- <script lang="ts">import { bad } from 'bad';</script> -->
+<script lang="ts">import { good } from 'good';</script>
+"#;
+        let scripts = extract_sfc_scripts(source);
+        assert_eq!(scripts.len(), 1);
+        assert!(scripts[0].body.contains("good"));
+    }
+
+    #[test]
+    fn spanning_comment_filters_script() {
+        let source = r#"
+<!-- disabled:
+<script lang="ts">import { bad } from 'bad';</script>
+-->
+<script lang="ts">const ok = true;</script>
+"#;
+        let scripts = extract_sfc_scripts(source);
+        assert_eq!(scripts.len(), 1);
+        assert!(scripts[0].body.contains("ok"));
+    }
+
+    #[test]
+    fn string_containing_comment_markers_not_corrupted() {
+        // A string in the script body containing <!-- should not cause filtering issues
+        let source = r#"
+<script setup lang="ts">
+const marker = "<!-- not a comment -->";
+import { ref } from 'vue';
+</script>
+"#;
+        let scripts = extract_sfc_scripts(source);
+        assert_eq!(scripts.len(), 1);
+        assert!(scripts[0].body.contains("import"));
+    }
+
+    // ── Generic attributes with > in quoted values ───────────────
+
+    #[test]
+    fn generic_attr_with_angle_bracket() {
+        let source =
+            r#"<script setup lang="ts" generic="T extends Foo<Bar>">const x = 1;</script>"#;
+        let scripts = extract_sfc_scripts(source);
+        assert_eq!(scripts.len(), 1);
+        assert_eq!(scripts[0].body, "const x = 1;");
+    }
+
+    #[test]
+    fn nested_generic_attr() {
+        let source = r#"<script setup lang="ts" generic="T extends Map<string, Set<number>>">const x = 1;</script>"#;
+        let scripts = extract_sfc_scripts(source);
+        assert_eq!(scripts.len(), 1);
+        assert_eq!(scripts[0].body, "const x = 1;");
+    }
+
+    // ── lang attribute with single quotes ────────────────────────
+
+    #[test]
+    fn lang_single_quoted() {
+        let scripts = extract_sfc_scripts("<script lang='ts'>const x = 1;</script>");
+        assert_eq!(scripts.len(), 1);
+        assert!(scripts[0].is_typescript);
+    }
+
+    // ── Case-insensitive matching ────────────────────────────────
+
+    #[test]
+    fn uppercase_script_tag() {
+        let scripts = extract_sfc_scripts(r#"<SCRIPT lang="ts">const x = 1;</SCRIPT>"#);
+        assert_eq!(scripts.len(), 1);
+        assert!(scripts[0].is_typescript);
+    }
+
+    // ── Edge cases ───────────────────────────────────────────────
+
+    #[test]
+    fn no_script_block() {
+        let scripts = extract_sfc_scripts("<template><div>Hello</div></template>");
+        assert!(scripts.is_empty());
+    }
+
+    #[test]
+    fn empty_script_body() {
+        let scripts = extract_sfc_scripts(r#"<script lang="ts"></script>"#);
+        assert_eq!(scripts.len(), 1);
+        assert!(scripts[0].body.is_empty());
+    }
+
+    #[test]
+    fn whitespace_only_script() {
+        let scripts = extract_sfc_scripts("<script lang=\"ts\">\n  \n</script>");
+        assert_eq!(scripts.len(), 1);
+        assert!(scripts[0].body.trim().is_empty());
+    }
+
+    #[test]
+    fn byte_offset_is_set() {
+        let source = r#"<template><div/></template><script lang="ts">code</script>"#;
+        let scripts = extract_sfc_scripts(source);
+        assert_eq!(scripts.len(), 1);
+        // The byte_offset should point to where "code" starts in the source
+        let offset = scripts[0].byte_offset;
+        assert_eq!(&source[offset..offset + 4], "code");
+    }
+
+    #[test]
+    fn script_with_extra_attributes() {
+        let scripts = extract_sfc_scripts(
+            r#"<script lang="ts" id="app" type="module" data-custom="val">const x = 1;</script>"#,
+        );
+        assert_eq!(scripts.len(), 1);
+        assert!(scripts[0].is_typescript);
+        assert!(scripts[0].src.is_none());
+    }
+}

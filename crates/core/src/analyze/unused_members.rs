@@ -190,3 +190,427 @@ pub(crate) fn find_unused_members(
 
     (unused_enum_members, unused_class_members)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
+    use crate::extract::{
+        ExportName, ImportInfo, ImportedName, MemberAccess, MemberInfo, MemberKind,
+    };
+    use crate::graph::{ExportSymbol, ModuleGraph, SymbolReference};
+    use crate::resolve::{ResolveResult, ResolvedImport, ResolvedModule};
+    use oxc_span::Span;
+    use std::path::PathBuf;
+
+    fn build_graph(file_specs: &[(&str, bool)]) -> ModuleGraph {
+        let files: Vec<DiscoveredFile> = file_specs
+            .iter()
+            .enumerate()
+            .map(|(i, (path, _))| DiscoveredFile {
+                id: FileId(i as u32),
+                path: PathBuf::from(path),
+                size_bytes: 0,
+            })
+            .collect();
+
+        let entry_points: Vec<EntryPoint> = file_specs
+            .iter()
+            .filter(|(_, is_entry)| *is_entry)
+            .map(|(path, _)| EntryPoint {
+                path: PathBuf::from(path),
+                source: EntryPointSource::ManualEntry,
+            })
+            .collect();
+
+        let resolved_modules: Vec<ResolvedModule> = files
+            .iter()
+            .map(|f| ResolvedModule {
+                file_id: f.id,
+                path: f.path.clone(),
+                exports: vec![],
+                re_exports: vec![],
+                resolved_imports: vec![],
+                resolved_dynamic_imports: vec![],
+                resolved_dynamic_patterns: vec![],
+                member_accesses: vec![],
+                whole_object_uses: vec![],
+                has_cjs_exports: false,
+            })
+            .collect();
+
+        ModuleGraph::build(&resolved_modules, &entry_points, &files)
+    }
+
+    fn test_config() -> ResolvedConfig {
+        fallow_config::FallowConfig {
+            schema: None,
+            entry: vec![],
+            ignore: vec![],
+            detect: fallow_config::DetectConfig::default(),
+            framework: vec![],
+            workspaces: None,
+            ignore_dependencies: vec![],
+            ignore_exports: vec![],
+            output: fallow_config::OutputFormat::Human,
+            duplicates: fallow_config::DuplicatesConfig::default(),
+            rules: fallow_config::RulesConfig::default(),
+            production: false,
+            plugins: vec![],
+        }
+        .resolve(PathBuf::from("/tmp/test"), 1, true)
+    }
+
+    fn make_member(name: &str, kind: MemberKind) -> MemberInfo {
+        MemberInfo {
+            name: name.to_string(),
+            kind,
+            span: Span::new(10, 20),
+            has_decorator: false,
+        }
+    }
+
+    fn make_export_with_members(
+        name: &str,
+        members: Vec<MemberInfo>,
+        ref_from: Option<u32>,
+    ) -> ExportSymbol {
+        let references = ref_from
+            .map(|from| {
+                vec![SymbolReference {
+                    from_file: FileId(from),
+                    kind: crate::graph::ReferenceKind::NamedImport,
+                    import_span: Span::new(0, 10),
+                }]
+            })
+            .unwrap_or_default();
+        ExportSymbol {
+            name: ExportName::Named(name.to_string()),
+            is_type_only: false,
+            span: Span::new(0, 10),
+            references,
+            members,
+        }
+    }
+
+    #[test]
+    fn unused_members_empty_graph() {
+        let graph = build_graph(&[]);
+        let config = test_config();
+        let (enum_members, class_members) =
+            find_unused_members(&graph, &config, &[], &HashMap::new());
+        assert!(enum_members.is_empty());
+        assert!(class_members.is_empty());
+    }
+
+    #[test]
+    fn unused_enum_member_detected() {
+        let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/enums.ts", false)]);
+        graph.modules[1].is_reachable = true;
+        graph.modules[1].exports = vec![make_export_with_members(
+            "Status",
+            vec![
+                make_member("Active", MemberKind::EnumMember),
+                make_member("Inactive", MemberKind::EnumMember),
+            ],
+            Some(0), // referenced from entry
+        )];
+        let config = test_config();
+
+        // No member accesses at all — both should be unused
+        let (enum_members, class_members) =
+            find_unused_members(&graph, &config, &[], &HashMap::new());
+        assert_eq!(enum_members.len(), 2);
+        assert!(class_members.is_empty());
+        let names: HashSet<&str> = enum_members.iter().map(|m| m.member_name.as_str()).collect();
+        assert!(names.contains("Active"));
+        assert!(names.contains("Inactive"));
+    }
+
+    #[test]
+    fn accessed_enum_member_not_flagged() {
+        let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/enums.ts", false)]);
+        graph.modules[1].is_reachable = true;
+        graph.modules[1].exports = vec![make_export_with_members(
+            "Status",
+            vec![
+                make_member("Active", MemberKind::EnumMember),
+                make_member("Inactive", MemberKind::EnumMember),
+            ],
+            Some(0),
+        )];
+        let config = test_config();
+
+        // Consumer accesses Status.Active
+        let resolved_modules = vec![ResolvedModule {
+            file_id: FileId(0),
+            path: PathBuf::from("/src/entry.ts"),
+            exports: vec![],
+            re_exports: vec![],
+            resolved_imports: vec![ResolvedImport {
+                info: ImportInfo {
+                    source: "./enums".to_string(),
+                    imported_name: ImportedName::Named("Status".to_string()),
+                    local_name: "Status".to_string(),
+                    is_type_only: false,
+                    span: Span::new(0, 30),
+                },
+                target: ResolveResult::InternalModule(FileId(1)),
+            }],
+            resolved_dynamic_imports: vec![],
+            resolved_dynamic_patterns: vec![],
+            member_accesses: vec![MemberAccess {
+                object: "Status".to_string(),
+                member: "Active".to_string(),
+            }],
+            whole_object_uses: vec![],
+            has_cjs_exports: false,
+        }];
+
+        let (enum_members, _) =
+            find_unused_members(&graph, &config, &resolved_modules, &HashMap::new());
+        // Only Inactive should be unused
+        assert_eq!(enum_members.len(), 1);
+        assert_eq!(enum_members[0].member_name, "Inactive");
+    }
+
+    #[test]
+    fn whole_object_use_skips_all_members() {
+        let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/enums.ts", false)]);
+        graph.modules[1].is_reachable = true;
+        graph.modules[1].exports = vec![make_export_with_members(
+            "Status",
+            vec![
+                make_member("Active", MemberKind::EnumMember),
+                make_member("Inactive", MemberKind::EnumMember),
+            ],
+            Some(0),
+        )];
+        let config = test_config();
+
+        // Consumer uses Object.values(Status) — whole object use
+        let resolved_modules = vec![ResolvedModule {
+            file_id: FileId(0),
+            path: PathBuf::from("/src/entry.ts"),
+            exports: vec![],
+            re_exports: vec![],
+            resolved_imports: vec![ResolvedImport {
+                info: ImportInfo {
+                    source: "./enums".to_string(),
+                    imported_name: ImportedName::Named("Status".to_string()),
+                    local_name: "Status".to_string(),
+                    is_type_only: false,
+                    span: Span::new(0, 30),
+                },
+                target: ResolveResult::InternalModule(FileId(1)),
+            }],
+            resolved_dynamic_imports: vec![],
+            resolved_dynamic_patterns: vec![],
+            member_accesses: vec![],
+            whole_object_uses: vec!["Status".to_string()],
+            has_cjs_exports: false,
+        }];
+
+        let (enum_members, class_members) =
+            find_unused_members(&graph, &config, &resolved_modules, &HashMap::new());
+        assert!(enum_members.is_empty());
+        assert!(class_members.is_empty());
+    }
+
+    #[test]
+    fn decorated_class_member_not_flagged() {
+        let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/entity.ts", false)]);
+        graph.modules[1].is_reachable = true;
+        graph.modules[1].exports = vec![make_export_with_members(
+            "User",
+            vec![MemberInfo {
+                name: "name".to_string(),
+                kind: MemberKind::ClassProperty,
+                span: Span::new(10, 20),
+                has_decorator: true, // @Column() etc.
+            }],
+            Some(0),
+        )];
+        let config = test_config();
+
+        let (_, class_members) =
+            find_unused_members(&graph, &config, &[], &HashMap::new());
+        assert!(class_members.is_empty());
+    }
+
+    #[test]
+    fn react_lifecycle_method_not_flagged() {
+        let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/component.ts", false)]);
+        graph.modules[1].is_reachable = true;
+        graph.modules[1].exports = vec![make_export_with_members(
+            "MyComponent",
+            vec![
+                make_member("render", MemberKind::ClassMethod),
+                make_member("componentDidMount", MemberKind::ClassMethod),
+                make_member("customMethod", MemberKind::ClassMethod),
+            ],
+            Some(0),
+        )];
+        let config = test_config();
+
+        let (_, class_members) =
+            find_unused_members(&graph, &config, &[], &HashMap::new());
+        // Only customMethod should be flagged
+        assert_eq!(class_members.len(), 1);
+        assert_eq!(class_members[0].member_name, "customMethod");
+    }
+
+    #[test]
+    fn angular_lifecycle_method_not_flagged() {
+        let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/component.ts", false)]);
+        graph.modules[1].is_reachable = true;
+        graph.modules[1].exports = vec![make_export_with_members(
+            "AppComponent",
+            vec![
+                make_member("ngOnInit", MemberKind::ClassMethod),
+                make_member("ngOnDestroy", MemberKind::ClassMethod),
+                make_member("myHelper", MemberKind::ClassMethod),
+            ],
+            Some(0),
+        )];
+        let config = test_config();
+
+        let (_, class_members) =
+            find_unused_members(&graph, &config, &[], &HashMap::new());
+        assert_eq!(class_members.len(), 1);
+        assert_eq!(class_members[0].member_name, "myHelper");
+    }
+
+    #[test]
+    fn this_member_access_not_flagged() {
+        let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/service.ts", false)]);
+        graph.modules[1].is_reachable = true;
+        graph.modules[1].exports = vec![make_export_with_members(
+            "Service",
+            vec![
+                make_member("label", MemberKind::ClassProperty),
+                make_member("unused_prop", MemberKind::ClassProperty),
+            ],
+            Some(0),
+        )];
+        let config = test_config();
+
+        // The service file itself accesses this.label
+        let resolved_modules = vec![ResolvedModule {
+            file_id: FileId(1), // same file as the service
+            path: PathBuf::from("/src/service.ts"),
+            exports: vec![],
+            re_exports: vec![],
+            resolved_imports: vec![],
+            resolved_dynamic_imports: vec![],
+            resolved_dynamic_patterns: vec![],
+            member_accesses: vec![MemberAccess {
+                object: "this".to_string(),
+                member: "label".to_string(),
+            }],
+            whole_object_uses: vec![],
+            has_cjs_exports: false,
+        }];
+
+        let (_, class_members) =
+            find_unused_members(&graph, &config, &resolved_modules, &HashMap::new());
+        // Only unused_prop should be flagged (label is accessed via this)
+        assert_eq!(class_members.len(), 1);
+        assert_eq!(class_members[0].member_name, "unused_prop");
+    }
+
+    #[test]
+    fn unreferenced_export_skips_member_analysis() {
+        let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/enums.ts", false)]);
+        graph.modules[1].is_reachable = true;
+        // Export has members but NO references — whole export is dead, members skipped
+        graph.modules[1].exports = vec![make_export_with_members(
+            "Status",
+            vec![make_member("Active", MemberKind::EnumMember)],
+            None, // no references
+        )];
+        let config = test_config();
+
+        let (enum_members, _) =
+            find_unused_members(&graph, &config, &[], &HashMap::new());
+        // Member analysis skipped because export itself is unreferenced
+        assert!(enum_members.is_empty());
+    }
+
+    #[test]
+    fn unreachable_module_skips_member_analysis() {
+        let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/dead.ts", false)]);
+        // Module 1 stays unreachable
+        graph.modules[1].exports = vec![make_export_with_members(
+            "DeadEnum",
+            vec![make_member("X", MemberKind::EnumMember)],
+            Some(0),
+        )];
+        let config = test_config();
+
+        let (enum_members, class_members) =
+            find_unused_members(&graph, &config, &[], &HashMap::new());
+        assert!(enum_members.is_empty());
+        assert!(class_members.is_empty());
+    }
+
+    #[test]
+    fn entry_point_module_skips_member_analysis() {
+        let mut graph = build_graph(&[("/src/entry.ts", true)]);
+        graph.modules[0].exports = vec![make_export_with_members(
+            "EntryEnum",
+            vec![make_member("X", MemberKind::EnumMember)],
+            None,
+        )];
+        let config = test_config();
+
+        let (enum_members, class_members) =
+            find_unused_members(&graph, &config, &[], &HashMap::new());
+        assert!(enum_members.is_empty());
+        assert!(class_members.is_empty());
+    }
+
+    #[test]
+    fn enum_member_kind_routed_to_enum_results() {
+        let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/enums.ts", false)]);
+        graph.modules[1].is_reachable = true;
+        graph.modules[1].exports = vec![make_export_with_members(
+            "Status",
+            vec![make_member("Active", MemberKind::EnumMember)],
+            Some(0),
+        )];
+        let config = test_config();
+
+        let (enum_members, class_members) =
+            find_unused_members(&graph, &config, &[], &HashMap::new());
+        assert_eq!(enum_members.len(), 1);
+        assert_eq!(enum_members[0].kind, MemberKind::EnumMember);
+        assert!(class_members.is_empty());
+    }
+
+    #[test]
+    fn class_member_kind_routed_to_class_results() {
+        let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/class.ts", false)]);
+        graph.modules[1].is_reachable = true;
+        graph.modules[1].exports = vec![make_export_with_members(
+            "MyClass",
+            vec![
+                make_member("myMethod", MemberKind::ClassMethod),
+                make_member("myProp", MemberKind::ClassProperty),
+            ],
+            Some(0),
+        )];
+        let config = test_config();
+
+        let (enum_members, class_members) =
+            find_unused_members(&graph, &config, &[], &HashMap::new());
+        assert!(enum_members.is_empty());
+        assert_eq!(class_members.len(), 2);
+        assert!(class_members
+            .iter()
+            .any(|m| m.kind == MemberKind::ClassMethod));
+        assert!(class_members
+            .iter()
+            .any(|m| m.kind == MemberKind::ClassProperty));
+    }
+}

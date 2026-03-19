@@ -76,3 +76,160 @@ pub(super) fn parse_mdx_to_module(file_id: FileId, source: &str, content_hash: u
 
     ModuleInfoExtractor::new().into_module_info(file_id, content_hash, suppressions)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── is_mdx_file ──────────────────────────────────────────────
+
+    #[test]
+    fn is_mdx_file_positive() {
+        assert!(is_mdx_file(Path::new("post.mdx")));
+    }
+
+    #[test]
+    fn is_mdx_file_rejects_md() {
+        assert!(!is_mdx_file(Path::new("readme.md")));
+    }
+
+    #[test]
+    fn is_mdx_file_rejects_tsx() {
+        assert!(!is_mdx_file(Path::new("component.tsx")));
+    }
+
+    #[test]
+    fn is_mdx_file_rejects_jsx() {
+        assert!(!is_mdx_file(Path::new("component.jsx")));
+    }
+
+    // ── extract_mdx_statements: import extraction ────────────────
+
+    #[test]
+    fn extracts_single_import() {
+        let result = extract_mdx_statements("import { Chart } from './Chart'\n\n# Title\n");
+        assert!(result.contains("import { Chart } from './Chart'"));
+    }
+
+    #[test]
+    fn extracts_default_import() {
+        let result = extract_mdx_statements("import Button from './Button'\n\n# Title\n");
+        assert!(result.contains("import Button from './Button'"));
+    }
+
+    #[test]
+    fn extracts_multiple_imports() {
+        let source = "import { A } from './a'\nimport { B } from './b'\n\n# Title\n";
+        let result = extract_mdx_statements(source);
+        assert!(result.contains("import { A } from './a'"));
+        assert!(result.contains("import { B } from './b'"));
+    }
+
+    #[test]
+    fn extracts_import_no_space() {
+        let result = extract_mdx_statements("import{ Chart } from './Chart'\n\n# Title\n");
+        assert!(result.contains("import{ Chart }"));
+    }
+
+    // ── Export extraction ────────────────────────────────────────
+
+    #[test]
+    fn extracts_export_const() {
+        let result = extract_mdx_statements("export const meta = { title: 'Hello' }\n\n# Title\n");
+        assert!(result.contains("export const meta"));
+    }
+
+    #[test]
+    fn extracts_export_no_space() {
+        let result = extract_mdx_statements("export{ foo } from './foo'\n\n# Title\n");
+        assert!(result.contains("export{ foo }"));
+    }
+
+    // ── Multi-line imports ───────────────────────────────────────
+
+    #[test]
+    fn multiline_import_with_braces() {
+        let source = "import {\n  Chart,\n  Table,\n  Graph\n} from './components'\n\n# Dashboard\n";
+        let result = extract_mdx_statements(source);
+        assert!(result.contains("Chart"));
+        assert!(result.contains("Table"));
+        assert!(result.contains("Graph"));
+        assert!(result.contains("from './components'"));
+    }
+
+    #[test]
+    fn multiline_import_closed_by_from() {
+        let source = "import {\n  Foo,\n  Bar\n} from './mod'\n\n# Content\n";
+        let result = extract_mdx_statements(source);
+        assert!(result.contains("Foo"));
+        assert!(result.contains("Bar"));
+    }
+
+    // ── Mixed content ────────────────────────────────────────────
+
+    #[test]
+    fn imports_between_prose() {
+        let source = "import { Header } from './Header'\n\n# Section 1\n\nSome content.\n\nimport { Footer } from './Footer'\n\n## Section 2\n";
+        let result = extract_mdx_statements(source);
+        assert!(result.contains("Header"));
+        assert!(result.contains("Footer"));
+    }
+
+    #[test]
+    fn prose_lines_excluded() {
+        let source = "import { A } from './a'\n\n# Title\n\nSome **markdown** text.\n\n- List item\n";
+        let result = extract_mdx_statements(source);
+        assert!(!result.contains("Title"));
+        assert!(!result.contains("markdown"));
+        assert!(!result.contains("List item"));
+    }
+
+    // ── Edge cases ───────────────────────────────────────────────
+
+    #[test]
+    fn empty_source() {
+        let result = extract_mdx_statements("");
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn no_imports_or_exports() {
+        let result = extract_mdx_statements("# Just Markdown\n\nNo imports here.\n");
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn import_like_text_not_extracted() {
+        // "important" starts with "import" but doesn't match "import " or "import{"
+        let result = extract_mdx_statements("This is an important note.\n");
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn export_like_text_not_extracted() {
+        // "exporting" doesn't match "export " or "export{"
+        let result = extract_mdx_statements("We are exporting goods overseas.\n");
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn side_effect_import() {
+        let result = extract_mdx_statements("import './global.css'\n\n# Title\n");
+        assert!(result.contains("import './global.css'"));
+    }
+
+    #[test]
+    fn namespace_import() {
+        let result = extract_mdx_statements("import * as utils from './utils'\n\n# Title\n");
+        assert!(result.contains("import * as utils from './utils'"));
+    }
+
+    #[test]
+    fn single_line_import_with_braces_balanced() {
+        // Braces balanced on one line — should NOT enter multiline mode
+        let source = "import { A } from './a'\n# Title\n";
+        let result = extract_mdx_statements(source);
+        let lines: Vec<&str> = result.lines().collect();
+        assert_eq!(lines.len(), 1);
+    }
+}

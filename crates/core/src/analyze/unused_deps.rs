@@ -408,3 +408,310 @@ pub(crate) fn find_unresolved_imports(
 
     unresolved
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ---- should_skip_dependency tests ----
+
+    type SkipDepSets = (
+        HashSet<String>,
+        HashSet<&'static str>,
+        HashSet<&'static str>,
+        HashSet<&'static str>,
+        HashSet<&'static str>,
+    );
+
+    /// Helper: build empty sets for should_skip_dependency args.
+    fn empty_sets() -> SkipDepSets {
+        (
+            HashSet::new(),
+            HashSet::new(),
+            HashSet::new(),
+            HashSet::new(),
+            HashSet::new(),
+        )
+    }
+
+    #[test]
+    fn skip_dep_returns_false_when_no_guard_matches() {
+        let (root_flagged, script_used, plugin_referenced, ignore_deps, workspace_names) =
+            empty_sets();
+        let result = should_skip_dependency(
+            "some-package",
+            &root_flagged,
+            &script_used,
+            &plugin_referenced,
+            &ignore_deps,
+            &workspace_names,
+            |_| false,
+        );
+        assert!(!result);
+    }
+
+    #[test]
+    fn skip_dep_when_root_flagged() {
+        let (mut root_flagged, script_used, plugin_referenced, ignore_deps, workspace_names) =
+            empty_sets();
+        root_flagged.insert("lodash".to_string());
+        assert!(should_skip_dependency(
+            "lodash",
+            &root_flagged,
+            &script_used,
+            &plugin_referenced,
+            &ignore_deps,
+            &workspace_names,
+            |_| false,
+        ));
+    }
+
+    #[test]
+    fn skip_dep_when_script_used() {
+        let (root_flagged, mut script_used, plugin_referenced, ignore_deps, workspace_names) =
+            empty_sets();
+        script_used.insert("eslint");
+        assert!(should_skip_dependency(
+            "eslint",
+            &root_flagged,
+            &script_used,
+            &plugin_referenced,
+            &ignore_deps,
+            &workspace_names,
+            |_| false,
+        ));
+    }
+
+    #[test]
+    fn skip_dep_when_plugin_referenced() {
+        let (root_flagged, script_used, mut plugin_referenced, ignore_deps, workspace_names) =
+            empty_sets();
+        plugin_referenced.insert("tailwindcss");
+        assert!(should_skip_dependency(
+            "tailwindcss",
+            &root_flagged,
+            &script_used,
+            &plugin_referenced,
+            &ignore_deps,
+            &workspace_names,
+            |_| false,
+        ));
+    }
+
+    #[test]
+    fn skip_dep_when_in_ignore_list() {
+        let (root_flagged, script_used, plugin_referenced, mut ignore_deps, workspace_names) =
+            empty_sets();
+        ignore_deps.insert("my-internal-package");
+        assert!(should_skip_dependency(
+            "my-internal-package",
+            &root_flagged,
+            &script_used,
+            &plugin_referenced,
+            &ignore_deps,
+            &workspace_names,
+            |_| false,
+        ));
+    }
+
+    #[test]
+    fn skip_dep_when_workspace_name() {
+        let (root_flagged, script_used, plugin_referenced, ignore_deps, mut workspace_names) =
+            empty_sets();
+        workspace_names.insert("@myorg/shared");
+        assert!(should_skip_dependency(
+            "@myorg/shared",
+            &root_flagged,
+            &script_used,
+            &plugin_referenced,
+            &ignore_deps,
+            &workspace_names,
+            |_| false,
+        ));
+    }
+
+    #[test]
+    fn skip_dep_when_used_in_workspace() {
+        let (root_flagged, script_used, plugin_referenced, ignore_deps, workspace_names) =
+            empty_sets();
+        assert!(should_skip_dependency(
+            "react",
+            &root_flagged,
+            &script_used,
+            &plugin_referenced,
+            &ignore_deps,
+            &workspace_names,
+            |dep| dep == "react",
+        ));
+    }
+
+    #[test]
+    fn skip_dep_closure_receives_correct_dep_name() {
+        let (root_flagged, script_used, plugin_referenced, ignore_deps, workspace_names) =
+            empty_sets();
+        // Closure that only returns true for "axios"
+        let result = should_skip_dependency(
+            "axios",
+            &root_flagged,
+            &script_used,
+            &plugin_referenced,
+            &ignore_deps,
+            &workspace_names,
+            |dep| dep == "axios",
+        );
+        assert!(result);
+
+        // Different dep name should not match
+        let result = should_skip_dependency(
+            "express",
+            &root_flagged,
+            &script_used,
+            &plugin_referenced,
+            &ignore_deps,
+            &workspace_names,
+            |dep| dep == "axios",
+        );
+        assert!(!result);
+    }
+
+    #[test]
+    fn skip_dep_short_circuits_on_first_match() {
+        // If root_flagged matches, the closure should not even be needed.
+        // We verify this by providing a dep in root_flagged and a closure that panics.
+        let (mut root_flagged, script_used, plugin_referenced, ignore_deps, workspace_names) =
+            empty_sets();
+        root_flagged.insert("lodash".to_string());
+        // This should return true without calling the closure
+        let result = should_skip_dependency(
+            "lodash",
+            &root_flagged,
+            &script_used,
+            &plugin_referenced,
+            &ignore_deps,
+            &workspace_names,
+            |_| panic!("closure should not be called"),
+        );
+        assert!(result);
+    }
+
+    #[test]
+    fn skip_dep_no_match_with_similar_names() {
+        let (mut root_flagged, script_used, plugin_referenced, ignore_deps, workspace_names) =
+            empty_sets();
+        root_flagged.insert("lodash-es".to_string());
+        // "lodash" is not the same as "lodash-es"
+        assert!(!should_skip_dependency(
+            "lodash",
+            &root_flagged,
+            &script_used,
+            &plugin_referenced,
+            &ignore_deps,
+            &workspace_names,
+            |_| false,
+        ));
+    }
+
+    #[test]
+    fn skip_dep_multiple_guards_match() {
+        // When multiple guards would match, function still returns true
+        let (mut root_flagged, mut script_used, plugin_referenced, ignore_deps, workspace_names) =
+            empty_sets();
+        root_flagged.insert("eslint".to_string());
+        script_used.insert("eslint");
+        assert!(should_skip_dependency(
+            "eslint",
+            &root_flagged,
+            &script_used,
+            &plugin_referenced,
+            &ignore_deps,
+            &workspace_names,
+            |_| false,
+        ));
+    }
+
+    // ---- is_builtin_module tests (via predicates, used in find_unlisted_dependencies) ----
+
+    #[test]
+    fn builtin_module_subpaths() {
+        assert!(super::super::predicates::is_builtin_module("fs/promises"));
+        assert!(super::super::predicates::is_builtin_module(
+            "stream/consumers"
+        ));
+        assert!(super::super::predicates::is_builtin_module(
+            "node:fs/promises"
+        ));
+        assert!(super::super::predicates::is_builtin_module(
+            "readline/promises"
+        ));
+    }
+
+    #[test]
+    fn builtin_module_cloudflare_workers() {
+        assert!(super::super::predicates::is_builtin_module(
+            "cloudflare:workers"
+        ));
+        assert!(super::super::predicates::is_builtin_module(
+            "cloudflare:sockets"
+        ));
+    }
+
+    #[test]
+    fn builtin_module_deno_std() {
+        assert!(super::super::predicates::is_builtin_module("std"));
+        assert!(super::super::predicates::is_builtin_module("std/path"));
+    }
+
+    // ---- is_implicit_dependency tests (used in find_unused_dependencies) ----
+
+    #[test]
+    fn implicit_dep_react_dom() {
+        assert!(super::super::predicates::is_implicit_dependency(
+            "react-dom"
+        ));
+        assert!(super::super::predicates::is_implicit_dependency(
+            "react-dom/client"
+        ));
+    }
+
+    #[test]
+    fn implicit_dep_next_packages() {
+        assert!(super::super::predicates::is_implicit_dependency(
+            "@next/font"
+        ));
+        assert!(super::super::predicates::is_implicit_dependency("@next/mdx"));
+        assert!(super::super::predicates::is_implicit_dependency(
+            "@next/bundle-analyzer"
+        ));
+        assert!(super::super::predicates::is_implicit_dependency("@next/env"));
+    }
+
+    #[test]
+    fn implicit_dep_websocket_addons() {
+        assert!(super::super::predicates::is_implicit_dependency(
+            "utf-8-validate"
+        ));
+        assert!(super::super::predicates::is_implicit_dependency(
+            "bufferutil"
+        ));
+    }
+
+    // ---- is_path_alias tests (used in find_unlisted_dependencies) ----
+
+    #[test]
+    fn path_alias_not_reported_as_unlisted() {
+        // These should be detected as path aliases and skipped
+        assert!(super::super::predicates::is_path_alias("@/components/Foo"));
+        assert!(super::super::predicates::is_path_alias("~/utils/helper"));
+        assert!(super::super::predicates::is_path_alias("#internal/auth"));
+        assert!(super::super::predicates::is_path_alias(
+            "@Components/Button"
+        ));
+    }
+
+    #[test]
+    fn scoped_npm_packages_not_path_aliases() {
+        assert!(!super::super::predicates::is_path_alias("@angular/core"));
+        assert!(!super::super::predicates::is_path_alias("@emotion/react"));
+        assert!(!super::super::predicates::is_path_alias("@nestjs/common"));
+    }
+}

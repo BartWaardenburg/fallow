@@ -112,4 +112,134 @@ mod tests {
     fn control_chars_allows_paths_with_dots_and_slashes() {
         assert!(validate_no_control_chars("./path/to/config.toml", "--config").is_ok());
     }
+
+    // ── validate_git_ref ────────────────────────────────────────────
+
+    #[test]
+    fn git_ref_allows_reflog_timestamp() {
+        assert_eq!(
+            validate_git_ref("HEAD@{2025-01-01}").unwrap(),
+            "HEAD@{2025-01-01}"
+        );
+    }
+
+    #[test]
+    fn git_ref_allows_reflog_relative_date() {
+        assert_eq!(
+            validate_git_ref("HEAD@{1 week ago}").unwrap(),
+            "HEAD@{1 week ago}"
+        );
+    }
+
+    #[test]
+    fn git_ref_rejects_unclosed_brace() {
+        let result = validate_git_ref("HEAD@{");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("unclosed"),
+            "Error should mention unclosed brace, got: {err}"
+        );
+    }
+
+    #[test]
+    fn git_ref_rejects_colon_outside_braces() {
+        let result = validate_git_ref("HEAD:file.txt");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("disallowed character"),
+            "Error should mention disallowed character, got: {err}"
+        );
+        assert!(err.contains(':'), "Error should mention the colon, got: {err}");
+    }
+
+    #[test]
+    fn git_ref_rejects_space_outside_braces() {
+        let result = validate_git_ref("some ref");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("disallowed character"),
+            "Error should mention disallowed character, got: {err}"
+        );
+    }
+
+    #[test]
+    fn git_ref_allows_reflog_index() {
+        assert_eq!(
+            validate_git_ref("origin/main@{0}").unwrap(),
+            "origin/main@{0}"
+        );
+    }
+
+    #[test]
+    fn git_ref_allows_simple_branch_names() {
+        assert_eq!(validate_git_ref("main").unwrap(), "main");
+        assert_eq!(
+            validate_git_ref("feature/my-branch").unwrap(),
+            "feature/my-branch"
+        );
+    }
+
+    #[test]
+    fn git_ref_allows_head_tilde_caret() {
+        assert_eq!(validate_git_ref("HEAD~3").unwrap(), "HEAD~3");
+        assert_eq!(validate_git_ref("HEAD^2").unwrap(), "HEAD^2");
+    }
+
+    #[test]
+    fn git_ref_allows_commit_sha() {
+        assert_eq!(
+            validate_git_ref("abc123def456").unwrap(),
+            "abc123def456"
+        );
+    }
+
+    #[test]
+    fn git_ref_rejects_empty() {
+        let result = validate_git_ref("");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("empty"));
+    }
+
+    #[test]
+    fn git_ref_rejects_leading_dash() {
+        let result = validate_git_ref("--evil-flag");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("start with '-'"));
+    }
+
+    #[test]
+    fn git_ref_allows_multiple_braces_segments() {
+        // e.g. HEAD@{0}~3 is valid
+        assert!(validate_git_ref("HEAD@{0}~3").is_ok());
+    }
+
+    #[test]
+    fn git_ref_allows_space_in_complex_reflog() {
+        // HEAD@{3 days ago} — spaces allowed inside braces
+        assert_eq!(
+            validate_git_ref("HEAD@{3 days ago}").unwrap(),
+            "HEAD@{3 days ago}"
+        );
+    }
+
+    #[test]
+    fn git_ref_rejects_semicolon() {
+        let result = validate_git_ref("main;rm -rf /");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn git_ref_rejects_backtick() {
+        let result = validate_git_ref("main`whoami`");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn git_ref_rejects_dollar_sign() {
+        let result = validate_git_ref("main$HOME");
+        assert!(result.is_err());
+    }
 }

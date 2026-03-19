@@ -78,3 +78,253 @@ pub(crate) fn build_code_lenses(
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    use fallow_core::results::{ExportUsage, ReferenceLocation};
+
+    #[test]
+    fn no_lenses_for_empty_results() {
+        let results = AnalysisResults::default();
+        let uri = Url::from_file_path("/tmp/project/src/mod.ts").unwrap();
+
+        let lenses = build_code_lenses(&results, Path::new("/tmp/project/src/mod.ts"), &uri);
+        assert!(lenses.is_empty());
+    }
+
+    #[test]
+    fn no_lenses_for_unrelated_file() {
+        let mut results = AnalysisResults::default();
+        results.export_usages.push(ExportUsage {
+            path: PathBuf::from("/tmp/project/src/other.ts"),
+            export_name: "foo".to_string(),
+            line: 1,
+            col: 0,
+            reference_count: 3,
+            reference_locations: vec![],
+        });
+
+        let uri = Url::from_file_path("/tmp/project/src/mod.ts").unwrap();
+        let lenses = build_code_lenses(&results, Path::new("/tmp/project/src/mod.ts"), &uri);
+        assert!(lenses.is_empty());
+    }
+
+    #[test]
+    fn single_reference_uses_singular_title() {
+        let mut results = AnalysisResults::default();
+        results.export_usages.push(ExportUsage {
+            path: PathBuf::from("/tmp/project/src/utils.ts"),
+            export_name: "helper".to_string(),
+            line: 10,
+            col: 7,
+            reference_count: 1,
+            reference_locations: vec![],
+        });
+
+        let uri = Url::from_file_path("/tmp/project/src/utils.ts").unwrap();
+        let lenses = build_code_lenses(&results, Path::new("/tmp/project/src/utils.ts"), &uri);
+        assert_eq!(lenses.len(), 1);
+
+        let cmd = lenses[0].command.as_ref().unwrap();
+        assert_eq!(cmd.title, "1 reference");
+    }
+
+    #[test]
+    fn multiple_references_uses_plural_title() {
+        let mut results = AnalysisResults::default();
+        results.export_usages.push(ExportUsage {
+            path: PathBuf::from("/tmp/project/src/utils.ts"),
+            export_name: "helper".to_string(),
+            line: 10,
+            col: 7,
+            reference_count: 5,
+            reference_locations: vec![],
+        });
+
+        let uri = Url::from_file_path("/tmp/project/src/utils.ts").unwrap();
+        let lenses = build_code_lenses(&results, Path::new("/tmp/project/src/utils.ts"), &uri);
+        assert_eq!(lenses.len(), 1);
+
+        let cmd = lenses[0].command.as_ref().unwrap();
+        assert_eq!(cmd.title, "5 references");
+    }
+
+    #[test]
+    fn zero_references_uses_plural_title() {
+        let mut results = AnalysisResults::default();
+        results.export_usages.push(ExportUsage {
+            path: PathBuf::from("/tmp/project/src/utils.ts"),
+            export_name: "unused".to_string(),
+            line: 1,
+            col: 0,
+            reference_count: 0,
+            reference_locations: vec![],
+        });
+
+        let uri = Url::from_file_path("/tmp/project/src/utils.ts").unwrap();
+        let lenses = build_code_lenses(&results, Path::new("/tmp/project/src/utils.ts"), &uri);
+        assert_eq!(lenses.len(), 1);
+
+        let cmd = lenses[0].command.as_ref().unwrap();
+        assert_eq!(cmd.title, "0 references");
+    }
+
+    #[test]
+    fn lens_position_matches_export_span() {
+        let mut results = AnalysisResults::default();
+        results.export_usages.push(ExportUsage {
+            path: PathBuf::from("/tmp/project/src/utils.ts"),
+            export_name: "myExport".to_string(),
+            line: 15, // 1-based
+            col: 4,
+            reference_count: 2,
+            reference_locations: vec![],
+        });
+
+        let uri = Url::from_file_path("/tmp/project/src/utils.ts").unwrap();
+        let lenses = build_code_lenses(&results, Path::new("/tmp/project/src/utils.ts"), &uri);
+        assert_eq!(lenses.len(), 1);
+
+        // 1-based line 15 → 0-based line 14
+        assert_eq!(lenses[0].range.start.line, 14);
+        assert_eq!(lenses[0].range.start.character, 4);
+        assert_eq!(lenses[0].range.end.line, 14);
+        assert_eq!(lenses[0].range.end.character, 4);
+    }
+
+    #[test]
+    fn noop_command_when_no_reference_locations() {
+        let mut results = AnalysisResults::default();
+        results.export_usages.push(ExportUsage {
+            path: PathBuf::from("/tmp/project/src/utils.ts"),
+            export_name: "x".to_string(),
+            line: 1,
+            col: 0,
+            reference_count: 3,
+            reference_locations: vec![],
+        });
+
+        let uri = Url::from_file_path("/tmp/project/src/utils.ts").unwrap();
+        let lenses = build_code_lenses(&results, Path::new("/tmp/project/src/utils.ts"), &uri);
+        assert_eq!(lenses.len(), 1);
+
+        let cmd = lenses[0].command.as_ref().unwrap();
+        assert_eq!(cmd.command, "fallow.noop");
+        assert!(cmd.arguments.is_none());
+    }
+
+    #[test]
+    fn show_references_command_with_reference_locations() {
+        let mut results = AnalysisResults::default();
+        results.export_usages.push(ExportUsage {
+            path: PathBuf::from("/tmp/project/src/utils.ts"),
+            export_name: "helper".to_string(),
+            line: 5,
+            col: 7,
+            reference_count: 2,
+            reference_locations: vec![
+                ReferenceLocation {
+                    path: PathBuf::from("/tmp/project/src/app.ts"),
+                    line: 3,
+                    col: 10,
+                },
+                ReferenceLocation {
+                    path: PathBuf::from("/tmp/project/src/main.ts"),
+                    line: 8,
+                    col: 0,
+                },
+            ],
+        });
+
+        let uri = Url::from_file_path("/tmp/project/src/utils.ts").unwrap();
+        let lenses = build_code_lenses(&results, Path::new("/tmp/project/src/utils.ts"), &uri);
+        assert_eq!(lenses.len(), 1);
+
+        let cmd = lenses[0].command.as_ref().unwrap();
+        assert_eq!(cmd.command, "editor.action.showReferences");
+
+        let args = cmd.arguments.as_ref().unwrap();
+        assert_eq!(args.len(), 3);
+
+        // First arg is the document URI
+        assert_eq!(args[0], serde_json::json!(uri.as_str()));
+
+        // Second arg is the export position (0-based)
+        assert_eq!(args[1]["line"], 4); // 1-based 5 → 0-based 4
+        assert_eq!(args[1]["character"], 7);
+
+        // Third arg is the reference locations array
+        let ref_locs = args[2].as_array().unwrap();
+        assert_eq!(ref_locs.len(), 2);
+
+        // First reference: app.ts line 3 → 0-based 2
+        let app_uri = Url::from_file_path("/tmp/project/src/app.ts").unwrap();
+        assert_eq!(ref_locs[0]["uri"], app_uri.as_str());
+        assert_eq!(ref_locs[0]["range"]["start"]["line"], 2);
+        assert_eq!(ref_locs[0]["range"]["start"]["character"], 10);
+    }
+
+    #[test]
+    fn multiple_exports_produce_multiple_lenses() {
+        let mut results = AnalysisResults::default();
+        let path = PathBuf::from("/tmp/project/src/utils.ts");
+        results.export_usages.push(ExportUsage {
+            path: path.clone(),
+            export_name: "foo".to_string(),
+            line: 1,
+            col: 0,
+            reference_count: 1,
+            reference_locations: vec![],
+        });
+        results.export_usages.push(ExportUsage {
+            path: path.clone(),
+            export_name: "bar".to_string(),
+            line: 10,
+            col: 0,
+            reference_count: 3,
+            reference_locations: vec![],
+        });
+        results.export_usages.push(ExportUsage {
+            path: path.clone(),
+            export_name: "baz".to_string(),
+            line: 20,
+            col: 0,
+            reference_count: 0,
+            reference_locations: vec![],
+        });
+
+        let uri = Url::from_file_path(&path).unwrap();
+        let lenses = build_code_lenses(&results, &path, &uri);
+        assert_eq!(lenses.len(), 3);
+
+        let titles: Vec<&str> = lenses
+            .iter()
+            .map(|l| l.command.as_ref().unwrap().title.as_str())
+            .collect();
+        assert_eq!(titles, vec!["1 reference", "3 references", "0 references"]);
+
+        let lines: Vec<u32> = lenses.iter().map(|l| l.range.start.line).collect();
+        assert_eq!(lines, vec![0, 9, 19]);
+    }
+
+    #[test]
+    fn line_zero_saturates_correctly() {
+        let mut results = AnalysisResults::default();
+        results.export_usages.push(ExportUsage {
+            path: PathBuf::from("/tmp/project/src/edge.ts"),
+            export_name: "x".to_string(),
+            line: 0, // edge case: 0 saturates to 0
+            col: 0,
+            reference_count: 1,
+            reference_locations: vec![],
+        });
+
+        let uri = Url::from_file_path("/tmp/project/src/edge.ts").unwrap();
+        let lenses = build_code_lenses(&results, Path::new("/tmp/project/src/edge.ts"), &uri);
+        assert_eq!(lenses.len(), 1);
+        assert_eq!(lenses[0].range.start.line, 0);
+    }
+}
