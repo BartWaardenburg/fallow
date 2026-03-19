@@ -6,7 +6,7 @@ use colored::Colorize;
 use fallow_config::{OutputFormat, ResolvedConfig, RulesConfig, Severity};
 use fallow_core::duplicates::DuplicationReport;
 use fallow_core::results::{AnalysisResults, UnusedDependency, UnusedExport, UnusedMember};
-use fallow_core::trace::{DependencyTrace, ExportTrace, FileTrace, PipelineTimings};
+use fallow_core::trace::{CloneTrace, DependencyTrace, ExportTrace, FileTrace, PipelineTimings};
 
 /// Strip the project root prefix from a path for display, falling back to the full path.
 fn relative_path<'a>(path: &'a Path, root: &Path) -> &'a Path {
@@ -1292,6 +1292,75 @@ fn print_dependency_trace_human(trace: &DependencyTrace) {
                 String::new()
             };
             eprintln!("    {} {}{}", "->".dimmed(), path.display(), tag);
+        }
+    }
+    eprintln!();
+}
+
+/// Print clone trace results.
+pub fn print_clone_trace(trace: &CloneTrace, root: &Path, format: &OutputFormat) {
+    match format {
+        OutputFormat::Json => print_trace_json(trace),
+        _ => print_clone_trace_human(trace, root),
+    }
+}
+
+fn print_clone_trace_human(trace: &CloneTrace, root: &Path) {
+    eprintln!();
+    if let Some(ref matched) = trace.matched_instance {
+        let relative = relative_path(&matched.file, root);
+        eprintln!(
+            "  {} clone at {}:{}-{}",
+            "FOUND".green().bold(),
+            relative.display(),
+            matched.start_line,
+            matched.end_line,
+        );
+    }
+    eprintln!(
+        "  {} clone group(s) containing this location",
+        trace.clone_groups.len()
+    );
+    for (i, group) in trace.clone_groups.iter().enumerate() {
+        eprintln!();
+        eprintln!(
+            "  {} ({} lines, {} tokens, {} instance{})",
+            format!("Clone group {}", i + 1).bold(),
+            group.line_count,
+            group.token_count,
+            group.instances.len(),
+            if group.instances.len() == 1 { "" } else { "s" }
+        );
+        for instance in &group.instances {
+            let relative = relative_path(&instance.file, root);
+            let is_queried = trace.matched_instance.as_ref().is_some_and(|m| {
+                m.file == instance.file
+                    && m.start_line == instance.start_line
+                    && m.end_line == instance.end_line
+            });
+            let marker = if is_queried {
+                ">>".cyan()
+            } else {
+                "->".dimmed()
+            };
+            eprintln!(
+                "    {} {}:{}-{}",
+                marker,
+                relative.display(),
+                instance.start_line,
+                instance.end_line
+            );
+        }
+    }
+    if let Some(ref matched) = trace.matched_instance {
+        eprintln!();
+        eprintln!("  {}:", "Code fragment".dimmed());
+        for (i, line) in matched.fragment.lines().enumerate() {
+            eprintln!(
+                "    {} {}",
+                format!("{:>4}", matched.start_line + i).dimmed(),
+                line
+            );
         }
     }
     eprintln!();

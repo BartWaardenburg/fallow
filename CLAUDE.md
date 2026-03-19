@@ -39,7 +39,7 @@ Key modules in fallow-core:
 - `duplicates/tokenize.rs` — AST-based tokenizer with optional type annotation stripping (`strip_types` flag) for cross-language clone detection between `.ts` and `.js` files
 - `cross_reference.rs` — Cross-references duplication findings with dead code analysis: identifies clone instances that are also unused (in unused files or overlapping unused exports) as high-priority combined findings
 - `plugins/` — Plugin system: `Plugin` trait, registry (46 built-in plugins, ~20 with AST-based config parsing); `config_parser.rs` provides Oxc-based helpers for extracting imports, string arrays, object keys, require() sources, and string-or-array values from JS/TS/JSON config files
-- `trace.rs` — Debug & trace tooling: trace export usage (`trace_export`), file edges (`trace_file`), dependency usage (`trace_dependency`), and `PipelineTimings` struct for `--performance` output
+- `trace.rs` — Debug & trace tooling: trace export usage (`trace_export`), file edges (`trace_file`), dependency usage (`trace_dependency`), clone location (`trace_clone`), and `PipelineTimings` struct for `--performance` output
 - `cache.rs` — Incremental bincode cache with xxh3 hashing
 - `progress.rs` — indicatif progress bars
 - `errors.rs` — Error types
@@ -82,7 +82,7 @@ cd benchmarks && npm run generate:dupes && npm run bench:dupes  # vs jscpd
 15. Cross-language clone detection (`--cross-language`): strips TypeScript type annotations (parameter types, return types, generics, interfaces, type aliases, `as`/`satisfies` expressions) for `.ts` ↔ `.js` matching
 16. Configurable normalization: fine-grained overrides (`ignore_identifiers`, `ignore_string_values`, `ignore_numeric_values`) on top of detection mode defaults for custom "semantic equivalence" definitions
 17. Dead code × duplication cross-reference (`check --include-dupes`): identifies clone instances in unused files or overlapping unused exports as combined high-priority findings
-18. Debug & trace tooling: `--trace FILE:EXPORT` (trace export usage chain), `--trace-file PATH` (all edges for a file), `--trace-dependency PACKAGE` (where a dep is used), `--performance` (pipeline timing breakdown). Human and JSON output.
+18. Debug & trace tooling: `--trace FILE:EXPORT` (trace export usage chain), `--trace-file PATH` (all edges for a file), `--trace-dependency PACKAGE` (where a dep is used), `dupes --trace FILE:LINE` (trace all clones at a location), `--performance` (pipeline timing breakdown). Human and JSON output.
 
 ## Framework support (46 plugins)
 
@@ -117,7 +117,7 @@ cd benchmarks && npm run generate:dupes && npm run bench:dupes  # vs jscpd
 ## CLI features
 
 - `check` — analyze with --format (human/json/sarif/compact), --changed-since, --baseline, --save-baseline, --fail-on-issues, --include-dupes (cross-reference with duplication), issue type filters (--unused-files, --unused-exports, etc.), --trace FILE:EXPORT (trace export usage), --trace-file PATH (trace file edges), --trace-dependency PACKAGE (trace dependency usage)
-- `dupes` — find code duplication with clone families, refactoring suggestions, --baseline/--save-baseline, --mode (strict/mild/weak/semantic), --min-tokens, --min-lines, --threshold, --skip-local, --cross-language
+- `dupes` — find code duplication with clone families, refactoring suggestions, --baseline/--save-baseline, --mode (strict/mild/weak/semantic), --min-tokens, --min-lines, --threshold, --skip-local, --cross-language, --trace FILE:LINE (trace all clones at a specific location)
 - `watch` — file watcher with debounced re-analysis
 - `fix` — auto-remove unused exports and deps (--dry-run, --yes/--force for non-TTY confirmation, --format json for structured output)
 - `init` — create fallow.jsonc (default) or fallow.toml (`--toml`), includes `$schema` for IDE autocomplete

@@ -210,6 +210,10 @@ enum Command {
         /// Enable cross-language detection (strip TS type annotations for TS↔JS matching)
         #[arg(long)]
         cross_language: bool,
+
+        /// Trace all clones at a specific location (format: FILE:LINE)
+        #[arg(long, value_name = "FILE:LINE")]
+        trace: Option<String>,
     },
 
     /// Dump the CLI interface as machine-readable JSON for agent introspection
@@ -734,6 +738,7 @@ fn main() -> ExitCode {
             threshold,
             skip_local,
             cross_language,
+            trace,
         } => run_dupes(
             &root,
             &cli.config,
@@ -750,6 +755,7 @@ fn main() -> ExitCode {
             cli.baseline.as_deref(),
             cli.save_baseline.as_deref(),
             cli.production,
+            trace.as_deref(),
         ),
         Command::Schema => unreachable!("handled above"),
     }
@@ -1217,6 +1223,7 @@ fn run_dupes(
     baseline_path: Option<&std::path::Path>,
     save_baseline_path: Option<&std::path::Path>,
     production: bool,
+    trace: Option<&str>,
 ) -> ExitCode {
     let start = Instant::now();
 
@@ -1256,6 +1263,32 @@ fn run_dupes(
 
     // Run duplication detection
     let mut report = fallow_core::duplicates::find_duplicates(&config.root, &files, &dupes_config);
+
+    // Handle trace (diagnostic mode — early return)
+    if let Some(trace_spec) = trace {
+        let (file_path, line_str) = match trace_spec.rsplit_once(':') {
+            Some((f, l)) => (f, l),
+            None => {
+                return emit_error(
+                    "--trace requires FILE:LINE format (e.g., src/utils.ts:42)",
+                    2,
+                    &output,
+                );
+            }
+        };
+        let line: usize = match line_str.parse() {
+            Ok(l) if l > 0 => l,
+            _ => {
+                return emit_error("--trace LINE must be a positive integer", 2, &output);
+            }
+        };
+        let trace_result = fallow_core::trace::trace_clone(&report, &config.root, file_path, line);
+        if trace_result.matched_instance.is_none() {
+            return emit_error(&format!("no clone found at {file_path}:{line}"), 2, &output);
+        }
+        report::print_clone_trace(&trace_result, &config.root, &output);
+        return ExitCode::SUCCESS;
+    }
 
     // Save baseline if requested (before filtering)
     if let Some(path) = save_baseline_path {

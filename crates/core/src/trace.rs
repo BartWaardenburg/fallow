@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
+use crate::duplicates::{CloneInstance, DuplicationReport};
 use crate::graph::{ModuleGraph, ReferenceKind};
 
 /// Result of tracing an export: why is it considered used or unused?
@@ -365,6 +366,59 @@ fn format_reference_kind(kind: &ReferenceKind) -> String {
     }
 }
 
+/// Result of tracing a clone: all groups containing the code at a given location.
+#[derive(Debug, Serialize)]
+pub struct CloneTrace {
+    pub file: PathBuf,
+    pub line: usize,
+    pub matched_instance: Option<CloneInstance>,
+    pub clone_groups: Vec<TracedCloneGroup>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TracedCloneGroup {
+    pub token_count: usize,
+    pub line_count: usize,
+    pub instances: Vec<CloneInstance>,
+}
+
+pub fn trace_clone(
+    report: &DuplicationReport,
+    root: &Path,
+    file_path: &str,
+    line: usize,
+) -> CloneTrace {
+    let resolved = root.join(file_path);
+    let mut matched_instance = None;
+    let mut clone_groups = Vec::new();
+
+    for group in &report.clone_groups {
+        let matching = group.instances.iter().find(|inst| {
+            let inst_matches = inst.file == resolved
+                || inst.file.strip_prefix(root).unwrap_or(&inst.file) == Path::new(file_path);
+            inst_matches && inst.start_line <= line && line <= inst.end_line
+        });
+
+        if let Some(matched) = matching {
+            if matched_instance.is_none() {
+                matched_instance = Some(matched.clone());
+            }
+            clone_groups.push(TracedCloneGroup {
+                token_count: group.token_count,
+                line_count: group.line_count,
+                instances: group.instances.clone(),
+            });
+        }
+    }
+
+    CloneTrace {
+        file: PathBuf::from(file_path),
+        line,
+        matched_instance,
+        clone_groups,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -635,5 +689,141 @@ mod tests {
         assert!(!trace.is_used);
         assert_eq!(trace.import_count, 0);
         assert!(trace.imported_by.is_empty());
+    }
+
+    #[test]
+    fn trace_clone_finds_matching_group() {
+        use crate::duplicates::{CloneGroup, CloneInstance, DuplicationReport, DuplicationStats};
+        let report = DuplicationReport {
+            clone_groups: vec![CloneGroup {
+                instances: vec![
+                    CloneInstance {
+                        file: PathBuf::from("/project/src/a.ts"),
+                        start_line: 10,
+                        end_line: 20,
+                        start_col: 0,
+                        end_col: 0,
+                        fragment: "fn foo() {}".to_string(),
+                    },
+                    CloneInstance {
+                        file: PathBuf::from("/project/src/b.ts"),
+                        start_line: 5,
+                        end_line: 15,
+                        start_col: 0,
+                        end_col: 0,
+                        fragment: "fn foo() {}".to_string(),
+                    },
+                ],
+                token_count: 60,
+                line_count: 11,
+            }],
+            clone_families: vec![],
+            stats: DuplicationStats {
+                total_files: 2,
+                files_with_clones: 2,
+                total_lines: 100,
+                duplicated_lines: 22,
+                total_tokens: 200,
+                duplicated_tokens: 120,
+                clone_groups: 1,
+                clone_instances: 2,
+                duplication_percentage: 22.0,
+            },
+        };
+        let trace = trace_clone(&report, Path::new("/project"), "src/a.ts", 15);
+        assert!(trace.matched_instance.is_some());
+        assert_eq!(trace.clone_groups.len(), 1);
+        assert_eq!(trace.clone_groups[0].instances.len(), 2);
+    }
+
+    #[test]
+    fn trace_clone_no_match() {
+        use crate::duplicates::{CloneGroup, CloneInstance, DuplicationReport, DuplicationStats};
+        let report = DuplicationReport {
+            clone_groups: vec![CloneGroup {
+                instances: vec![CloneInstance {
+                    file: PathBuf::from("/project/src/a.ts"),
+                    start_line: 10,
+                    end_line: 20,
+                    start_col: 0,
+                    end_col: 0,
+                    fragment: "fn foo() {}".to_string(),
+                }],
+                token_count: 60,
+                line_count: 11,
+            }],
+            clone_families: vec![],
+            stats: DuplicationStats {
+                total_files: 1,
+                files_with_clones: 1,
+                total_lines: 50,
+                duplicated_lines: 11,
+                total_tokens: 100,
+                duplicated_tokens: 60,
+                clone_groups: 1,
+                clone_instances: 1,
+                duplication_percentage: 22.0,
+            },
+        };
+        let trace = trace_clone(&report, Path::new("/project"), "src/a.ts", 25);
+        assert!(trace.matched_instance.is_none());
+        assert!(trace.clone_groups.is_empty());
+    }
+
+    #[test]
+    fn trace_clone_line_boundary() {
+        use crate::duplicates::{CloneGroup, CloneInstance, DuplicationReport, DuplicationStats};
+        let report = DuplicationReport {
+            clone_groups: vec![CloneGroup {
+                instances: vec![
+                    CloneInstance {
+                        file: PathBuf::from("/project/src/a.ts"),
+                        start_line: 10,
+                        end_line: 20,
+                        start_col: 0,
+                        end_col: 0,
+                        fragment: "code".to_string(),
+                    },
+                    CloneInstance {
+                        file: PathBuf::from("/project/src/b.ts"),
+                        start_line: 1,
+                        end_line: 11,
+                        start_col: 0,
+                        end_col: 0,
+                        fragment: "code".to_string(),
+                    },
+                ],
+                token_count: 50,
+                line_count: 11,
+            }],
+            clone_families: vec![],
+            stats: DuplicationStats {
+                total_files: 2,
+                files_with_clones: 2,
+                total_lines: 100,
+                duplicated_lines: 22,
+                total_tokens: 200,
+                duplicated_tokens: 100,
+                clone_groups: 1,
+                clone_instances: 2,
+                duplication_percentage: 22.0,
+            },
+        };
+        let root = Path::new("/project");
+        assert!(
+            trace_clone(&report, root, "src/a.ts", 10)
+                .matched_instance
+                .is_some()
+        );
+        assert!(
+            trace_clone(&report, root, "src/a.ts", 20)
+                .matched_instance
+                .is_some()
+        );
+        assert!(
+            trace_clone(&report, root, "src/a.ts", 21)
+                .matched_instance
+                .is_none()
+        );
     }
 }
