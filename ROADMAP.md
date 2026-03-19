@@ -1,6 +1,6 @@
 # Fallow Roadmap
 
-> Last updated: 2026-03-18
+> Last updated: 2026-03-19
 
 Fallow is a Rust-native dead code and duplication analyzer for JavaScript/TypeScript — the fast alternative to knip and jscpd.
 
@@ -30,7 +30,7 @@ Fallow is a Rust-native dead code and duplication analyzer for JavaScript/TypeSc
 - **Filtering**: `--skip-local`, `--threshold`, `--min-lines`, `--min-tokens`, `duplicates.ignore` config globs
 
 ### Shared Infrastructure
-- **CLI commands**: check, dupes, watch, fix, init, list, schema, config-schema
+- **CLI commands**: check, dupes, watch, fix, init, migrate, list, schema, config-schema
 - **Config format**: JSONC (default), JSON, TOML — with `$schema` support for IDE autocomplete/validation
 - **LSP server**: diagnostics for all 10 dead code issue types + quick-fix code actions
 - **Performance**: rayon parallelism, oxc_parser, incremental bincode cache, flat graph storage, DashMap lock-free bare specifier cache
@@ -177,7 +177,7 @@ Extend import extraction to `.astro`, `.mdx`, and improve existing `.vue`/`.svel
 - [x] VS Code extension published
 - [x] Duplication detection with clone families and baseline tracking
 - [ ] Large-scale benchmarks published (1000+ files, warm/cold cache, memory)
-- [ ] Migration guide from knip with worked examples + `fallow migrate` CLI command
+- [ ] Migration guide from knip with worked examples
 
 ---
 
@@ -214,7 +214,7 @@ These are not gated on any release — they should happen continuously:
 
 - **Documentation site**: Move from GitHub wiki to a proper docs site (Starlight, Nextra, or similar)
 - **CHANGELOG**: Maintain a changelog from v0.3 onward
-- **Migration tooling**: `fallow migrate` command that reads knip config and generates fallow config, plus a written migration guide with worked examples
+- **Migration guide**: Written migration guide from knip/jscpd with worked examples (`fallow migrate` CLI command is shipped)
 - **Communication**: GitHub Discussions for support, feedback, and RFCs
 - **Contributing guide**: Plugin authoring tutorial, "your first PR" guide, issue templates
 - **Compatibility matrix**: For each of the top 20 frameworks, document exactly what fallow detects vs. knip — let users make informed choices
@@ -241,4 +241,4 @@ Fallow should be fast enough to run on every save and every commit — not as a 
 | **0.3** | Trust | Cross-workspace resolution, large-scale benchmarks |
 | **0.4** | Reach | GitHub Action, MCP server, plugin authoring guide, more plugins, SFC compilers, dupes semantic improvements |
 | **0.5** | Editor | Incremental analysis, VS Code extension, code lens, trace tooling |
-| **1.0** | Stable | Quality milestone — trustworthy results, stable formats, full docs, migration tooling |
+| **1.0** | Stable | Quality milestone — trustworthy results, stable formats, full docs, migration guide |
