@@ -469,6 +469,52 @@ impl ModuleGraph {
                         }
                     }
                 }
+
+                // CSS Module default imports: `import styles from './Button.module.css'`
+                // Member accesses like `styles.primary` should mark the `primary` named
+                // export as referenced, since CSS module default imports act as namespace
+                // objects where each property corresponds to a class name (named export).
+                if matches!(sym.imported_name, ImportedName::Default)
+                    && !sym.local_name.is_empty()
+                    && is_css_module_path(&target_module.path)
+                {
+                    let local_name = &sym.local_name;
+                    let source_mod = module_by_id.get(&source_id);
+                    let is_whole_object = source_mod
+                        .map(|m| m.whole_object_uses.iter().any(|n| n == local_name))
+                        .unwrap_or(false);
+                    let accessed_members: Vec<String> = source_mod
+                        .map(|m| {
+                            m.member_accesses
+                                .iter()
+                                .filter(|ma| ma.object == *local_name)
+                                .map(|ma| ma.member.clone())
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    if is_whole_object || accessed_members.is_empty() {
+                        for export in &mut target_module.exports {
+                            if export.references.iter().all(|r| r.from_file != source_id) {
+                                export.references.push(SymbolReference {
+                                    from_file: source_id,
+                                    kind: ReferenceKind::DefaultImport,
+                                });
+                            }
+                        }
+                    } else {
+                        for export in &mut target_module.exports {
+                            let name_str = export.name.to_string();
+                            if accessed_members.contains(&name_str)
+                                && export.references.iter().all(|r| r.from_file != source_id)
+                            {
+                                export.references.push(SymbolReference {
+                                    from_file: source_id,
+                                    kind: ReferenceKind::DefaultImport,
+                                });
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -707,6 +753,17 @@ impl ModuleGraph {
         let range = &self.modules[idx].edge_range;
         self.edges[range.clone()].iter().map(|e| e.target).collect()
     }
+}
+
+/// Check if a path is a CSS Module file (`.module.css` or `.module.scss`).
+fn is_css_module_path(path: &std::path::Path) -> bool {
+    path.file_stem()
+        .and_then(|s| s.to_str())
+        .is_some_and(|stem| stem.ends_with(".module"))
+        && path
+            .extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|ext| ext == "css" || ext == "scss")
 }
 
 /// Check if an export name matches an imported name.

@@ -308,6 +308,17 @@ static CSS_COMMENT_RE: LazyLock<regex::Regex> =
 static SCSS_LINE_COMMENT_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r"//[^\n]*").expect("valid regex"));
 
+/// Regex to extract CSS class names from selectors.
+/// Matches `.className` in selectors. Applied after stripping comments, strings, and URLs.
+static CSS_CLASS_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"\.([a-zA-Z_][a-zA-Z0-9_-]*)").expect("valid regex"));
+
+/// Regex to strip quoted strings and `url(...)` content from CSS before class extraction.
+/// Prevents false positives from `content: ".foo"` and `url(./path/file.ext)`.
+static CSS_NON_SELECTOR_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r#"(?s)"[^"]*"|'[^']*'|url\([^)]*\)"#).expect("valid regex")
+});
+
 pub(crate) struct SfcScript {
     pub body: String,
     pub is_typescript: bool,
@@ -384,6 +395,14 @@ fn is_css_file(path: &Path) -> bool {
     path.extension()
         .and_then(|e| e.to_str())
         .is_some_and(|ext| ext == "css" || ext == "scss")
+}
+
+fn is_css_module_file(path: &Path) -> bool {
+    is_css_file(path)
+        && path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .is_some_and(|stem| stem.ends_with(".module"))
 }
 
 /// Extract frontmatter from an Astro component.
@@ -604,6 +623,28 @@ fn strip_css_comments(source: &str, is_scss: bool) -> String {
     }
 }
 
+/// Extract class names from a CSS module file as named exports.
+fn extract_css_module_exports(source: &str) -> Vec<ExportInfo> {
+    let cleaned = CSS_NON_SELECTOR_RE.replace_all(source, "");
+    let mut seen = std::collections::HashSet::new();
+    let mut exports = Vec::new();
+    for cap in CSS_CLASS_RE.captures_iter(&cleaned) {
+        if let Some(m) = cap.get(1) {
+            let class_name = m.as_str().to_string();
+            if seen.insert(class_name.clone()) {
+                exports.push(ExportInfo {
+                    name: ExportName::Named(class_name),
+                    local_name: None,
+                    is_type_only: false,
+                    span: Span::default(),
+                    members: Vec::new(),
+                });
+            }
+        }
+    }
+    exports
+}
+
 /// Parse a CSS/SCSS file, extracting @import, @use, @forward, @apply, and @tailwind directives.
 fn parse_css_to_module(
     file_id: FileId,
@@ -672,9 +713,16 @@ fn parse_css_to_module(
         });
     }
 
+    // For CSS module files, extract class names as named exports
+    let exports = if is_css_module_file(path) {
+        extract_css_module_exports(&stripped)
+    } else {
+        Vec::new()
+    };
+
     ModuleInfo {
         file_id,
-        exports: Vec::new(),
+        exports,
         imports,
         re_exports: Vec::new(),
         dynamic_imports: Vec::new(),
@@ -2920,5 +2968,153 @@ More content.
         assert_eq!(info.imports.len(), 2); // real-import.css + tailwindcss
         assert!(info.imports.iter().any(|i| i.source == "./real-import.css"));
         assert!(info.imports.iter().any(|i| i.source == "tailwindcss"));
+    }
+
+    // ── CSS Module extraction ─────────────────────────────────────
+
+    fn parse_css_module(source: &str) -> ModuleInfo {
+        parse_source_to_module(FileId(0), Path::new("Component.module.css"), source, 0)
+    }
+
+    fn parse_css_non_module(source: &str) -> ModuleInfo {
+        parse_source_to_module(FileId(0), Path::new("styles.css"), source, 0)
+    }
+
+    #[test]
+    fn css_module_extracts_class_names_as_exports() {
+        let info = parse_css_module(".header { color: red; } .footer { color: blue; }");
+        let export_names: Vec<&ExportName> = info.exports.iter().map(|e| &e.name).collect();
+        assert!(export_names.contains(&&ExportName::Named("header".to_string())));
+        assert!(export_names.contains(&&ExportName::Named("footer".to_string())));
+        // No default export — default import handling is done at the graph level
+        assert!(!export_names.contains(&&ExportName::Default));
+    }
+
+    #[test]
+    fn css_module_extracts_kebab_case_class_names() {
+        let info = parse_css_module(".nav-bar { display: flex; } .main-content { padding: 10px; }");
+        let named: Vec<String> = info
+            .exports
+            .iter()
+            .filter_map(|e| match &e.name {
+                ExportName::Named(n) => Some(n.clone()),
+                _ => None,
+            })
+            .collect();
+        assert!(named.contains(&"nav-bar".to_string()));
+        assert!(named.contains(&"main-content".to_string()));
+    }
+
+    #[test]
+    fn css_module_deduplicates_class_names() {
+        let info = parse_css_module(".btn { color: red; } .btn { font-size: 14px; }");
+        let named_count = info
+            .exports
+            .iter()
+            .filter(|e| matches!(&e.name, ExportName::Named(n) if n == "btn"))
+            .count();
+        assert_eq!(
+            named_count, 1,
+            "Duplicate class names should be deduplicated"
+        );
+    }
+
+    #[test]
+    fn css_module_no_default_export() {
+        let info = parse_css_module(".foo { color: red; }");
+        assert!(
+            !info.exports.iter().any(|e| e.name == ExportName::Default),
+            "CSS modules should not emit a default export (handled at graph level)"
+        );
+    }
+
+    #[test]
+    fn non_module_css_has_no_exports() {
+        let info = parse_css_non_module(".header { color: red; }");
+        assert!(
+            info.exports.is_empty(),
+            "Non-module CSS should have no exports"
+        );
+    }
+
+    #[test]
+    fn css_module_ignores_classes_in_comments() {
+        let info = parse_css_module("/* .commented { color: red; } */ .active { color: green; }");
+        let named: Vec<String> = info
+            .exports
+            .iter()
+            .filter_map(|e| match &e.name {
+                ExportName::Named(n) => Some(n.clone()),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            !named.contains(&"commented".to_string()),
+            "Classes in comments should be ignored"
+        );
+        assert!(named.contains(&"active".to_string()));
+    }
+
+    #[test]
+    fn scss_module_extracts_class_names() {
+        let info = parse_source_to_module(
+            FileId(0),
+            Path::new("Component.module.scss"),
+            ".wrapper { .inner { color: red; } }",
+            0,
+        );
+        let named: Vec<String> = info
+            .exports
+            .iter()
+            .filter_map(|e| match &e.name {
+                ExportName::Named(n) => Some(n.clone()),
+                _ => None,
+            })
+            .collect();
+        assert!(named.contains(&"wrapper".to_string()));
+        assert!(named.contains(&"inner".to_string()));
+    }
+
+    #[test]
+    fn css_module_with_complex_selectors() {
+        let info =
+            parse_css_module(".btn:hover { color: red; } .btn.active { } .container > .child { }");
+        let named: Vec<String> = info
+            .exports
+            .iter()
+            .filter_map(|e| match &e.name {
+                ExportName::Named(n) => Some(n.clone()),
+                _ => None,
+            })
+            .collect();
+        assert!(named.contains(&"btn".to_string()));
+        assert!(named.contains(&"active".to_string()));
+        assert!(named.contains(&"container".to_string()));
+        assert!(named.contains(&"child".to_string()));
+    }
+
+    #[test]
+    fn css_module_ignores_classes_in_strings_and_urls() {
+        let info = parse_css_module(
+            r#".real { content: ".fake"; background: url(./img/hero.png); } .also-real { color: red; }"#,
+        );
+        let named: Vec<String> = info
+            .exports
+            .iter()
+            .filter_map(|e| match &e.name {
+                ExportName::Named(n) => Some(n.clone()),
+                _ => None,
+            })
+            .collect();
+        assert!(named.contains(&"real".to_string()));
+        assert!(named.contains(&"also-real".to_string()));
+        assert!(
+            !named.contains(&"fake".to_string()),
+            "Classes inside quoted strings should be ignored"
+        );
+        assert!(
+            !named.contains(&"png".to_string()),
+            "File extensions inside url() should be ignored"
+        );
     }
 }
