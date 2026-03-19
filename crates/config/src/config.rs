@@ -99,6 +99,18 @@ pub struct DuplicatesConfig {
     /// Only report cross-directory duplicates.
     #[serde(default)]
     pub skip_local: bool,
+
+    /// Enable cross-language clone detection by stripping type annotations.
+    ///
+    /// When enabled, TypeScript type annotations (parameter types, return types,
+    /// generics, interfaces, type aliases) are stripped from the token stream,
+    /// allowing detection of clones between `.ts` and `.js` files.
+    #[serde(default)]
+    pub cross_language: bool,
+
+    /// Fine-grained normalization overrides on top of the detection mode.
+    #[serde(default)]
+    pub normalization: NormalizationConfig,
 }
 
 impl Default for DuplicatesConfig {
@@ -111,6 +123,57 @@ impl Default for DuplicatesConfig {
             threshold: 0.0,
             ignore: vec![],
             skip_local: false,
+            cross_language: false,
+            normalization: NormalizationConfig::default(),
+        }
+    }
+}
+
+/// Fine-grained normalization overrides.
+///
+/// Each option, when set to `Some(true)`, forces that normalization regardless of
+/// the detection mode. When set to `Some(false)`, it forces preservation. When
+/// `None`, the detection mode's default behavior applies.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct NormalizationConfig {
+    /// Blind all identifiers (variable names, function names, etc.) to the same hash.
+    /// Default in `semantic` mode.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ignore_identifiers: Option<bool>,
+
+    /// Blind string literal values to the same hash.
+    /// Default in `weak` and `semantic` modes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ignore_string_values: Option<bool>,
+
+    /// Blind numeric literal values to the same hash.
+    /// Default in `semantic` mode.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ignore_numeric_values: Option<bool>,
+}
+
+/// Resolved normalization flags: mode defaults merged with user overrides.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ResolvedNormalization {
+    pub ignore_identifiers: bool,
+    pub ignore_string_values: bool,
+    pub ignore_numeric_values: bool,
+}
+
+impl ResolvedNormalization {
+    /// Resolve normalization from a detection mode and optional overrides.
+    pub fn resolve(mode: DetectionMode, overrides: &NormalizationConfig) -> Self {
+        let (default_ids, default_strings, default_numbers) = match mode {
+            DetectionMode::Strict | DetectionMode::Mild => (false, false, false),
+            DetectionMode::Weak => (false, true, false),
+            DetectionMode::Semantic => (true, true, true),
+        };
+
+        Self {
+            ignore_identifiers: overrides.ignore_identifiers.unwrap_or(default_ids),
+            ignore_string_values: overrides.ignore_string_values.unwrap_or(default_strings),
+            ignore_numeric_values: overrides.ignore_numeric_values.unwrap_or(default_numbers),
         }
     }
 }

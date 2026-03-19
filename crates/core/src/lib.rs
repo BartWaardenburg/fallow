@@ -1,5 +1,6 @@
 pub mod analyze;
 pub mod cache;
+pub mod cross_reference;
 pub mod discover;
 pub mod duplicates;
 pub mod errors;

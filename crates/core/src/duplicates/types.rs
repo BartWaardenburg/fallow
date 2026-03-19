@@ -120,6 +120,10 @@ mod tests {
         assert_eq!(config.threshold, 0.0);
         assert!(config.ignore.is_empty());
         assert!(!config.skip_local);
+        assert!(!config.cross_language);
+        assert!(config.normalization.ignore_identifiers.is_none());
+        assert!(config.normalization.ignore_string_values.is_none());
+        assert!(config.normalization.ignore_numeric_values.is_none());
     }
 
     #[test]
@@ -185,5 +189,41 @@ ignore = ["**/*.generated.ts"]
         assert_eq!(config.mode, DetectionMode::Mild);
         assert_eq!(config.min_tokens, 50);
         assert_eq!(config.min_lines, 5);
+    }
+
+    #[test]
+    fn config_deserialize_cross_language() {
+        let toml_str = r#"crossLanguage = true"#;
+        let config: DuplicatesConfig = toml::from_str(toml_str).unwrap();
+        assert!(config.cross_language);
+    }
+
+    #[test]
+    fn config_deserialize_normalization_overrides() {
+        let toml_str = r#"
+[normalization]
+ignoreIdentifiers = true
+ignoreStringValues = false
+"#;
+        let config: DuplicatesConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.normalization.ignore_identifiers, Some(true));
+        assert_eq!(config.normalization.ignore_string_values, Some(false));
+        assert!(config.normalization.ignore_numeric_values.is_none());
+    }
+
+    #[test]
+    fn config_deserialize_json_normalization() {
+        let json_str = r#"{
+            "crossLanguage": true,
+            "normalization": {
+                "ignoreIdentifiers": true,
+                "ignoreNumericValues": true
+            }
+        }"#;
+        let config: DuplicatesConfig = serde_json::from_str(json_str).unwrap();
+        assert!(config.cross_language);
+        assert_eq!(config.normalization.ignore_identifiers, Some(true));
+        assert_eq!(config.normalization.ignore_numeric_values, Some(true));
+        assert!(config.normalization.ignore_string_values.is_none());
     }
 }
