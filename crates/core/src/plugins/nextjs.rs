@@ -84,6 +84,9 @@ const TOOLING_DEPENDENCIES: &[&str] = &[
     "@next/mdx",
     "@next/bundle-analyzer",
     "@next/env",
+    // Virtual packages for enforcing server/client boundaries (imported but not in package.json)
+    "server-only",
+    "client-only",
 ];
 
 // Used exports for App Router page files

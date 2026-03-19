@@ -923,6 +923,11 @@ fn find_unlisted_dependencies(
         if is_builtin_module(package_name) || is_path_alias(package_name) {
             continue;
         }
+        // Skip virtual module imports (e.g., `virtual:pwa-register`, `virtual:emoji-mart-lang-importer`)
+        // created by Vite plugins and similar build tools
+        if package_name.starts_with("virtual:") {
+            continue;
+        }
         // Skip internal workspace package names
         if workspace_names.contains(package_name) {
             continue;
@@ -1145,8 +1150,17 @@ fn find_duplicate_exports(
         .collect()
 }
 
-/// Check if a package name is a Node.js built-in module.
+/// Check if a package name is a platform built-in module (Node.js, Deno, Cloudflare Workers).
 fn is_builtin_module(name: &str) -> bool {
+    // Cloudflare Workers built-in modules (e.g., `cloudflare:workers`, `cloudflare:sockets`)
+    if name.starts_with("cloudflare:") {
+        return true;
+    }
+    // Deno standard library — imported as bare `std` or subpaths like `std/path`
+    // (Deno also uses `jsr:@std/` but that would be extracted differently)
+    if name == "std" || name.starts_with("std/") {
+        return true;
+    }
     let builtins = [
         "assert",
         "assert/strict",

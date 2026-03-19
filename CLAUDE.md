@@ -27,9 +27,9 @@ Pipeline: Config → File Discovery → Incremental Parallel Parsing (rayon + ox
 
 Key modules in fallow-core:
 - `project.rs` — `ProjectState` struct: owns the file registry (stable FileIds sorted by path) and workspace metadata. Foundation for cross-workspace resolution and future incremental analysis.
-- `discover.rs` — File walking + entry point detection (also workspace-aware). FileIds are assigned deterministically by path sort order (not size) for stability across runs. Hidden directory allowlist (`.storybook`, `.well-known`, `.changeset`, `.github`) — other dotdirs are skipped. Only root-level `build/` is ignored (not nested `test/build/` etc.).
+- `discover.rs` — File walking + entry point detection (also workspace-aware). FileIds are assigned deterministically by path sort order (not size) for stability across runs. Hidden directory allowlist (`.storybook`, `.well-known`, `.changeset`, `.github`, `.expo`) — other dotdirs are skipped. Only root-level `build/` is ignored (not nested `test/build/` etc.).
 - `extract.rs` — AST visitor extracting imports, exports, re-exports, members, whole-object uses, dynamic import patterns; SFC (Vue/Svelte) script extraction (HTML comment filtering, `<script src="...">` support); Astro frontmatter extraction; MDX import/export extraction; CSS Module class name extraction (`.module.css`/`.module.scss` → named exports). Returns `ParseResult` with modules + cache hit/miss statistics for incremental analysis visibility.
-- `resolve.rs` — oxc_resolver-based import resolution + glob-based dynamic import pattern resolution + DashMap-backed bare specifier cache for lock-free parallel lookups. Cross-workspace imports resolve through node_modules symlinks via canonicalize. Pnpm content-addressable store detection: `.pnpm` virtual store paths are mapped back to workspace source files for injected dependencies.
+- `resolve.rs` — oxc_resolver-based import resolution + glob-based dynamic import pattern resolution + DashMap-backed bare specifier cache for lock-free parallel lookups. Cross-workspace imports resolve through node_modules symlinks via canonicalize. Pnpm content-addressable store detection: `.pnpm` virtual store paths are mapped back to workspace source files for injected dependencies. React Native platform extensions (`.web`/`.ios`/`.android`/`.native`) resolved via `resolve_file` fallback. Per-file tsconfig path alias resolution (`TsconfigDiscovery::Auto`) finds the nearest tsconfig.json for each file.
 - `graph.rs` — Module graph with re-export chain propagation
 - `analyze.rs` — Dead code detection (10 issue types) with inline suppression filtering
 - `scripts.rs` — Shell command parser for package.json scripts: extracts binary names (mapped to package names for dependency usage detection), `--config` args (entry points), and file path args; handles env wrappers, package manager runners, node runners
@@ -38,7 +38,7 @@ Key modules in fallow-core:
 - `duplicates/normalize.rs` — Configurable token normalization with `ResolvedNormalization`: mode defaults (strict/mild/weak/semantic) merged with user-specified overrides (`ignore_identifiers`, `ignore_string_values`, `ignore_numeric_values`)
 - `duplicates/tokenize.rs` — AST-based tokenizer with optional type annotation stripping (`strip_types` flag) for cross-language clone detection between `.ts` and `.js` files
 - `cross_reference.rs` — Cross-references duplication findings with dead code analysis: identifies clone instances that are also unused (in unused files or overlapping unused exports) as high-priority combined findings
-- `plugins/` — Plugin system: `Plugin` trait, registry (46 built-in plugins, ~20 with AST-based config parsing); `config_parser.rs` provides Oxc-based helpers for extracting imports, string arrays, object keys, require() sources, and string-or-array values from JS/TS/JSON config files
+- `plugins/` — Plugin system: `Plugin` trait, registry (47 built-in plugins, ~20 with AST-based config parsing); `config_parser.rs` provides Oxc-based helpers for extracting imports, string arrays, object keys, require() sources, and string-or-array values from JS/TS/JSON config files
 - `trace.rs` — Debug & trace tooling: trace export usage (`trace_export`), file edges (`trace_file`), dependency usage (`trace_dependency`), clone location (`trace_clone`), and `PipelineTimings` struct for `--performance` output
 - `cache.rs` — Incremental bincode cache with xxh3 hashing. Unchanged files skip AST parsing and load from cache; only changed/new files are parsed. Cache is pruned of stale entries (deleted files) on each run. `--performance` output shows cache hit/miss stats.
 - `progress.rs` — indicatif progress bars
@@ -87,11 +87,15 @@ cd benchmarks && npm run generate:dupes && npm run bench:dupes  # vs jscpd
 20. Package.json `exports` field subpath resolution: cross-workspace imports through exports maps (e.g., `"./utils": "./dist/utils.js"`) resolve correctly. Output directories (`dist/`, `build/`, `out/`, `esm/`, `cjs/`) are mapped back to `src/` equivalents with source extension fallback, including nested output subdirectories (e.g., `dist/esm/utils.mjs` → `src/utils.ts`), since fallow ignores output directories by default.
 21. Pnpm content-addressable store detection: `.pnpm` virtual store paths (e.g., `node_modules/.pnpm/@myorg+ui@1.0.0/node_modules/@myorg/ui/dist/index.js`) are mapped back to workspace source files. Handles injected dependencies, scoped/unscoped packages, and peer dependency suffixes.
 22. Package.json entry point fields: `main`, `module`, `types`, `typings`, `source`, `browser` (string or object), `bin` (string or object), and `exports` (recursive). The `source` field is a common convention for pointing to unbuilt source entry points.
+23. `export *` chain propagation through multi-level barrel files: re-export chains (`a.ts` → `barrel.ts` → `index.ts` via `export *`) are fully resolved so that transitive usage is tracked correctly.
+24. Tsconfig path alias resolution (`TsconfigDiscovery::Auto`): per-file tsconfig discovery resolves path aliases (e.g., `@/utils`) by finding the nearest `tsconfig.json` for each file, supporting monorepos with per-package tsconfig files.
+25. React Native platform extensions: `.web.ts`, `.ios.ts`, `.android.ts`, `.native.ts` variants are resolved alongside standard extensions so platform-specific files are not falsely reported as unused.
+26. Decorated class member skip: class members with decorators (NestJS `@Get()`, Angular `@Input()`, TypeORM `@Column()`, etc.) are not reported as unused, since decorator-driven frameworks consume them via reflection.
 
-## Framework support (46 plugins)
+## Framework support (47 plugins)
 
 **Frameworks**: Next.js, Nuxt, Remix, SvelteKit, Gatsby, Astro, Angular, React Router, React Native, Expo, NestJS, Docusaurus
-**Bundlers**: Vite, Webpack, Rspack, Rollup, Tsup
+**Bundlers**: Vite, Webpack, Rspack, Rollup, Tsup, Tsdown
 **Testing**: Vitest, Jest, Playwright, Cypress, Mocha, Ava, Storybook
 **Linting**: ESLint, Biome, Stylelint, Commitlint
 **Transpilation**: TypeScript, Babel
@@ -115,6 +119,8 @@ cd benchmarks && npm run generate:dupes && npm run bench:dupes  # vs jscpd
   - **Babel**: presets/plugins with short-name resolution (e.g. "env" → "@babel/preset-env"), extends, JSON/.babelrc support
   - **Rollup**: input entries, external deps
   - **PostCSS**: plugins (object keys, require() calls, string arrays)
+  - **Nuxt**: modules, css, plugins, extends, postcss plugins from `nuxt.config.ts`; path aliases (`~`, `~~`, `#shared`)
+- **Plugin trait extensions** — `path_aliases()` for framework-specific alias resolution (e.g., Nuxt `~/`, Next.js `@/`); `virtual_module_prefixes()` for framework virtual modules (e.g., Docusaurus `@theme/`, `@docusaurus/`); `TsconfigDiscovery::Auto` for per-file tsconfig path alias resolution across monorepo packages.
 - **External plugins** (`crates/config/src/external_plugin.rs`) — Standalone plugin definitions (JSONC, JSON, TOML) or inline via the `framework` config field. Discovered from: `plugins` config field, `.fallow/plugins/` directory, and `fallow-plugin-*.{jsonc,json,toml}` files in project root. Supports entry points, always-used files, used exports, config patterns, tooling dependencies, and rich `detection` logic (`dependency`, `fileExists`, `all`/`any` combinators). Inline `framework` definitions use the same `ExternalPluginDef` schema and are merged into the plugin pipeline. All formats use camelCase field names. `$schema` field supported for IDE autocomplete in JSONC/JSON. See `docs/plugin-authoring.md` for the full format.
 
 ## CLI features
@@ -247,7 +253,7 @@ unresolved_imports = "error"
 ## Key design decisions
 
 - **No TypeScript compiler dependency**: Syntactic analysis only via Oxc. This is the speed advantage.
-- **Plugin system**: Single source of truth for framework support. Rust trait-based plugins with static patterns for common cases and optional AST-based config parsing via Oxc for ~20 plugins (no JavaScript evaluation), 15 with rich config extraction (entry points, dependencies, setup files from config objects). 46 built-in plugins covering the most popular JS/TS frameworks.
+- **Plugin system**: Single source of truth for framework support. Rust trait-based plugins with static patterns for common cases and optional AST-based config parsing via Oxc for ~20 plugins (no JavaScript evaluation), 15 with rich config extraction (entry points, dependencies, setup files from config objects). 47 built-in plugins covering the most popular JS/TS frameworks.
 - **Flat edge storage**: Contiguous `Vec<Edge>` with range indices for cache-friendly traversal.
 - **Lock-free parallel resolution**: Bare specifier cache uses `DashMap` (sharded concurrent map) for contention-free reads under rayon work-stealing.
 - **Re-export chain resolution**: Iterative propagation through barrel files with cycle detection.

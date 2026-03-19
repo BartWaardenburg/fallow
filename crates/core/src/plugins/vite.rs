@@ -49,6 +49,12 @@ impl Plugin for VitePlugin {
         TOOLING_DEPENDENCIES
     }
 
+    fn virtual_module_prefixes(&self) -> &'static [&'static str] {
+        // Vite plugins create virtual modules with `virtual:` prefix
+        // (e.g., `virtual:pwa-register`, `virtual:emoji-mart-lang-importer`)
+        &["virtual:"]
+    }
+
     fn resolve_config(&self, config_path: &Path, source: &str, _root: &Path) -> PluginResult {
         let mut result = PluginResult::default();
 
