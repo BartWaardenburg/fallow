@@ -1,0 +1,11 @@
+@use "./variables";
+@forward "./mixins";
+@import "./reset.css";
+
+.wrapper {
+  .inner { color: red; }
+}
+
+.btn {
+  @apply px-4 py-2;
+}

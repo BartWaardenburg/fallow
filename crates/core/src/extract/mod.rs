@@ -1,6 +1,6 @@
-mod astro;
-mod css;
-mod mdx;
+pub mod astro;
+pub mod css;
+pub mod mdx;
 mod parse;
 pub(crate) mod sfc;
 pub(crate) mod visitor;
@@ -14,10 +14,11 @@ use crate::cache::CacheStore;
 use crate::discover::{DiscoveredFile, FileId};
 use crate::suppress::Suppression;
 
-// Re-export pub(crate) items used by other submodules
-pub(crate) use astro::extract_astro_frontmatter;
-pub(crate) use mdx::extract_mdx_statements;
-pub(crate) use sfc::{extract_sfc_scripts, is_sfc_file};
+// Re-export extraction functions for internal use and fuzzing
+pub use astro::extract_astro_frontmatter;
+pub use css::extract_css_module_exports;
+pub use mdx::extract_mdx_statements;
+pub use sfc::{extract_sfc_scripts, is_sfc_file};
 
 use parse::parse_source_to_module;
 

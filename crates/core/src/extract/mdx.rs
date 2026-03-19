@@ -17,7 +17,7 @@ use crate::discover::FileId;
 ///
 /// NOTE: CSS/SCSS `@apply` is handled in `parse_css_to_module()`, not here.
 /// MDX import/export extraction only handles JS/TS `import`/`export` statements.
-pub(crate) fn extract_mdx_statements(source: &str) -> String {
+pub fn extract_mdx_statements(source: &str) -> String {
     let mut statements = Vec::new();
     let mut in_multiline = false;
     let mut brace_depth: i32 = 0;

@@ -1,0 +1,1 @@
+API_KEY=test dotenv -- node src/app.js | tee output.log ; echo "done"

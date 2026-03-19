@@ -1,0 +1,35 @@
+[package]
+name = "fallow-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+# Prevent this crate from joining the parent workspace
+[workspace]
+
+[dependencies]
+libfuzzer-sys = "0.4"
+fallow-core = { path = "../crates/core" }
+
+[[bin]]
+name = "fuzz_sfc"
+path = "fuzz_targets/fuzz_sfc.rs"
+
+[[bin]]
+name = "fuzz_mdx"
+path = "fuzz_targets/fuzz_mdx.rs"
+
+[[bin]]
+name = "fuzz_astro"
+path = "fuzz_targets/fuzz_astro.rs"
+
+[[bin]]
+name = "fuzz_css"
+path = "fuzz_targets/fuzz_css.rs"
+
+[[bin]]
+name = "fuzz_scripts"
+path = "fuzz_targets/fuzz_scripts.rs"

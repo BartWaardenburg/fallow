@@ -1,0 +1,10 @@
+.btn:hover { color: red; }
+.btn.active { }
+.container > .child { }
+@media (max-width: 768px) {
+  .mobile-nav { display: block; }
+  .desktop-nav { display: none; }
+}
+/* .commented { color: red; } */
+.real { content: ".fake"; background: url(./img/hero.png); }
+.also-real { color: red; }

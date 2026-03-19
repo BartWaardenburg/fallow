@@ -34,7 +34,7 @@ static SRC_ATTR_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
 static HTML_COMMENT_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r"(?s)<!--.*?-->").expect("valid regex"));
 
-pub(crate) struct SfcScript {
+pub struct SfcScript {
     pub body: String,
     pub is_typescript: bool,
     /// Whether the script uses JSX syntax (lang="tsx" or lang="jsx").
@@ -45,7 +45,7 @@ pub(crate) struct SfcScript {
     pub src: Option<String>,
 }
 
-pub(crate) fn extract_sfc_scripts(source: &str) -> Vec<SfcScript> {
+pub fn extract_sfc_scripts(source: &str) -> Vec<SfcScript> {
     // Build HTML comment ranges to filter out <script> blocks inside comments.
     // Using ranges instead of source replacement avoids corrupting script body content
     // (e.g., string literals containing "<!--" would be destroyed by replacement).
@@ -88,7 +88,7 @@ pub(crate) fn extract_sfc_scripts(source: &str) -> Vec<SfcScript> {
         .collect()
 }
 
-pub(crate) fn is_sfc_file(path: &Path) -> bool {
+pub fn is_sfc_file(path: &Path) -> bool {
     path.extension()
         .and_then(|e| e.to_str())
         .is_some_and(|ext| ext == "vue" || ext == "svelte")

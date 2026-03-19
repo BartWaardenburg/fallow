@@ -1,0 +1,6 @@
+---
+interface Props { title: string; }
+const { title } = Astro.props as Props;
+export { default as Layout } from '../layouts/Layout.astro';
+---
+<h1>{title}</h1>

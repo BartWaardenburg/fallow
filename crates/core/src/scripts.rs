@@ -25,13 +25,13 @@ pub struct ScriptAnalysis {
 
 /// A parsed command segment from a script value.
 #[derive(Debug, PartialEq)]
-struct ScriptCommand {
+pub struct ScriptCommand {
     /// The binary/command name (e.g., "webpack", "eslint", "tsc").
-    binary: String,
+    pub binary: String,
     /// Config file arguments (from `--config`, `-c`).
-    config_args: Vec<String>,
+    pub config_args: Vec<String>,
     /// File path arguments (positional args that look like file paths).
-    file_args: Vec<String>,
+    pub file_args: Vec<String>,
 }
 
 /// Known binary-name → package-name mappings where they diverge.
@@ -144,7 +144,7 @@ pub fn analyze_scripts(scripts: &HashMap<String, String>, root: &Path) -> Script
 /// Parse a single script value into one or more commands.
 ///
 /// Splits on shell operators (`&&`, `||`, `;`, `|`) and parses each segment.
-fn parse_script(script: &str) -> Vec<ScriptCommand> {
+pub fn parse_script(script: &str) -> Vec<ScriptCommand> {
     let mut commands = Vec::new();
 
     for segment in split_shell_operators(script) {

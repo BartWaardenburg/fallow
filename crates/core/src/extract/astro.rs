@@ -17,7 +17,7 @@ static ASTRO_FRONTMATTER_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
 });
 
 /// Extract frontmatter from an Astro component.
-pub(crate) fn extract_astro_frontmatter(source: &str) -> Option<SfcScript> {
+pub fn extract_astro_frontmatter(source: &str) -> Option<SfcScript> {
     ASTRO_FRONTMATTER_RE.captures(source).map(|cap| {
         let body_match = cap.name("body");
         SfcScript {
