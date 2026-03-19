@@ -206,7 +206,7 @@ Supports `--changed-since main` for PR-only analysis, `--baseline` for failing o
 - **Auto-fix** — `fallow fix` removes unused exports and dependencies (`--dry-run` to preview)
 - **VS Code extension** — tree views for dead code and duplicates, status bar, auto-download of the LSP binary, one-click fixes ([`editors/vscode`](editors/vscode))
 - **LSP server** — real-time diagnostics, "remove unused export" code actions, and Code Lens with clickable reference counts above exports (opens Peek References panel)
-- **Workspace support** — npm, yarn, and pnpm workspaces (including `pnpm-workspace.yaml`) with `exports` field subpath resolution
+- **Workspace support** — npm, yarn, and pnpm workspaces (including `pnpm-workspace.yaml`, content-addressable store detection, and injected dependencies) with `exports` field subpath resolution
 - **Script binary analysis** — parses `package.json` scripts to detect CLI tool usage, reducing false positives in unused dependency detection
 - **Dynamic import resolution** — partial resolution of template literals, `import.meta.glob`, and `require.context`
 - **Non-JS file support** — Vue/Svelte SFC (`<script>` block extraction), Astro (frontmatter), MDX (import/export statements), CSS/SCSS (`@import`, `@use`, `@forward`, `@apply`/`@tailwind` as Tailwind dependency usage), CSS Modules (`.module.css`/`.module.scss` class name tracking)
