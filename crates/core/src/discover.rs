@@ -150,7 +150,7 @@ pub fn discover_files(config: &ResolvedConfig) -> Vec<DiscoveredFile> {
 /// Known output directory names from exports maps.
 /// When an entry point path is inside one of these directories, we also try
 /// the `src/` equivalent to find the tracked source file.
-const OUTPUT_DIRS: &[&str] = &["dist", "build", "out", "lib", "esm", "cjs"];
+const OUTPUT_DIRS: &[&str] = &["dist", "build", "out", "esm", "cjs"];
 
 /// Resolve a path relative to a base directory, with security check and extension fallback.
 ///
@@ -209,13 +209,16 @@ fn resolve_entry_path(
 /// - `/project/packages/ui/src/utils.tsx`
 /// - etc. for all source extensions
 ///
+/// Preserves any path prefix between the package root and the output dir,
+/// e.g. `./modules/dist/utils.js` → `base/modules/src/utils.ts`.
+///
 /// Returns `Some(path)` if a source file is found.
 fn try_output_to_source_path(base: &Path, entry: &str) -> Option<PathBuf> {
     let entry_path = Path::new(entry);
     let components: Vec<_> = entry_path.components().collect();
 
-    // Find an output directory component in the entry path
-    let output_pos = components.iter().position(|c| {
+    // Find the last output directory component in the entry path
+    let output_pos = components.iter().rposition(|c| {
         if let std::path::Component::Normal(s) = c
             && let Some(name) = s.to_str()
         {
@@ -224,13 +227,21 @@ fn try_output_to_source_path(base: &Path, entry: &str) -> Option<PathBuf> {
         false
     })?;
 
+    // Build the relative prefix before the output dir, filtering out CurDir (".")
+    let prefix: PathBuf = components[..output_pos]
+        .iter()
+        .filter(|c| !matches!(c, std::path::Component::CurDir))
+        .collect();
+
     // Build the relative path after the output dir (e.g., "utils.js")
     let suffix: PathBuf = components[output_pos + 1..].iter().collect();
 
-    // Build any prefix before the output dir (e.g., "./" → nothing meaningful)
-    // We join base + "src" + suffix-with-new-extension
+    // Try base + prefix + "src" + suffix-with-source-extension
     for ext in SOURCE_EXTENSIONS {
-        let source_candidate = base.join("src").join(suffix.with_extension(ext));
+        let source_candidate = base
+            .join(&prefix)
+            .join("src")
+            .join(suffix.with_extension(ext));
         if source_candidate.exists() {
             return Some(source_candidate);
         }

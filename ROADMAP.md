@@ -42,8 +42,8 @@ Fallow is a Rust-native dead code and duplication analyzer for JavaScript/TypeSc
 ### Integrations
 - **CLI commands**: check, dupes, watch, fix, init, migrate, list, schema, config-schema
 - **Config format**: JSONC (default), JSON, TOML — with `$schema` support for IDE autocomplete/validation
-- **LSP server**: diagnostics for all 10 dead code issue types + quick-fix code actions
-- **VS Code extension**: tree views for dead code and duplicates, status bar, auto-download of LSP binary, one-click fixes
+- **LSP server**: diagnostics for all 10 dead code issue types, quick-fix code actions, Code Lens with export reference counts
+- **VS Code extension**: tree views for dead code and duplicates, status bar, Code Lens, auto-download of LSP binary, one-click fixes
 - **MCP server**: AI agent integration via stdio transport (analyze, check_changed, find_dupes, fix_preview, fix_apply, project_info)
 - **GitHub Action**: SARIF upload, PR comments, baseline support, analysis caching
 - **External plugins**: `fallow-plugin-*.toml` for community-driven framework support without writing Rust
@@ -53,7 +53,7 @@ Fallow is a Rust-native dead code and duplication analyzer for JavaScript/TypeSc
 - Vue/Svelte SFC (`<script>` block extraction with `lang="ts"`/`lang="tsx"`, `<script src="...">`, HTML comment filtering)
 - Astro (frontmatter extraction between `---` delimiters)
 - MDX (line-based import/export extraction with multi-line brace tracking)
-- CSS/SCSS (`@import`, `@use`, `@forward` as module dependencies; `@apply`/`@tailwind` as Tailwind dependency usage)
+- CSS/SCSS (`@import`, `@use`, `@forward` as module dependencies; `@apply`/`@tailwind` as Tailwind dependency usage; CSS Modules class name export tracking)
 
 ### Performance
 - rayon parallelism, oxc_parser, incremental bincode cache, flat graph storage, DashMap lock-free bare specifier cache
@@ -64,7 +64,8 @@ Fallow is a Rust-native dead code and duplication analyzer for JavaScript/TypeSc
 
 - **Syntactic analysis only**: No TypeScript type information. Projects using `isolatedModules: true` (required for esbuild/swc/vite) are well-served; legacy tsc-only projects may see false positives on type-only imports.
 - **Config parsing ceiling**: AST-based extraction covers static object literals, string arrays, and simple wrappers like `defineConfig(...)`. Computed values (`getPlugins()`), conditionals (`process.env.NODE_ENV`), and nested config factories are out of reach without JS eval.
-- **CSS/SCSS parsing is regex-based**: Handles `@import`, `@use`, `@forward`, `@apply`, `@tailwind` with comment stripping, but does not parse full CSS syntax. CSS Modules (`.module.css` class name exports) are not yet tracked. SCSS partials (`_variables.scss` from `@use "variables"`) rely on the resolver, not SCSS-specific partial resolution.
+- **CSS/SCSS parsing is regex-based**: Handles `@import`, `@use`, `@forward`, `@apply`, `@tailwind` with comment stripping, and CSS Module class name extraction. Does not parse full CSS syntax. SCSS partials (`_variables.scss` from `@use "variables"`) rely on the resolver, not SCSS-specific partial resolution.
+- **LSP column offsets are byte-based**: Diagnostics and Code Lens use byte column offsets from the Oxc parser, but the LSP spec requires UTF-16 code unit offsets. Identical for ASCII; may be off for non-ASCII characters before the target position on the same line.
 
 ---
 
@@ -78,18 +79,18 @@ Fallow is a Rust-native dead code and duplication analyzer for JavaScript/TypeSc
 
 **Phase B (fine-grained incremental, post-1.0)**: Patch the graph in place, track export-level dependencies, incremental re-export chain propagation. This requires redesigning the flat `Vec<Edge>` storage to support insertion/removal.
 
-### Enhanced Code Actions & Code Lens
+### Enhanced Code Actions
 
-- Usage counts on exports (code lens)
 - "Extract duplicate" — for duplication: offer to extract a clone family into a shared function
 - Hover: show where an export is used, or show other locations of a duplicate block
+- Code Lens: click to navigate to reference locations (currently display-only)
 
 ### Cross-Workspace: Remaining Edge Cases
 
-The basic cross-workspace resolution works (unified module graph, `--workspace` scoping, symlink resolution via `canonicalize`). Remaining work:
-- `package.json` `exports` field resolution
+The basic cross-workspace resolution works (unified module graph, `--workspace` scoping, symlink resolution via `canonicalize`, `exports` field subpath resolution with output→source mapping). Remaining work:
 - pnpm content-addressable store: detect `.pnpm` paths and map them back to workspace sources
 - tsconfig project references
+- Conditional exports with nested output subdirectories (e.g., `"./utils": { "import": "./dist/esm/utils.mjs" }` — the `esm/` subdirectory inside `dist/` is not stripped during source fallback)
 
 ### 1.0 Criteria
 
@@ -104,9 +105,6 @@ The basic cross-workspace resolution works (unified module graph, `--workspace` 
 ## Post-1.0: Exploration
 
 These are ideas, not commitments. They ship as 1.x releases based on user demand.
-
-### CSS Modules Support
-Track CSS Module class names (`.module.css`) as named exports, so `import styles from './Button.module.css'` + `styles.button` marks `.button` as used. Requires CSS class name extraction and mapping to JS import destructuring.
 
 ### Historical Trend Tracking
 Store baselines over time. Generate trend reports for both dead code and duplication: "dead code grew 15% this quarter, duplication dropped 3%." Dashboard-friendly JSON API.

@@ -466,7 +466,7 @@ fn resolve_specifier(
 /// When an exports map points to `./dist/utils.js`, we try replacing these
 /// prefixes with `src/` (the conventional source directory) to find the tracked
 /// source file.
-const OUTPUT_DIRS: &[&str] = &["dist", "build", "out", "lib", "esm", "cjs"];
+const OUTPUT_DIRS: &[&str] = &["dist", "build", "out", "esm", "cjs"];
 
 /// Source extensions to try when mapping a built output file back to source.
 const SOURCE_EXTS: &[&str] = &["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"];
@@ -480,8 +480,10 @@ const SOURCE_EXTS: &[&str] = &["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "c
 fn try_source_fallback(resolved: &Path, path_to_id: &HashMap<&Path, FileId>) -> Option<FileId> {
     let components: Vec<_> = resolved.components().collect();
 
-    // Find the position of an output directory component
-    let output_pos = components.iter().position(|c| {
+    // Find the LAST output directory component (closest to the file).
+    // Using rposition avoids false matches on parent directories that happen to
+    // be named "build", "dist", etc.
+    let output_pos = components.iter().rposition(|c| {
         if let std::path::Component::Normal(s) = c
             && let Some(name) = s.to_str()
         {
