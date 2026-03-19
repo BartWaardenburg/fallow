@@ -142,6 +142,19 @@ pub struct ExportUsage {
     /// 0-based byte column offset.
     pub col: u32,
     pub reference_count: usize,
+    /// Locations where this export is referenced. Used by the LSP Code Lens
+    /// to enable click-to-navigate via `editor.action.showReferences`.
+    pub reference_locations: Vec<ReferenceLocation>,
+}
+
+/// A location where an export is referenced (import site in another file).
+#[derive(Debug, Clone, Serialize)]
+pub struct ReferenceLocation {
+    pub path: PathBuf,
+    /// 1-based line number.
+    pub line: u32,
+    /// 0-based byte column offset.
+    pub col: u32,
 }
 
 #[cfg(test)]

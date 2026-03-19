@@ -1360,10 +1360,21 @@ fn is_angular_lifecycle_method(name: &str) -> bool {
 /// Collect usage counts for all exports in the module graph.
 ///
 /// Iterates every module and every export, producing an `ExportUsage` entry with the
-/// reference count. This data is used by the LSP server to show Code Lens annotations
-/// (e.g., "3 references", "0 references") above export declarations.
+/// reference count and reference locations. This data is used by the LSP server to show
+/// Code Lens annotations (e.g., "3 references") above export declarations, with
+/// click-to-navigate support via `editor.action.showReferences`.
 fn collect_export_usages(graph: &ModuleGraph) -> Vec<ExportUsage> {
     let mut usages = Vec::new();
+
+    // Build FileId -> path index for resolving reference locations
+    let file_paths: HashMap<FileId, &std::path::Path> = graph
+        .modules
+        .iter()
+        .map(|m| (m.file_id, m.path.as_path()))
+        .collect();
+
+    // Cache source content per file for byte offset -> line/col conversion
+    let mut source_cache: HashMap<FileId, String> = HashMap::new();
 
     for module in &graph.modules {
         // Skip unreachable modules — no point showing Code Lens for files
@@ -1385,12 +1396,36 @@ fn collect_export_usages(graph: &ModuleGraph) -> Vec<ExportUsage> {
             let source = source_content.get_or_insert_with(|| read_source(&module.path));
             let (line, col) = byte_offset_to_line_col(source, export.span.start);
 
+            // Resolve reference locations for Code Lens navigation
+            let reference_locations: Vec<ReferenceLocation> = export
+                .references
+                .iter()
+                .filter_map(|r| {
+                    // Skip references with no span (e.g. from dynamic import patterns)
+                    if r.import_span.start == 0 && r.import_span.end == 0 {
+                        return None;
+                    }
+                    let ref_path = file_paths.get(&r.from_file)?;
+                    let ref_source = source_cache
+                        .entry(r.from_file)
+                        .or_insert_with(|| read_source(ref_path));
+                    let (ref_line, ref_col) =
+                        byte_offset_to_line_col(ref_source, r.import_span.start);
+                    Some(ReferenceLocation {
+                        path: ref_path.to_path_buf(),
+                        line: ref_line,
+                        col: ref_col,
+                    })
+                })
+                .collect();
+
             usages.push(ExportUsage {
                 path: module.path.clone(),
                 export_name: export.name.to_string(),
                 line,
                 col,
                 reference_count: export.references.len(),
+                reference_locations,
             });
         }
     }

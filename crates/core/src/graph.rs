@@ -78,6 +78,9 @@ pub struct ExportSymbol {
 pub struct SymbolReference {
     pub from_file: FileId,
     pub kind: ReferenceKind,
+    /// Byte span of the import statement in the referencing file.
+    /// Used by the LSP to locate references for Code Lens navigation.
+    pub import_span: oxc_span::Span,
 }
 
 /// How an export is referenced.
@@ -105,6 +108,8 @@ struct ImportedSymbol {
     imported_name: ImportedName,
     #[allow(dead_code)]
     local_name: String,
+    /// Byte span of the import statement in the source file.
+    import_span: oxc_span::Span,
 }
 
 impl ModuleGraph {
@@ -183,6 +188,7 @@ impl ModuleGraph {
                                 .push(ImportedSymbol {
                                     imported_name: import.info.imported_name.clone(),
                                     local_name: import.info.local_name.clone(),
+                                    import_span: import.info.span,
                                 });
                         }
                         ResolveResult::NpmPackage(name) => {
@@ -211,6 +217,7 @@ impl ModuleGraph {
                             .push(ImportedSymbol {
                                 imported_name: ImportedName::SideEffect,
                                 local_name: String::new(),
+                                import_span: oxc_span::Span::new(0, 0),
                             });
                     } else if let ResolveResult::NpmPackage(name) = &re_export.target {
                         package_usage.entry(name.clone()).or_default().push(file.id);
@@ -242,6 +249,7 @@ impl ModuleGraph {
                             .push(ImportedSymbol {
                                 imported_name: import.info.imported_name.clone(),
                                 local_name: import.info.local_name.clone(),
+                                import_span: import.info.span,
                             });
                     }
                 }
@@ -259,6 +267,7 @@ impl ModuleGraph {
                             .push(ImportedSymbol {
                                 imported_name: ImportedName::Namespace,
                                 local_name: String::new(),
+                                import_span: oxc_span::Span::new(0, 0),
                             });
                     }
                 }
@@ -392,6 +401,7 @@ impl ModuleGraph {
                     export.references.push(SymbolReference {
                         from_file: source_id,
                         kind: ref_kind,
+                        import_span: sym.import_span,
                     });
                 }
 
@@ -441,6 +451,7 @@ impl ModuleGraph {
                                 export.references.push(SymbolReference {
                                     from_file: source_id,
                                     kind: ReferenceKind::NamespaceImport,
+                                    import_span: sym.import_span,
                                 });
                             }
                         }
@@ -454,6 +465,7 @@ impl ModuleGraph {
                                 export.references.push(SymbolReference {
                                     from_file: source_id,
                                     kind: ReferenceKind::NamespaceImport,
+                                    import_span: sym.import_span,
                                 });
                             }
                         }
@@ -465,6 +477,7 @@ impl ModuleGraph {
                             export.references.push(SymbolReference {
                                 from_file: source_id,
                                 kind: ReferenceKind::NamespaceImport,
+                                import_span: sym.import_span,
                             });
                         }
                     }
@@ -498,6 +511,7 @@ impl ModuleGraph {
                                 export.references.push(SymbolReference {
                                     from_file: source_id,
                                     kind: ReferenceKind::DefaultImport,
+                                    import_span: sym.import_span,
                                 });
                             }
                         }
@@ -510,6 +524,7 @@ impl ModuleGraph {
                                 export.references.push(SymbolReference {
                                     from_file: source_id,
                                     kind: ReferenceKind::DefaultImport,
+                                    import_span: sym.import_span,
                                 });
                             }
                         }
@@ -630,6 +645,7 @@ impl ModuleGraph {
                                         SymbolReference {
                                             from_file: edge.source,
                                             kind: ReferenceKind::NamedImport,
+                                            import_span: sym.import_span,
                                         },
                                     ))
                                 } else {
