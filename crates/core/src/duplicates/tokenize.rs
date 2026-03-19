@@ -185,7 +185,20 @@ fn point_span(pos: u32) -> Span {
 /// For Vue/Svelte SFC files, extracts `<script>` blocks first and tokenizes
 /// their content, mirroring the main analysis pipeline's SFC handling.
 /// For Astro files, extracts frontmatter. For MDX files, extracts import/export statements.
+///
+/// When `strip_types` is true, TypeScript type annotations, interfaces, and type
+/// aliases are stripped from the token stream. This enables cross-language clone
+/// detection between `.ts` and `.js` files.
 pub fn tokenize_file(path: &Path, source: &str) -> FileTokens {
+    tokenize_file_inner(path, source, false)
+}
+
+/// Tokenize a source file with optional type stripping for cross-language detection.
+pub fn tokenize_file_cross_language(path: &Path, source: &str, strip_types: bool) -> FileTokens {
+    tokenize_file_inner(path, source, strip_types)
+}
+
+fn tokenize_file_inner(path: &Path, source: &str, strip_types: bool) -> FileTokens {
     use crate::extract::{
         extract_astro_frontmatter, extract_mdx_statements, extract_sfc_scripts, is_sfc_file,
     };
@@ -207,7 +220,7 @@ pub fn tokenize_file(path: &Path, source: &str) -> FileTokens {
             let allocator = Allocator::default();
             let parser_return = Parser::new(&allocator, &script.body, source_type).parse();
 
-            let mut extractor = TokenExtractor::new();
+            let mut extractor = TokenExtractor::with_strip_types(strip_types);
             extractor.visit_program(&parser_return.program);
 
             // Adjust token spans to reference positions in the full SFC source
@@ -233,7 +246,7 @@ pub fn tokenize_file(path: &Path, source: &str) -> FileTokens {
             let allocator = Allocator::default();
             let parser_return = Parser::new(&allocator, &script.body, SourceType::ts()).parse();
 
-            let mut extractor = TokenExtractor::new();
+            let mut extractor = TokenExtractor::with_strip_types(strip_types);
             extractor.visit_program(&parser_return.program);
 
             let offset = script.byte_offset as u32;
@@ -264,7 +277,7 @@ pub fn tokenize_file(path: &Path, source: &str) -> FileTokens {
             let allocator = Allocator::default();
             let parser_return = Parser::new(&allocator, &statements, SourceType::jsx()).parse();
 
-            let mut extractor = TokenExtractor::new();
+            let mut extractor = TokenExtractor::with_strip_types(strip_types);
             extractor.visit_program(&parser_return.program);
 
             let line_count = source.lines().count().max(1);
@@ -286,7 +299,7 @@ pub fn tokenize_file(path: &Path, source: &str) -> FileTokens {
     let allocator = Allocator::default();
     let parser_return = Parser::new(&allocator, source, source_type).parse();
 
-    let mut extractor = TokenExtractor::new();
+    let mut extractor = TokenExtractor::with_strip_types(strip_types);
     extractor.visit_program(&parser_return.program);
 
     // If parsing produced very few tokens relative to source size (likely parse errors
@@ -299,7 +312,7 @@ pub fn tokenize_file(path: &Path, source: &str) -> FileTokens {
         };
         let allocator2 = Allocator::default();
         let retry_return = Parser::new(&allocator2, source, jsx_type).parse();
-        let mut retry_extractor = TokenExtractor::new();
+        let mut retry_extractor = TokenExtractor::with_strip_types(strip_types);
         retry_extractor.visit_program(&retry_return.program);
         if retry_extractor.tokens.len() > extractor.tokens.len() {
             extractor = retry_extractor;
@@ -318,11 +331,17 @@ pub fn tokenize_file(path: &Path, source: &str) -> FileTokens {
 /// AST visitor that extracts a flat sequence of normalized tokens.
 struct TokenExtractor {
     tokens: Vec<SourceToken>,
+    /// When true, skip TypeScript type annotations, interfaces, and type aliases
+    /// to enable cross-language clone detection between .ts and .js files.
+    strip_types: bool,
 }
 
 impl TokenExtractor {
-    fn new() -> Self {
-        Self { tokens: Vec::new() }
+    fn with_strip_types(strip_types: bool) -> Self {
+        Self {
+            tokens: Vec::new(),
+            strip_types,
+        }
     }
 
     fn push(&mut self, kind: TokenKind, span: Span) {
@@ -763,6 +782,10 @@ impl<'a> Visit<'a> for TokenExtractor {
     // ── Import/Export ───────────────────────────────────────
 
     fn visit_import_declaration(&mut self, decl: &ImportDeclaration<'a>) {
+        // Skip `import type { ... } from '...'` when stripping types
+        if self.strip_types && decl.import_kind.is_type() {
+            return;
+        }
         self.push_keyword(KeywordType::Import, decl.span);
         walk::walk_import_declaration(self, decl);
         self.push_keyword(KeywordType::From, decl.span);
@@ -773,6 +796,10 @@ impl<'a> Visit<'a> for TokenExtractor {
     }
 
     fn visit_export_named_declaration(&mut self, decl: &ExportNamedDeclaration<'a>) {
+        // Skip `export type { ... }` when stripping types
+        if self.strip_types && decl.export_kind.is_type() {
+            return;
+        }
         self.push_keyword(KeywordType::Export, decl.span);
         walk::walk_export_named_declaration(self, decl);
     }
@@ -795,6 +822,9 @@ impl<'a> Visit<'a> for TokenExtractor {
     // ── TypeScript declarations ────────────────────────────
 
     fn visit_ts_interface_declaration(&mut self, decl: &TSInterfaceDeclaration<'a>) {
+        if self.strip_types {
+            return; // Skip entire interface when stripping types
+        }
         self.push_keyword(KeywordType::Interface, decl.span);
         walk::walk_ts_interface_declaration(self, decl);
     }
@@ -806,8 +836,18 @@ impl<'a> Visit<'a> for TokenExtractor {
     }
 
     fn visit_ts_type_alias_declaration(&mut self, decl: &TSTypeAliasDeclaration<'a>) {
+        if self.strip_types {
+            return; // Skip entire type alias when stripping types
+        }
         self.push_keyword(KeywordType::Type, decl.span);
         walk::walk_ts_type_alias_declaration(self, decl);
+    }
+
+    fn visit_ts_module_declaration(&mut self, decl: &TSModuleDeclaration<'a>) {
+        if self.strip_types && decl.declare {
+            return; // Skip `declare module` / `declare namespace` when stripping types
+        }
+        walk::walk_ts_module_declaration(self, decl);
     }
 
     fn visit_ts_enum_declaration(&mut self, decl: &TSEnumDeclaration<'a>) {
@@ -827,8 +867,46 @@ impl<'a> Visit<'a> for TokenExtractor {
     }
 
     fn visit_ts_type_annotation(&mut self, ann: &TSTypeAnnotation<'a>) {
+        if self.strip_types {
+            return; // Skip parameter/return type annotations when stripping types
+        }
         self.push_punc(PunctuationType::Colon, ann.span);
         walk::walk_ts_type_annotation(self, ann);
+    }
+
+    fn visit_ts_type_parameter_declaration(&mut self, decl: &TSTypeParameterDeclaration<'a>) {
+        if self.strip_types {
+            return; // Skip generic type parameters when stripping types
+        }
+        walk::walk_ts_type_parameter_declaration(self, decl);
+    }
+
+    fn visit_ts_type_parameter_instantiation(&mut self, inst: &TSTypeParameterInstantiation<'a>) {
+        if self.strip_types {
+            return; // Skip generic type arguments when stripping types
+        }
+        walk::walk_ts_type_parameter_instantiation(self, inst);
+    }
+
+    fn visit_ts_as_expression(&mut self, expr: &TSAsExpression<'a>) {
+        self.visit_expression(&expr.expression);
+        if !self.strip_types {
+            self.push_keyword(KeywordType::As, expr.span);
+            self.visit_ts_type(&expr.type_annotation);
+        }
+    }
+
+    fn visit_ts_satisfies_expression(&mut self, expr: &TSSatisfiesExpression<'a>) {
+        self.visit_expression(&expr.expression);
+        if !self.strip_types {
+            self.push_keyword(KeywordType::Satisfies, expr.span);
+            self.visit_ts_type(&expr.type_annotation);
+        }
+    }
+
+    fn visit_ts_non_null_expression(&mut self, expr: &TSNonNullExpression<'a>) {
+        self.visit_expression(&expr.expression);
+        // The `!` postfix is stripped when stripping types (it's a type assertion)
     }
 
     fn visit_identifier_name(&mut self, ident: &IdentifierName<'a>) {
@@ -1063,6 +1141,11 @@ mod tests {
         tokenize_file(&path, code).tokens
     }
 
+    fn tokenize_cross_language(code: &str) -> Vec<SourceToken> {
+        let path = PathBuf::from("test.ts");
+        tokenize_file_cross_language(&path, code, true).tokens
+    }
+
     #[test]
     fn tokenize_jsx_element() {
         let tokens =
@@ -1089,5 +1172,175 @@ mod tests {
             brackets >= 4,
             "Should contain JSX angle brackets, got {brackets}"
         );
+    }
+
+    // ── Cross-language type stripping tests ──────────────────────
+
+    #[test]
+    fn strip_types_removes_parameter_type_annotations() {
+        let ts_tokens = tokenize("function foo(x: string) { return x; }");
+        let stripped = tokenize_cross_language("function foo(x: string) { return x; }");
+
+        // The stripped version should have fewer tokens (no `: string`)
+        assert!(
+            stripped.len() < ts_tokens.len(),
+            "Stripped tokens ({}) should be fewer than full tokens ({})",
+            stripped.len(),
+            ts_tokens.len()
+        );
+
+        // Should NOT contain type-annotation colon or the type name
+        let has_colon_before_string = ts_tokens.windows(2).any(|w| {
+            matches!(w[0].kind, TokenKind::Punctuation(PunctuationType::Colon))
+                && matches!(&w[1].kind, TokenKind::Identifier(n) if n == "string")
+        });
+        assert!(has_colon_before_string, "Original should have `: string`");
+
+        // Stripped version should match JS version
+        let js_tokens = {
+            let path = PathBuf::from("test.js");
+            tokenize_file(&path, "function foo(x) { return x; }").tokens
+        };
+        assert_eq!(
+            stripped.len(),
+            js_tokens.len(),
+            "Stripped TS should produce same token count as JS"
+        );
+    }
+
+    #[test]
+    fn strip_types_removes_return_type_annotations() {
+        let stripped = tokenize_cross_language("function foo(): string { return 'hello'; }");
+        // Should NOT contain the return type annotation
+        let has_string_type = stripped.iter().enumerate().any(|(i, t)| {
+            matches!(&t.kind, TokenKind::Identifier(n) if n == "string")
+                && i > 0
+                && matches!(
+                    stripped[i - 1].kind,
+                    TokenKind::Punctuation(PunctuationType::Colon)
+                )
+        });
+        assert!(
+            !has_string_type,
+            "Stripped version should not have return type annotation"
+        );
+    }
+
+    #[test]
+    fn strip_types_removes_interface_declarations() {
+        let stripped = tokenize_cross_language("interface Foo { bar: string; }\nconst x = 42;");
+        // Should NOT contain interface keyword
+        let has_interface = stripped
+            .iter()
+            .any(|t| matches!(t.kind, TokenKind::Keyword(KeywordType::Interface)));
+        assert!(
+            !has_interface,
+            "Stripped version should not contain interface declaration"
+        );
+        // Should still contain the const declaration
+        let has_const = stripped
+            .iter()
+            .any(|t| matches!(t.kind, TokenKind::Keyword(KeywordType::Const)));
+        assert!(has_const, "Should still contain const keyword");
+    }
+
+    #[test]
+    fn strip_types_removes_type_alias_declarations() {
+        let stripped = tokenize_cross_language("type Result = string | number;\nconst x = 42;");
+        let has_type = stripped
+            .iter()
+            .any(|t| matches!(t.kind, TokenKind::Keyword(KeywordType::Type)));
+        assert!(!has_type, "Stripped version should not contain type alias");
+        let has_const = stripped
+            .iter()
+            .any(|t| matches!(t.kind, TokenKind::Keyword(KeywordType::Const)));
+        assert!(has_const, "Should still contain const keyword");
+    }
+
+    #[test]
+    fn strip_types_preserves_runtime_code() {
+        let stripped =
+            tokenize_cross_language("const x: number = 42;\nif (x > 0) { console.log(x); }");
+        // Should have const, x, =, 42, if, x, >, 0, console, log, x, etc.
+        let has_const = stripped
+            .iter()
+            .any(|t| matches!(t.kind, TokenKind::Keyword(KeywordType::Const)));
+        let has_if = stripped
+            .iter()
+            .any(|t| matches!(t.kind, TokenKind::Keyword(KeywordType::If)));
+        let has_42 = stripped
+            .iter()
+            .any(|t| matches!(&t.kind, TokenKind::NumericLiteral(n) if n == "42"));
+        assert!(has_const, "Should preserve const");
+        assert!(has_if, "Should preserve if");
+        assert!(has_42, "Should preserve numeric literal");
+    }
+
+    #[test]
+    fn strip_types_preserves_enums() {
+        // Enums have runtime semantics, so they should NOT be stripped
+        let stripped = tokenize_cross_language("enum Color { Red, Green, Blue }");
+        let has_enum = stripped
+            .iter()
+            .any(|t| matches!(t.kind, TokenKind::Keyword(KeywordType::Enum)));
+        assert!(
+            has_enum,
+            "Enums should be preserved (they have runtime semantics)"
+        );
+    }
+
+    #[test]
+    fn strip_types_removes_import_type() {
+        let stripped = tokenize_cross_language("import type { Foo } from './foo';\nconst x = 42;");
+        // Should NOT contain import keyword from the type-only import
+        let import_count = stripped
+            .iter()
+            .filter(|t| matches!(t.kind, TokenKind::Keyword(KeywordType::Import)))
+            .count();
+        assert_eq!(import_count, 0, "import type should be stripped");
+        // Should still contain the const declaration
+        let has_const = stripped
+            .iter()
+            .any(|t| matches!(t.kind, TokenKind::Keyword(KeywordType::Const)));
+        assert!(has_const, "Runtime code should be preserved");
+    }
+
+    #[test]
+    fn strip_types_preserves_value_imports() {
+        let stripped = tokenize_cross_language("import { foo } from './foo';\nconst x = foo();");
+        let has_import = stripped
+            .iter()
+            .any(|t| matches!(t.kind, TokenKind::Keyword(KeywordType::Import)));
+        assert!(has_import, "Value imports should be preserved");
+    }
+
+    #[test]
+    fn strip_types_removes_export_type() {
+        let stripped = tokenize_cross_language("export type { Foo };\nconst x = 42;");
+        // The export type should be stripped
+        let export_count = stripped
+            .iter()
+            .filter(|t| matches!(t.kind, TokenKind::Keyword(KeywordType::Export)))
+            .count();
+        assert_eq!(export_count, 0, "export type should be stripped");
+    }
+
+    #[test]
+    fn strip_types_removes_declare_module() {
+        let stripped = tokenize_cross_language(
+            "declare module 'foo' { export function bar(): void; }\nconst x = 42;",
+        );
+        // Should not contain function keyword from the declare block
+        let has_function_keyword = stripped
+            .iter()
+            .any(|t| matches!(t.kind, TokenKind::Keyword(KeywordType::Function)));
+        assert!(
+            !has_function_keyword,
+            "declare module contents should be stripped"
+        );
+        let has_const = stripped
+            .iter()
+            .any(|t| matches!(t.kind, TokenKind::Keyword(KeywordType::Const)));
+        assert!(has_const, "Runtime code should be preserved");
     }
 }

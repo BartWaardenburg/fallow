@@ -5,7 +5,7 @@ use serde::Serialize;
 use crate::extract::MemberKind;
 
 /// Complete analysis results.
-#[derive(Debug, Default, Serialize)]
+#[derive(Debug, Default, Clone, Serialize)]
 pub struct AnalysisResults {
     pub unused_files: Vec<UnusedFile>,
     pub unused_exports: Vec<UnusedExport>,
@@ -45,13 +45,13 @@ impl AnalysisResults {
 }
 
 /// A file that is not reachable from any entry point.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct UnusedFile {
     pub path: PathBuf,
 }
 
 /// An export that is never imported by other modules.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct UnusedExport {
     pub path: PathBuf,
     pub export_name: String,
@@ -65,7 +65,7 @@ pub struct UnusedExport {
 }
 
 /// A dependency that is listed in package.json but never imported.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct UnusedDependency {
     pub package_name: String,
     pub location: DependencyLocation,
@@ -75,7 +75,7 @@ pub struct UnusedDependency {
 }
 
 /// Where in package.json a dependency is listed.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum DependencyLocation {
     Dependencies,
@@ -83,7 +83,7 @@ pub enum DependencyLocation {
 }
 
 /// An unused enum or class member.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct UnusedMember {
     pub path: PathBuf,
     pub parent_name: String,
@@ -94,7 +94,7 @@ pub struct UnusedMember {
 }
 
 /// An import that could not be resolved.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct UnresolvedImport {
     pub path: PathBuf,
     pub specifier: String,
@@ -103,14 +103,14 @@ pub struct UnresolvedImport {
 }
 
 /// A dependency used in code but not listed in package.json.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct UnlistedDependency {
     pub package_name: String,
     pub imported_from: Vec<PathBuf>,
 }
 
 /// An export that appears multiple times across the project.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct DuplicateExport {
     pub export_name: String,
     pub locations: Vec<PathBuf>,
@@ -119,7 +119,7 @@ pub struct DuplicateExport {
 /// A production dependency that is only used via type-only imports.
 /// In production builds, type imports are erased, so this dependency
 /// is not needed at runtime and could be moved to devDependencies.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct TypeOnlyDependency {
     pub package_name: String,
     /// Path to the package.json where the dependency is listed.
