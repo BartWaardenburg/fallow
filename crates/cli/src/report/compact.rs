@@ -3,7 +3,7 @@ use std::path::Path;
 use fallow_core::duplicates::DuplicationReport;
 use fallow_core::results::{AnalysisResults, UnusedExport, UnusedMember};
 
-use super::{relative_path, normalize_uri};
+use super::{normalize_uri, relative_path};
 
 pub(super) fn print_compact(results: &AnalysisResults, root: &Path) {
     for line in build_compact_lines(results, root) {
@@ -86,7 +86,8 @@ pub fn build_compact_lines(results: &AnalysisResults, root: &Path) -> Vec<String
 pub(super) fn print_duplication_compact(report: &DuplicationReport, root: &Path) {
     for (i, group) in report.clone_groups.iter().enumerate() {
         for instance in &group.instances {
-            let relative = normalize_uri(&relative_path(&instance.file, root).display().to_string());
+            let relative =
+                normalize_uri(&relative_path(&instance.file, root).display().to_string());
             println!(
                 "clone-group-{}:{}:{}-{}:{}tokens",
                 i + 1,

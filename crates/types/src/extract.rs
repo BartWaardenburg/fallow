@@ -25,7 +25,7 @@ pub struct ModuleInfo {
     /// Static member access expressions (e.g., `Status.Active`).
     pub member_accesses: Vec<MemberAccess>,
     /// Identifiers used in "all members consumed" patterns
-    /// (Object.values, Object.keys, Object.entries, for..in, spread, computed dynamic access).
+    /// (Object.values, Object.keys, Object.entries, Object.getOwnPropertyNames, for..in, spread, computed dynamic access).
     pub whole_object_uses: Vec<String>,
     /// Whether this module uses `CommonJS` exports (`module.exports` or `exports.*`).
     pub has_cjs_exports: bool,

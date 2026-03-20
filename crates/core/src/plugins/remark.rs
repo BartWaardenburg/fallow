@@ -10,7 +10,7 @@ use super::{Plugin, PluginResult};
 
 pub struct RemarkPlugin;
 
-const ENABLERS: &[&str] = &["remark", "remark-cli", "remark-"];
+const ENABLERS: &[&str] = &["remark", "remark-cli"];
 
 const CONFIG_PATTERNS: &[&str] = &[".remarkrc.{js,cjs,mjs}"];
 

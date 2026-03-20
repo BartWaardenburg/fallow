@@ -25,6 +25,11 @@ const ALWAYS_USED: &[&str] = &["astro.config.{ts,js,mjs}"];
 
 const TOOLING_DEPENDENCIES: &[&str] = &["astro", "@astrojs/check", "@astrojs/ts-plugin"];
 
+/// Virtual module prefixes provided by Astro at build time.
+/// `astro:` provides built-in modules (content, transitions, env, actions, assets,
+/// i18n, middleware, container, schema).
+const VIRTUAL_MODULE_PREFIXES: &[&str] = &["astro:"];
+
 impl Plugin for AstroPlugin {
     fn name(&self) -> &'static str {
         "astro"
@@ -50,6 +55,10 @@ impl Plugin for AstroPlugin {
         TOOLING_DEPENDENCIES
     }
 
+    fn virtual_module_prefixes(&self) -> &'static [&'static str] {
+        VIRTUAL_MODULE_PREFIXES
+    }
+
     fn resolve_config(&self, config_path: &Path, source: &str, _root: &Path) -> PluginResult {
         let mut result = PluginResult::default();
 
@@ -60,5 +69,17 @@ impl Plugin for AstroPlugin {
         }
 
         result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn virtual_module_prefixes_includes_astro_builtins() {
+        let plugin = AstroPlugin;
+        let prefixes = plugin.virtual_module_prefixes();
+        assert!(prefixes.contains(&"astro:"));
     }
 }

@@ -7,7 +7,7 @@
     "type": "git",
     "url": "git+https://github.com/fallow-rs/fallow.git"
   },
-  "homepage": "https://github.com/fallow-rs/fallow",
+  "homepage": "https://docs.fallow.tools",
   "bugs": {
     "url": "https://github.com/fallow-rs/fallow/issues"
   },

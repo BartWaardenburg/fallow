@@ -8,6 +8,10 @@ edition = "2024"
 rust-version = "1.85"
 license = "MIT"
 repository = "https://github.com/fallow-rs/fallow"
+homepage = "https://docs.fallow.tools"
+documentation = "https://docs.fallow.tools"
+keywords = ["dead-code", "javascript", "typescript", "lint", "static-analysis"]
+categories = ["command-line-utilities", "development-tools"]
 
 [workspace.dependencies]
 fallow-core = { version = "0.3.0", path = "crates/core" }

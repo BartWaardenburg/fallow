@@ -8,7 +8,9 @@ use crate::resolve::ResolvedModule;
 use crate::results::*;
 use crate::suppress::{self, IssueKind, Suppression};
 
-use super::predicates::{is_builtin_module, is_implicit_dependency, is_path_alias};
+use super::predicates::{
+    is_builtin_module, is_implicit_dependency, is_path_alias, is_virtual_module,
+};
 use super::{byte_offset_to_line_col, read_source};
 
 /// Find dependencies in package.json that are never imported.
@@ -296,9 +298,9 @@ pub fn find_unlisted_dependencies(
         if is_builtin_module(package_name) || is_path_alias(package_name) {
             continue;
         }
-        // Skip virtual module imports (e.g., `virtual:pwa-register`, `virtual:emoji-mart-lang-importer`)
+        // Skip virtual module imports (e.g., `virtual:pwa-register`, `virtual:uno.css`)
         // created by Vite plugins and similar build tools
-        if package_name.starts_with("virtual:") {
+        if is_virtual_module(package_name) {
             continue;
         }
         // Skip internal workspace package names
@@ -369,6 +371,11 @@ pub fn find_unresolved_imports(
 
         for import in &module.resolved_imports {
             if let crate::resolve::ResolveResult::Unresolvable(spec) = &import.target {
+                // Skip virtual module imports using the `virtual:` convention
+                // (e.g., `virtual:pwa-register`, `virtual:uno.css`)
+                if is_virtual_module(spec) {
+                    continue;
+                }
                 // Skip virtual module imports provided by active framework plugins
                 // (e.g., Nuxt's #imports, #app, #components, #build).
                 if virtual_prefixes

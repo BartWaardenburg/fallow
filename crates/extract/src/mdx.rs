@@ -239,4 +239,45 @@ mod tests {
         let lines: Vec<&str> = result.lines().collect();
         assert_eq!(lines.len(), 1);
     }
+
+    // ── Multi-line import is extracted as one statement ──────────
+
+    #[test]
+    fn multiline_import_with_braces_extracted_as_one() {
+        let source = "import {\n  Foo,\n  Bar\n} from './module'\n\n# Title\n";
+        let result = extract_mdx_statements(source);
+        assert!(result.contains("Foo"), "Foo should be in the result");
+        assert!(result.contains("Bar"), "Bar should be in the result");
+        assert!(
+            result.contains("from './module'"),
+            "from clause should be in the result"
+        );
+    }
+
+    // ── Re-export with braces ───────────────────────────────────
+
+    #[test]
+    fn export_with_braces_from_module() {
+        let source = "export { Foo, Bar } from './module'\n\n# Title\n";
+        let result = extract_mdx_statements(source);
+        assert!(result.contains("export { Foo, Bar } from './module'"));
+    }
+
+    // ── Non-import/export lines between imports are ignored ─────
+
+    #[test]
+    fn non_import_lines_between_imports_ignored() {
+        let source = "import { A } from './a'\n\n# Some heading\n\nA paragraph of text.\n\nimport { B } from './b'\n";
+        let result = extract_mdx_statements(source);
+        assert!(result.contains("import { A } from './a'"));
+        assert!(result.contains("import { B } from './b'"));
+        assert!(!result.contains("heading"), "prose should not be extracted");
+        assert!(
+            !result.contains("paragraph"),
+            "prose should not be extracted"
+        );
+        // Only 2 lines total
+        let lines: Vec<&str> = result.lines().collect();
+        assert_eq!(lines.len(), 2);
+    }
 }

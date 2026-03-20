@@ -1,0 +1,21 @@
+//! Kysely plugin.
+//!
+//! Detects Kysely projects and marks config and migration files as always used.
+
+use super::Plugin;
+
+const ENABLERS: &[&str] = &["kysely", "kysely-ctl"];
+
+const ENTRY_PATTERNS: &[&str] = &["migrations/**/*.{ts,js}", "src/migrations/**/*.{ts,js}"];
+
+const ALWAYS_USED: &[&str] = &["kysely.config.{ts,js}", ".config/kysely.config.{ts,js}"];
+
+const TOOLING_DEPENDENCIES: &[&str] = &["kysely", "kysely-ctl"];
+
+define_plugin! {
+    struct KyselyPlugin => "kysely",
+    enablers: ENABLERS,
+    entry_patterns: ENTRY_PATTERNS,
+    always_used: ALWAYS_USED,
+    tooling_dependencies: TOOLING_DEPENDENCIES,
+}

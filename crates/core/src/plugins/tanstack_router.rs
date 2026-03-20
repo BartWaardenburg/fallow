@@ -4,20 +4,29 @@
 
 use super::Plugin;
 
-const ENABLERS: &[&str] = &["@tanstack/react-router", "@tanstack/start"];
+const ENABLERS: &[&str] = &[
+    "@tanstack/react-router",
+    "@tanstack/start",
+    "@tanstack/react-start",
+];
 
 const ENTRY_PATTERNS: &[&str] = &[
     "src/routes/**/*.{ts,tsx,js,jsx}",
     "app/routes/**/*.{ts,tsx,js,jsx}",
     "src/routeTree.gen.ts",
+    "src/server.{ts,tsx}",
+    "src/client.{ts,tsx}",
+    "src/router.{ts,tsx}",
+    "src/routes/__root.{ts,tsx}",
 ];
 
-const ALWAYS_USED: &[&str] = &["tsr.config.json"];
+const ALWAYS_USED: &[&str] = &["tsr.config.json", "app.config.{ts,js}"];
 
 const TOOLING_DEPENDENCIES: &[&str] = &[
     "@tanstack/react-router",
     "@tanstack/react-router-devtools",
     "@tanstack/start",
+    "@tanstack/react-start",
     "@tanstack/router-cli",
     "@tanstack/router-vite-plugin",
 ];

@@ -229,14 +229,17 @@ mod cypress;
 mod dependency_cruiser;
 mod docusaurus;
 mod drizzle;
+mod electron;
 mod eslint;
 mod expo;
 mod gatsby;
 mod graphql_codegen;
 mod husky;
+mod i18next;
 mod jest;
 mod karma;
 mod knex;
+mod kysely;
 mod lefthook;
 mod lint_staged;
 mod markdownlint;
@@ -264,6 +267,7 @@ mod react_router;
 mod relay;
 mod remark;
 mod remix;
+mod rolldown;
 mod rollup;
 mod rsbuild;
 mod rspack;
@@ -284,6 +288,7 @@ mod tsdown;
 mod tsup;
 mod turborepo;
 mod typedoc;
+mod typeorm;
 mod typescript;
 mod vite;
 mod vitepress;
@@ -353,10 +358,13 @@ impl PluginRegistry {
             Box::new(vitepress::VitePressPlugin),
             Box::new(next_intl::NextIntlPlugin),
             Box::new(relay::RelayPlugin),
+            Box::new(electron::ElectronPlugin),
+            Box::new(i18next::I18nextPlugin),
             // Bundlers
             Box::new(vite::VitePlugin),
             Box::new(webpack::WebpackPlugin),
             Box::new(rollup::RollupPlugin),
+            Box::new(rolldown::RolldownPlugin),
             Box::new(rspack::RspackPlugin),
             Box::new(rsbuild::RsbuildPlugin),
             Box::new(tsup::TsupPlugin),
@@ -393,6 +401,8 @@ impl PluginRegistry {
             Box::new(prisma::PrismaPlugin),
             Box::new(drizzle::DrizzlePlugin),
             Box::new(knex::KnexPlugin),
+            Box::new(typeorm::TypeormPlugin),
+            Box::new(kysely::KyselyPlugin),
             // Monorepo
             Box::new(turborepo::TurborepoPlugin),
             Box::new(nx::NxPlugin),

@@ -592,7 +592,10 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         if let Expression::StaticMemberExpression(member) = &expr.callee
             && let Expression::Identifier(obj) = &member.object
             && obj.name == "Object"
-            && matches!(member.property.name.as_str(), "values" | "keys" | "entries")
+            && matches!(
+                member.property.name.as_str(),
+                "values" | "keys" | "entries" | "getOwnPropertyNames"
+            )
             && let Some(Argument::Identifier(arg_ident)) = expr.arguments.first()
         {
             self.whole_object_uses.push(arg_ident.name.to_string());
@@ -651,9 +654,15 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 } else {
                     format!("{dir}/")
                 };
+                // Parse the optional third argument (regex filter) and convert
+                // simple extension patterns (e.g., /\.vue$/) to a glob suffix.
+                let suffix = expr.arguments.get(2).and_then(|arg| match arg {
+                    Argument::RegExpLiteral(re) => regex_pattern_to_suffix(&re.regex.pattern.text),
+                    _ => None,
+                });
                 self.dynamic_import_patterns.push(DynamicImportPattern {
                     prefix,
-                    suffix: None,
+                    suffix,
                     span: expr.span,
                 });
             }
@@ -806,6 +815,60 @@ fn extract_trailing_string(expr: &Expression<'_>) -> Option<String> {
         }
         _ => None,
     }
+}
+
+/// Convert a simple regex extension filter pattern to a glob suffix.
+///
+/// Handles common `require.context()` patterns like:
+/// - `\.vue$` → `".vue"`
+/// - `\.tsx?$` → uses `".ts"` / `".tsx"` via glob `".{ts,tsx}"`
+/// - `\.(js|ts)$` → `".{js,ts}"`
+/// - `\.(js|jsx|ts|tsx)$` → `".{js,jsx,ts,tsx}"`
+///
+/// Returns `None` for patterns that are too complex to convert.
+fn regex_pattern_to_suffix(pattern: &str) -> Option<String> {
+    // Strip leading `^` or `.*` anchors (they don't affect extension matching)
+    let p = pattern.strip_prefix('^').unwrap_or(pattern);
+    let p = p.strip_prefix(".*").unwrap_or(p);
+
+    // Must start with `\.` (escaped dot for extension)
+    let p = p.strip_prefix("\\.")?;
+
+    // Must end with `$`
+    let p = p.strip_suffix('$')?;
+
+    // Pattern: `ext?` — e.g., `tsx?` → {ts,tsx}
+    if let Some(base) = p.strip_suffix('?') {
+        // base must be simple alphanumeric (e.g., "tsx" from "tsx?")
+        if base.chars().all(|c| c.is_ascii_alphanumeric()) && !base.is_empty() {
+            let without_last = &base[..base.len() - 1];
+            if without_last.is_empty() {
+                // Single char like `x?` → matches "" or "x", too ambiguous
+                return None;
+            }
+            return Some(format!(".{{{without_last},{base}}}"));
+        }
+        return None;
+    }
+
+    // Pattern: `(ext1|ext2|...)` — e.g., `(js|ts)` → {js,ts}
+    if let Some(inner) = p.strip_prefix('(').and_then(|s| s.strip_suffix(')')) {
+        let exts: Vec<&str> = inner.split('|').collect();
+        if exts
+            .iter()
+            .all(|e| e.chars().all(|c| c.is_ascii_alphanumeric()) && !e.is_empty())
+        {
+            return Some(format!(".{{{}}}", exts.join(",")));
+        }
+        return None;
+    }
+
+    // Pattern: simple extension like `vue`, `json`, `css`
+    if p.chars().all(|c| c.is_ascii_alphanumeric()) && !p.is_empty() {
+        return Some(format!(".{p}"));
+    }
+
+    None
 }
 
 #[cfg(test)]
@@ -1235,5 +1298,136 @@ mod tests {
         let info = parse("const ctx = require.context('./components', true);");
         assert_eq!(info.dynamic_import_patterns.len(), 1);
         assert_eq!(info.dynamic_import_patterns[0].prefix, "./components/**/");
+    }
+
+    #[test]
+    fn require_context_regex_simple_extension() {
+        let info = parse("const ctx = require.context('./components', true, /\\.vue$/);");
+        assert_eq!(info.dynamic_import_patterns.len(), 1);
+        assert_eq!(info.dynamic_import_patterns[0].prefix, "./components/**/");
+        assert_eq!(
+            info.dynamic_import_patterns[0].suffix,
+            Some(".vue".to_string())
+        );
+    }
+
+    #[test]
+    fn require_context_regex_optional_char() {
+        let info = parse("const ctx = require.context('./src', true, /\\.tsx?$/);");
+        assert_eq!(info.dynamic_import_patterns.len(), 1);
+        assert_eq!(
+            info.dynamic_import_patterns[0].suffix,
+            Some(".{ts,tsx}".to_string())
+        );
+    }
+
+    #[test]
+    fn require_context_regex_alternation() {
+        let info = parse("const ctx = require.context('./src', false, /\\.(js|ts)$/);");
+        assert_eq!(info.dynamic_import_patterns.len(), 1);
+        assert_eq!(info.dynamic_import_patterns[0].prefix, "./src/");
+        assert_eq!(
+            info.dynamic_import_patterns[0].suffix,
+            Some(".{js,ts}".to_string())
+        );
+    }
+
+    #[test]
+    fn require_context_no_regex_has_no_suffix() {
+        let info = parse("const ctx = require.context('./icons', true);");
+        assert_eq!(info.dynamic_import_patterns.len(), 1);
+        assert!(info.dynamic_import_patterns[0].suffix.is_none());
+    }
+
+    // ── regex_pattern_to_suffix unit tests ──────────────────────
+
+    #[test]
+    fn regex_suffix_simple_ext() {
+        assert_eq!(regex_pattern_to_suffix(r"\.vue$"), Some(".vue".to_string()));
+        assert_eq!(
+            regex_pattern_to_suffix(r"\.json$"),
+            Some(".json".to_string())
+        );
+        assert_eq!(regex_pattern_to_suffix(r"\.css$"), Some(".css".to_string()));
+    }
+
+    #[test]
+    fn regex_suffix_optional_char() {
+        assert_eq!(
+            regex_pattern_to_suffix(r"\.tsx?$"),
+            Some(".{ts,tsx}".to_string())
+        );
+        assert_eq!(
+            regex_pattern_to_suffix(r"\.jsx?$"),
+            Some(".{js,jsx}".to_string())
+        );
+    }
+
+    #[test]
+    fn regex_suffix_alternation() {
+        assert_eq!(
+            regex_pattern_to_suffix(r"\.(js|ts)$"),
+            Some(".{js,ts}".to_string())
+        );
+        assert_eq!(
+            regex_pattern_to_suffix(r"\.(js|jsx|ts|tsx)$"),
+            Some(".{js,jsx,ts,tsx}".to_string())
+        );
+    }
+
+    #[test]
+    fn regex_suffix_complex_returns_none() {
+        // Patterns too complex to convert
+        assert_eq!(regex_pattern_to_suffix(r"\..*$"), None);
+        assert_eq!(regex_pattern_to_suffix(r"\.[^.]+$"), None);
+        assert_eq!(regex_pattern_to_suffix(r"test"), None);
+    }
+
+    // ── Whole-object-use edge cases ─────────────────────────────
+
+    #[test]
+    fn for_in_loop_marks_enum_as_whole_use() {
+        let info = parse(
+            "import { MyEnum } from './types';\nfor (const key in MyEnum) { console.log(key); }",
+        );
+        assert!(
+            info.whole_object_uses.contains(&"MyEnum".to_string()),
+            "for...in should mark MyEnum as whole-object-use"
+        );
+    }
+
+    #[test]
+    fn spread_in_object_marks_whole_use() {
+        let info = parse("import { obj } from './data';\nconst copy = { ...obj };");
+        assert!(
+            info.whole_object_uses.contains(&"obj".to_string()),
+            "spread in object literal should mark obj as whole-object-use"
+        );
+    }
+
+    #[test]
+    fn object_get_own_property_names_marks_whole_use() {
+        let info = parse("import { MyEnum } from './types';\nObject.getOwnPropertyNames(MyEnum);");
+        assert!(
+            info.whole_object_uses.contains(&"MyEnum".to_string()),
+            "Object.getOwnPropertyNames should mark MyEnum as whole-object-use"
+        );
+    }
+
+    #[test]
+    fn nested_member_access_only_tracks_object() {
+        let info = parse("import { obj } from './data';\nconst val = obj.nested.prop;");
+        // obj should be tracked as a member access, not as whole-object-use
+        assert!(
+            info.member_accesses
+                .iter()
+                .any(|a| a.object == "obj" && a.member == "nested"),
+            "obj.nested should be tracked as a member access"
+        );
+        // obj should NOT be in whole_object_uses (it's a specific member access)
+        assert!(
+            !info.whole_object_uses.contains(&"obj".to_string()),
+            "nested member access should not mark obj as whole-object-use"
+        );
     }
 }

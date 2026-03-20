@@ -55,6 +55,13 @@ const TOOLING_DEPENDENCIES: &[&str] = &[
     "svelte-preprocess",
 ];
 
+/// Virtual module prefixes provided by SvelteKit at build time.
+/// `$app/` provides runtime modules (environment, forms, navigation, paths, server, state).
+/// `$env/` provides environment variable access (static/dynamic, public/private).
+/// `$lib/` is an alias for the `src/lib` directory.
+/// `$service-worker` provides service worker build info.
+const VIRTUAL_MODULE_PREFIXES: &[&str] = &["$app/", "$env/", "$lib/", "$service-worker"];
+
 // SvelteKit route convention exports
 const PAGE_EXPORTS: &[&str] = &["default"];
 const PAGE_LOAD_EXPORTS: &[&str] = &[
@@ -106,6 +113,10 @@ impl Plugin for SvelteKitPlugin {
 
     fn tooling_dependencies(&self) -> &'static [&'static str] {
         TOOLING_DEPENDENCIES
+    }
+
+    fn virtual_module_prefixes(&self) -> &'static [&'static str] {
+        VIRTUAL_MODULE_PREFIXES
     }
 
     fn used_exports(&self) -> Vec<(&'static str, &'static [&'static str])> {
@@ -201,5 +212,15 @@ mod tests {
                 .referenced_dependencies
                 .contains(&"@sveltejs/vite-plugin-svelte".to_string())
         );
+    }
+
+    #[test]
+    fn virtual_module_prefixes_includes_sveltekit_builtins() {
+        let plugin = SvelteKitPlugin;
+        let prefixes = plugin.virtual_module_prefixes();
+        assert!(prefixes.contains(&"$app/"));
+        assert!(prefixes.contains(&"$env/"));
+        assert!(prefixes.contains(&"$lib/"));
+        assert!(prefixes.contains(&"$service-worker"));
     }
 }

@@ -10,7 +10,7 @@ use super::{Plugin, PluginResult};
 
 pub struct VitePlugin;
 
-const ENABLERS: &[&str] = &["vite"];
+const ENABLERS: &[&str] = &["vite", "rolldown-vite"];
 
 const ENTRY_PATTERNS: &[&str] = &[
     "src/main.{ts,tsx,js,jsx}",

@@ -11,10 +11,7 @@ const ENTRY_PATTERNS: &[&str] = &[
     ".vitepress/theme/**/*.{vue,ts,js}",
 ];
 
-const ALWAYS_USED: &[&str] = &[
-    ".vitepress/config.{ts,js,mts,mjs}",
-    ".vitepress/theme/index.{ts,js,mts,mjs}",
-];
+const ALWAYS_USED: &[&str] = &[".vitepress/config.{ts,js,mts,mjs}"];
 
 const TOOLING_DEPENDENCIES: &[&str] = &["vitepress"];
 

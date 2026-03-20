@@ -385,4 +385,78 @@ import { ref } from 'vue';
         assert!(scripts[0].is_typescript);
         assert!(scripts[0].src.is_none());
     }
+
+    // ── Multiple script blocks: exports from both ───────────────
+
+    #[test]
+    fn multiple_script_blocks_exports_combined() {
+        let source = r#"
+<script lang="ts">
+export const version = '1.0';
+</script>
+<script setup lang="ts">
+import { ref } from 'vue';
+const count = ref(0);
+</script>
+"#;
+        let info = parse_sfc_to_module(FileId(0), source, 0);
+        // The non-setup block exports `version`
+        assert!(
+            info.exports
+                .iter()
+                .any(|e| matches!(&e.name, crate::ExportName::Named(n) if n == "version")),
+            "export from <script> block should be extracted"
+        );
+        // The setup block imports `ref` from 'vue'
+        assert!(
+            info.imports.iter().any(|i| i.source == "vue"),
+            "import from <script setup> block should be extracted"
+        );
+    }
+
+    // ── lang="tsx" detection ────────────────────────────────────
+
+    #[test]
+    fn lang_tsx_detected_as_typescript_jsx() {
+        let scripts =
+            extract_sfc_scripts(r#"<script lang="tsx">const el = <div>{x}</div>;</script>"#);
+        assert_eq!(scripts.len(), 1);
+        assert!(scripts[0].is_typescript, "lang=tsx should be typescript");
+        assert!(scripts[0].is_jsx, "lang=tsx should be jsx");
+    }
+
+    // ── HTML comment filtering of script blocks ─────────────────
+
+    #[test]
+    fn multiline_html_comment_filters_all_script_blocks_inside() {
+        let source = r#"
+<!--
+  This whole section is disabled:
+  <script lang="ts">import { bad1 } from 'bad1';</script>
+  <script lang="ts">import { bad2 } from 'bad2';</script>
+-->
+<script lang="ts">import { good } from 'good';</script>
+"#;
+        let scripts = extract_sfc_scripts(source);
+        assert_eq!(scripts.len(), 1);
+        assert!(scripts[0].body.contains("good"));
+    }
+
+    // ── <script src="..."> generates side-effect import ─────────
+
+    #[test]
+    fn script_src_generates_side_effect_import() {
+        let info = parse_sfc_to_module(
+            FileId(0),
+            r#"<script src="./external-logic.ts" lang="ts"></script>"#,
+            0,
+        );
+        assert!(
+            info.imports
+                .iter()
+                .any(|i| i.source == "./external-logic.ts"
+                    && matches!(i.imported_name, ImportedName::SideEffect)),
+            "script src should generate a side-effect import"
+        );
+    }
 }

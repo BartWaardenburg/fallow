@@ -7,7 +7,7 @@
 //!
 //! Handles env var prefixes (`cross-env`, `dotenv`, `KEY=value`), package manager
 //! runners (`npx`, `pnpm exec`, `yarn dlx`), and Node.js runners (`node`, `tsx`,
-//! `ts-node`). Shell operators (`&&`, `||`, `;`, `|`) are split correctly.
+//! `ts-node`). Shell operators (`&&`, `||`, `;`, `|`, `&`) are split correctly.
 
 #[allow(clippy::disallowed_types)]
 use std::collections::HashMap;
@@ -144,7 +144,7 @@ pub fn analyze_scripts(scripts: &HashMap<String, String>, root: &Path) -> Script
 
 /// Parse a single script value into one or more commands.
 ///
-/// Splits on shell operators (`&&`, `||`, `;`, `|`) and parses each segment.
+/// Splits on shell operators (`&&`, `||`, `;`, `|`, `&`) and parses each segment.
 pub fn parse_script(script: &str) -> Vec<ScriptCommand> {
     let mut commands = Vec::new();
 
@@ -161,7 +161,7 @@ pub fn parse_script(script: &str) -> Vec<ScriptCommand> {
     commands
 }
 
-/// Split a script string on shell operators (`&&`, `||`, `;`, `|`).
+/// Split a script string on shell operators (`&&`, `||`, `;`, `|`, `&`).
 /// Respects single and double quotes.
 fn split_shell_operators(script: &str) -> Vec<&str> {
     let mut segments = Vec::new();
@@ -200,8 +200,11 @@ fn split_shell_operators(script: &str) -> Vec<&str> {
             continue;
         }
 
-        // ; or single | (pipe — only first command provides the binary)
-        if b == b';' || (b == b'|' && (i + 1 >= len || bytes[i + 1] != b'|')) {
+        // ; or single | (pipe) or single & (background)
+        if b == b';'
+            || (b == b'|' && (i + 1 >= len || bytes[i + 1] != b'|'))
+            || (b == b'&' && (i + 1 >= len || bytes[i + 1] != b'&'))
+        {
             segments.push(&script[start..i]);
             i += 1;
             start = i;
@@ -879,6 +882,31 @@ mod tests {
         assert!(segments[1].trim() == "jest");
     }
 
+    #[test]
+    fn background_operator_splits_commands() {
+        let cmds = parse_script("tsc --watch & webpack --watch");
+        assert_eq!(cmds.len(), 2);
+        assert_eq!(cmds[0].binary, "tsc");
+        assert_eq!(cmds[1].binary, "webpack");
+    }
+
+    #[test]
+    fn double_ampersand_still_works() {
+        let cmds = parse_script("tsc --watch && webpack --watch");
+        assert_eq!(cmds.len(), 2);
+        assert_eq!(cmds[0].binary, "tsc");
+        assert_eq!(cmds[1].binary, "webpack");
+    }
+
+    #[test]
+    fn multiple_background_operators() {
+        let cmds = parse_script("server & client & proxy");
+        assert_eq!(cmds.len(), 3);
+        assert_eq!(cmds[0].binary, "server");
+        assert_eq!(cmds[1].binary, "client");
+        assert_eq!(cmds[2].binary, "proxy");
+    }
+
     // --- is_production_script ---
 
     #[test]
@@ -913,6 +941,32 @@ mod tests {
         assert!(!super::is_production_script("typecheck"));
         assert!(!super::is_production_script("format"));
         assert!(!super::is_production_script("e2e"));
+    }
+
+    // --- mixed operator parsing ---
+
+    #[test]
+    fn mixed_operators_all_binaries_detected() {
+        let cmds = parse_script("build && serve & watch || fallback");
+        assert_eq!(cmds.len(), 4);
+        assert_eq!(cmds[0].binary, "build");
+        assert_eq!(cmds[1].binary, "serve");
+        assert_eq!(cmds[2].binary, "watch");
+        assert_eq!(cmds[3].binary, "fallback");
+    }
+
+    #[test]
+    fn background_with_env_vars() {
+        let cmds = parse_script("NODE_ENV=production server &");
+        assert_eq!(cmds.len(), 1);
+        assert_eq!(cmds[0].binary, "server");
+    }
+
+    #[test]
+    fn trailing_background_operator() {
+        let cmds = parse_script("webpack --watch &");
+        assert_eq!(cmds.len(), 1);
+        assert_eq!(cmds[0].binary, "webpack");
     }
 
     // --- filter_production_scripts ---

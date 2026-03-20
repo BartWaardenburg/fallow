@@ -4,7 +4,7 @@
 
 use super::Plugin;
 
-const ENABLERS: &[&str] = &["nitropack", "nitro"];
+const ENABLERS: &[&str] = &["nitropack"];
 
 const ENTRY_PATTERNS: &[&str] = &[
     "server/**/*.{ts,js}",
@@ -15,7 +15,7 @@ const ENTRY_PATTERNS: &[&str] = &[
 
 const ALWAYS_USED: &[&str] = &["nitro.config.{ts,js}"];
 
-const TOOLING_DEPENDENCIES: &[&str] = &["nitropack", "nitro"];
+const TOOLING_DEPENDENCIES: &[&str] = &["nitropack"];
 
 define_plugin! {
     struct NitroPlugin => "nitro",

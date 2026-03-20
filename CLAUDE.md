@@ -148,12 +148,12 @@ cd benchmarks && npm run generate:dupes && npm run bench:dupes  # vs jscpd
 **Frameworks**: Next.js, Nuxt, Remix, SvelteKit, Gatsby, Astro, Angular, React Router, TanStack Router, React Native, Expo, NestJS, Docusaurus, Nitro, VitePress, Sanity, Capacitor, next-intl, Relay, Electron, i18next
 **Bundlers**: Vite, Webpack, Rspack, Rsbuild, Rollup, Rolldown, Tsup, Tsdown, Parcel
 **Testing**: Vitest, Jest, Playwright, Cypress, Mocha, Ava, Storybook, Karma, Cucumber, WebdriverIO
-**Linting**: ESLint, Biome, Stylelint, Commitlint, Prettier, Oxlint, markdownlint, CSpell, Remark
-**Transpilation**: TypeScript, Babel, SWC
+**Linting & formatting**: ESLint, Biome, Stylelint, Prettier, Oxlint, markdownlint, CSpell, Remark
+**Transpilation & language**: TypeScript, Babel, SWC
 **CSS**: Tailwind, PostCSS
-**Database**: Prisma, Drizzle, Knex, TypeORM, Kysely
+**Database & ORM**: Prisma, Drizzle, Knex, TypeORM, Kysely
 **Monorepo**: Turborepo, Nx, Changesets, Syncpack
-**CI/CD**: semantic-release, Commitizen
+**CI/CD & release**: Commitlint, Commitizen, semantic-release
 **Deployment**: Wrangler (Cloudflare), Sentry
 **Git hooks**: husky, lint-staged, lefthook, simple-git-hooks
 **Media & assets**: SVGO, SVGR

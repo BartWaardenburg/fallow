@@ -109,10 +109,12 @@ fallow dupes uses a suffix array with LCP for clone detection — no quadratic p
 
 ```bash
 cd benchmarks
-npm install
-node download-fixtures.mjs    # Clone real-world projects
-node bench.mjs                # Run dead code benchmarks
-node bench-dupes.mjs          # Run duplication benchmarks
+npm install                          # knip v5, jscpd, tinybench
+cd knip6 && npm install && cd ..     # knip v6 (optional, for three-way comparison)
+npm run generate                     # Generate synthetic fixtures
+node download-fixtures.mjs           # Clone real-world projects
+node bench.mjs                       # Run dead code benchmarks (fallow vs knip v5 + v6)
+node bench-dupes.mjs                 # Run duplication benchmarks (fallow vs jscpd)
 ```
 
 </details>

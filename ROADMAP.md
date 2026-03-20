@@ -10,11 +10,11 @@ Code analysis should be fast enough to be invisible — part of the feedback loo
 
 ## Current State (v0.3.x)
 
-**Dead code analysis** covers 10 issue types (unused files, exports, types, dependencies, devDeps, enum members, class members, unresolved imports, unlisted deps, duplicate exports) with 79 framework plugins (30 with AST-based config parsing), 4 output formats (human, JSON, SARIF, compact), auto-fix, and a per-issue severity rules system. Production mode, inline suppression, cross-workspace resolution (npm/yarn/pnpm), and `--changed-since` for incremental CI are all shipped.
+**Dead code analysis** covers 10 issue types (unused files, exports, types, dependencies, devDeps, enum members, class members, unresolved imports, unlisted deps, duplicate exports) with 84 framework plugins (30 with AST-based config parsing), 4 output formats (human, JSON, SARIF, compact), auto-fix, and a per-issue severity rules system. Production mode, inline suppression, cross-workspace resolution (npm/yarn/pnpm), and `--changed-since` for incremental CI are all shipped.
 
 **Duplication detection** uses a suffix array with LCP for clone detection — no quadratic pairwise comparison. 4 detection modes (strict, mild, weak, semantic), clone family grouping with refactoring suggestions, baseline tracking for CI adoption, and cross-language TS↔JS matching.
 
-**Integrations**: LSP server with diagnostics, code actions, and Code Lens; VS Code extension with tree views and auto-download; MCP server for AI agent integration; GitHub Action with SARIF upload; external plugin system (`fallow-plugin-*.toml`); migration from knip/jscpd configs.
+**Integrations**: LSP server with diagnostics, code actions, and Code Lens; VS Code extension with tree views and auto-download; MCP server for AI agent integration; GitHub Action with SARIF upload; external plugin system (`fallow-plugin-*.{toml,json,jsonc}`); migration from knip/jscpd configs.
 
 **Non-JS files**: Vue/Svelte SFC, Astro frontmatter, MDX imports, CSS/SCSS modules.
 
@@ -73,7 +73,7 @@ These are ideas, not commitments. They ship as 1.x releases based on user demand
 
 These are not gated on any release — they happen continuously:
 
-- **Documentation site** — move from GitHub wiki to a proper docs site
+- ~~**Documentation site** — move from GitHub wiki to a proper docs site~~ → [docs.fallow.tools](https://docs.fallow.tools)
 - **Compatibility matrix** — for each of the top 20 frameworks, document exactly what fallow detects vs. knip
 - **Contributing guide** — plugin authoring tutorial, "your first PR" guide
 - **Blog posts** — technical deep-dives on the suffix array algorithm, Oxc integration, benchmark methodology

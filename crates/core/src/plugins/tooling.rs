@@ -39,6 +39,9 @@ const GENERAL_TOOLING_PREFIXES: &[&str] = &[
     "@graphql-codegen/",
     "@rollup/",
     "@biomejs/",
+    "@electron-forge/",
+    "@electron/",
+    "@formatjs/",
 ];
 
 /// Exact package names that are always dev tooling.
@@ -109,6 +112,15 @@ const GENERAL_TOOLING_EXACT: &[&str] = &[
     "prettier-plugin-organize-imports",
     "@vitejs/plugin-react-swc",
     "@vitejs/plugin-legacy",
+    "rolldown",
+    "rolldown-vite",
+    "oxc-transform",
+    "puppeteer",
+    "madge",
+    "patch-package",
+    "electron",
+    "electron-builder",
+    "electron-vite",
 ];
 
 /// Check whether a package is a known tooling/dev dependency by name.

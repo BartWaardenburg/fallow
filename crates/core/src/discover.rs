@@ -7,7 +7,7 @@ use ignore::WalkBuilder;
 // Re-export types from fallow-types
 pub use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
 
-const SOURCE_EXTENSIONS: &[&str] = &[
+pub const SOURCE_EXTENSIONS: &[&str] = &[
     "ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs", "vue", "svelte", "astro", "mdx", "css",
     "scss",
 ];

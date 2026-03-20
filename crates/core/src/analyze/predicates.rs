@@ -89,6 +89,16 @@ pub(super) fn is_config_file(path: &std::path::Path) -> bool {
     config_patterns.iter().any(|p| name.starts_with(p))
 }
 
+/// Check if an import specifier is a virtual module that does not correspond to a real file.
+///
+/// The `virtual:` prefix is a convention established by Vite and widely adopted across
+/// the JS/TS bundler ecosystem. Plugins create virtual modules with this prefix
+/// (e.g., `virtual:pwa-register`, `virtual:uno.css`, `virtual:generated-pages`).
+/// These should never be flagged as unlisted dependencies or unresolved imports.
+pub fn is_virtual_module(name: &str) -> bool {
+    name.starts_with("virtual:")
+}
+
 /// Check if a package name is a platform built-in module (Node.js, Deno, Cloudflare Workers).
 pub fn is_builtin_module(name: &str) -> bool {
     // Cloudflare Workers built-in modules (e.g., `cloudflare:workers`, `cloudflare:sockets`)
@@ -641,6 +651,32 @@ mod tests {
     #[test]
     fn not_path_alias_lowercase_short_scope() {
         assert!(!is_path_alias("@s/lowercase"));
+    }
+
+    // is_virtual_module tests
+    #[test]
+    fn virtual_module_vite_convention() {
+        assert!(is_virtual_module("virtual:pwa-register"));
+        assert!(is_virtual_module("virtual:pwa-register/react"));
+        assert!(is_virtual_module("virtual:uno.css"));
+        assert!(is_virtual_module("virtual:unocss"));
+        assert!(is_virtual_module("virtual:generated-layouts"));
+        assert!(is_virtual_module("virtual:generated-pages"));
+        assert!(is_virtual_module("virtual:icons/mdi/home"));
+        assert!(is_virtual_module("virtual:windi.css"));
+        assert!(is_virtual_module("virtual:windi-devtools"));
+        assert!(is_virtual_module("virtual:svg-icons-register"));
+        assert!(is_virtual_module("virtual:remix/server-build"));
+        assert!(is_virtual_module("virtual:emoji-mart-lang-importer"));
+    }
+
+    #[test]
+    fn not_virtual_module() {
+        assert!(!is_virtual_module("react"));
+        assert!(!is_virtual_module("lodash"));
+        assert!(!is_virtual_module("@scope/pkg"));
+        assert!(!is_virtual_module("node:fs"));
+        assert!(!is_virtual_module("cloudflare:workers"));
     }
 
     // is_angular_lifecycle_method tests

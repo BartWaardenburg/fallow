@@ -71,22 +71,34 @@ pub fn run_watch(
     loop {
         match rx.recv() {
             Ok(Ok(events)) => {
-                // Filter to only source file changes
-                let has_source_changes = events.iter().any(|e| {
-                    matches!(e.kind, DebouncedEventKind::Any) && {
-                        let path_str = e.path.to_string_lossy();
-                        path_str.ends_with(".ts")
-                            || path_str.ends_with(".tsx")
-                            || path_str.ends_with(".js")
-                            || path_str.ends_with(".jsx")
-                            || path_str.ends_with(".mts")
-                            || path_str.ends_with(".cts")
-                            || path_str.ends_with(".mjs")
-                            || path_str.ends_with(".cjs")
+                // Filter to source file and config file changes
+                let has_relevant_changes = events.iter().any(|e| {
+                    if !matches!(e.kind, DebouncedEventKind::Any) {
+                        return false;
                     }
+                    // Check source extensions (shared with discovery layer)
+                    if let Some(ext) = e.path.extension().and_then(|s| s.to_str())
+                        && fallow_core::discover::SOURCE_EXTENSIONS.contains(&ext)
+                    {
+                        return true;
+                    }
+                    // Config files that affect analysis results
+                    e.path
+                        .file_name()
+                        .and_then(|s| s.to_str())
+                        .is_some_and(|name| {
+                            matches!(
+                                name,
+                                "package.json"
+                                    | ".fallowrc.json"
+                                    | "fallow.toml"
+                                    | ".fallow.toml"
+                                    | "tsconfig.json"
+                            )
+                        })
                 });
 
-                if has_source_changes {
+                if has_relevant_changes {
                     eprintln!("\nFile changed, re-analyzing...");
                     let Ok(config) = load_config(
                         root,
