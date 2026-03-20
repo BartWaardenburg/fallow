@@ -250,7 +250,12 @@ impl CacheStore {
     /// almost certainly has not changed, so we can skip reading the file
     /// entirely. This turns a cache hit from `stat() + read() + hash`
     /// into just `stat()`.
-    pub fn get_by_metadata(&self, path: &Path, mtime_secs: u64, file_size: u64) -> Option<&CachedModule> {
+    pub fn get_by_metadata(
+        &self,
+        path: &Path,
+        mtime_secs: u64,
+        file_size: u64,
+    ) -> Option<&CachedModule> {
         let key = path.to_string_lossy().to_string();
         let entry = self.entries.get(&key)?;
         if entry.mtime_secs == mtime_secs && entry.file_size == file_size && mtime_secs > 0 {
@@ -424,7 +429,11 @@ pub fn cached_to_module(
 /// `mtime_secs` and `file_size` come from `std::fs::metadata()` at parse time
 /// and enable fast cache validation on subsequent runs (skip file read when
 /// mtime+size match).
-pub fn module_to_cached(module: &crate::ModuleInfo, mtime_secs: u64, file_size: u64) -> CachedModule {
+pub fn module_to_cached(
+    module: &crate::ModuleInfo,
+    mtime_secs: u64,
+    file_size: u64,
+) -> CachedModule {
     CachedModule {
         content_hash: module.content_hash,
         mtime_secs,
@@ -435,7 +444,7 @@ pub fn module_to_cached(module: &crate::ModuleInfo, mtime_secs: u64, file_size: 
             .map(|e| CachedExport {
                 name: match &e.name {
                     ExportName::Named(n) => n.clone(),
-                    ExportName::Default => "default".to_string(),
+                    ExportName::Default => String::new(),
                 },
                 is_default: matches!(e.name, ExportName::Default),
                 is_type_only: e.is_type_only,
@@ -1205,7 +1214,11 @@ mod tests {
         };
         store.insert(Path::new("test.ts"), module);
 
-        assert!(store.get_by_metadata(Path::new("test.ts"), 2000, 500).is_none());
+        assert!(
+            store
+                .get_by_metadata(Path::new("test.ts"), 2000, 500)
+                .is_none()
+        );
     }
 
     #[test]
@@ -1229,7 +1242,11 @@ mod tests {
         };
         store.insert(Path::new("test.ts"), module);
 
-        assert!(store.get_by_metadata(Path::new("test.ts"), 1000, 999).is_none());
+        assert!(
+            store
+                .get_by_metadata(Path::new("test.ts"), 1000, 999)
+                .is_none()
+        );
     }
 
     #[test]
@@ -1254,13 +1271,21 @@ mod tests {
         store.insert(Path::new("test.ts"), module);
 
         // Zero mtime should never match (falls through to content hash check)
-        assert!(store.get_by_metadata(Path::new("test.ts"), 0, 500).is_none());
+        assert!(
+            store
+                .get_by_metadata(Path::new("test.ts"), 0, 500)
+                .is_none()
+        );
     }
 
     #[test]
     fn get_by_metadata_returns_none_for_missing_file() {
         let store = CacheStore::new();
-        assert!(store.get_by_metadata(Path::new("nonexistent.ts"), 1000, 500).is_none());
+        assert!(
+            store
+                .get_by_metadata(Path::new("nonexistent.ts"), 1000, 500)
+                .is_none()
+        );
     }
 
     #[test]

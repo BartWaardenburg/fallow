@@ -9,6 +9,7 @@ documentation.workspace = true
 keywords.workspace = true
 categories.workspace = true
 description = "Module graph construction, resolution, and project state for the fallow dead code analyzer"
+readme = "../../README.md"
 
 [dependencies]
 fallow-types = { workspace = true }

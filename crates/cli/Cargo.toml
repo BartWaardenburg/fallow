@@ -9,6 +9,7 @@ documentation.workspace = true
 keywords.workspace = true
 categories.workspace = true
 description = "CLI for the fallow dead code analyzer"
+readme = "../../README.md"
 
 [[bin]]
 name = "fallow"
