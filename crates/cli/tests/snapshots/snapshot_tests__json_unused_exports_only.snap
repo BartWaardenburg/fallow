@@ -3,6 +3,10 @@ source: crates/cli/tests/snapshot_tests.rs
 expression: redact_version(&json_str)
 ---
 {
+  "schema_version": "1.0.0",
+  "version": "[VERSION]",
+  "elapsed_ms": 0,
+  "total_issues": 1,
   "unused_files": [],
   "unused_exports": [
     {
@@ -23,9 +27,5 @@ expression: redact_version(&json_str)
   "unresolved_imports": [],
   "unlisted_dependencies": [],
   "duplicate_exports": [],
-  "type_only_dependencies": [],
-  "schema_version": "1.0.0",
-  "version": "[VERSION]",
-  "elapsed_ms": 0,
-  "total_issues": 1
+  "type_only_dependencies": []
 }

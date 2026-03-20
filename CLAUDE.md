@@ -246,6 +246,11 @@ Supports JSON (with JSONC comment support) and TOML. Config files are searched i
 - A `$schema` field in JSON enables IDE autocomplete and validation
 - Run `fallow config-schema` to generate the JSON Schema, or reference it from GitHub
 - The `schema.json` file is checked into the repo root
+- `extends` — inherit from base config files (array of relative paths, deep-merge objects, replace arrays, circular detection, max 10 levels, cross-format JSON↔TOML, string shorthand supported)
+- `overrides` — per-path rule configuration: array of `{ "files": ["*.test.ts"], "rules": { "unused-exports": "off" } }` objects; later overrides take precedence; glob matching against project-relative paths
+- `ignorePatterns` — array of glob patterns to exclude from analysis (replaces the old `ignore` field)
+- No `detect` section — use `rules` with `"off"` severity instead (e.g., `"unused-types": "off"`)
+- No `output` in config — output format is CLI-only via `--format` flag
 
 ## Rules system
 

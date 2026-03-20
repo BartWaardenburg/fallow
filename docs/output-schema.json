@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Fallow JSON Output Schema",
-  "description": "Schema for the JSON output of `fallow check --format json` and `fallow dupes --format json`.",
+  "description": "Schema for the JSON output of `fallow check --format json`. The `fallow dupes` command has a separate output structure (clone_groups, clone_families, stats) sharing only the metadata fields (schema_version, version, elapsed_ms).",
   "type": "object",
   "required": ["schema_version", "version", "elapsed_ms", "total_issues"],
   "properties": {

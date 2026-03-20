@@ -32,34 +32,44 @@ pub(super) fn print_json(results: &AnalysisResults, elapsed: Duration) -> ExitCo
 const SCHEMA_VERSION: &str = "1.0.0";
 
 /// Build the JSON output value for analysis results.
+///
+/// Metadata fields (`schema_version`, `version`, `elapsed_ms`, `total_issues`)
+/// appear first in the output for readability.
 pub fn build_json(
     results: &AnalysisResults,
     elapsed: Duration,
 ) -> Result<serde_json::Value, serde_json::Error> {
-    let mut output = serde_json::to_value(results)?;
-    if let serde_json::Value::Object(ref mut map) = output {
-        map.insert(
-            "schema_version".to_string(),
-            serde_json::json!(SCHEMA_VERSION),
-        );
-        map.insert(
-            "version".to_string(),
-            serde_json::json!(env!("CARGO_PKG_VERSION")),
-        );
-        map.insert(
-            "elapsed_ms".to_string(),
-            serde_json::json!(elapsed.as_millis()),
-        );
-        map.insert(
-            "total_issues".to_string(),
-            serde_json::json!(results.total_issues()),
-        );
+    let results_value = serde_json::to_value(results)?;
+
+    let mut map = serde_json::Map::new();
+    map.insert(
+        "schema_version".to_string(),
+        serde_json::json!(SCHEMA_VERSION),
+    );
+    map.insert(
+        "version".to_string(),
+        serde_json::json!(env!("CARGO_PKG_VERSION")),
+    );
+    map.insert(
+        "elapsed_ms".to_string(),
+        serde_json::json!(elapsed.as_millis()),
+    );
+    map.insert(
+        "total_issues".to_string(),
+        serde_json::json!(results.total_issues()),
+    );
+
+    if let serde_json::Value::Object(results_map) = results_value {
+        for (key, value) in results_map {
+            map.insert(key, value);
+        }
     }
-    Ok(output)
+
+    Ok(serde_json::Value::Object(map))
 }
 
 pub(super) fn print_duplication_json(report: &DuplicationReport, elapsed: Duration) -> ExitCode {
-    let mut output = match serde_json::to_value(report) {
+    let report_value = match serde_json::to_value(report) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("Error: failed to serialize duplication report: {e}");
@@ -67,20 +77,26 @@ pub(super) fn print_duplication_json(report: &DuplicationReport, elapsed: Durati
         }
     };
 
-    if let serde_json::Value::Object(ref mut map) = output {
-        map.insert(
-            "schema_version".to_string(),
-            serde_json::json!(SCHEMA_VERSION),
-        );
-        map.insert(
-            "version".to_string(),
-            serde_json::json!(env!("CARGO_PKG_VERSION")),
-        );
-        map.insert(
-            "elapsed_ms".to_string(),
-            serde_json::json!(elapsed.as_millis()),
-        );
+    // Metadata fields first, then report data
+    let mut map = serde_json::Map::new();
+    map.insert(
+        "schema_version".to_string(),
+        serde_json::json!(SCHEMA_VERSION),
+    );
+    map.insert(
+        "version".to_string(),
+        serde_json::json!(env!("CARGO_PKG_VERSION")),
+    );
+    map.insert(
+        "elapsed_ms".to_string(),
+        serde_json::json!(elapsed.as_millis()),
+    );
+    if let serde_json::Value::Object(report_map) = report_value {
+        for (key, value) in report_map {
+            map.insert(key, value);
+        }
     }
+    let output = serde_json::Value::Object(map);
 
     match serde_json::to_string_pretty(&output) {
         Ok(json) => {
@@ -210,6 +226,19 @@ mod tests {
         assert!(output["unresolved_imports"].is_array());
         assert!(output["unlisted_dependencies"].is_array());
         assert!(output["duplicate_exports"].is_array());
+        assert!(output["type_only_dependencies"].is_array());
+    }
+
+    #[test]
+    fn json_metadata_fields_appear_first() {
+        let results = AnalysisResults::default();
+        let elapsed = Duration::from_millis(0);
+        let output = build_json(&results, elapsed).expect("should serialize");
+        let keys: Vec<&String> = output.as_object().unwrap().keys().collect();
+        assert_eq!(keys[0], "schema_version");
+        assert_eq!(keys[1], "version");
+        assert_eq!(keys[2], "elapsed_ms");
+        assert_eq!(keys[3], "total_issues");
     }
 
     #[test]
