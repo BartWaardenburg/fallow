@@ -15,7 +15,7 @@
 
 ---
 
-Unused code, circular dependencies, code duplication, and complexity hotspots — found in seconds, not minutes. fallow analyzes your entire codebase for unused files, exports, dependencies, and types, detects circular dependencies, finds duplicated code blocks, and surfaces complexity hotspots. 3-36x faster than [knip](https://knip.dev) v5 (2-14x faster than knip v6) for unused code analysis, 20-33x faster than [jscpd](https://github.com/kucherenko/jscpd) for duplication detection, with no Node.js runtime dependency.
+Unused code, circular dependencies, code duplication, and complexity hotspots. Found in seconds, not minutes. fallow analyzes your entire codebase for unused files, exports, dependencies, and types, detects circular dependencies, finds duplicated code blocks, and surfaces complexity hotspots. 3-36x faster than [knip](https://knip.dev) v5 (2-14x faster than knip v6) for unused code analysis, 20-33x faster than [jscpd](https://github.com/kucherenko/jscpd) for duplication detection, with no Node.js runtime dependency.
 
 ```bash
 npx fallow check    # Dead code analysis
@@ -223,7 +223,7 @@ Supports `--changed-since main` for PR-only analysis, `--baseline` for failing o
 - **Auto-fix** — `fallow fix` removes unused exports and dependencies (`--dry-run` to preview)
 - **VS Code extension** — tree views for dead code and duplicates, status bar, auto-download of the LSP binary, one-click fixes ([`editors/vscode`](https://github.com/fallow-rs/fallow/tree/main/editors/vscode))
 - **LSP server** — real-time diagnostics, hover information, "remove unused export" code actions, and Code Lens with clickable reference counts above exports (opens Peek References panel)
-- **Workspace support** — npm, yarn, and pnpm workspaces (including `pnpm-workspace.yaml`, content-addressable store detection, and injected dependencies) with `exports` field subpath resolution
+- **Workspace support** — npm, yarn, and pnpm workspaces (including `pnpm-workspace.yaml`, content-addressable store detection, and injected dependencies) with `exports` field subpath resolution. TypeScript project references (`tsconfig.json` `references`) are also discovered as workspaces
 - **Script binary analysis** — parses `package.json` scripts to detect CLI tool usage, reducing false positives in unused dependency detection
 - **Dynamic import resolution** — partial resolution of template literals, `import.meta.glob`, and `require.context`
 - **Non-JS file support** — Vue/Svelte SFC (`<script>` block extraction), Astro (frontmatter), MDX (import/export statements), CSS/SCSS (`@import`, `@use`, `@forward`, `@apply`/`@tailwind` as Tailwind dependency usage), CSS Modules (`.module.css`/`.module.scss` class name tracking)
