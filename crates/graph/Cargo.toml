@@ -26,6 +26,9 @@ globset = { workspace = true }
 # Graph
 fixedbitset = { workspace = true }
 
+# Hashing
+rustc-hash = { workspace = true }
+
 # Logging
 tracing = { workspace = true }
 

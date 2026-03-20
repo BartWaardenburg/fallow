@@ -80,7 +80,7 @@ fn strip_css_comments(source: &str, is_scss: bool) -> String {
 /// Extract class names from a CSS module file as named exports.
 pub fn extract_css_module_exports(source: &str) -> Vec<ExportInfo> {
     let cleaned = CSS_NON_SELECTOR_RE.replace_all(source, "");
-    let mut seen = std::collections::HashSet::new();
+    let mut seen = rustc_hash::FxHashSet::default();
     let mut exports = Vec::new();
     for cap in CSS_CLASS_RE.captures_iter(&cleaned) {
         if let Some(m) = cap.get(1) {

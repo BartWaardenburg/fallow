@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 use std::path::Path;
 
 use fallow_core::duplicates::DuplicationReport;
@@ -63,16 +63,18 @@ pub(crate) fn filter_new_issues(
     mut results: fallow_core::results::AnalysisResults,
     baseline: &BaselineData,
 ) -> fallow_core::results::AnalysisResults {
-    let baseline_files: HashSet<&str> = baseline.unused_files.iter().map(|s| s.as_str()).collect();
-    let baseline_exports: HashSet<&str> =
+    let baseline_files: FxHashSet<&str> =
+        baseline.unused_files.iter().map(|s| s.as_str()).collect();
+    let baseline_exports: FxHashSet<&str> =
         baseline.unused_exports.iter().map(|s| s.as_str()).collect();
-    let baseline_types: HashSet<&str> = baseline.unused_types.iter().map(|s| s.as_str()).collect();
-    let baseline_deps: HashSet<&str> = baseline
+    let baseline_types: FxHashSet<&str> =
+        baseline.unused_types.iter().map(|s| s.as_str()).collect();
+    let baseline_deps: FxHashSet<&str> = baseline
         .unused_dependencies
         .iter()
         .map(|s| s.as_str())
         .collect();
-    let baseline_dev_deps: HashSet<&str> = baseline
+    let baseline_dev_deps: FxHashSet<&str> = baseline
         .unused_dev_dependencies
         .iter()
         .map(|s| s.as_str())
@@ -155,7 +157,7 @@ pub(crate) fn filter_new_clone_groups(
     baseline: &DuplicationBaselineData,
     root: &Path,
 ) -> DuplicationReport {
-    let baseline_keys: HashSet<&str> = baseline.clone_groups.iter().map(|s| s.as_str()).collect();
+    let baseline_keys: FxHashSet<&str> = baseline.clone_groups.iter().map(|s| s.as_str()).collect();
 
     report.clone_groups.retain(|g| {
         let key = clone_group_key(g, root);
@@ -174,7 +176,7 @@ pub(crate) fn filter_new_clone_groups(
 
 /// Recompute duplication statistics after baseline filtering.
 fn recompute_stats(report: &DuplicationReport) -> fallow_core::duplicates::DuplicationStats {
-    let mut files_with_clones: HashSet<&Path> = HashSet::new();
+    let mut files_with_clones: FxHashSet<&Path> = FxHashSet::default();
     let mut duplicated_lines = 0usize;
     let mut duplicated_tokens = 0usize;
     let mut clone_instances = 0usize;

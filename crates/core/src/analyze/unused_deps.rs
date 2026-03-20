@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use fallow_config::{PackageJson, ResolvedConfig};
 
@@ -24,7 +24,7 @@ pub(crate) fn find_unused_dependencies(
     workspaces: &[fallow_config::WorkspaceInfo],
 ) -> (Vec<UnusedDependency>, Vec<UnusedDependency>) {
     // Collect deps referenced in config files (discovered by plugins)
-    let plugin_referenced: HashSet<&str> = plugin_result
+    let plugin_referenced: FxHashSet<&str> = plugin_result
         .map(|pr| {
             pr.referenced_dependencies
                 .iter()
@@ -34,27 +34,27 @@ pub(crate) fn find_unused_dependencies(
         .unwrap_or_default();
 
     // Collect tooling deps from plugins
-    let plugin_tooling: HashSet<&str> = plugin_result
+    let plugin_tooling: FxHashSet<&str> = plugin_result
         .map(|pr| pr.tooling_dependencies.iter().map(|s| s.as_str()).collect())
         .unwrap_or_default();
 
     // Collect packages used as binaries in package.json scripts
-    let script_used: HashSet<&str> = plugin_result
+    let script_used: FxHashSet<&str> = plugin_result
         .map(|pr| pr.script_used_packages.iter().map(|s| s.as_str()).collect())
         .unwrap_or_default();
 
     // Collect workspace package names — these are internal deps, not npm packages
-    let workspace_names: HashSet<&str> = workspaces.iter().map(|ws| ws.name.as_str()).collect();
+    let workspace_names: FxHashSet<&str> = workspaces.iter().map(|ws| ws.name.as_str()).collect();
 
-    // Pre-compute ignore deps as HashSet for O(1) lookups instead of O(n) linear scan
-    let ignore_deps: HashSet<&str> = config
+    // Pre-compute ignore deps as FxHashSet for O(1) lookups instead of O(n) linear scan
+    let ignore_deps: FxHashSet<&str> = config
         .ignore_dependencies
         .iter()
         .map(|s| s.as_str())
         .collect();
 
     // Build per-package set of files that use it (globally)
-    let used_packages: HashSet<&str> = graph.package_usage.keys().map(|s| s.as_str()).collect();
+    let used_packages: FxHashSet<&str> = graph.package_usage.keys().map(|s| s.as_str()).collect();
 
     let root_pkg_path = config.root.join("package.json");
 
@@ -94,7 +94,7 @@ pub(crate) fn find_unused_dependencies(
 
     // --- Workspace package.json checks: scope usage to files within each workspace ---
     // Track which deps are already flagged from root to avoid double-reporting
-    let root_flagged: HashSet<String> = unused_deps
+    let root_flagged: FxHashSet<String> = unused_deps
         .iter()
         .chain(unused_dev_deps.iter())
         .map(|d| d.package_name.clone())
@@ -177,11 +177,11 @@ pub(crate) fn find_unused_dependencies(
 /// is a workspace package, or used by files in the workspace.
 fn should_skip_dependency(
     dep: &str,
-    root_flagged: &HashSet<String>,
-    script_used: &HashSet<&str>,
-    plugin_referenced: &HashSet<&str>,
-    ignore_deps: &HashSet<&str>,
-    workspace_names: &HashSet<&str>,
+    root_flagged: &FxHashSet<String>,
+    script_used: &FxHashSet<&str>,
+    plugin_referenced: &FxHashSet<&str>,
+    ignore_deps: &FxHashSet<&str>,
+    workspace_names: &FxHashSet<&str>,
     is_used_in_workspace: impl Fn(&str) -> bool,
 ) -> bool {
     root_flagged.contains(dep)
@@ -204,7 +204,7 @@ pub(crate) fn find_type_only_dependencies(
     workspaces: &[fallow_config::WorkspaceInfo],
 ) -> Vec<TypeOnlyDependency> {
     let root_pkg_path = config.root.join("package.json");
-    let workspace_names: HashSet<&str> = workspaces.iter().map(|ws| ws.name.as_str()).collect();
+    let workspace_names: FxHashSet<&str> = workspaces.iter().map(|ws| ws.name.as_str()).collect();
 
     let mut type_only_deps = Vec::new();
 
@@ -254,21 +254,21 @@ pub(crate) fn find_unlisted_dependencies(
     workspaces: &[fallow_config::WorkspaceInfo],
     plugin_result: Option<&crate::plugins::AggregatedPluginResult>,
 ) -> Vec<UnlistedDependency> {
-    let all_deps: HashSet<String> = pkg.all_dependency_names().into_iter().collect();
+    let all_deps: FxHashSet<String> = pkg.all_dependency_names().into_iter().collect();
 
     // Build a set of all deps across all workspace package.json files.
     // In monorepos, imports in workspace files reference deps from that workspace's package.json.
-    let mut all_workspace_deps: HashSet<String> = all_deps.clone();
+    let mut all_workspace_deps: FxHashSet<String> = all_deps.clone();
     // Also collect workspace package names — internal workspace deps should not be flagged
-    let mut workspace_names: HashSet<String> = HashSet::new();
+    let mut workspace_names: FxHashSet<String> = FxHashSet::default();
     // Map: canonical workspace root -> set of dep names (for per-file checks)
-    let mut ws_dep_map: Vec<(std::path::PathBuf, HashSet<String>)> = Vec::new();
+    let mut ws_dep_map: Vec<(std::path::PathBuf, FxHashSet<String>)> = Vec::new();
 
     for ws in workspaces {
         workspace_names.insert(ws.name.clone());
         let ws_pkg_path = ws.root.join("package.json");
         if let Ok(ws_pkg) = PackageJson::load(&ws_pkg_path) {
-            let ws_deps: HashSet<String> = ws_pkg.all_dependency_names().into_iter().collect();
+            let ws_deps: FxHashSet<String> = ws_pkg.all_dependency_names().into_iter().collect();
             all_workspace_deps.extend(ws_deps.iter().cloned());
             // Use raw workspace root path for starts_with checks (avoids per-file canonicalize)
             ws_dep_map.push((ws.root.clone(), ws_deps));
@@ -288,11 +288,11 @@ pub(crate) fn find_unlisted_dependencies(
     // Collect tooling dependencies from active plugins — these are framework-provided
     // packages (e.g., Nuxt provides `ofetch`, `h3`, `vue-router` at runtime) that may
     // be imported in user code without being listed in package.json.
-    let plugin_tooling: HashSet<&str> = plugin_result
+    let plugin_tooling: FxHashSet<&str> = plugin_result
         .map(|pr| pr.tooling_dependencies.iter().map(|s| s.as_str()).collect())
         .unwrap_or_default();
 
-    let mut unlisted: HashMap<String, Vec<std::path::PathBuf>> = HashMap::new();
+    let mut unlisted: FxHashMap<String, Vec<std::path::PathBuf>> = FxHashMap::default();
 
     for (package_name, file_ids) in &graph.package_usage {
         if is_builtin_module(package_name) || is_path_alias(package_name) {
@@ -360,7 +360,7 @@ pub(crate) fn find_unlisted_dependencies(
 pub(crate) fn find_unresolved_imports(
     resolved_modules: &[ResolvedModule],
     _config: &ResolvedConfig,
-    suppressions_by_file: &HashMap<FileId, &[Suppression]>,
+    suppressions_by_file: &FxHashMap<FileId, &[Suppression]>,
     virtual_prefixes: &[&str],
 ) -> Vec<UnresolvedImport> {
     let mut unresolved = Vec::new();
@@ -410,21 +410,21 @@ mod tests {
     // ---- should_skip_dependency tests ----
 
     type SkipDepSets = (
-        HashSet<String>,
-        HashSet<&'static str>,
-        HashSet<&'static str>,
-        HashSet<&'static str>,
-        HashSet<&'static str>,
+        FxHashSet<String>,
+        FxHashSet<&'static str>,
+        FxHashSet<&'static str>,
+        FxHashSet<&'static str>,
+        FxHashSet<&'static str>,
     );
 
     /// Helper: build empty sets for should_skip_dependency args.
     fn empty_sets() -> SkipDepSets {
         (
-            HashSet::new(),
-            HashSet::new(),
-            HashSet::new(),
-            HashSet::new(),
-            HashSet::new(),
+            FxHashSet::default(),
+            FxHashSet::default(),
+            FxHashSet::default(),
+            FxHashSet::default(),
+            FxHashSet::default(),
         )
     }
 

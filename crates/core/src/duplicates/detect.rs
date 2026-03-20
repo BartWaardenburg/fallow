@@ -4,7 +4,7 @@
 //! sort) followed by an O(N) LCP scan. This avoids quadratic pairwise
 //! comparisons and naturally finds all maximal clones in a single linear pass.
 
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::PathBuf;
 
 use super::normalize::HashedToken;
@@ -265,7 +265,7 @@ impl CloneDetector {
 
         for rg in surviving_groups {
             // Build instances, deduplicating by (file_id, offset).
-            let mut seen: HashSet<(usize, usize)> = HashSet::new();
+            let mut seen: FxHashSet<(usize, usize)> = FxHashSet::default();
             let mut group_instances: Vec<CloneInstance> = Vec::new();
 
             for &(file_id, offset) in &rg.instances {
@@ -283,7 +283,7 @@ impl CloneDetector {
 
             // Apply skip_local: only keep cross-directory clones.
             if self.skip_local && group_instances.len() >= 2 {
-                let dirs: std::collections::HashSet<_> = group_instances
+                let dirs: FxHashSet<_> = group_instances
                     .iter()
                     .filter_map(|inst| inst.file.parent().map(|p| p.to_path_buf()))
                     .collect();
@@ -362,7 +362,7 @@ impl CloneDetector {
         // Smaller groups are checked against this index in O(instances × log(intervals)).
 
         // Build file path → index mapping for interval tracking
-        let mut path_to_idx: HashMap<PathBuf, usize> = HashMap::new();
+        let mut path_to_idx: FxHashMap<PathBuf, usize> = FxHashMap::default();
         let mut next_idx = 0usize;
         for group in &clone_groups {
             for inst in &group.instances {
@@ -431,7 +431,8 @@ fn rank_reduce(files: &[FileData]) -> Vec<Vec<u32>> {
     // don't matter as long as equal hashes get equal ranks. Skipping the
     // sort+dedup saves O(N log N) and a second allocation.
     let total: usize = files.iter().map(|f| f.hashed_tokens.len()).sum();
-    let mut hash_to_rank: HashMap<u64, u32> = HashMap::with_capacity(total / 2);
+    let mut hash_to_rank: FxHashMap<u64, u32> =
+        FxHashMap::with_capacity_and_hasher(total / 2, rustc_hash::FxBuildHasher);
     let mut next_rank: u32 = 0;
 
     files
@@ -862,12 +863,11 @@ fn compute_stats(
     total_lines: usize,
     total_tokens: usize,
 ) -> DuplicationStats {
-    use std::collections::HashSet;
     use std::path::Path;
 
-    let mut files_with_clones: HashSet<&Path> = HashSet::new();
+    let mut files_with_clones: FxHashSet<&Path> = FxHashSet::default();
     // Group duplicated lines by file to avoid cloning PathBuf per line.
-    let mut file_dup_lines: HashMap<&Path, HashSet<usize>> = HashMap::new();
+    let mut file_dup_lines: FxHashMap<&Path, FxHashSet<usize>> = FxHashMap::default();
     let mut duplicated_tokens = 0usize;
     let mut clone_instances = 0usize;
 
@@ -932,6 +932,8 @@ fn empty_report(total_files: usize) -> DuplicationReport {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use super::*;
     use crate::duplicates::normalize::HashedToken;
     use crate::duplicates::tokenize::{FileTokens, SourceToken, TokenKind};

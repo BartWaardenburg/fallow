@@ -198,7 +198,7 @@ pub fn discover_external_plugins(
     config_plugin_paths: &[String],
 ) -> Vec<ExternalPluginDef> {
     let mut plugins = Vec::new();
-    let mut seen_names = std::collections::HashSet::new();
+    let mut seen_names = rustc_hash::FxHashSet::default();
 
     // All paths are checked against the canonical root to prevent symlink escapes
     let canonical_root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
@@ -254,7 +254,7 @@ fn load_plugins_from_dir(
     dir: &Path,
     canonical_root: &Path,
     plugins: &mut Vec<ExternalPluginDef>,
-    seen: &mut std::collections::HashSet<String>,
+    seen: &mut rustc_hash::FxHashSet<String>,
 ) {
     if let Ok(entries) = std::fs::read_dir(dir) {
         let mut plugin_files: Vec<PathBuf> = entries
@@ -274,7 +274,7 @@ fn load_plugin_file(
     path: &Path,
     canonical_root: &Path,
     plugins: &mut Vec<ExternalPluginDef>,
-    seen: &mut std::collections::HashSet<String>,
+    seen: &mut rustc_hash::FxHashSet<String>,
 ) {
     // Verify symlinks don't escape the project root
     if !is_within_root(path, canonical_root) {

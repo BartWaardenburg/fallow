@@ -11,7 +11,7 @@ pub mod normalize;
 pub mod tokenize;
 pub(crate) mod types;
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::path::{Path, PathBuf};
 
 use globset::{Glob, GlobSet, GlobSetBuilder};
@@ -106,7 +106,7 @@ pub fn find_duplicates(
     );
 
     // Collect per-file suppressions for line-level filtering
-    let suppressions_by_file: HashMap<PathBuf, Vec<Suppression>> = file_data
+    let suppressions_by_file: FxHashMap<PathBuf, Vec<Suppression>> = file_data
         .iter()
         .filter(|(_, _, _, supps)| !supps.is_empty())
         .map(|(path, _, _, supps)| (path.clone(), supps.clone()))
@@ -137,7 +137,7 @@ pub fn find_duplicates(
 /// Filter out clone instances that are suppressed by line-level comments.
 fn apply_line_suppressions(
     report: &mut DuplicationReport,
-    suppressions_by_file: &HashMap<PathBuf, Vec<Suppression>>,
+    suppressions_by_file: &FxHashMap<PathBuf, Vec<Suppression>>,
 ) {
     report.clone_groups.retain_mut(|group| {
         group.instances.retain(|instance| {

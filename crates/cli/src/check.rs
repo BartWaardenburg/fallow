@@ -223,7 +223,7 @@ fn resolve_workspace_filter(
 fn get_changed_files(
     root: &std::path::Path,
     git_ref: &str,
-) -> Option<std::collections::HashSet<std::path::PathBuf>> {
+) -> Option<rustc_hash::FxHashSet<std::path::PathBuf>> {
     let output = match std::process::Command::new("git")
         .args(["diff", "--name-only", &format!("{git_ref}...HEAD")])
         .current_dir(root)
@@ -253,11 +253,10 @@ fn get_changed_files(
         return None;
     }
 
-    let files: std::collections::HashSet<std::path::PathBuf> =
-        String::from_utf8_lossy(&output.stdout)
-            .lines()
-            .map(|line| root.join(line))
-            .collect();
+    let files: rustc_hash::FxHashSet<std::path::PathBuf> = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(|line| root.join(line))
+        .collect();
 
     Some(files)
 }
@@ -310,7 +309,7 @@ pub(crate) fn run_check(opts: &CheckOptions<'_>) -> ExitCode {
     };
 
     // Get changed files if --changed-since is set (already validated)
-    let changed_files: Option<std::collections::HashSet<std::path::PathBuf>> = opts
+    let changed_files: Option<rustc_hash::FxHashSet<std::path::PathBuf>> = opts
         .changed_since
         .and_then(|git_ref| get_changed_files(opts.root, git_ref));
 

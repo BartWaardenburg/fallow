@@ -4,7 +4,7 @@
 //! the duplicate can be safely removed without any refactoring. This module
 //! identifies such combined findings.
 
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 use std::path::PathBuf;
 
 use serde::Serialize;
@@ -57,7 +57,8 @@ pub fn cross_reference(
     dead_code: &AnalysisResults,
 ) -> CrossReferenceResult {
     // Build lookup sets for fast checking
-    let unused_files: HashSet<&PathBuf> = dead_code.unused_files.iter().map(|f| &f.path).collect();
+    let unused_files: FxHashSet<&PathBuf> =
+        dead_code.unused_files.iter().map(|f| &f.path).collect();
 
     let mut combined_findings = Vec::new();
     let mut clones_in_unused_files = 0usize;
@@ -145,7 +146,7 @@ impl CrossReferenceResult {
     }
 
     /// Get clone groups that have at least one combined finding, with their indices.
-    pub fn affected_group_indices(&self) -> HashSet<usize> {
+    pub fn affected_group_indices(&self) -> FxHashSet<usize> {
         self.combined_findings
             .iter()
             .map(|f| f.group_index)

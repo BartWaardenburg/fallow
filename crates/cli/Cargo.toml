@@ -25,6 +25,7 @@ miette = { workspace = true }
 notify = { workspace = true }
 notify-debouncer-mini = { workspace = true }
 tempfile = { workspace = true }
+rustc-hash = { workspace = true }
 
 [lib]
 name = "fallow_cli"

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -24,7 +24,7 @@ struct ExportFix {
 /// Apply export fixes to source files, returning JSON fix entries.
 fn apply_export_fixes(
     root: &Path,
-    exports_by_file: &HashMap<PathBuf, Vec<&fallow_core::results::UnusedExport>>,
+    exports_by_file: &FxHashMap<PathBuf, Vec<&fallow_core::results::UnusedExport>>,
     output: &OutputFormat,
     dry_run: bool,
     fixes: &mut Vec<serde_json::Value>,
@@ -191,8 +191,7 @@ fn apply_dependency_fixes(
     }
 
     // Group all unused deps by their package.json path so we can batch edits per file
-    let mut deps_by_pkg: std::collections::HashMap<&Path, Vec<(&str, &str)>> =
-        std::collections::HashMap::new();
+    let mut deps_by_pkg: FxHashMap<&Path, Vec<(&str, &str)>> = FxHashMap::default();
     for dep in &results.unused_dependencies {
         deps_by_pkg
             .entry(&dep.path)
@@ -329,8 +328,8 @@ pub(crate) fn run_fix(opts: &FixOptions<'_>) -> ExitCode {
     let mut fixes: Vec<serde_json::Value> = Vec::new();
 
     // Group exports by file path so we can apply all fixes to a single in-memory copy.
-    let mut exports_by_file: HashMap<PathBuf, Vec<&fallow_core::results::UnusedExport>> =
-        HashMap::new();
+    let mut exports_by_file: FxHashMap<PathBuf, Vec<&fallow_core::results::UnusedExport>> =
+        FxHashMap::default();
     for export in &results.unused_exports {
         exports_by_file
             .entry(export.path.clone())
@@ -444,7 +443,7 @@ mod tests {
         std::fs::write(&file, original).unwrap();
 
         let export = make_export(&file, "foo", 1);
-        let mut exports_by_file: HashMap<PathBuf, Vec<&UnusedExport>> = HashMap::new();
+        let mut exports_by_file: FxHashMap<PathBuf, Vec<&UnusedExport>> = FxHashMap::default();
         exports_by_file.insert(file.clone(), vec![&export]);
 
         let mut fixes = Vec::new();
@@ -473,7 +472,7 @@ mod tests {
         std::fs::write(&file, "export function foo() {}\nexport const bar = 1;\n").unwrap();
 
         let export = make_export(&file, "foo", 1);
-        let mut exports_by_file: HashMap<PathBuf, Vec<&UnusedExport>> = HashMap::new();
+        let mut exports_by_file: FxHashMap<PathBuf, Vec<&UnusedExport>> = FxHashMap::default();
         exports_by_file.insert(file.clone(), vec![&export]);
 
         let mut fixes = Vec::new();
@@ -500,7 +499,7 @@ mod tests {
         std::fs::write(&file, "export default function App() {}\n").unwrap();
 
         let export = make_export(&file, "default", 1);
-        let mut exports_by_file: HashMap<PathBuf, Vec<&UnusedExport>> = HashMap::new();
+        let mut exports_by_file: FxHashMap<PathBuf, Vec<&UnusedExport>> = FxHashMap::default();
         exports_by_file.insert(file.clone(), vec![&export]);
 
         let mut fixes = Vec::new();
@@ -524,7 +523,7 @@ mod tests {
         std::fs::write(&file, "export default class MyService {}\n").unwrap();
 
         let export = make_export(&file, "default", 1);
-        let mut exports_by_file: HashMap<PathBuf, Vec<&UnusedExport>> = HashMap::new();
+        let mut exports_by_file: FxHashMap<PathBuf, Vec<&UnusedExport>> = FxHashMap::default();
         exports_by_file.insert(file.clone(), vec![&export]);
 
         let mut fixes = Vec::new();
@@ -548,7 +547,7 @@ mod tests {
         std::fs::write(&file, "export default abstract class Base {}\n").unwrap();
 
         let export = make_export(&file, "default", 1);
-        let mut exports_by_file: HashMap<PathBuf, Vec<&UnusedExport>> = HashMap::new();
+        let mut exports_by_file: FxHashMap<PathBuf, Vec<&UnusedExport>> = FxHashMap::default();
         exports_by_file.insert(file.clone(), vec![&export]);
 
         let mut fixes = Vec::new();
@@ -572,7 +571,7 @@ mod tests {
         std::fs::write(&file, "export default async function handler() {}\n").unwrap();
 
         let export = make_export(&file, "default", 1);
-        let mut exports_by_file: HashMap<PathBuf, Vec<&UnusedExport>> = HashMap::new();
+        let mut exports_by_file: FxHashMap<PathBuf, Vec<&UnusedExport>> = FxHashMap::default();
         exports_by_file.insert(file.clone(), vec![&export]);
 
         let mut fixes = Vec::new();
@@ -597,7 +596,7 @@ mod tests {
         std::fs::write(&file, original).unwrap();
 
         let export = make_export(&file, "default", 1);
-        let mut exports_by_file: HashMap<PathBuf, Vec<&UnusedExport>> = HashMap::new();
+        let mut exports_by_file: FxHashMap<PathBuf, Vec<&UnusedExport>> = FxHashMap::default();
         exports_by_file.insert(file.clone(), vec![&export]);
 
         let mut fixes = Vec::new();
@@ -622,7 +621,7 @@ mod tests {
         std::fs::write(&file, "  export const x = 1;\n").unwrap();
 
         let export = make_export(&file, "x", 1);
-        let mut exports_by_file: HashMap<PathBuf, Vec<&UnusedExport>> = HashMap::new();
+        let mut exports_by_file: FxHashMap<PathBuf, Vec<&UnusedExport>> = FxHashMap::default();
         exports_by_file.insert(file.clone(), vec![&export]);
 
         let mut fixes = Vec::new();
@@ -650,7 +649,7 @@ mod tests {
         .unwrap();
 
         let export = make_export(&file, "foo", 1);
-        let mut exports_by_file: HashMap<PathBuf, Vec<&UnusedExport>> = HashMap::new();
+        let mut exports_by_file: FxHashMap<PathBuf, Vec<&UnusedExport>> = FxHashMap::default();
         exports_by_file.insert(file.clone(), vec![&export]);
 
         let mut fixes = Vec::new();
@@ -676,7 +675,7 @@ mod tests {
         std::fs::write(&outside_file, original).unwrap();
 
         let export = make_export(&outside_file, "evil", 1);
-        let mut exports_by_file: HashMap<PathBuf, Vec<&UnusedExport>> = HashMap::new();
+        let mut exports_by_file: FxHashMap<PathBuf, Vec<&UnusedExport>> = FxHashMap::default();
         exports_by_file.insert(outside_file.clone(), vec![&export]);
 
         let mut fixes = Vec::new();
@@ -702,7 +701,7 @@ mod tests {
         std::fs::write(&file, original).unwrap();
 
         let export = make_export(&file, "foo", 1);
-        let mut exports_by_file: HashMap<PathBuf, Vec<&UnusedExport>> = HashMap::new();
+        let mut exports_by_file: FxHashMap<PathBuf, Vec<&UnusedExport>> = FxHashMap::default();
         exports_by_file.insert(file.clone(), vec![&export]);
 
         let mut fixes = Vec::new();
@@ -731,7 +730,7 @@ mod tests {
 
         let e1 = make_export(&file, "a", 1);
         let e2 = make_export(&file, "C", 3);
-        let mut exports_by_file: HashMap<PathBuf, Vec<&UnusedExport>> = HashMap::new();
+        let mut exports_by_file: FxHashMap<PathBuf, Vec<&UnusedExport>> = FxHashMap::default();
         exports_by_file.insert(file.clone(), vec![&e1, &e2]);
 
         let mut fixes = Vec::new();
@@ -834,7 +833,7 @@ mod tests {
 
         // Line 999 is way out of bounds
         let export = make_export(&file, "ghost", 999);
-        let mut exports_by_file: HashMap<PathBuf, Vec<&UnusedExport>> = HashMap::new();
+        let mut exports_by_file: FxHashMap<PathBuf, Vec<&UnusedExport>> = FxHashMap::default();
         exports_by_file.insert(file.clone(), vec![&export]);
 
         let mut fixes = Vec::new();

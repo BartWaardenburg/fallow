@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::path::Path;
 
 use tower_lsp::lsp_types::*;
@@ -23,8 +23,8 @@ pub(crate) fn build_diagnostics(
     results: &AnalysisResults,
     duplication: &DuplicationReport,
     root: &Path,
-) -> HashMap<Url, Vec<Diagnostic>> {
-    let mut diagnostics_by_file: HashMap<Url, Vec<Diagnostic>> = HashMap::new();
+) -> FxHashMap<Url, Vec<Diagnostic>> {
+    let mut diagnostics_by_file: FxHashMap<Url, Vec<Diagnostic>> = FxHashMap::default();
 
     // Helper: get the package.json URI for dependency-related diagnostics
     let package_json_path = root.join("package.json");

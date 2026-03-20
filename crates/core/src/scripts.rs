@@ -9,14 +9,17 @@
 //! runners (`npx`, `pnpm exec`, `yarn dlx`), and Node.js runners (`node`, `tsx`,
 //! `ts-node`). Shell operators (`&&`, `||`, `;`, `|`) are split correctly.
 
-use std::collections::{HashMap, HashSet};
+#[allow(clippy::disallowed_types)]
+use std::collections::HashMap;
 use std::path::Path;
+
+use rustc_hash::FxHashSet;
 
 /// Result of analyzing all package.json scripts.
 #[derive(Debug, Default)]
 pub struct ScriptAnalysis {
     /// Package names used as binaries in scripts (mapped from binary → package name).
-    pub used_packages: HashSet<String>,
+    pub used_packages: FxHashSet<String>,
     /// Config file paths extracted from `--config` / `-c` arguments.
     pub config_files: Vec<String>,
     /// File paths extracted as positional arguments (entry point candidates).
@@ -59,7 +62,7 @@ const NODE_RUNNERS: &[&str] = &["node", "ts-node", "tsx", "babel-node", "bun"];
 ///
 /// In production mode, dev/test/lint scripts are excluded since they only affect
 /// devDependency usage, not the production dependency graph.
-#[allow(clippy::implicit_hasher)]
+#[allow(clippy::implicit_hasher, clippy::disallowed_types)]
 pub fn filter_production_scripts(scripts: &HashMap<String, String>) -> HashMap<String, String> {
     scripts
         .iter()
@@ -100,7 +103,7 @@ fn is_production_script(name: &str) -> bool {
 ///
 /// For each script value, parses shell commands, extracts binary names (mapped to
 /// package names), `--config` file paths, and positional file path arguments.
-#[allow(clippy::implicit_hasher)]
+#[allow(clippy::implicit_hasher, clippy::disallowed_types)]
 pub fn analyze_scripts(scripts: &HashMap<String, String>, root: &Path) -> ScriptAnalysis {
     let mut result = ScriptAnalysis::default();
 

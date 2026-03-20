@@ -4,7 +4,7 @@ mod unused_exports;
 mod unused_files;
 mod unused_members;
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 use fallow_config::{PackageJson, ResolvedConfig};
 
@@ -67,7 +67,7 @@ pub fn find_dead_code_full(
     let _span = tracing::info_span!("find_dead_code").entered();
 
     // Build suppression index: FileId -> suppressions
-    let suppressions_by_file: HashMap<FileId, &[Suppression]> = modules
+    let suppressions_by_file: FxHashMap<FileId, &[Suppression]> = modules
         .iter()
         .filter(|m| !m.suppressions.is_empty())
         .map(|m| (m.file_id, m.suppressions.as_slice()))

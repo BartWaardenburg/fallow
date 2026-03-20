@@ -15,6 +15,7 @@ schemars = { workspace = true }
 glob = { workspace = true }
 globset = { workspace = true }
 miette = { workspace = true }
+rustc-hash = { workspace = true }
 
 [lints]
 workspace = true

@@ -1,5 +1,6 @@
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+
+use rustc_hash::FxHashMap;
 
 use fallow_config::WorkspaceInfo;
 
@@ -16,7 +17,7 @@ use fallow_types::discover::{DiscoveredFile, FileId};
 /// that adding/removing files does not invalidate cached graph data.
 pub struct ProjectState {
     files: Vec<DiscoveredFile>,
-    path_to_id: HashMap<PathBuf, FileId>,
+    path_to_id: FxHashMap<PathBuf, FileId>,
     workspaces: Vec<WorkspaceInfo>,
 }
 

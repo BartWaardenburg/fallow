@@ -1,5 +1,6 @@
-use std::collections::HashMap;
 use std::path::Path;
+
+use rustc_hash::FxHashMap;
 
 use bincode::{Decode, Encode};
 
@@ -18,7 +19,7 @@ const MAX_CACHE_SIZE: usize = 256 * 1024 * 1024;
 pub struct CacheStore {
     version: u32,
     /// Map from file path to cached module data.
-    entries: HashMap<String, CachedModule>,
+    entries: FxHashMap<String, CachedModule>,
 }
 
 /// Cached data for a single module.
@@ -136,7 +137,7 @@ impl CacheStore {
     pub fn new() -> Self {
         Self {
             version: CACHE_VERSION,
-            entries: HashMap::new(),
+            entries: FxHashMap::default(),
         }
     }
 
@@ -199,8 +200,8 @@ impl CacheStore {
     /// Remove cache entries for files that are no longer in the project.
     /// Keeps the cache from growing unboundedly as files are deleted.
     pub fn retain_paths(&mut self, files: &[fallow_types::discover::DiscoveredFile]) {
-        use std::collections::HashSet;
-        let current_paths: HashSet<String> = files
+        use rustc_hash::FxHashSet;
+        let current_paths: FxHashSet<String> = files
             .iter()
             .map(|f| f.path.to_string_lossy().to_string())
             .collect();

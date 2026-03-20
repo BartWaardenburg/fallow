@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use fallow_config::ResolvedConfig;
 
@@ -20,28 +20,28 @@ pub(crate) fn find_unused_members(
     graph: &ModuleGraph,
     _config: &ResolvedConfig,
     resolved_modules: &[ResolvedModule],
-    suppressions_by_file: &HashMap<FileId, &[Suppression]>,
+    suppressions_by_file: &FxHashMap<FileId, &[Suppression]>,
 ) -> (Vec<UnusedMember>, Vec<UnusedMember>) {
     let mut unused_enum_members = Vec::new();
     let mut unused_class_members = Vec::new();
 
     // Map export_name -> set of member_names that are accessed across all modules.
     // We map local import names back to the original imported names.
-    let mut accessed_members: HashMap<String, HashSet<String>> = HashMap::new();
+    let mut accessed_members: FxHashMap<String, FxHashSet<String>> = FxHashMap::default();
 
     // Also build a per-file set of `this.member` accesses. These indicate internal usage
     // within a class body — class members accessed via `this.foo` are used internally
     // even if no external code accesses them via `ClassName.foo`.
-    let mut self_accessed_members: HashMap<crate::discover::FileId, HashSet<String>> =
-        HashMap::new();
+    let mut self_accessed_members: FxHashMap<crate::discover::FileId, FxHashSet<String>> =
+        FxHashMap::default();
 
     // Build a set of export names that are used as whole objects (Object.values, for..in, etc.).
     // All members of these exports should be considered used.
-    let mut whole_object_used_exports: HashSet<String> = HashSet::new();
+    let mut whole_object_used_exports: FxHashSet<String> = FxHashSet::default();
 
     for resolved in resolved_modules {
         // Build a map from local name -> imported name for this module's imports
-        let local_to_imported: HashMap<&str, &str> = resolved
+        let local_to_imported: FxHashMap<&str, &str> = resolved
             .resolved_imports
             .iter()
             .filter_map(|imp| match &imp.info.imported_name {
@@ -298,7 +298,7 @@ mod tests {
         let graph = build_graph(&[]);
         let config = test_config();
         let (enum_members, class_members) =
-            find_unused_members(&graph, &config, &[], &HashMap::new());
+            find_unused_members(&graph, &config, &[], &FxHashMap::default());
         assert!(enum_members.is_empty());
         assert!(class_members.is_empty());
     }
@@ -319,10 +319,10 @@ mod tests {
 
         // No member accesses at all — both should be unused
         let (enum_members, class_members) =
-            find_unused_members(&graph, &config, &[], &HashMap::new());
+            find_unused_members(&graph, &config, &[], &FxHashMap::default());
         assert_eq!(enum_members.len(), 2);
         assert!(class_members.is_empty());
-        let names: HashSet<&str> = enum_members
+        let names: FxHashSet<&str> = enum_members
             .iter()
             .map(|m| m.member_name.as_str())
             .collect();
@@ -371,7 +371,7 @@ mod tests {
         }];
 
         let (enum_members, _) =
-            find_unused_members(&graph, &config, &resolved_modules, &HashMap::new());
+            find_unused_members(&graph, &config, &resolved_modules, &FxHashMap::default());
         // Only Inactive should be unused
         assert_eq!(enum_members.len(), 1);
         assert_eq!(enum_members[0].member_name, "Inactive");
@@ -415,7 +415,7 @@ mod tests {
         }];
 
         let (enum_members, class_members) =
-            find_unused_members(&graph, &config, &resolved_modules, &HashMap::new());
+            find_unused_members(&graph, &config, &resolved_modules, &FxHashMap::default());
         assert!(enum_members.is_empty());
         assert!(class_members.is_empty());
     }
@@ -436,7 +436,7 @@ mod tests {
         )];
         let config = test_config();
 
-        let (_, class_members) = find_unused_members(&graph, &config, &[], &HashMap::new());
+        let (_, class_members) = find_unused_members(&graph, &config, &[], &FxHashMap::default());
         assert!(class_members.is_empty());
     }
 
@@ -455,7 +455,7 @@ mod tests {
         )];
         let config = test_config();
 
-        let (_, class_members) = find_unused_members(&graph, &config, &[], &HashMap::new());
+        let (_, class_members) = find_unused_members(&graph, &config, &[], &FxHashMap::default());
         // Only customMethod should be flagged
         assert_eq!(class_members.len(), 1);
         assert_eq!(class_members[0].member_name, "customMethod");
@@ -476,7 +476,7 @@ mod tests {
         )];
         let config = test_config();
 
-        let (_, class_members) = find_unused_members(&graph, &config, &[], &HashMap::new());
+        let (_, class_members) = find_unused_members(&graph, &config, &[], &FxHashMap::default());
         assert_eq!(class_members.len(), 1);
         assert_eq!(class_members[0].member_name, "myHelper");
     }
@@ -513,7 +513,7 @@ mod tests {
         }];
 
         let (_, class_members) =
-            find_unused_members(&graph, &config, &resolved_modules, &HashMap::new());
+            find_unused_members(&graph, &config, &resolved_modules, &FxHashMap::default());
         // Only unused_prop should be flagged (label is accessed via this)
         assert_eq!(class_members.len(), 1);
         assert_eq!(class_members[0].member_name, "unused_prop");
@@ -531,7 +531,7 @@ mod tests {
         )];
         let config = test_config();
 
-        let (enum_members, _) = find_unused_members(&graph, &config, &[], &HashMap::new());
+        let (enum_members, _) = find_unused_members(&graph, &config, &[], &FxHashMap::default());
         // Member analysis skipped because export itself is unreferenced
         assert!(enum_members.is_empty());
     }
@@ -548,7 +548,7 @@ mod tests {
         let config = test_config();
 
         let (enum_members, class_members) =
-            find_unused_members(&graph, &config, &[], &HashMap::new());
+            find_unused_members(&graph, &config, &[], &FxHashMap::default());
         assert!(enum_members.is_empty());
         assert!(class_members.is_empty());
     }
@@ -564,7 +564,7 @@ mod tests {
         let config = test_config();
 
         let (enum_members, class_members) =
-            find_unused_members(&graph, &config, &[], &HashMap::new());
+            find_unused_members(&graph, &config, &[], &FxHashMap::default());
         assert!(enum_members.is_empty());
         assert!(class_members.is_empty());
     }
@@ -581,7 +581,7 @@ mod tests {
         let config = test_config();
 
         let (enum_members, class_members) =
-            find_unused_members(&graph, &config, &[], &HashMap::new());
+            find_unused_members(&graph, &config, &[], &FxHashMap::default());
         assert_eq!(enum_members.len(), 1);
         assert_eq!(enum_members[0].kind, MemberKind::EnumMember);
         assert!(class_members.is_empty());
@@ -602,7 +602,7 @@ mod tests {
         let config = test_config();
 
         let (enum_members, class_members) =
-            find_unused_members(&graph, &config, &[], &HashMap::new());
+            find_unused_members(&graph, &config, &[], &FxHashMap::default());
         assert!(enum_members.is_empty());
         assert_eq!(class_members.len(), 2);
         assert!(

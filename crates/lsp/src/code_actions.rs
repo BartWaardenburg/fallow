@@ -1,3 +1,4 @@
+#[allow(clippy::disallowed_types)]
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -9,6 +10,7 @@ use fallow_core::results::AnalysisResults;
 use crate::diagnostics::ZERO_RANGE;
 
 /// Build quick-fix code actions for unused exports (remove the `export` keyword).
+#[allow(clippy::disallowed_types)]
 pub(crate) fn build_remove_export_actions(
     results: &AnalysisResults,
     file_path: &Path,
@@ -160,6 +162,7 @@ pub(crate) fn build_delete_file_actions(
 }
 
 /// Build "Extract duplicate into function" code actions for clone groups overlapping the cursor.
+#[allow(clippy::disallowed_types)]
 pub(crate) fn build_extract_duplicate_actions(
     file_path: &Path,
     uri: &Url,

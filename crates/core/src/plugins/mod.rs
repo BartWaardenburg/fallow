@@ -9,7 +9,7 @@
 //! - **Dynamic resolution**: Parse tool config files to discover additional entries,
 //!   referenced dependencies, and setup files
 
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 use std::path::{Path, PathBuf};
 
 use fallow_config::{ExternalPluginDef, PackageJson, PluginDetection};
@@ -286,7 +286,7 @@ pub struct AggregatedPluginResult {
     /// Tooling dependencies (should not be flagged as unused devDeps).
     pub tooling_dependencies: Vec<String>,
     /// Package names discovered as used in package.json scripts (binary invocations).
-    pub script_used_packages: std::collections::HashSet<String>,
+    pub script_used_packages: FxHashSet<String>,
     /// Import prefixes for virtual modules provided by active frameworks.
     /// Imports matching these prefixes should not be flagged as unlisted dependencies.
     pub virtual_module_prefixes: Vec<String>,
@@ -640,7 +640,7 @@ impl PluginRegistry {
 
         // Phase 3: Find and parse config files using pre-compiled matchers
         // Only check matchers for plugins that are active in this workspace
-        let active_names: HashSet<&str> = active.iter().map(|p| p.name()).collect();
+        let active_names: FxHashSet<&str> = active.iter().map(|p| p.name()).collect();
         let workspace_matchers: Vec<_> = precompiled_config_matchers
             .iter()
             .filter(|(p, _)| active_names.contains(p.name()))

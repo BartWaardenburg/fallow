@@ -125,7 +125,7 @@ pub fn discover_workspaces(root: &Path) -> Vec<WorkspaceInfo> {
     // Overlapping patterns (e.g., `examples/*` and `examples/minimal/*`) can match the
     // same directory, causing duplicate workspace entries and double-reported issues.
     {
-        let mut seen = std::collections::HashSet::new();
+        let mut seen = rustc_hash::FxHashSet::default();
         workspaces.retain(|(ws, _)| {
             let canonical = ws.root.canonicalize().unwrap_or_else(|_| ws.root.clone());
             seen.insert(canonical)
@@ -135,7 +135,7 @@ pub fn discover_workspaces(root: &Path) -> Vec<WorkspaceInfo> {
     // 5. Mark workspaces that are depended on by other workspaces.
     // Uses dep names collected during initial package.json load (step 3)
     // to avoid re-reading all workspace package.json files.
-    let all_dep_names: std::collections::HashSet<String> = workspaces
+    let all_dep_names: rustc_hash::FxHashSet<String> = workspaces
         .iter()
         .flat_map(|(_, deps)| deps.iter().cloned())
         .collect();
@@ -203,6 +203,12 @@ fn parse_pnpm_workspace_yaml(content: &str) -> Vec<String> {
     patterns
 }
 
+/// Type alias for standard `HashMap` used in serde-deserialized structs.
+/// `rustc-hash` v2 does not have a `serde` feature, so fields deserialized
+/// from JSON must use `std::collections::HashMap`.
+#[allow(clippy::disallowed_types)]
+type StdHashMap<K, V> = std::collections::HashMap<K, V>;
+
 /// Parsed package.json with fields relevant to fallow.
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct PackageJson {
@@ -225,13 +231,13 @@ pub struct PackageJson {
     #[serde(default)]
     pub exports: Option<serde_json::Value>,
     #[serde(default)]
-    pub dependencies: Option<std::collections::HashMap<String, String>>,
+    pub dependencies: Option<StdHashMap<String, String>>,
     #[serde(default, rename = "devDependencies")]
-    pub dev_dependencies: Option<std::collections::HashMap<String, String>>,
+    pub dev_dependencies: Option<StdHashMap<String, String>>,
     #[serde(default, rename = "peerDependencies")]
-    pub peer_dependencies: Option<std::collections::HashMap<String, String>>,
+    pub peer_dependencies: Option<StdHashMap<String, String>>,
     #[serde(default)]
-    pub scripts: Option<std::collections::HashMap<String, String>>,
+    pub scripts: Option<StdHashMap<String, String>>,
     #[serde(default)]
     pub workspaces: Option<serde_json::Value>,
 }

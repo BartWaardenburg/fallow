@@ -1,4 +1,6 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::VecDeque;
+
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::ops::Range;
 use std::path::PathBuf;
 
@@ -16,13 +18,13 @@ pub struct ModuleGraph {
     /// Flat edge storage for cache-friendly iteration.
     edges: Vec<Edge>,
     /// Maps npm package names to the set of `FileId`s that import them.
-    pub package_usage: HashMap<String, Vec<FileId>>,
+    pub package_usage: FxHashMap<String, Vec<FileId>>,
     /// Maps npm package names to the set of `FileId`s that import them with type-only imports.
     /// A package appearing here but not in `package_usage` (or only in both) indicates
     /// it's only used for types and could be a devDependency.
-    pub type_only_package_usage: HashMap<String, Vec<FileId>>,
+    pub type_only_package_usage: FxHashMap<String, Vec<FileId>>,
     /// All entry point `FileId`s.
-    pub entry_points: HashSet<FileId>,
+    pub entry_points: FxHashSet<FileId>,
     /// Reverse index: for each `FileId`, which files import it.
     pub reverse_deps: Vec<Vec<FileId>>,
     /// Precomputed: which modules have namespace imports (import * as ns).
@@ -143,20 +145,20 @@ impl ModuleGraph {
         let total_capacity = max_file_id.max(module_count);
 
         // Build path -> FileId index
-        let path_to_id: HashMap<PathBuf, FileId> =
+        let path_to_id: FxHashMap<PathBuf, FileId> =
             files.iter().map(|f| (f.path.clone(), f.id)).collect();
 
         // Build FileId -> ResolvedModule index
-        let module_by_id: HashMap<FileId, &ResolvedModule> =
+        let module_by_id: FxHashMap<FileId, &ResolvedModule> =
             resolved_modules.iter().map(|m| (m.file_id, m)).collect();
 
         // Build entry point set — use path_to_id map instead of O(n) scan per entry
-        let entry_point_ids: HashSet<FileId> = entry_points
+        let entry_point_ids: FxHashSet<FileId> = entry_points
             .iter()
             .filter_map(|ep| {
                 // Try direct lookup first (fast path)
                 path_to_id.get(&ep.path).copied().or_else(|| {
-                    // Fallback: canonicalize entry point and do a direct HashMap lookup
+                    // Fallback: canonicalize entry point and do a direct FxHashMap lookup
                     ep.path
                         .canonicalize()
                         .ok()
@@ -192,15 +194,15 @@ impl ModuleGraph {
     /// indices, package usage maps, and the namespace-imported bitset.
     fn populate_edges(
         files: &[DiscoveredFile],
-        module_by_id: &HashMap<FileId, &ResolvedModule>,
-        entry_point_ids: &HashSet<FileId>,
+        module_by_id: &FxHashMap<FileId, &ResolvedModule>,
+        entry_point_ids: &FxHashSet<FileId>,
         module_count: usize,
         total_capacity: usize,
     ) -> Self {
         let mut all_edges = Vec::new();
         let mut modules = Vec::with_capacity(module_count);
-        let mut package_usage: HashMap<String, Vec<FileId>> = HashMap::new();
-        let mut type_only_package_usage: HashMap<String, Vec<FileId>> = HashMap::new();
+        let mut package_usage: FxHashMap<String, Vec<FileId>> = FxHashMap::default();
+        let mut type_only_package_usage: FxHashMap<String, Vec<FileId>> = FxHashMap::default();
         let mut reverse_deps = vec![Vec::new(); total_capacity];
         let mut namespace_imported = FixedBitSet::with_capacity(total_capacity);
 
@@ -209,7 +211,8 @@ impl ModuleGraph {
 
             if let Some(resolved) = module_by_id.get(&file.id) {
                 // Group imports by target
-                let mut edges_by_target: HashMap<FileId, Vec<ImportedSymbol>> = HashMap::new();
+                let mut edges_by_target: FxHashMap<FileId, Vec<ImportedSymbol>> =
+                    FxHashMap::default();
 
                 for import in &resolved.resolved_imports {
                     match &import.target {
@@ -434,8 +437,8 @@ impl ModuleGraph {
     /// tracking) and CSS Module default-import narrowing.
     fn populate_references(
         &mut self,
-        module_by_id: &HashMap<FileId, &ResolvedModule>,
-        entry_point_ids: &HashSet<FileId>,
+        module_by_id: &FxHashMap<FileId, &ResolvedModule>,
+        entry_point_ids: &FxHashSet<FileId>,
     ) {
         for edge_idx in 0..self.edges.len() {
             let source_id = self.edges[edge_idx].source;
@@ -659,7 +662,7 @@ impl ModuleGraph {
         // Reuse a single HashSet across iterations to avoid repeated allocations.
         // In barrel-heavy monorepos, this loop can run up to max_iterations × re_export_info.len()
         // × target_exports.len() times — reusing with .clear() avoids O(n) allocations.
-        let mut existing_refs: HashSet<FileId> = HashSet::new();
+        let mut existing_refs: FxHashSet<FileId> = FxHashSet::default();
 
         while changed && iteration < max_iterations {
             changed = false;

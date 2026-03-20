@@ -2,7 +2,7 @@ mod code_actions;
 mod code_lens;
 mod diagnostics;
 
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
@@ -20,10 +20,10 @@ struct FallowLspServer {
     root: Arc<RwLock<Option<PathBuf>>>,
     results: Arc<RwLock<Option<AnalysisResults>>>,
     duplication: Arc<RwLock<Option<DuplicationReport>>>,
-    previous_diagnostic_uris: Arc<RwLock<HashSet<Url>>>,
+    previous_diagnostic_uris: Arc<RwLock<FxHashSet<Url>>>,
     last_analysis: Arc<Mutex<Instant>>,
     analysis_guard: Arc<tokio::sync::Mutex<()>>,
-    documents: Arc<RwLock<HashMap<Url, String>>>,
+    documents: Arc<RwLock<FxHashMap<Url, String>>>,
 }
 
 #[tower_lsp::async_trait]
@@ -271,7 +271,7 @@ impl FallowLspServer {
         let diagnostics_by_file = diagnostics::build_diagnostics(results, duplication, root);
 
         // Collect the set of URIs we are publishing to
-        let new_uris: HashSet<Url> = diagnostics_by_file.keys().cloned().collect();
+        let new_uris: FxHashSet<Url> = diagnostics_by_file.keys().cloned().collect();
 
         // Publish diagnostics for current results
         for (uri, diags) in &diagnostics_by_file {
@@ -313,14 +313,14 @@ async fn main() {
         root: Arc::new(RwLock::new(None)),
         results: Arc::new(RwLock::new(None)),
         duplication: Arc::new(RwLock::new(None)),
-        previous_diagnostic_uris: Arc::new(RwLock::new(HashSet::new())),
+        previous_diagnostic_uris: Arc::new(RwLock::new(FxHashSet::default())),
         last_analysis: Arc::new(Mutex::new(
             Instant::now()
                 .checked_sub(std::time::Duration::from_secs(10))
                 .unwrap_or_else(Instant::now),
         )),
         analysis_guard: Arc::new(tokio::sync::Mutex::new(())),
-        documents: Arc::new(RwLock::new(HashMap::new())),
+        documents: Arc::new(RwLock::new(FxHashMap::default())),
     });
 
     Server::new(stdin, stdout, socket).serve(service).await;

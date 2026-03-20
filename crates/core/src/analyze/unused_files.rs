@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 use crate::discover::FileId;
 use crate::graph::ModuleGraph;
@@ -21,7 +21,7 @@ use super::predicates::{is_barrel_with_reachable_sources, is_config_file, is_dec
 /// import directly from the source files rather than through the barrel.
 pub(crate) fn find_unused_files(
     graph: &ModuleGraph,
-    suppressions_by_file: &HashMap<FileId, &[Suppression]>,
+    suppressions_by_file: &FxHashMap<FileId, &[Suppression]>,
 ) -> Vec<UnusedFile> {
     graph
         .modules

@@ -1,5 +1,6 @@
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+
+use rustc_hash::FxHashMap;
 
 use dashmap::DashMap;
 use oxc_resolver::{ResolveOptions, Resolver};
@@ -11,7 +12,7 @@ use fallow_types::extract::{ImportInfo, ModuleInfo, ReExportInfo};
 /// Thread-safe cache for bare specifier resolutions using lock-free concurrent reads.
 /// Bare specifiers (like `react`, `lodash/merge`) resolve to the same target
 /// regardless of which file imports them (modulo nested `node_modules`, which is rare).
-/// Uses `DashMap` (sharded read-write locks) instead of `Mutex<HashMap>` to eliminate
+/// Uses `DashMap` (sharded read-write locks) instead of `Mutex<FxHashMap>` to eliminate
 /// contention under rayon's work-stealing on large projects.
 struct BareSpecifierCache {
     cache: DashMap<String, ResolveResult>,
@@ -92,7 +93,7 @@ pub fn resolve_all_imports(
         .par_iter()
         .map(|ws| ws.root.canonicalize().unwrap_or_else(|_| ws.root.clone()))
         .collect();
-    let workspace_roots: HashMap<&str, &Path> = workspaces
+    let workspace_roots: FxHashMap<&str, &Path> = workspaces
         .iter()
         .zip(canonical_ws_roots.iter())
         .map(|(ws, canonical)| (ws.name.as_str(), canonical.as_path()))
@@ -106,17 +107,17 @@ pub fn resolve_all_imports(
         .collect();
 
     // Build path -> FileId index using pre-computed canonical paths
-    let path_to_id: HashMap<&Path, FileId> = canonical_paths
+    let path_to_id: FxHashMap<&Path, FileId> = canonical_paths
         .iter()
         .enumerate()
         .map(|(idx, canonical)| (canonical.as_path(), files[idx].id))
         .collect();
 
     // Also index by non-canonical path for fallback lookups
-    let raw_path_to_id: HashMap<&Path, FileId> =
+    let raw_path_to_id: FxHashMap<&Path, FileId> =
         files.iter().map(|f| (f.path.as_path(), f.id)).collect();
 
-    // FileIds are sequential 0..n, so direct array indexing is faster than HashMap.
+    // FileIds are sequential 0..n, so direct array indexing is faster than FxHashMap.
     let file_paths: Vec<&Path> = files.iter().map(|f| f.path.as_path()).collect();
 
     // Create resolver ONCE and share across threads (oxc_resolver::Resolver is Send + Sync)
@@ -481,10 +482,10 @@ fn resolve_specifier(
     resolver: &Resolver,
     from_file: &Path,
     specifier: &str,
-    path_to_id: &HashMap<&Path, FileId>,
-    raw_path_to_id: &HashMap<&Path, FileId>,
+    path_to_id: &FxHashMap<&Path, FileId>,
+    raw_path_to_id: &FxHashMap<&Path, FileId>,
     bare_cache: &BareSpecifierCache,
-    workspace_roots: &HashMap<&str, &Path>,
+    workspace_roots: &FxHashMap<&str, &Path>,
     path_aliases: &[(String, String)],
     root: &Path,
 ) -> ResolveResult {
@@ -604,9 +605,9 @@ fn try_path_alias_fallback(
     specifier: &str,
     path_aliases: &[(String, String)],
     root: &Path,
-    path_to_id: &HashMap<&Path, FileId>,
-    raw_path_to_id: &HashMap<&Path, FileId>,
-    workspace_roots: &HashMap<&str, &Path>,
+    path_to_id: &FxHashMap<&Path, FileId>,
+    raw_path_to_id: &FxHashMap<&Path, FileId>,
+    workspace_roots: &FxHashMap<&str, &Path>,
 ) -> Option<ResolveResult> {
     for (prefix, replacement) in path_aliases {
         if !specifier.starts_with(prefix.as_str()) {
@@ -674,7 +675,7 @@ const SOURCE_EXTS: &[&str] = &["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "c
 /// are handled by finding the last output directory component (closest to the file,
 /// avoiding false matches on parent directories) and then walking backwards to collect
 /// all consecutive output directory components before it.
-fn try_source_fallback(resolved: &Path, path_to_id: &HashMap<&Path, FileId>) -> Option<FileId> {
+fn try_source_fallback(resolved: &Path, path_to_id: &FxHashMap<&Path, FileId>) -> Option<FileId> {
     let components: Vec<_> = resolved.components().collect();
 
     let is_output_dir = |c: &std::path::Component| -> bool {
@@ -760,8 +761,8 @@ fn extract_package_name_from_node_modules_path(path: &Path) -> Option<String> {
 /// matches a workspace package, and tries to find the source file in that workspace.
 fn try_pnpm_workspace_fallback(
     path: &Path,
-    path_to_id: &HashMap<&Path, FileId>,
-    workspace_roots: &HashMap<&str, &Path>,
+    path_to_id: &FxHashMap<&Path, FileId>,
+    workspace_roots: &FxHashMap<&str, &Path>,
 ) -> Option<FileId> {
     // Only relevant for paths containing .pnpm
     let components: Vec<&str> = path
@@ -960,7 +961,7 @@ mod tests {
     #[test]
     fn test_try_source_fallback_dist_to_src() {
         let src_path = PathBuf::from("/project/packages/ui/src/utils.ts");
-        let mut path_to_id = HashMap::new();
+        let mut path_to_id = FxHashMap::default();
         path_to_id.insert(src_path.as_path(), FileId(0));
 
         let dist_path = PathBuf::from("/project/packages/ui/dist/utils.js");
@@ -974,7 +975,7 @@ mod tests {
     #[test]
     fn test_try_source_fallback_build_to_src() {
         let src_path = PathBuf::from("/project/packages/core/src/index.tsx");
-        let mut path_to_id = HashMap::new();
+        let mut path_to_id = FxHashMap::default();
         path_to_id.insert(src_path.as_path(), FileId(1));
 
         let build_path = PathBuf::from("/project/packages/core/build/index.js");
@@ -987,7 +988,7 @@ mod tests {
 
     #[test]
     fn test_try_source_fallback_no_match() {
-        let path_to_id: HashMap<&Path, FileId> = HashMap::new();
+        let path_to_id: FxHashMap<&Path, FileId> = FxHashMap::default();
 
         let dist_path = PathBuf::from("/project/packages/ui/dist/utils.js");
         assert_eq!(
@@ -1000,7 +1001,7 @@ mod tests {
     #[test]
     fn test_try_source_fallback_non_output_dir() {
         let src_path = PathBuf::from("/project/packages/ui/src/utils.ts");
-        let mut path_to_id = HashMap::new();
+        let mut path_to_id = FxHashMap::default();
         path_to_id.insert(src_path.as_path(), FileId(0));
 
         // A path that's not in an output directory should not trigger fallback
@@ -1015,7 +1016,7 @@ mod tests {
     #[test]
     fn test_try_source_fallback_nested_path() {
         let src_path = PathBuf::from("/project/packages/ui/src/components/Button.ts");
-        let mut path_to_id = HashMap::new();
+        let mut path_to_id = FxHashMap::default();
         path_to_id.insert(src_path.as_path(), FileId(2));
 
         let dist_path = PathBuf::from("/project/packages/ui/dist/components/Button.js");
@@ -1029,7 +1030,7 @@ mod tests {
     #[test]
     fn test_try_source_fallback_nested_dist_esm() {
         let src_path = PathBuf::from("/project/packages/ui/src/utils.ts");
-        let mut path_to_id = HashMap::new();
+        let mut path_to_id = FxHashMap::default();
         path_to_id.insert(src_path.as_path(), FileId(0));
 
         let dist_path = PathBuf::from("/project/packages/ui/dist/esm/utils.mjs");
@@ -1043,7 +1044,7 @@ mod tests {
     #[test]
     fn test_try_source_fallback_nested_build_cjs() {
         let src_path = PathBuf::from("/project/packages/core/src/index.ts");
-        let mut path_to_id = HashMap::new();
+        let mut path_to_id = FxHashMap::default();
         path_to_id.insert(src_path.as_path(), FileId(1));
 
         let build_path = PathBuf::from("/project/packages/core/build/cjs/index.cjs");
@@ -1057,7 +1058,7 @@ mod tests {
     #[test]
     fn test_try_source_fallback_nested_dist_esm_deep_path() {
         let src_path = PathBuf::from("/project/packages/ui/src/components/Button.ts");
-        let mut path_to_id = HashMap::new();
+        let mut path_to_id = FxHashMap::default();
         path_to_id.insert(src_path.as_path(), FileId(2));
 
         let dist_path = PathBuf::from("/project/packages/ui/dist/esm/components/Button.mjs");
@@ -1071,7 +1072,7 @@ mod tests {
     #[test]
     fn test_try_source_fallback_triple_nested_output_dirs() {
         let src_path = PathBuf::from("/project/packages/ui/src/utils.ts");
-        let mut path_to_id = HashMap::new();
+        let mut path_to_id = FxHashMap::default();
         path_to_id.insert(src_path.as_path(), FileId(0));
 
         let dist_path = PathBuf::from("/project/packages/ui/out/dist/esm/utils.mjs");
@@ -1085,7 +1086,7 @@ mod tests {
     #[test]
     fn test_try_source_fallback_parent_dir_named_build() {
         let src_path = PathBuf::from("/home/user/build/my-project/src/utils.ts");
-        let mut path_to_id = HashMap::new();
+        let mut path_to_id = FxHashMap::default();
         path_to_id.insert(src_path.as_path(), FileId(0));
 
         let dist_path = PathBuf::from("/home/user/build/my-project/dist/utils.js");
@@ -1132,10 +1133,10 @@ mod tests {
     #[test]
     fn test_try_pnpm_workspace_fallback_dist_to_src() {
         let src_path = PathBuf::from("/project/packages/ui/src/utils.ts");
-        let mut path_to_id = HashMap::new();
+        let mut path_to_id = FxHashMap::default();
         path_to_id.insert(src_path.as_path(), FileId(0));
 
-        let mut workspace_roots = HashMap::new();
+        let mut workspace_roots = FxHashMap::default();
         let ws_root = PathBuf::from("/project/packages/ui");
         workspace_roots.insert("@myorg/ui", ws_root.as_path());
 
@@ -1153,10 +1154,10 @@ mod tests {
     #[test]
     fn test_try_pnpm_workspace_fallback_direct_source() {
         let src_path = PathBuf::from("/project/packages/core/src/index.ts");
-        let mut path_to_id = HashMap::new();
+        let mut path_to_id = FxHashMap::default();
         path_to_id.insert(src_path.as_path(), FileId(1));
 
-        let mut workspace_roots = HashMap::new();
+        let mut workspace_roots = FxHashMap::default();
         let ws_root = PathBuf::from("/project/packages/core");
         workspace_roots.insert("@myorg/core", ws_root.as_path());
 
@@ -1173,9 +1174,9 @@ mod tests {
 
     #[test]
     fn test_try_pnpm_workspace_fallback_non_workspace_package() {
-        let path_to_id: HashMap<&Path, FileId> = HashMap::new();
+        let path_to_id: FxHashMap<&Path, FileId> = FxHashMap::default();
 
-        let mut workspace_roots = HashMap::new();
+        let mut workspace_roots = FxHashMap::default();
         let ws_root = PathBuf::from("/project/packages/ui");
         workspace_roots.insert("@myorg/ui", ws_root.as_path());
 
@@ -1192,10 +1193,10 @@ mod tests {
     #[test]
     fn test_try_pnpm_workspace_fallback_unscoped_package() {
         let src_path = PathBuf::from("/project/packages/utils/src/index.ts");
-        let mut path_to_id = HashMap::new();
+        let mut path_to_id = FxHashMap::default();
         path_to_id.insert(src_path.as_path(), FileId(2));
 
-        let mut workspace_roots = HashMap::new();
+        let mut workspace_roots = FxHashMap::default();
         let ws_root = PathBuf::from("/project/packages/utils");
         workspace_roots.insert("my-utils", ws_root.as_path());
 
@@ -1213,10 +1214,10 @@ mod tests {
     #[test]
     fn test_try_pnpm_workspace_fallback_nested_path() {
         let src_path = PathBuf::from("/project/packages/ui/src/components/Button.ts");
-        let mut path_to_id = HashMap::new();
+        let mut path_to_id = FxHashMap::default();
         path_to_id.insert(src_path.as_path(), FileId(3));
 
-        let mut workspace_roots = HashMap::new();
+        let mut workspace_roots = FxHashMap::default();
         let ws_root = PathBuf::from("/project/packages/ui");
         workspace_roots.insert("@myorg/ui", ws_root.as_path());
 
@@ -1233,8 +1234,8 @@ mod tests {
 
     #[test]
     fn test_try_pnpm_workspace_fallback_no_pnpm() {
-        let path_to_id: HashMap<&Path, FileId> = HashMap::new();
-        let workspace_roots: HashMap<&str, &Path> = HashMap::new();
+        let path_to_id: FxHashMap<&Path, FileId> = FxHashMap::default();
+        let workspace_roots: FxHashMap<&str, &Path> = FxHashMap::default();
 
         // Regular path without .pnpm — should return None immediately
         let regular_path = PathBuf::from("/project/node_modules/react/index.js");
@@ -1247,10 +1248,10 @@ mod tests {
     #[test]
     fn test_try_pnpm_workspace_fallback_with_peer_deps() {
         let src_path = PathBuf::from("/project/packages/ui/src/index.ts");
-        let mut path_to_id = HashMap::new();
+        let mut path_to_id = FxHashMap::default();
         path_to_id.insert(src_path.as_path(), FileId(4));
 
-        let mut workspace_roots = HashMap::new();
+        let mut workspace_roots = FxHashMap::default();
         let ws_root = PathBuf::from("/project/packages/ui");
         workspace_roots.insert("@myorg/ui", ws_root.as_path());
 
