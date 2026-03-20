@@ -3,7 +3,7 @@ use std::path::Path;
 use fallow_core::duplicates::DuplicationReport;
 use fallow_core::results::{AnalysisResults, UnusedExport, UnusedMember};
 
-use super::relative_path;
+use super::{relative_path, normalize_uri};
 
 pub(super) fn print_compact(results: &AnalysisResults, root: &Path) {
     for line in build_compact_lines(results, root) {
@@ -14,7 +14,7 @@ pub(super) fn print_compact(results: &AnalysisResults, root: &Path) {
 /// Build compact output lines for analysis results.
 /// Each issue is represented as a single `prefix:details` line.
 pub fn build_compact_lines(results: &AnalysisResults, root: &Path) -> Vec<String> {
-    let rel = |p: &Path| relative_path(p, root).display().to_string();
+    let rel = |p: &Path| normalize_uri(&relative_path(p, root).display().to_string());
 
     let compact_export = |export: &UnusedExport, kind: &str, re_kind: &str| -> String {
         let tag = if export.is_re_export { re_kind } else { kind };
@@ -86,11 +86,11 @@ pub fn build_compact_lines(results: &AnalysisResults, root: &Path) -> Vec<String
 pub(super) fn print_duplication_compact(report: &DuplicationReport, root: &Path) {
     for (i, group) in report.clone_groups.iter().enumerate() {
         for instance in &group.instances {
-            let relative = relative_path(&instance.file, root);
+            let relative = normalize_uri(&relative_path(&instance.file, root).display().to_string());
             println!(
                 "clone-group-{}:{}:{}-{}:{}tokens",
                 i + 1,
-                relative.display(),
+                relative,
                 instance.start_line,
                 instance.end_line,
                 group.token_count
