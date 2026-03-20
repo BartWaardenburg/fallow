@@ -217,6 +217,9 @@ jobs:
     name: Publish to npm
     needs: [build, release]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     env:
       TAG_REF: ${{ github.ref }}
     steps:
@@ -301,8 +304,6 @@ jobs:
           done
 
       - name: Publish platform packages
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           FAILED=0
           for dir in ./npm/darwin-arm64 ./npm/darwin-x64 ./npm/linux-x64-gnu ./npm/linux-arm64-gnu ./npm/linux-x64-musl ./npm/linux-arm64-musl ./npm/win32-x64-msvc; do
@@ -318,8 +319,6 @@ jobs:
 
       - name: Publish fallow
         run: npm publish ./npm/fallow --access public --provenance --ignore-scripts
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   vscode-publish:
     name: Publish VS Code Extension
