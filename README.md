@@ -1,15 +1,15 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.svg">
-    <source media="(prefers-color-scheme: light)" srcset="assets/logo.svg">
-    <img src="assets/logo.svg" alt="fallow" width="290">
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/fallow-rs/fallow/main/assets/logo-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/fallow-rs/fallow/main/assets/logo.svg">
+    <img src="https://raw.githubusercontent.com/fallow-rs/fallow/main/assets/logo.svg" alt="fallow" width="290">
   </picture><br>
   <strong>Dead code and duplication analyzer for JavaScript and TypeScript, built in Rust.</strong><br><br>
   <a href="https://github.com/fallow-rs/fallow/actions/workflows/ci.yml"><img src="https://github.com/fallow-rs/fallow/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://github.com/fallow-rs/fallow/actions/workflows/coverage.yml"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/fallow-rs/fallow/badges/coverage.json" alt="Coverage"></a>
   <a href="https://crates.io/crates/fallow-cli"><img src="https://img.shields.io/crates/v/fallow-cli.svg" alt="crates.io"></a>
   <a href="https://www.npmjs.com/package/fallow"><img src="https://img.shields.io/npm/v/fallow.svg" alt="npm"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
+  <a href="https://github.com/fallow-rs/fallow/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
   <a href="https://docs.fallow.tools"><img src="https://img.shields.io/badge/docs-docs.fallow.tools-blue.svg" alt="Documentation"></a>
 </p>
 
@@ -23,7 +23,7 @@ npx fallow dupes    # Duplication detection
 ```
 
 <p align="center">
-  <img src="assets/screenshots/fallow-check-output.png" alt="Example fallow check output" width="820">
+  <img src="https://raw.githubusercontent.com/fallow-rs/fallow/main/assets/screenshots/fallow-check-output.png" alt="Example fallow check output" width="820">
 </p>
 
 ## Quick start
@@ -136,9 +136,9 @@ node bench-dupes.mjs                 # Run duplication benchmarks (fallow vs jsc
 | Speed vs knip v5 | **3-36x faster** | Baseline |
 | Speed vs knip v6 | **2-14x faster** | Baseline |
 | Memory usage | **3-15x less** | Baseline |
-| Dead code detection | 10 issue types | Comparable |
+| Dead code detection | 11 issue types | Comparable |
 | Duplication detection | Built-in | Not included |
-| Framework plugins | 84 (30 with config parsing) | 140+ (runtime config loading) |
+| Framework plugins | 84 (31 with config parsing) | 140+ (runtime config loading) |
 | Runtime dependency | None (standalone binary) | Node.js |
 | Config format | JSONC, JSON, TOML | JSON |
 
@@ -216,8 +216,8 @@ Supports `--changed-since main` for PR-only analysis, `--baseline` for failing o
 - **Inline suppression** — `// fallow-ignore-next-line` and `// fallow-ignore-file` comments to suppress individual findings
 - **Watch mode** — `fallow watch` re-analyzes on file changes
 - **Auto-fix** — `fallow fix` removes unused exports and dependencies (`--dry-run` to preview)
-- **VS Code extension** — tree views for dead code and duplicates, status bar, auto-download of the LSP binary, one-click fixes ([`editors/vscode`](editors/vscode))
-- **LSP server** — real-time diagnostics, "remove unused export" code actions, and Code Lens with clickable reference counts above exports (opens Peek References panel)
+- **VS Code extension** — tree views for dead code and duplicates, status bar, auto-download of the LSP binary, one-click fixes ([`editors/vscode`](https://github.com/fallow-rs/fallow/tree/main/editors/vscode))
+- **LSP server** — real-time diagnostics, hover information, "remove unused export" code actions, and Code Lens with clickable reference counts above exports (opens Peek References panel)
 - **Workspace support** — npm, yarn, and pnpm workspaces (including `pnpm-workspace.yaml`, content-addressable store detection, and injected dependencies) with `exports` field subpath resolution
 - **Script binary analysis** — parses `package.json` scripts to detect CLI tool usage, reducing false positives in unused dependency detection
 - **Dynamic import resolution** — partial resolution of template literals, `import.meta.glob`, and `require.context`
@@ -268,14 +268,14 @@ pattern = "src/routes/**/*.{ts,tsx}"
 exports = ["default", "loader", "action"]
 ```
 
-Fallow auto-discovers `fallow-plugin-*.toml` files in your project root and `.fallow/plugins/` directory. See the [Plugin Authoring Guide](docs/plugin-authoring.md) for the full format and examples.
+Fallow auto-discovers `fallow-plugin-*.toml` files in your project root and `.fallow/plugins/` directory. See the [Plugin Authoring Guide](https://github.com/fallow-rs/fallow/blob/main/docs/plugin-authoring.md) for the full format and examples.
 
 ## Learn more
 
 - [Documentation](https://docs.fallow.tools)
 - [Migrating from knip](https://docs.fallow.tools/migration/from-knip)
 - [Full plugin list](https://docs.fallow.tools/frameworks/built-in)
-- [Plugin Authoring Guide](docs/plugin-authoring.md)
+- [Plugin Authoring Guide](https://github.com/fallow-rs/fallow/blob/main/docs/plugin-authoring.md)
 
 ## Contributing
 
