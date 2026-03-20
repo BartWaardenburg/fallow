@@ -36,7 +36,9 @@ export const updateStatusBar = (
       checkResult.unused_class_members.length +
       checkResult.unresolved_imports.length +
       checkResult.unlisted_dependencies.length +
-      checkResult.duplicate_exports.length;
+      checkResult.duplicate_exports.length +
+      (checkResult.type_only_dependencies?.length ?? 0) +
+      (checkResult.circular_dependencies?.length ?? 0);
 
     parts.push(`${issueCount} issues`);
   }

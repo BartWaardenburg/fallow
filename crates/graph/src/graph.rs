@@ -338,7 +338,11 @@ impl ModuleGraph {
                     }
                 }
 
-                for (target_id, symbols) in edges_by_target {
+                // Sort by target FileId for deterministic edge order across runs
+                let mut sorted_edges: Vec<_> = edges_by_target.into_iter().collect();
+                sorted_edges.sort_by_key(|(target_id, _)| target_id.0);
+
+                for (target_id, symbols) in sorted_edges {
                     all_edges.push(Edge {
                         source: file.id,
                         target: target_id,
@@ -459,6 +463,7 @@ impl ModuleGraph {
     /// Walks every edge and attaches `SymbolReference` entries to the target
     /// module's exports. Includes namespace import narrowing (member access
     /// tracking) and CSS Module default-import narrowing.
+    #[allow(clippy::cognitive_complexity)]
     fn populate_references(
         &mut self,
         module_by_id: &FxHashMap<FileId, &ResolvedModule>,
@@ -546,16 +551,50 @@ impl ModuleGraph {
                         }
                     } else {
                         // Narrow: only mark accessed members as referenced
+                        let mut found_members: FxHashSet<String> = FxHashSet::default();
                         for export in &mut self.modules[target_idx].exports {
                             let name_str = export.name.to_string();
-                            if accessed_members.contains(&name_str)
-                                && export.references.iter().all(|r| r.from_file != source_id)
-                            {
-                                export.references.push(SymbolReference {
-                                    from_file: source_id,
-                                    kind: ReferenceKind::NamespaceImport,
-                                    import_span: sym_import_span,
-                                });
+                            if accessed_members.contains(&name_str) {
+                                found_members.insert(name_str);
+                                if export.references.iter().all(|r| r.from_file != source_id) {
+                                    export.references.push(SymbolReference {
+                                        from_file: source_id,
+                                        kind: ReferenceKind::NamespaceImport,
+                                        import_span: sym_import_span,
+                                    });
+                                }
+                            }
+                        }
+
+                        // For members not found on the target (e.g., barrel with
+                        // `export *` that has no own exports for these names),
+                        // create synthetic ExportSymbol entries so that
+                        // resolve_re_export_chains can propagate them to the
+                        // actual source modules.
+                        let target_has_star_re_exports = self.modules[target_idx]
+                            .re_exports
+                            .iter()
+                            .any(|re| re.exported_name == "*");
+                        if target_has_star_re_exports {
+                            for member in &accessed_members {
+                                if !found_members.contains(member) {
+                                    let export_name = if member == "default" {
+                                        ExportName::Default
+                                    } else {
+                                        ExportName::Named(member.clone())
+                                    };
+                                    self.modules[target_idx].exports.push(ExportSymbol {
+                                        name: export_name,
+                                        is_type_only: false,
+                                        span: oxc_span::Span::new(0, 0),
+                                        references: vec![SymbolReference {
+                                            from_file: source_id,
+                                            kind: ReferenceKind::NamespaceImport,
+                                            import_span: sym_import_span,
+                                        }],
+                                        members: Vec::new(),
+                                    });
+                                }
                             }
                         }
                     }
@@ -996,26 +1035,167 @@ impl ModuleGraph {
             }
         }
 
-        // Sort each SCC by file path for deterministic output
-        for scc in &mut sccs {
-            scc.sort_by(|a, b| {
-                let path_a = &self.modules[a.0 as usize].path;
-                let path_b = &self.modules[b.0 as usize].path;
-                path_a.cmp(path_b)
-            });
+        // Phase 2: Enumerate individual elementary cycles within each SCC.
+        // For small SCCs (len == 2), there's exactly one cycle.
+        // For larger SCCs, use bounded DFS to find up to MAX_CYCLES_PER_SCC cycles.
+        const MAX_CYCLES_PER_SCC: usize = 20;
+
+        let mut result: Vec<Vec<FileId>> = Vec::new();
+        let mut seen_cycles: FxHashSet<Vec<u32>> = FxHashSet::default();
+
+        for scc in &sccs {
+            if scc.len() == 2 {
+                let mut cycle = vec![scc[0].0 as usize, scc[1].0 as usize];
+                // Canonical: smallest path first
+                if self.modules[cycle[1]].path < self.modules[cycle[0]].path {
+                    cycle.swap(0, 1);
+                }
+                let key: Vec<u32> = cycle.iter().map(|&n| n as u32).collect();
+                if seen_cycles.insert(key) {
+                    result.push(cycle.into_iter().map(|n| FileId(n as u32)).collect());
+                }
+                continue;
+            }
+
+            let scc_nodes: Vec<usize> = scc.iter().map(|id| id.0 as usize).collect();
+            let elementary = enumerate_elementary_cycles(
+                &scc_nodes,
+                &all_succs,
+                &succ_ranges,
+                MAX_CYCLES_PER_SCC,
+                &self.modules,
+            );
+
+            for cycle in elementary {
+                let key: Vec<u32> = cycle.iter().map(|&n| n as u32).collect();
+                if seen_cycles.insert(key) {
+                    result.push(cycle.into_iter().map(|n| FileId(n as u32)).collect());
+                }
+            }
         }
 
-        // Sort SCCs by length (shortest first), then by first file path for stability
-        sccs.sort_by(|a, b| {
+        // Sort: shortest first, then by first file path
+        result.sort_by(|a, b| {
             a.len().cmp(&b.len()).then_with(|| {
-                let path_a = &self.modules[a[0].0 as usize].path;
-                let path_b = &self.modules[b[0].0 as usize].path;
-                path_a.cmp(path_b)
+                self.modules[a[0].0 as usize]
+                    .path
+                    .cmp(&self.modules[b[0].0 as usize].path)
             })
         });
 
-        sccs
+        result
     }
+}
+
+/// Rotate a cycle so the node with the smallest path is first (canonical form for dedup).
+fn canonical_cycle(cycle: &[usize], modules: &[ModuleNode]) -> Vec<usize> {
+    if cycle.is_empty() {
+        return Vec::new();
+    }
+    let min_pos = cycle
+        .iter()
+        .enumerate()
+        .min_by(|(_, a), (_, b)| modules[**a].path.cmp(&modules[**b].path))
+        .map_or(0, |(i, _)| i);
+    let mut result = cycle[min_pos..].to_vec();
+    result.extend_from_slice(&cycle[..min_pos]);
+    result
+}
+
+/// Enumerate individual elementary cycles within an SCC using depth-limited DFS.
+///
+/// Uses iterative deepening: first finds all 2-node cycles, then 3-node, etc.
+/// This ensures the shortest, most actionable cycles are always found first.
+/// Stops after `max_cycles` total cycles to bound work on dense SCCs.
+fn enumerate_elementary_cycles(
+    scc_nodes: &[usize],
+    all_succs: &[usize],
+    succ_ranges: &[Range<usize>],
+    max_cycles: usize,
+    modules: &[ModuleNode],
+) -> Vec<Vec<usize>> {
+    let scc_set: FxHashSet<usize> = scc_nodes.iter().copied().collect();
+    let mut cycles: Vec<Vec<usize>> = Vec::new();
+    let mut seen: FxHashSet<Vec<u32>> = FxHashSet::default();
+
+    // Sort start nodes by path for deterministic enumeration order
+    let mut sorted_nodes: Vec<usize> = scc_nodes.to_vec();
+    sorted_nodes.sort_by(|a, b| modules[*a].path.cmp(&modules[*b].path));
+
+    // DFS frame for iterative cycle finding
+    struct CycleFrame {
+        succ_pos: usize,
+        succ_end: usize,
+    }
+
+    // Iterative deepening: increase max depth from 2 up to SCC size
+    let max_depth = scc_nodes.len().min(12); // Cap depth to avoid very long cycles
+    for depth_limit in 2..=max_depth {
+        if cycles.len() >= max_cycles {
+            break;
+        }
+
+        for &start in &sorted_nodes {
+            if cycles.len() >= max_cycles {
+                break;
+            }
+
+            let mut path: Vec<usize> = vec![start];
+            let mut path_set = FixedBitSet::with_capacity(modules.len());
+            path_set.insert(start);
+
+            let range = &succ_ranges[start];
+            let mut dfs: Vec<CycleFrame> = vec![CycleFrame {
+                succ_pos: range.start,
+                succ_end: range.end,
+            }];
+
+            while let Some(frame) = dfs.last_mut() {
+                if cycles.len() >= max_cycles {
+                    break;
+                }
+
+                if frame.succ_pos >= frame.succ_end {
+                    // Backtrack
+                    dfs.pop();
+                    if path.len() > 1 {
+                        let last = path.pop().unwrap();
+                        path_set.set(last, false);
+                    }
+                    continue;
+                }
+
+                let w = all_succs[frame.succ_pos];
+                frame.succ_pos += 1;
+
+                // Only follow edges within this SCC
+                if !scc_set.contains(&w) {
+                    continue;
+                }
+
+                if w == start && path.len() >= 2 && path.len() == depth_limit {
+                    // Found an elementary cycle at exactly this depth
+                    let canonical = canonical_cycle(&path, modules);
+                    let key: Vec<u32> = canonical.iter().map(|&n| n as u32).collect();
+                    if seen.insert(key) {
+                        cycles.push(canonical);
+                    }
+                } else if !path_set.contains(w) && path.len() < depth_limit {
+                    // Extend path (only if within depth limit)
+                    path.push(w);
+                    path_set.insert(w);
+
+                    let range = &succ_ranges[w];
+                    dfs.push(CycleFrame {
+                        succ_pos: range.start,
+                        succ_end: range.end,
+                    });
+                }
+            }
+        }
+    }
+
+    cycles
 }
 
 /// Check if a path is a CSS Module file (`.module.css` or `.module.scss`).
@@ -2378,12 +2558,19 @@ mod tests {
     }
 
     #[test]
-    fn find_cycles_overlapping_cycles_form_single_scc() {
-        // A -> B -> A, B -> C -> B => SCC is {A, B, C}
+    fn find_cycles_overlapping_cycles_enumerated() {
+        // A -> B -> A, B -> C -> B => SCC is {A, B, C} but should report 2 elementary cycles
         let graph = build_cycle_graph(3, &[(0, 1), (1, 0), (1, 2), (2, 1)]);
         let cycles = graph.find_cycles();
-        assert_eq!(cycles.len(), 1);
-        assert_eq!(cycles[0].len(), 3);
+        assert_eq!(
+            cycles.len(),
+            2,
+            "should find 2 elementary cycles, not 1 SCC"
+        );
+        assert!(
+            cycles.iter().all(|c| c.len() == 2),
+            "both cycles should have length 2"
+        );
     }
 
     #[test]
@@ -2427,5 +2614,31 @@ mod tests {
         let cycles = graph.find_cycles();
         assert_eq!(cycles.len(), 1);
         assert_eq!(cycles[0].len(), 10);
+    }
+
+    #[test]
+    fn find_cycles_complex_scc_multiple_elementary() {
+        // A square: A->B, B->C, C->D, D->A, plus diagonal A->C
+        // Elementary cycles: A->B->C->D->A, A->C->D->A, and A->B->C->...
+        let graph = build_cycle_graph(4, &[(0, 1), (1, 2), (2, 3), (3, 0), (0, 2)]);
+        let cycles = graph.find_cycles();
+        // Should find multiple elementary cycles, not just one SCC of 4
+        assert!(
+            cycles.len() >= 2,
+            "should find at least 2 elementary cycles, got {}",
+            cycles.len()
+        );
+        // All cycles should be shorter than the full SCC
+        assert!(cycles.iter().all(|c| c.len() <= 4));
+    }
+
+    #[test]
+    fn find_cycles_no_duplicate_cycles() {
+        // Triangle: A->B->C->A — should find exactly 1 cycle, not duplicates
+        // from different DFS start points
+        let graph = build_cycle_graph(3, &[(0, 1), (1, 2), (2, 0)]);
+        let cycles = graph.find_cycles();
+        assert_eq!(cycles.len(), 1, "triangle should produce exactly 1 cycle");
+        assert_eq!(cycles[0].len(), 3);
     }
 }

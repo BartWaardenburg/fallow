@@ -13,7 +13,7 @@ use crate::extract::ModuleInfo;
 use crate::graph::ModuleGraph;
 use crate::resolve::ResolvedModule;
 use crate::results::*;
-use crate::suppress::Suppression;
+use crate::suppress::{self, IssueKind, Suppression};
 
 use unused_deps::{
     find_type_only_dependencies, find_unlisted_dependencies, find_unresolved_imports,
@@ -196,6 +196,14 @@ pub fn find_dead_code_full(
         let cycles = graph.find_cycles();
         results.circular_dependencies = cycles
             .into_iter()
+            .filter(|cycle| {
+                // Skip cycles where any participating file has a file-level suppression
+                !cycle.iter().any(|&id| {
+                    suppressions_by_file.get(&id).is_some_and(|supps| {
+                        suppress::is_file_suppressed(supps, IssueKind::CircularDependency)
+                    })
+                })
+            })
             .map(|cycle| {
                 let files: Vec<std::path::PathBuf> = cycle
                     .iter()

@@ -462,6 +462,12 @@ fn main() -> ExitCode {
             .unwrap_or(4)
     });
 
+    // Configure rayon global thread pool to match --threads, ensuring parsing
+    // and import resolution use the same thread count as file walking.
+    let _ = rayon::ThreadPoolBuilder::new()
+        .num_threads(threads)
+        .build_global();
+
     match cli.command.unwrap_or(Command::Check {
         ci: false,
         fail_on_issues: false,

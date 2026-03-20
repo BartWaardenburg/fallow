@@ -9,6 +9,8 @@ export interface IssueTypeConfig {
   readonly "unresolved-imports": boolean;
   readonly "unlisted-dependencies": boolean;
   readonly "duplicate-exports": boolean;
+  readonly "type-only-dependencies": boolean;
+  readonly "circular-dependencies": boolean;
 }
 
 export type DuplicationMode = "strict" | "mild" | "weak" | "semantic";
@@ -26,6 +28,8 @@ export interface FallowCheckResult {
   readonly unresolved_imports: ReadonlyArray<UnresolvedImport>;
   readonly unlisted_dependencies: ReadonlyArray<UnlistedDependency>;
   readonly duplicate_exports: ReadonlyArray<DuplicateExport>;
+  readonly type_only_dependencies?: ReadonlyArray<TypeOnlyDependency>;
+  readonly circular_dependencies?: ReadonlyArray<CircularDependency>;
 }
 
 export interface UnusedFile {
@@ -67,6 +71,16 @@ export interface UnlistedDependency {
 export interface DuplicateExport {
   readonly export_name: string;
   readonly locations: ReadonlyArray<string>;
+}
+
+export interface TypeOnlyDependency {
+  readonly package_name: string;
+  readonly path: string;
+}
+
+export interface CircularDependency {
+  readonly files: ReadonlyArray<string>;
+  readonly length: number;
 }
 
 export interface FallowDupesResult {
@@ -142,7 +156,9 @@ export type IssueCategory =
   | "unused-class-members"
   | "unresolved-imports"
   | "unlisted-dependencies"
-  | "duplicate-exports";
+  | "duplicate-exports"
+  | "type-only-dependencies"
+  | "circular-dependencies";
 
 export const ISSUE_CATEGORY_LABELS: Record<IssueCategory, string> = {
   "unused-files": "Unused Files",
@@ -155,4 +171,6 @@ export const ISSUE_CATEGORY_LABELS: Record<IssueCategory, string> = {
   "unresolved-imports": "Unresolved Imports",
   "unlisted-dependencies": "Unlisted Dependencies",
   "duplicate-exports": "Duplicate Exports",
+  "type-only-dependencies": "Type-Only Dependencies",
+  "circular-dependencies": "Circular Dependencies",
 };

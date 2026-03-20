@@ -83,7 +83,9 @@
             "unused-class-members": true,
             "unresolved-imports": true,
             "unlisted-dependencies": true,
-            "duplicate-exports": true
+            "duplicate-exports": true,
+            "type-only-dependencies": true,
+            "circular-dependencies": true
           },
           "description": "Toggle individual issue types on or off. Uses kebab-case names matching fallow's rules config.",
           "properties": {
@@ -96,7 +98,9 @@
             "unused-class-members": { "type": "boolean" },
             "unresolved-imports": { "type": "boolean" },
             "unlisted-dependencies": { "type": "boolean" },
-            "duplicate-exports": { "type": "boolean" }
+            "duplicate-exports": { "type": "boolean" },
+            "type-only-dependencies": { "type": "boolean" },
+            "circular-dependencies": { "type": "boolean" }
           }
         },
         "fallow.duplication.threshold": {

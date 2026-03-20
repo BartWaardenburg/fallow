@@ -12,6 +12,9 @@ pub struct BaselineData {
     pub unused_types: Vec<String>,
     pub unused_dependencies: Vec<String>,
     pub unused_dev_dependencies: Vec<String>,
+    /// Circular dependency chains, keyed by sorted file paths joined with `->`.
+    #[serde(default)]
+    pub circular_dependencies: Vec<String>,
 }
 
 impl BaselineData {
@@ -54,8 +57,24 @@ impl BaselineData {
                 .iter()
                 .map(|d| d.package_name.clone())
                 .collect(),
+            circular_dependencies: results
+                .circular_dependencies
+                .iter()
+                .map(circular_dep_key)
+                .collect(),
         }
     }
+}
+
+/// Generate a stable key for a circular dependency based on sorted file paths.
+fn circular_dep_key(dep: &fallow_core::results::CircularDependency) -> String {
+    let mut paths: Vec<String> = dep
+        .files
+        .iter()
+        .map(|f| f.to_string_lossy().replace('\\', "/"))
+        .collect();
+    paths.sort();
+    paths.join("->")
 }
 
 /// Filter results to only include issues not present in the baseline.
@@ -105,6 +124,17 @@ pub fn filter_new_issues(
     results
         .unused_dev_dependencies
         .retain(|d| !baseline_dev_deps.contains(d.package_name.as_str()));
+
+    let baseline_circular: FxHashSet<&str> = baseline
+        .circular_dependencies
+        .iter()
+        .map(|s| s.as_str())
+        .collect();
+    results.circular_dependencies.retain(|c| {
+        let key = circular_dep_key(c);
+        !baseline_circular.contains(key.as_str())
+    });
+
     results
 }
 
@@ -329,6 +359,7 @@ mod tests {
             unused_types: vec![],
             unused_dependencies: vec![],
             unused_dev_dependencies: vec![],
+            circular_dependencies: vec![],
         };
         let results = AnalysisResults {
             unused_files: vec![
@@ -357,6 +388,7 @@ mod tests {
             unused_types: vec![],
             unused_dependencies: vec![],
             unused_dev_dependencies: vec![],
+            circular_dependencies: vec![],
         };
         let results = make_results();
         let filtered = filter_new_issues(results, &baseline);
@@ -372,6 +404,7 @@ mod tests {
             unused_types: vec![],
             unused_dependencies: vec![],
             unused_dev_dependencies: vec![],
+            circular_dependencies: vec![],
         };
         let results = AnalysisResults {
             unused_exports: vec![

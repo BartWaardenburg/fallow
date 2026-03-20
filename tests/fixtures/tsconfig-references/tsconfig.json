@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "strict": true,
+    "paths": {
+      "@core/*": ["./packages/core/src/*"],
+      "@ui/*": ["./packages/ui/src/*"]
+    }
+  },
+  "references": [
+    {"path": "./packages/core"},
+    {"path": "./packages/ui"}
+  ]
+}

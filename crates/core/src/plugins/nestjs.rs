@@ -35,6 +35,7 @@ const TOOLING_DEPENDENCIES: &[&str] = &[
     "@nestjs/config",
     "@nestjs/typeorm",
     "@nestjs/mongoose",
+    "reflect-metadata",
 ];
 
 define_plugin! {

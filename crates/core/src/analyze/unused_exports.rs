@@ -216,7 +216,11 @@ pub fn find_duplicate_exports(
 
     // Filter: only keep truly independent duplicates (not re-export chains)
     let _ = config; // used for consistency
-    export_locations
+    // Sort by export name for deterministic output order
+    let mut sorted_locations: Vec<_> = export_locations.into_iter().collect();
+    sorted_locations.sort_by(|a, b| a.0.cmp(&b.0));
+
+    sorted_locations
         .into_iter()
         .filter_map(|(name, locations)| {
             if locations.len() <= 1 {

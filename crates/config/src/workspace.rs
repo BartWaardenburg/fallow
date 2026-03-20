@@ -1,3 +1,4 @@
+use std::io::Read as _;
 use std::path::{Path, PathBuf};
 
 use schemars::JsonSchema;
@@ -11,7 +12,7 @@ pub struct WorkspaceConfig {
     pub patterns: Vec<String>,
 }
 
-/// Discovered workspace info from package.json or pnpm-workspace.yaml.
+/// Discovered workspace info from package.json, pnpm-workspace.yaml, or tsconfig.json references.
 #[derive(Debug, Clone)]
 pub struct WorkspaceInfo {
     /// Workspace root path.
@@ -23,6 +24,11 @@ pub struct WorkspaceInfo {
 }
 
 /// Discover all workspace packages in a monorepo.
+///
+/// Sources (additive, deduplicated by canonical path):
+/// 1. `package.json` `workspaces` field
+/// 2. `pnpm-workspace.yaml` `packages` field
+/// 3. `tsconfig.json` `references` field (TypeScript project references)
 pub fn discover_workspaces(root: &Path) -> Vec<WorkspaceInfo> {
     let mut patterns = Vec::new();
 
@@ -40,90 +46,129 @@ pub fn discover_workspaces(root: &Path) -> Vec<WorkspaceInfo> {
         patterns.extend(parse_pnpm_workspace_yaml(&content));
     }
 
-    if patterns.is_empty() {
-        return Vec::new();
-    }
-
-    // 3. Separate positive and negated patterns.
-    // Negated patterns (e.g., `!**/test/**`) are used as exclusion filters —
-    // the `glob` crate does not support `!` prefixed patterns natively.
-    let (positive, negative): (Vec<&String>, Vec<&String>) =
-        patterns.iter().partition(|p| !p.starts_with('!'));
-    let negation_matchers: Vec<globset::GlobMatcher> = negative
-        .iter()
-        .filter_map(|p| {
-            let stripped = p.strip_prefix('!').unwrap_or(p);
-            globset::Glob::new(stripped)
-                .ok()
-                .map(|g| g.compile_matcher())
-        })
-        .collect();
-
-    // Expand patterns to find workspace directories
-    // Pre-compute canonical root once for security checks in expand_workspace_glob
+    // Pre-compute canonical root once for security checks
     let canonical_root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
     let mut workspaces = Vec::new();
-    for pattern in &positive {
-        // Normalize the pattern for directory matching:
-        // - `packages/*` → glob for `packages/*` (find all subdirs)
-        // - `packages/` → glob for `packages/*` (trailing slash means "contents of")
-        // - `apps`       → glob for `apps` (exact directory)
-        let glob_pattern = if pattern.ends_with('/') {
-            format!("{pattern}*")
-        } else if !pattern.contains('*') && !pattern.contains('?') && !pattern.contains('{') {
-            // Bare directory name — treat as exact match
-            (*pattern).clone()
-        } else {
-            (*pattern).clone()
-        };
 
-        // Walk directories matching the glob
-        let matched_dirs = expand_workspace_glob(root, &glob_pattern, &canonical_root);
-        for dir in matched_dirs {
-            // Skip workspace entries that point to the project root itself
-            // (e.g. pnpm-workspace.yaml listing `.` as a workspace)
-            let canonical_dir = dir.canonicalize().unwrap_or_else(|_| dir.clone());
-            if canonical_dir == canonical_root {
-                continue;
-            }
+    // 3. Expand package.json/pnpm workspace patterns to find workspace directories
+    if !patterns.is_empty() {
+        // Separate positive and negated patterns.
+        // Negated patterns (e.g., `!**/test/**`) are used as exclusion filters —
+        // the `glob` crate does not support `!` prefixed patterns natively.
+        let (positive, negative): (Vec<&String>, Vec<&String>) =
+            patterns.iter().partition(|p| !p.starts_with('!'));
+        let negation_matchers: Vec<globset::GlobMatcher> = negative
+            .iter()
+            .filter_map(|p| {
+                let stripped = p.strip_prefix('!').unwrap_or(p);
+                globset::Glob::new(stripped)
+                    .ok()
+                    .map(|g| g.compile_matcher())
+            })
+            .collect();
 
-            // Check against negation patterns — skip directories that match any negated pattern
-            let relative = dir.strip_prefix(root).unwrap_or(&dir);
-            let relative_str = relative.to_string_lossy();
-            if negation_matchers
-                .iter()
-                .any(|m| m.is_match(relative_str.as_ref()))
-            {
-                continue;
-            }
+        for pattern in &positive {
+            // Normalize the pattern for directory matching:
+            // - `packages/*` → glob for `packages/*` (find all subdirs)
+            // - `packages/` → glob for `packages/*` (trailing slash means "contents of")
+            // - `apps`       → glob for `apps` (exact directory)
+            let glob_pattern = if pattern.ends_with('/') {
+                format!("{pattern}*")
+            } else if !pattern.contains('*') && !pattern.contains('?') && !pattern.contains('{') {
+                // Bare directory name — treat as exact match
+                (*pattern).clone()
+            } else {
+                (*pattern).clone()
+            };
 
-            let ws_pkg_path = dir.join("package.json");
-            if ws_pkg_path.exists()
-                && let Ok(pkg) = PackageJson::load(&ws_pkg_path)
-            {
-                // Collect dependency names during initial load to avoid
-                // re-reading package.json in step 5.
-                let dep_names = pkg.all_dependency_names();
-                let name = pkg.name.unwrap_or_else(|| {
-                    dir.file_name()
-                        .map(|n| n.to_string_lossy().to_string())
-                        .unwrap_or_default()
-                });
-                workspaces.push((
-                    WorkspaceInfo {
-                        root: dir,
-                        name,
-                        is_internal_dependency: false,
-                    },
-                    dep_names,
-                ));
+            // Walk directories matching the glob
+            let matched_dirs = expand_workspace_glob(root, &glob_pattern, &canonical_root);
+            for dir in matched_dirs {
+                // Skip workspace entries that point to the project root itself
+                // (e.g. pnpm-workspace.yaml listing `.` as a workspace)
+                let canonical_dir = dir.canonicalize().unwrap_or_else(|_| dir.clone());
+                if canonical_dir == canonical_root {
+                    continue;
+                }
+
+                // Check against negation patterns — skip directories that match any negated pattern
+                let relative = dir.strip_prefix(root).unwrap_or(&dir);
+                let relative_str = relative.to_string_lossy();
+                if negation_matchers
+                    .iter()
+                    .any(|m| m.is_match(relative_str.as_ref()))
+                {
+                    continue;
+                }
+
+                let ws_pkg_path = dir.join("package.json");
+                if ws_pkg_path.exists()
+                    && let Ok(pkg) = PackageJson::load(&ws_pkg_path)
+                {
+                    // Collect dependency names during initial load to avoid
+                    // re-reading package.json in step 5.
+                    let dep_names = pkg.all_dependency_names();
+                    let name = pkg.name.unwrap_or_else(|| {
+                        dir.file_name()
+                            .map(|n| n.to_string_lossy().to_string())
+                            .unwrap_or_default()
+                    });
+                    workspaces.push((
+                        WorkspaceInfo {
+                            root: dir,
+                            name,
+                            is_internal_dependency: false,
+                        },
+                        dep_names,
+                    ));
+                }
             }
         }
     }
 
-    // 4. Deduplicate workspaces by canonical path.
-    // Overlapping patterns (e.g., `examples/*` and `examples/minimal/*`) can match the
-    // same directory, causing duplicate workspace entries and double-reported issues.
+    // 4. Check root tsconfig.json for TypeScript project references.
+    // Referenced directories are added as workspaces, supplementing npm/pnpm workspaces.
+    // This enables cross-workspace resolution for TypeScript composite projects.
+    for dir in parse_tsconfig_references(root) {
+        let canonical_dir = dir.canonicalize().unwrap_or_else(|_| dir.clone());
+        // Security: skip references pointing to project root or outside it
+        if canonical_dir == canonical_root || !canonical_dir.starts_with(&canonical_root) {
+            continue;
+        }
+
+        // Read package.json if available; otherwise use directory name
+        let ws_pkg_path = dir.join("package.json");
+        let (name, dep_names) = if ws_pkg_path.exists() {
+            if let Ok(pkg) = PackageJson::load(&ws_pkg_path) {
+                let deps = pkg.all_dependency_names();
+                let n = pkg.name.unwrap_or_else(|| dir_name(&dir));
+                (n, deps)
+            } else {
+                (dir_name(&dir), Vec::new())
+            }
+        } else {
+            // No package.json — use directory name, no deps.
+            // Valid for TypeScript-only composite projects.
+            (dir_name(&dir), Vec::new())
+        };
+
+        workspaces.push((
+            WorkspaceInfo {
+                root: dir,
+                name,
+                is_internal_dependency: false,
+            },
+            dep_names,
+        ));
+    }
+
+    if workspaces.is_empty() {
+        return Vec::new();
+    }
+
+    // 5. Deduplicate workspaces by canonical path.
+    // Overlapping sources (npm workspaces + tsconfig references pointing to the same
+    // directory) are collapsed. npm-discovered entries take precedence (they appear first).
     {
         let mut seen = rustc_hash::FxHashSet::default();
         workspaces.retain(|(ws, _)| {
@@ -132,7 +177,7 @@ pub fn discover_workspaces(root: &Path) -> Vec<WorkspaceInfo> {
         });
     }
 
-    // 5. Mark workspaces that are depended on by other workspaces.
+    // 6. Mark workspaces that are depended on by other workspaces.
     // Uses dep names collected during initial package.json load (step 3)
     // to avoid re-reading all workspace package.json files.
     let all_dep_names: rustc_hash::FxHashSet<String> = workspaces
@@ -144,6 +189,115 @@ pub fn discover_workspaces(root: &Path) -> Vec<WorkspaceInfo> {
     }
 
     workspaces.into_iter().map(|(ws, _)| ws).collect()
+}
+
+/// Extract the directory name as a string, for workspace name fallback.
+fn dir_name(dir: &Path) -> String {
+    dir.file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default()
+}
+
+/// Parse `tsconfig.json` at the project root and extract `references[].path` directories.
+///
+/// Returns directories that exist on disk. tsconfig.json is JSONC (comments + trailing commas),
+/// so we strip both before parsing.
+fn parse_tsconfig_references(root: &Path) -> Vec<PathBuf> {
+    let tsconfig_path = root.join("tsconfig.json");
+    let Ok(content) = std::fs::read_to_string(&tsconfig_path) else {
+        return Vec::new();
+    };
+
+    // Strip UTF-8 BOM if present (common in Windows-authored tsconfig files)
+    let content = content.trim_start_matches('\u{FEFF}');
+
+    // Strip JSONC comments
+    let mut stripped = String::new();
+    if json_comments::StripComments::new(content.as_bytes())
+        .read_to_string(&mut stripped)
+        .is_err()
+    {
+        return Vec::new();
+    }
+
+    // Strip trailing commas (common in tsconfig.json)
+    let cleaned = strip_trailing_commas(&stripped);
+
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&cleaned) else {
+        return Vec::new();
+    };
+
+    let Some(refs) = value.get("references").and_then(|v| v.as_array()) else {
+        return Vec::new();
+    };
+
+    refs.iter()
+        .filter_map(|r| {
+            r.get("path").and_then(|p| p.as_str()).map(|p| {
+                // strip_prefix removes exactly one leading "./" (unlike trim_start_matches
+                // which would strip repeatedly)
+                let cleaned = p.strip_prefix("./").unwrap_or(p);
+                root.join(cleaned)
+            })
+        })
+        .filter(|p| p.is_dir())
+        .collect()
+}
+
+/// Strip trailing commas before `]` and `}` in JSON-like content.
+///
+/// tsconfig.json commonly uses trailing commas which are valid JSONC but not valid JSON.
+/// This strips them so `serde_json` can parse the content.
+fn strip_trailing_commas(input: &str) -> String {
+    let bytes = input.as_bytes();
+    let len = bytes.len();
+    let mut result = Vec::with_capacity(len);
+    let mut in_string = false;
+    let mut i = 0;
+
+    while i < len {
+        let b = bytes[i];
+
+        if in_string {
+            result.push(b);
+            if b == b'\\' && i + 1 < len {
+                // Push escaped character and skip it
+                i += 1;
+                result.push(bytes[i]);
+            } else if b == b'"' {
+                in_string = false;
+            }
+            i += 1;
+            continue;
+        }
+
+        if b == b'"' {
+            in_string = true;
+            result.push(b);
+            i += 1;
+            continue;
+        }
+
+        if b == b',' {
+            // Look ahead past whitespace for ] or }
+            let mut j = i + 1;
+            while j < len && bytes[j].is_ascii_whitespace() {
+                j += 1;
+            }
+            if j < len && (bytes[j] == b']' || bytes[j] == b'}') {
+                // Skip the trailing comma
+                i += 1;
+                continue;
+            }
+        }
+
+        result.push(b);
+        i += 1;
+    }
+
+    // We only removed ASCII commas and preserved all other bytes unchanged,
+    // so the result is valid UTF-8 if the input was. Use from_utf8 to be safe.
+    String::from_utf8(result).unwrap_or_else(|_| input.to_string())
 }
 
 /// Expand a workspace glob pattern to matching directories.
@@ -436,6 +590,182 @@ mod tests {
         let yaml = "packages:\n  - 'packages/*'\ncatalog:\n  react: ^18\n";
         let patterns = parse_pnpm_workspace_yaml(yaml);
         assert_eq!(patterns, vec!["packages/*"]);
+    }
+
+    #[test]
+    fn strip_trailing_commas_basic() {
+        assert_eq!(
+            strip_trailing_commas(r#"{"a": 1, "b": 2,}"#),
+            r#"{"a": 1, "b": 2}"#
+        );
+    }
+
+    #[test]
+    fn strip_trailing_commas_array() {
+        assert_eq!(strip_trailing_commas(r#"[1, 2, 3,]"#), r#"[1, 2, 3]"#);
+    }
+
+    #[test]
+    fn strip_trailing_commas_with_whitespace() {
+        assert_eq!(
+            strip_trailing_commas("{\n  \"a\": 1,\n}"),
+            "{\n  \"a\": 1\n}"
+        );
+    }
+
+    #[test]
+    fn strip_trailing_commas_preserves_strings() {
+        // Commas inside strings should NOT be stripped
+        assert_eq!(
+            strip_trailing_commas(r#"{"a": "hello,}"}"#),
+            r#"{"a": "hello,}"}"#
+        );
+    }
+
+    #[test]
+    fn strip_trailing_commas_nested() {
+        let input = r#"{"refs": [{"path": "./a",}, {"path": "./b",},],}"#;
+        let expected = r#"{"refs": [{"path": "./a"}, {"path": "./b"}]}"#;
+        assert_eq!(strip_trailing_commas(input), expected);
+    }
+
+    #[test]
+    fn strip_trailing_commas_escaped_quotes() {
+        assert_eq!(
+            strip_trailing_commas(r#"{"a": "he\"llo,}",}"#),
+            r#"{"a": "he\"llo,}"}"#
+        );
+    }
+
+    #[test]
+    fn tsconfig_references_from_dir() {
+        let temp_dir = std::env::temp_dir().join("fallow-test-tsconfig-refs");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(temp_dir.join("packages/core")).unwrap();
+        std::fs::create_dir_all(temp_dir.join("packages/ui")).unwrap();
+
+        std::fs::write(
+            temp_dir.join("tsconfig.json"),
+            r#"{
+                // Root tsconfig with project references
+                "references": [
+                    {"path": "./packages/core"},
+                    {"path": "./packages/ui"},
+                ],
+            }"#,
+        )
+        .unwrap();
+
+        let refs = parse_tsconfig_references(&temp_dir);
+        assert_eq!(refs.len(), 2);
+        assert!(refs.iter().any(|p| p.ends_with("packages/core")));
+        assert!(refs.iter().any(|p| p.ends_with("packages/ui")));
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn tsconfig_references_no_file() {
+        let refs = parse_tsconfig_references(std::path::Path::new("/nonexistent"));
+        assert!(refs.is_empty());
+    }
+
+    #[test]
+    fn tsconfig_references_no_references_field() {
+        let temp_dir = std::env::temp_dir().join("fallow-test-tsconfig-no-refs");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        std::fs::write(
+            temp_dir.join("tsconfig.json"),
+            r#"{"compilerOptions": {"strict": true}}"#,
+        )
+        .unwrap();
+
+        let refs = parse_tsconfig_references(&temp_dir);
+        assert!(refs.is_empty());
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn tsconfig_references_skips_nonexistent_dirs() {
+        let temp_dir = std::env::temp_dir().join("fallow-test-tsconfig-missing-dir");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(temp_dir.join("packages/core")).unwrap();
+
+        std::fs::write(
+            temp_dir.join("tsconfig.json"),
+            r#"{"references": [{"path": "./packages/core"}, {"path": "./packages/missing"}]}"#,
+        )
+        .unwrap();
+
+        let refs = parse_tsconfig_references(&temp_dir);
+        assert_eq!(refs.len(), 1);
+        assert!(refs[0].ends_with("packages/core"));
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn discover_workspaces_from_tsconfig_references() {
+        let temp_dir = std::env::temp_dir().join("fallow-test-ws-tsconfig-refs");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(temp_dir.join("packages/core")).unwrap();
+        std::fs::create_dir_all(temp_dir.join("packages/ui")).unwrap();
+
+        // No package.json workspaces — only tsconfig references
+        std::fs::write(
+            temp_dir.join("tsconfig.json"),
+            r#"{"references": [{"path": "./packages/core"}, {"path": "./packages/ui"}]}"#,
+        )
+        .unwrap();
+
+        // core has package.json with a name
+        std::fs::write(
+            temp_dir.join("packages/core/package.json"),
+            r#"{"name": "@project/core"}"#,
+        )
+        .unwrap();
+
+        // ui has NO package.json — name should fall back to directory name
+        let workspaces = discover_workspaces(&temp_dir);
+        assert_eq!(workspaces.len(), 2);
+        assert!(workspaces.iter().any(|ws| ws.name == "@project/core"));
+        assert!(workspaces.iter().any(|ws| ws.name == "ui"));
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn tsconfig_references_outside_root_rejected() {
+        let temp_dir = std::env::temp_dir().join("fallow-test-tsconfig-outside");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(temp_dir.join("project/packages/core")).unwrap();
+        // "outside" is a sibling of "project", not inside it
+        std::fs::create_dir_all(temp_dir.join("outside")).unwrap();
+
+        std::fs::write(
+            temp_dir.join("project/tsconfig.json"),
+            r#"{"references": [{"path": "./packages/core"}, {"path": "../outside"}]}"#,
+        )
+        .unwrap();
+
+        // Security: "../outside" points outside the project root and should be rejected
+        let workspaces = discover_workspaces(&temp_dir.join("project"));
+        assert_eq!(
+            workspaces.len(),
+            1,
+            "reference outside project root should be rejected: {workspaces:?}"
+        );
+        assert!(
+            workspaces[0]
+                .root
+                .to_string_lossy()
+                .contains("packages/core")
+        );
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 
     #[test]
