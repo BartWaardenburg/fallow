@@ -33,6 +33,39 @@ pub struct ModuleInfo {
     pub content_hash: u64,
     /// Inline suppression directives parsed from comments.
     pub suppressions: Vec<Suppression>,
+    /// Pre-computed byte offsets where each line starts, for O(log N) byte-to-line/col conversion.
+    /// Entry `i` is the byte offset of the start of line `i` (0-indexed).
+    /// Example: for "abc\ndef\n", `line_offsets` = \[0, 4\].
+    pub line_offsets: Vec<u32>,
+}
+
+/// Compute a table of line-start byte offsets from source text.
+///
+/// The returned vec contains one entry per line: `line_offsets[i]` is the byte
+/// offset where line `i` starts (0-indexed). The first entry is always `0`.
+pub fn compute_line_offsets(source: &str) -> Vec<u32> {
+    let mut offsets = vec![0u32];
+    for (i, byte) in source.bytes().enumerate() {
+        if byte == b'\n' {
+            offsets.push((i + 1) as u32);
+        }
+    }
+    offsets
+}
+
+/// Convert a byte offset to a 1-based line number and 0-based byte column
+/// using a pre-computed line offset table (from [`compute_line_offsets`]).
+///
+/// Uses binary search for O(log L) lookup where L is the number of lines.
+pub fn byte_offset_to_line_col(line_offsets: &[u32], byte_offset: u32) -> (u32, u32) {
+    // Binary search: find the last line whose start is <= byte_offset
+    let line_idx = match line_offsets.binary_search(&byte_offset) {
+        Ok(idx) => idx,
+        Err(idx) => idx.saturating_sub(1),
+    };
+    let line = line_idx as u32 + 1; // 1-based
+    let col = byte_offset - line_offsets[line_idx];
+    (line, col)
 }
 
 /// A dynamic import with a pattern that can be partially resolved (e.g., template literals).
@@ -81,7 +114,7 @@ pub struct MemberInfo {
 }
 
 /// The kind of member.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bincode::Encode, bincode::Decode)]
 #[serde(rename_all = "snake_case")]
 pub enum MemberKind {
     /// A TypeScript enum member.

@@ -15,7 +15,7 @@ use oxc_span::Span;
 use crate::{ExportName, MemberAccess, MemberKind};
 
 /// Cache version — bump when the cache format changes.
-const CACHE_VERSION: u32 = 8;
+const CACHE_VERSION: u32 = 11;
 
 /// Maximum cache file size to deserialize (256 MB).
 const MAX_CACHE_SIZE: usize = 256 * 1024 * 1024;
@@ -33,6 +33,11 @@ pub struct CacheStore {
 pub struct CachedModule {
     /// xxh3 hash of the file content.
     pub content_hash: u64,
+    /// File modification time (seconds since epoch) for fast cache validation.
+    /// When mtime+size match the on-disk file, we skip reading file content entirely.
+    pub mtime_secs: u64,
+    /// File size in bytes for fast cache validation.
+    pub file_size: u64,
     /// Exported symbols.
     pub exports: Vec<CachedExport>,
     /// Import specifiers.
@@ -53,6 +58,8 @@ pub struct CachedModule {
     pub has_cjs_exports: bool,
     /// Inline suppression directives.
     pub suppressions: Vec<CachedSuppression>,
+    /// Pre-computed line-start byte offsets for O(log N) byte-to-line/col conversion.
+    pub line_offsets: Vec<u32>,
 }
 
 /// Cached suppression directive.
@@ -157,8 +164,8 @@ pub struct CachedReExport {
 pub struct CachedMember {
     /// Member name.
     pub name: String,
-    /// Member kind as a string ("enum", "method", "property").
-    pub kind: String,
+    /// Member kind (enum, method, or property).
+    pub kind: MemberKind,
     /// Byte offset of the span start.
     pub span_start: u32,
     /// Byte offset of the span end.
@@ -237,6 +244,22 @@ impl CacheStore {
         self.entries.insert(key, module);
     }
 
+    /// Fast cache lookup using only file metadata (mtime + size).
+    ///
+    /// If the cached entry has matching mtime and size, the file content
+    /// almost certainly has not changed, so we can skip reading the file
+    /// entirely. This turns a cache hit from `stat() + read() + hash`
+    /// into just `stat()`.
+    pub fn get_by_metadata(&self, path: &Path, mtime_secs: u64, file_size: u64) -> Option<&CachedModule> {
+        let key = path.to_string_lossy().to_string();
+        let entry = self.entries.get(&key)?;
+        if entry.mtime_secs == mtime_secs && entry.file_size == file_size && mtime_secs > 0 {
+            Some(entry)
+        } else {
+            None
+        }
+    }
+
     /// Look up a cached module by path only (ignoring hash).
     /// Used to check whether a module's content hash matches without
     /// requiring the caller to know the hash upfront.
@@ -297,18 +320,7 @@ pub fn cached_to_module(
                 .iter()
                 .map(|m| MemberInfo {
                     name: m.name.clone(),
-                    kind: match m.kind.as_str() {
-                        "enum" => MemberKind::EnumMember,
-                        "method" => MemberKind::ClassMethod,
-                        "property" => MemberKind::ClassProperty,
-                        other => {
-                            tracing::warn!(
-                                kind = other,
-                                "Unknown cached member kind, defaulting to ClassProperty"
-                            );
-                            MemberKind::ClassProperty
-                        }
-                    },
+                    kind: m.kind.clone(),
                     span: Span::new(m.span_start, m.span_end),
                     has_decorator: m.has_decorator,
                 })
@@ -403,13 +415,20 @@ pub fn cached_to_module(
         has_cjs_exports: cached.has_cjs_exports,
         content_hash: cached.content_hash,
         suppressions,
+        line_offsets: cached.line_offsets.clone(),
     }
 }
 
 /// Convert a [`ModuleInfo`](crate::ModuleInfo) to a [`CachedModule`] for storage.
-pub fn module_to_cached(module: &crate::ModuleInfo) -> CachedModule {
+///
+/// `mtime_secs` and `file_size` come from `std::fs::metadata()` at parse time
+/// and enable fast cache validation on subsequent runs (skip file read when
+/// mtime+size match).
+pub fn module_to_cached(module: &crate::ModuleInfo, mtime_secs: u64, file_size: u64) -> CachedModule {
     CachedModule {
         content_hash: module.content_hash,
+        mtime_secs,
+        file_size,
         exports: module
             .exports
             .iter()
@@ -428,11 +447,7 @@ pub fn module_to_cached(module: &crate::ModuleInfo) -> CachedModule {
                     .iter()
                     .map(|m| CachedMember {
                         name: m.name.clone(),
-                        kind: match m.kind {
-                            MemberKind::EnumMember => "enum".to_string(),
-                            MemberKind::ClassMethod => "method".to_string(),
-                            MemberKind::ClassProperty => "property".to_string(),
-                        },
+                        kind: m.kind.clone(),
                         span_start: m.span.start,
                         span_end: m.span.end,
                         has_decorator: m.has_decorator,
@@ -514,6 +529,7 @@ pub fn module_to_cached(module: &crate::ModuleInfo) -> CachedModule {
                 kind: s.kind.map_or(0, |k| k.to_discriminant()),
             })
             .collect(),
+        line_offsets: module.line_offsets.clone(),
     }
 }
 
@@ -541,6 +557,8 @@ mod tests {
         let mut store = CacheStore::new();
         let module = CachedModule {
             content_hash: 42,
+            mtime_secs: 0,
+            file_size: 0,
             exports: vec![],
             imports: vec![],
             re_exports: vec![],
@@ -551,6 +569,7 @@ mod tests {
             dynamic_import_patterns: vec![],
             has_cjs_exports: false,
             suppressions: vec![],
+            line_offsets: vec![],
         };
         store.insert(Path::new("test.ts"), module);
         assert_eq!(store.len(), 1);
@@ -563,6 +582,8 @@ mod tests {
         let mut store = CacheStore::new();
         let module = CachedModule {
             content_hash: 42,
+            mtime_secs: 0,
+            file_size: 0,
             exports: vec![],
             imports: vec![],
             re_exports: vec![],
@@ -573,6 +594,7 @@ mod tests {
             dynamic_import_patterns: vec![],
             has_cjs_exports: false,
             suppressions: vec![],
+            line_offsets: vec![],
         };
         store.insert(Path::new("test.ts"), module);
         assert!(store.get(Path::new("test.ts"), 99).is_none());
@@ -589,6 +611,8 @@ mod tests {
         let mut store = CacheStore::new();
         let m1 = CachedModule {
             content_hash: 1,
+            mtime_secs: 0,
+            file_size: 0,
             exports: vec![],
             imports: vec![],
             re_exports: vec![],
@@ -599,9 +623,12 @@ mod tests {
             dynamic_import_patterns: vec![],
             has_cjs_exports: false,
             suppressions: vec![],
+            line_offsets: vec![],
         };
         let m2 = CachedModule {
             content_hash: 2,
+            mtime_secs: 0,
+            file_size: 0,
             exports: vec![],
             imports: vec![],
             re_exports: vec![],
@@ -612,6 +639,7 @@ mod tests {
             dynamic_import_patterns: vec![],
             has_cjs_exports: false,
             suppressions: vec![],
+            line_offsets: vec![],
         };
         store.insert(Path::new("test.ts"), m1);
         store.insert(Path::new("test.ts"), m2);
@@ -641,9 +669,10 @@ mod tests {
             has_cjs_exports: false,
             content_hash: 123,
             suppressions: vec![],
+            line_offsets: vec![],
         };
 
-        let cached = module_to_cached(&module);
+        let cached = module_to_cached(&module, 0, 0);
         let restored = cached_to_module(&cached, FileId(0));
 
         assert_eq!(restored.exports.len(), 1);
@@ -678,9 +707,10 @@ mod tests {
             has_cjs_exports: false,
             content_hash: 456,
             suppressions: vec![],
+            line_offsets: vec![],
         };
 
-        let cached = module_to_cached(&module);
+        let cached = module_to_cached(&module, 0, 0);
         let restored = cached_to_module(&cached, FileId(0));
 
         assert_eq!(restored.exports[0].name, ExportName::Default);
@@ -730,9 +760,10 @@ mod tests {
             has_cjs_exports: false,
             content_hash: 789,
             suppressions: vec![],
+            line_offsets: vec![],
         };
 
-        let cached = module_to_cached(&module);
+        let cached = module_to_cached(&module, 0, 0);
         let restored = cached_to_module(&cached, FileId(0));
 
         assert_eq!(restored.imports.len(), 4);
@@ -773,9 +804,10 @@ mod tests {
             has_cjs_exports: false,
             content_hash: 0,
             suppressions: vec![],
+            line_offsets: vec![],
         };
 
-        let cached = module_to_cached(&module);
+        let cached = module_to_cached(&module, 0, 0);
         let restored = cached_to_module(&cached, FileId(0));
 
         assert_eq!(restored.re_exports.len(), 1);
@@ -813,9 +845,10 @@ mod tests {
             has_cjs_exports: true,
             content_hash: 0,
             suppressions: vec![],
+            line_offsets: vec![],
         };
 
-        let cached = module_to_cached(&module);
+        let cached = module_to_cached(&module, 0, 0);
         let restored = cached_to_module(&cached, FileId(0));
 
         assert_eq!(restored.dynamic_imports.len(), 1);
@@ -872,9 +905,10 @@ mod tests {
             has_cjs_exports: false,
             content_hash: 0,
             suppressions: vec![],
+            line_offsets: vec![],
         };
 
-        let cached = module_to_cached(&module);
+        let cached = module_to_cached(&module, 0, 0);
         let restored = cached_to_module(&cached, FileId(0));
 
         assert_eq!(restored.exports[0].members.len(), 3);
@@ -910,6 +944,8 @@ mod tests {
         let mut store = CacheStore::new();
         let module = CachedModule {
             content_hash: 42,
+            mtime_secs: 0,
+            file_size: 0,
             exports: vec![],
             imports: vec![],
             re_exports: vec![],
@@ -920,6 +956,7 @@ mod tests {
             dynamic_import_patterns: vec![],
             has_cjs_exports: false,
             suppressions: vec![],
+            line_offsets: vec![],
         };
         store.insert(Path::new("test.ts"), module);
         store.save(&dir).unwrap();
@@ -939,6 +976,8 @@ mod tests {
         let mut store = CacheStore::new();
         let module = CachedModule {
             content_hash: 42,
+            mtime_secs: 0,
+            file_size: 0,
             exports: vec![],
             imports: vec![],
             re_exports: vec![],
@@ -949,6 +988,7 @@ mod tests {
             dynamic_import_patterns: vec![],
             has_cjs_exports: false,
             suppressions: vec![],
+            line_offsets: vec![],
         };
         store.insert(Path::new("test.ts"), module);
         store.save(&dir).unwrap();
@@ -995,9 +1035,10 @@ mod tests {
             has_cjs_exports: false,
             content_hash: 0,
             suppressions: vec![],
+            line_offsets: vec![],
         };
 
-        let cached = module_to_cached(&module);
+        let cached = module_to_cached(&module, 0, 0);
         let restored = cached_to_module(&cached, FileId(0));
 
         assert!(restored.imports[0].is_type_only);
@@ -1010,6 +1051,8 @@ mod tests {
         let mut store = CacheStore::new();
         let module = CachedModule {
             content_hash: 42,
+            mtime_secs: 0,
+            file_size: 0,
             exports: vec![],
             imports: vec![],
             re_exports: vec![],
@@ -1020,6 +1063,7 @@ mod tests {
             dynamic_import_patterns: vec![],
             has_cjs_exports: false,
             suppressions: vec![],
+            line_offsets: vec![],
         };
         store.insert(Path::new("test.ts"), module);
 
@@ -1047,6 +1091,8 @@ mod tests {
         let mut store = CacheStore::new();
         let m = || CachedModule {
             content_hash: 1,
+            mtime_secs: 0,
+            file_size: 0,
             exports: vec![],
             imports: vec![],
             re_exports: vec![],
@@ -1057,6 +1103,7 @@ mod tests {
             dynamic_import_patterns: vec![],
             has_cjs_exports: false,
             suppressions: vec![],
+            line_offsets: vec![],
         };
 
         store.insert(Path::new("/project/a.ts"), m());
@@ -1090,6 +1137,8 @@ mod tests {
         let mut store = CacheStore::new();
         let m = CachedModule {
             content_hash: 1,
+            mtime_secs: 0,
+            file_size: 0,
             exports: vec![],
             imports: vec![],
             re_exports: vec![],
@@ -1100,11 +1149,141 @@ mod tests {
             dynamic_import_patterns: vec![],
             has_cjs_exports: false,
             suppressions: vec![],
+            line_offsets: vec![],
         };
         store.insert(Path::new("a.ts"), m);
         assert_eq!(store.len(), 1);
 
         store.retain_paths(&[]);
         assert!(store.is_empty());
+    }
+
+    #[test]
+    fn get_by_metadata_returns_entry_on_match() {
+        let mut store = CacheStore::new();
+        let module = CachedModule {
+            content_hash: 42,
+            mtime_secs: 1000,
+            file_size: 500,
+            exports: vec![],
+            imports: vec![],
+            re_exports: vec![],
+            dynamic_imports: vec![],
+            require_calls: vec![],
+            member_accesses: vec![],
+            whole_object_uses: vec![],
+            dynamic_import_patterns: vec![],
+            has_cjs_exports: false,
+            suppressions: vec![],
+            line_offsets: vec![],
+        };
+        store.insert(Path::new("test.ts"), module);
+
+        let result = store.get_by_metadata(Path::new("test.ts"), 1000, 500);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().content_hash, 42);
+    }
+
+    #[test]
+    fn get_by_metadata_returns_none_on_mtime_mismatch() {
+        let mut store = CacheStore::new();
+        let module = CachedModule {
+            content_hash: 42,
+            mtime_secs: 1000,
+            file_size: 500,
+            exports: vec![],
+            imports: vec![],
+            re_exports: vec![],
+            dynamic_imports: vec![],
+            require_calls: vec![],
+            member_accesses: vec![],
+            whole_object_uses: vec![],
+            dynamic_import_patterns: vec![],
+            has_cjs_exports: false,
+            suppressions: vec![],
+            line_offsets: vec![],
+        };
+        store.insert(Path::new("test.ts"), module);
+
+        assert!(store.get_by_metadata(Path::new("test.ts"), 2000, 500).is_none());
+    }
+
+    #[test]
+    fn get_by_metadata_returns_none_on_size_mismatch() {
+        let mut store = CacheStore::new();
+        let module = CachedModule {
+            content_hash: 42,
+            mtime_secs: 1000,
+            file_size: 500,
+            exports: vec![],
+            imports: vec![],
+            re_exports: vec![],
+            dynamic_imports: vec![],
+            require_calls: vec![],
+            member_accesses: vec![],
+            whole_object_uses: vec![],
+            dynamic_import_patterns: vec![],
+            has_cjs_exports: false,
+            suppressions: vec![],
+            line_offsets: vec![],
+        };
+        store.insert(Path::new("test.ts"), module);
+
+        assert!(store.get_by_metadata(Path::new("test.ts"), 1000, 999).is_none());
+    }
+
+    #[test]
+    fn get_by_metadata_returns_none_for_zero_mtime() {
+        let mut store = CacheStore::new();
+        let module = CachedModule {
+            content_hash: 42,
+            mtime_secs: 0,
+            file_size: 500,
+            exports: vec![],
+            imports: vec![],
+            re_exports: vec![],
+            dynamic_imports: vec![],
+            require_calls: vec![],
+            member_accesses: vec![],
+            whole_object_uses: vec![],
+            dynamic_import_patterns: vec![],
+            has_cjs_exports: false,
+            suppressions: vec![],
+            line_offsets: vec![],
+        };
+        store.insert(Path::new("test.ts"), module);
+
+        // Zero mtime should never match (falls through to content hash check)
+        assert!(store.get_by_metadata(Path::new("test.ts"), 0, 500).is_none());
+    }
+
+    #[test]
+    fn get_by_metadata_returns_none_for_missing_file() {
+        let store = CacheStore::new();
+        assert!(store.get_by_metadata(Path::new("nonexistent.ts"), 1000, 500).is_none());
+    }
+
+    #[test]
+    fn module_to_cached_stores_mtime_and_size() {
+        let module = ModuleInfo {
+            file_id: FileId(0),
+            exports: vec![],
+            imports: vec![],
+            re_exports: vec![],
+            dynamic_imports: vec![],
+            require_calls: vec![],
+            member_accesses: vec![],
+            whole_object_uses: vec![],
+            dynamic_import_patterns: vec![],
+            has_cjs_exports: false,
+            content_hash: 42,
+            suppressions: vec![],
+            line_offsets: vec![],
+        };
+
+        let cached = module_to_cached(&module, 12345, 6789);
+        assert_eq!(cached.mtime_secs, 12345);
+        assert_eq!(cached.file_size, 6789);
+        assert_eq!(cached.content_hash, 42);
     }
 }
