@@ -192,6 +192,7 @@ impl ModuleGraph {
     ///
     /// Creates `ModuleNode` entries, flat `Edge` storage, reverse dependency
     /// indices, package usage maps, and the namespace-imported bitset.
+    #[allow(clippy::cognitive_complexity)] // Complex but coherent edge-population logic
     fn populate_edges(
         files: &[DiscoveredFile],
         module_by_id: &FxHashMap<FileId, &ResolvedModule>,
@@ -820,12 +821,12 @@ impl ModuleGraph {
     }
 
     /// Total number of modules.
-    pub fn module_count(&self) -> usize {
+    pub const fn module_count(&self) -> usize {
         self.modules.len()
     }
 
     /// Total number of edges.
-    pub fn edge_count(&self) -> usize {
+    pub const fn edge_count(&self) -> usize {
         self.edges.len()
     }
 

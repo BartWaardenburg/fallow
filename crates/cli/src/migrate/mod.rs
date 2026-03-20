@@ -35,12 +35,7 @@ struct MigrationResult {
 }
 
 /// Run the migrate command.
-pub(crate) fn run_migrate(
-    root: &Path,
-    use_toml: bool,
-    dry_run: bool,
-    from: Option<&Path>,
-) -> ExitCode {
+pub fn run_migrate(root: &Path, use_toml: bool, dry_run: bool, from: Option<&Path>) -> ExitCode {
     // Check if a fallow config already exists
     let existing_names = [".fallowrc.json", "fallow.toml", ".fallow.toml"];
     if !dry_run {
@@ -55,11 +50,7 @@ pub(crate) fn run_migrate(
         }
     }
 
-    let result = if let Some(from_path) = from {
-        migrate_from_file(from_path)
-    } else {
-        migrate_auto_detect(root)
-    };
+    let result = from.map_or_else(|| migrate_auto_detect(root), migrate_from_file);
 
     let result = match result {
         Ok(r) => r,

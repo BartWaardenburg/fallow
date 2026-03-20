@@ -92,11 +92,7 @@ fn is_production_script(name: &str) -> bool {
         .strip_prefix("pre")
         .or_else(|| root_name.strip_prefix("post"));
 
-    if let Some(base) = base {
-        matches!(base, "start" | "build" | "serve" | "install")
-    } else {
-        false
-    }
+    base.is_some_and(|base| matches!(base, "start" | "build" | "serve" | "install"))
 }
 
 /// Analyze all scripts from a package.json `scripts` field.
@@ -223,6 +219,7 @@ fn split_shell_operators(script: &str) -> Vec<&str> {
 }
 
 /// Parse a single command segment (after splitting on shell operators).
+#[allow(clippy::cognitive_complexity)] // Shell command parsing naturally has many branches
 fn parse_command_segment(segment: &str) -> Option<ScriptCommand> {
     let tokens: Vec<&str> = segment.split_whitespace().collect();
     if tokens.is_empty() {
@@ -393,12 +390,10 @@ fn extract_config_arg(token: &str, next: Option<&str>) -> Option<String> {
 
 /// Check if a token is an environment variable assignment (`KEY=value`).
 fn is_env_assignment(token: &str) -> bool {
-    if let Some(eq_pos) = token.find('=') {
+    token.find('=').is_some_and(|eq_pos| {
         let name = &token[..eq_pos];
         !name.is_empty() && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
-    } else {
-        false
-    }
+    })
 }
 
 /// Check if a token looks like a file path (has a known extension or path separator).

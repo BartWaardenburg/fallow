@@ -34,7 +34,7 @@ impl IssueKind {
     }
 
     /// Convert to a u8 discriminant for compact cache storage.
-    pub fn to_discriminant(self) -> u8 {
+    pub const fn to_discriminant(self) -> u8 {
         match self {
             Self::UnusedFile => 1,
             Self::UnusedExport => 2,
@@ -51,7 +51,7 @@ impl IssueKind {
     }
 
     /// Reconstruct from a cache discriminant.
-    pub fn from_discriminant(d: u8) -> Option<Self> {
+    pub const fn from_discriminant(d: u8) -> Option<Self> {
         match d {
             1 => Some(Self::UnusedFile),
             2 => Some(Self::UnusedExport),

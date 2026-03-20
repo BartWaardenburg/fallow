@@ -34,7 +34,7 @@ pub struct CloneDetector {
 
 impl CloneDetector {
     /// Create a new detector with the given thresholds.
-    pub fn new(min_tokens: usize, min_lines: usize, skip_local: bool) -> Self {
+    pub const fn new(min_tokens: usize, min_lines: usize, skip_local: bool) -> Self {
         Self {
             min_tokens,
             min_lines,
@@ -912,10 +912,10 @@ fn compute_stats(
 }
 
 /// Create an empty report when there are no files to analyze.
-fn empty_report(total_files: usize) -> DuplicationReport {
+const fn empty_report(total_files: usize) -> DuplicationReport {
     DuplicationReport {
-        clone_groups: vec![],
-        clone_families: vec![],
+        clone_groups: Vec::new(),
+        clone_families: Vec::new(),
         stats: DuplicationStats {
             total_files,
             files_with_clones: 0,

@@ -157,6 +157,7 @@ const KNIP_PLUGIN_KEYS: &[&str] = &[
     "yorkie",
 ];
 
+#[allow(clippy::cognitive_complexity)] // Config migration mapping is inherently branchy
 pub(super) fn migrate_knip(
     knip: &serde_json::Value,
     config: &mut serde_json::Map<String, serde_json::Value>,

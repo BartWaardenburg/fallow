@@ -28,7 +28,7 @@ pub struct PluginResult {
 }
 
 impl PluginResult {
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.entry_patterns.is_empty()
             && self.referenced_dependencies.is_empty()
             && self.always_used_files.is_empty()
@@ -371,6 +371,7 @@ impl PluginRegistry {
     ///
     /// This discovers which plugins are active, collects their static patterns,
     /// then parses any config files to extract dynamic information.
+    #[allow(clippy::cognitive_complexity)] // Plugin discovery and aggregation logic is inherently complex
     pub fn run(
         &self,
         pkg: &PackageJson,
@@ -433,6 +434,7 @@ impl PluginRegistry {
         // Reuse `all_deps` from Phase 1 (already computed above)
         let all_dep_refs: Vec<&str> = all_deps.iter().map(|s| s.as_str()).collect();
         for ext in &self.external_plugins {
+            #[allow(clippy::option_if_let_else)] // Chained if-let-else is more readable here
             let is_active = if let Some(detection) = &ext.detection {
                 check_plugin_detection(detection, &all_dep_refs, root, discovered_files)
             } else if !ext.enablers.is_empty() {

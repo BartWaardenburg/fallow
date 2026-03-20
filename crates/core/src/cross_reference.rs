@@ -136,12 +136,12 @@ fn find_overlapping_unused_export(
 /// Summary statistics for cross-referenced findings.
 impl CrossReferenceResult {
     /// Total number of combined findings.
-    pub fn total(&self) -> usize {
+    pub const fn total(&self) -> usize {
         self.combined_findings.len()
     }
 
     /// Whether any combined findings exist.
-    pub fn has_findings(&self) -> bool {
+    pub const fn has_findings(&self) -> bool {
         !self.combined_findings.is_empty()
     }
 

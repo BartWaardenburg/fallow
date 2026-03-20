@@ -35,7 +35,7 @@ enum Level {
     Error,
 }
 
-fn severity_to_level(s: Severity) -> Level {
+const fn severity_to_level(s: Severity) -> Level {
     match s {
         Severity::Error => Level::Error,
         Severity::Warn => Level::Warn,

@@ -90,7 +90,7 @@ pub(super) fn is_config_file(path: &std::path::Path) -> bool {
 }
 
 /// Check if a package name is a platform built-in module (Node.js, Deno, Cloudflare Workers).
-pub(crate) fn is_builtin_module(name: &str) -> bool {
+pub fn is_builtin_module(name: &str) -> bool {
     // Cloudflare Workers built-in modules (e.g., `cloudflare:workers`, `cloudflare:sockets`)
     if name.starts_with("cloudflare:") {
         return true;

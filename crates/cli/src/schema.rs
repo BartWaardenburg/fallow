@@ -4,7 +4,7 @@ use clap::CommandFactory;
 
 use crate::Cli;
 
-pub(crate) fn run_schema() -> ExitCode {
+pub fn run_schema() -> ExitCode {
     let cmd = Cli::command();
     let schema = build_cli_schema(&cmd);
     match serde_json::to_string_pretty(&schema) {
@@ -19,7 +19,7 @@ pub(crate) fn run_schema() -> ExitCode {
     }
 }
 
-pub(crate) fn build_cli_schema(cmd: &clap::Command) -> serde_json::Value {
+pub fn build_cli_schema(cmd: &clap::Command) -> serde_json::Value {
     let mut global_flags = Vec::new();
     for arg in cmd.get_arguments() {
         if arg.get_id() == "help" || arg.get_id() == "version" {

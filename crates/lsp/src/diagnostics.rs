@@ -7,7 +7,7 @@ use fallow_core::duplicates::DuplicationReport;
 use fallow_core::results::AnalysisResults;
 
 /// LSP range at position (0,0) used for file-level and package.json diagnostics.
-pub(crate) const ZERO_RANGE: Range = Range {
+pub const ZERO_RANGE: Range = Range {
     start: Position {
         line: 0,
         character: 0,
@@ -19,7 +19,7 @@ pub(crate) const ZERO_RANGE: Range = Range {
 };
 
 /// Build all LSP diagnostics from analysis results and duplication report, keyed by file URI.
-pub(crate) fn build_diagnostics(
+pub fn build_diagnostics(
     results: &AnalysisResults,
     duplication: &DuplicationReport,
     root: &Path,

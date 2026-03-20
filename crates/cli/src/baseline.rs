@@ -6,7 +6,7 @@ use fallow_core::duplicates::DuplicationReport;
 /// Baseline data for comparison.
 #[derive(serde::Serialize, serde::Deserialize)]
 #[allow(clippy::struct_field_names)]
-pub(crate) struct BaselineData {
+pub struct BaselineData {
     pub unused_files: Vec<String>,
     pub unused_exports: Vec<String>,
     pub unused_types: Vec<String>,
@@ -15,7 +15,7 @@ pub(crate) struct BaselineData {
 }
 
 impl BaselineData {
-    pub(crate) fn from_results(results: &fallow_core::results::AnalysisResults) -> Self {
+    pub fn from_results(results: &fallow_core::results::AnalysisResults) -> Self {
         Self {
             unused_files: results
                 .unused_files
@@ -59,7 +59,7 @@ impl BaselineData {
 }
 
 /// Filter results to only include issues not present in the baseline.
-pub(crate) fn filter_new_issues(
+pub fn filter_new_issues(
     mut results: fallow_core::results::AnalysisResults,
     baseline: &BaselineData,
 ) -> fallow_core::results::AnalysisResults {
@@ -114,14 +114,14 @@ pub(crate) fn filter_new_issues(
 /// (`file:start_line-end_line`) instance locations. This allows stable comparison
 /// across runs even if group ordering changes.
 #[derive(serde::Serialize, serde::Deserialize)]
-pub(crate) struct DuplicationBaselineData {
+pub struct DuplicationBaselineData {
     /// Clone group keys: sorted list of `file:start-end` per group.
     pub clone_groups: Vec<String>,
 }
 
 impl DuplicationBaselineData {
     /// Build a duplication baseline from the current report.
-    pub(crate) fn from_report(report: &DuplicationReport, root: &Path) -> Self {
+    pub fn from_report(report: &DuplicationReport, root: &Path) -> Self {
         Self {
             clone_groups: report
                 .clone_groups
@@ -152,7 +152,7 @@ fn clone_group_key(group: &fallow_core::duplicates::CloneGroup, root: &Path) -> 
 }
 
 /// Filter a duplication report to only include clone groups not present in the baseline.
-pub(crate) fn filter_new_clone_groups(
+pub fn filter_new_clone_groups(
     mut report: DuplicationReport,
     baseline: &DuplicationBaselineData,
     root: &Path,

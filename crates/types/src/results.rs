@@ -30,7 +30,7 @@ pub struct AnalysisResults {
 
 impl AnalysisResults {
     /// Total number of issues found.
-    pub fn total_issues(&self) -> usize {
+    pub const fn total_issues(&self) -> usize {
         self.unused_files.len()
             + self.unused_exports.len()
             + self.unused_types.len()
@@ -45,7 +45,7 @@ impl AnalysisResults {
     }
 
     /// Whether any issues were found.
-    pub fn has_issues(&self) -> bool {
+    pub const fn has_issues(&self) -> bool {
         self.total_issues() > 0
     }
 }

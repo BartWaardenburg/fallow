@@ -2,7 +2,7 @@ use std::process::ExitCode;
 
 use fallow_config::{ExternalPluginDef, FallowConfig};
 
-pub(crate) fn run_init(root: &std::path::Path, use_toml: bool) -> ExitCode {
+pub fn run_init(root: &std::path::Path, use_toml: bool) -> ExitCode {
     // Check if any config file already exists
     let existing_names = [".fallowrc.json", "fallow.toml", ".fallow.toml"];
     for name in &existing_names {
@@ -56,7 +56,7 @@ pub(crate) fn run_init(root: &std::path::Path, use_toml: bool) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-pub(crate) fn run_config_schema() -> ExitCode {
+pub fn run_config_schema() -> ExitCode {
     let schema = FallowConfig::json_schema();
     match serde_json::to_string_pretty(&schema) {
         Ok(json) => {
@@ -70,7 +70,7 @@ pub(crate) fn run_config_schema() -> ExitCode {
     }
 }
 
-pub(crate) fn run_plugin_schema() -> ExitCode {
+pub fn run_plugin_schema() -> ExitCode {
     let schema = ExternalPluginDef::json_schema();
     match serde_json::to_string_pretty(&schema) {
         Ok(json) => {

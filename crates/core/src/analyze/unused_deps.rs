@@ -16,7 +16,7 @@ use super::{byte_offset_to_line_col, read_source};
 /// Checks both the root package.json and each workspace's package.json.
 /// For workspace deps, only files within that workspace are considered when
 /// determining whether a dependency is used (mirroring `find_unlisted_dependencies`).
-pub(crate) fn find_unused_dependencies(
+pub fn find_unused_dependencies(
     graph: &ModuleGraph,
     pkg: &PackageJson,
     config: &ResolvedConfig,
@@ -111,16 +111,14 @@ pub(crate) fn find_unused_dependencies(
         // to avoid per-file canonicalize() syscalls.
         let ws_root = &ws.root;
         let is_used_in_workspace = |dep: &str| -> bool {
-            if let Some(file_ids) = graph.package_usage.get(dep) {
+            graph.package_usage.get(dep).is_some_and(|file_ids| {
                 file_ids.iter().any(|id| {
                     graph
                         .modules
                         .get(id.0 as usize)
                         .is_some_and(|module| module.path.starts_with(ws_root))
                 })
-            } else {
-                false
-            }
+            })
         };
 
         // Check workspace production dependencies
@@ -197,7 +195,7 @@ fn should_skip_dependency(
 /// In production mode, `import type { Foo } from 'pkg'` is erased at compile time,
 /// meaning the dependency is not needed at runtime. Such dependencies should be
 /// moved to devDependencies.
-pub(crate) fn find_type_only_dependencies(
+pub fn find_type_only_dependencies(
     graph: &ModuleGraph,
     pkg: &PackageJson,
     config: &ResolvedConfig,
@@ -247,7 +245,7 @@ pub(crate) fn find_type_only_dependencies(
 }
 
 /// Find dependencies used in imports but not listed in package.json.
-pub(crate) fn find_unlisted_dependencies(
+pub fn find_unlisted_dependencies(
     graph: &ModuleGraph,
     pkg: &PackageJson,
     config: &ResolvedConfig,
@@ -357,7 +355,7 @@ pub(crate) fn find_unlisted_dependencies(
 }
 
 /// Find imports that could not be resolved.
-pub(crate) fn find_unresolved_imports(
+pub fn find_unresolved_imports(
     resolved_modules: &[ResolvedModule],
     _config: &ResolvedConfig,
     suppressions_by_file: &FxHashMap<FileId, &[Suppression]>,

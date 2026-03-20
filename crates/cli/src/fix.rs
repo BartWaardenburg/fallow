@@ -266,7 +266,7 @@ fn apply_dependency_fixes(
 }
 
 #[allow(clippy::struct_excessive_bools)]
-pub(crate) struct FixOptions<'a> {
+pub struct FixOptions<'a> {
     pub root: &'a Path,
     pub config_path: &'a Option<PathBuf>,
     pub output: OutputFormat,
@@ -278,7 +278,7 @@ pub(crate) struct FixOptions<'a> {
     pub production: bool,
 }
 
-pub(crate) fn run_fix(opts: &FixOptions<'_>) -> ExitCode {
+pub fn run_fix(opts: &FixOptions<'_>) -> ExitCode {
     // In non-TTY environments (CI, AI agents), require --yes or --dry-run
     // to prevent accidental destructive operations.
     if !opts.dry_run && !opts.yes && !std::io::stdin().is_terminal() {

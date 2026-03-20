@@ -10,7 +10,7 @@ use crate::suppress::{self, IssueKind, Suppression};
 use super::{byte_offset_to_line_col, read_source};
 
 /// Find exports that are never imported by other files.
-pub(crate) fn find_unused_exports(
+pub fn find_unused_exports(
     graph: &ModuleGraph,
     config: &ResolvedConfig,
     plugin_result: Option<&crate::plugins::AggregatedPluginResult>,
@@ -164,7 +164,7 @@ pub(crate) fn find_unused_exports(
 /// Barrel re-exports (files that only re-export from other modules via `export { X } from './source'`)
 /// are excluded — having an index.ts re-export the same name as the source module is the normal
 /// barrel file pattern, not a true duplicate.
-pub(crate) fn find_duplicate_exports(
+pub fn find_duplicate_exports(
     graph: &ModuleGraph,
     config: &ResolvedConfig,
     suppressions_by_file: &FxHashMap<FileId, &[Suppression]>,
@@ -256,7 +256,7 @@ pub(crate) fn find_duplicate_exports(
 /// reference count and reference locations. This data is used by the LSP server to show
 /// Code Lens annotations (e.g., "3 references") above export declarations, with
 /// click-to-navigate support via `editor.action.showReferences`.
-pub(crate) fn collect_export_usages(graph: &ModuleGraph) -> Vec<ExportUsage> {
+pub fn collect_export_usages(graph: &ModuleGraph) -> Vec<ExportUsage> {
     let mut usages = Vec::new();
 
     // Build FileId -> path index for resolving reference locations

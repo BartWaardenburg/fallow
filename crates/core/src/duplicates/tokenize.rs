@@ -176,7 +176,7 @@ pub struct FileTokens {
 /// Used for synthetic punctuation tokens (`(`, `)`, `,`, `.`) that don't
 /// have their own AST span. Using the parent expression's full span would
 /// inflate clone line ranges, especially in chained method calls.
-fn point_span(pos: u32) -> Span {
+const fn point_span(pos: u32) -> Span {
     Span::new(pos, pos + 1)
 }
 
@@ -347,7 +347,7 @@ struct TokenExtractor {
 }
 
 impl TokenExtractor {
-    fn with_strip_types(strip_types: bool) -> Self {
+    const fn with_strip_types(strip_types: bool) -> Self {
         Self {
             tokens: Vec::new(),
             strip_types,

@@ -17,7 +17,7 @@ struct SarifFields {
     properties: Option<serde_json::Value>,
 }
 
-fn severity_to_sarif_level(s: Severity) -> &'static str {
+const fn severity_to_sarif_level(s: Severity) -> &'static str {
     match s {
         Severity::Error => "error",
         Severity::Warn | Severity::Off => "warning",

@@ -9,7 +9,7 @@ use crate::load_config;
 use crate::report;
 
 #[allow(clippy::ref_option, clippy::needless_pass_by_value)] // matches load_config signature
-pub(crate) fn run_watch(
+pub fn run_watch(
     root: &Path,
     config_path: &Option<PathBuf>,
     output: OutputFormat,

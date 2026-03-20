@@ -23,6 +23,14 @@ pub(super) fn print_json(results: &AnalysisResults, elapsed: Duration) -> ExitCo
     }
 }
 
+/// JSON output schema version (independent of tool version).
+///
+/// Bump this when the structure of the JSON output changes:
+/// - Major: removing or renaming fields, changing types
+/// - Minor: adding new fields or issue types
+/// - Patch: documentation-only changes
+const SCHEMA_VERSION: &str = "1.0.0";
+
 /// Build the JSON output value for analysis results.
 pub fn build_json(
     results: &AnalysisResults,
@@ -30,6 +38,10 @@ pub fn build_json(
 ) -> Result<serde_json::Value, serde_json::Error> {
     let mut output = serde_json::to_value(results)?;
     if let serde_json::Value::Object(ref mut map) = output {
+        map.insert(
+            "schema_version".to_string(),
+            serde_json::json!(SCHEMA_VERSION),
+        );
         map.insert(
             "version".to_string(),
             serde_json::json!(env!("CARGO_PKG_VERSION")),
@@ -56,6 +68,10 @@ pub(super) fn print_duplication_json(report: &DuplicationReport, elapsed: Durati
     };
 
     if let serde_json::Value::Object(ref mut map) = output {
+        map.insert(
+            "schema_version".to_string(),
+            serde_json::json!(SCHEMA_VERSION),
+        );
         map.insert(
             "version".to_string(),
             serde_json::json!(env!("CARGO_PKG_VERSION")),
@@ -171,6 +187,7 @@ mod tests {
         let elapsed = Duration::from_millis(123);
         let output = build_json(&results, elapsed).expect("should serialize");
 
+        assert_eq!(output["schema_version"], "1.0.0");
         assert!(output["version"].is_string());
         assert_eq!(output["elapsed_ms"], 123);
         assert_eq!(output["total_issues"], 0);

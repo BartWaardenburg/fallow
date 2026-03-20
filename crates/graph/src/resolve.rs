@@ -308,12 +308,10 @@ pub fn resolve_all_imports(
                         .iter()
                         .enumerate()
                         .filter(|(_idx, canonical)| {
-                            if let Ok(relative) = canonical.strip_prefix(from_dir) {
+                            canonical.strip_prefix(from_dir).is_ok_and(|relative| {
                                 let rel_str = format!("./{}", relative.to_string_lossy());
                                 matcher.is_match(&rel_str)
-                            } else {
-                                false
-                            }
+                            })
                         })
                         .map(|(idx, _)| files[idx].id)
                         .collect();
@@ -477,7 +475,7 @@ fn create_resolver(active_plugins: &[String]) -> Resolver {
 }
 
 /// Resolve a single import specifier to a target.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::option_if_let_else)]
 fn resolve_specifier(
     resolver: &Resolver,
     from_file: &Path,
@@ -826,10 +824,10 @@ fn make_glob_from_pattern(pattern: &fallow_types::extract::DynamicImportPattern)
     if pattern.prefix.contains('*') || pattern.prefix.contains('{') {
         return pattern.prefix.clone();
     }
-    match &pattern.suffix {
-        Some(suffix) => format!("{}*{}", pattern.prefix, suffix),
-        None => format!("{}*", pattern.prefix),
-    }
+    pattern.suffix.as_ref().map_or_else(
+        || format!("{}*", pattern.prefix),
+        |suffix| format!("{}*{}", pattern.prefix, suffix),
+    )
 }
 
 /// Check if a specifier is a bare specifier (npm package or Node.js imports map entry).

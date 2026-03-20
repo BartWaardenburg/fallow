@@ -14,7 +14,7 @@ use crate::visitor::ModuleInfoExtractor;
 use fallow_types::discover::FileId;
 
 /// Parse source text into a [`ModuleInfo`](super::ModuleInfo).
-pub(crate) fn parse_source_to_module(
+pub fn parse_source_to_module(
     file_id: FileId,
     path: &Path,
     source: &str,

@@ -5,7 +5,7 @@ use tower_lsp::lsp_types::*;
 use fallow_core::results::AnalysisResults;
 
 /// Build Code Lens items for a file showing reference counts above each export declaration.
-pub(crate) fn build_code_lenses(
+pub fn build_code_lenses(
     results: &AnalysisResults,
     file_path: &Path,
     document_uri: &Url,

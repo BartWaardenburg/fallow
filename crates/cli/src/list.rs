@@ -5,18 +5,18 @@ use fallow_config::OutputFormat;
 use crate::load_config;
 
 #[allow(clippy::struct_excessive_bools)]
-pub(crate) struct ListOptions<'a> {
-    pub(crate) root: &'a std::path::Path,
-    pub(crate) config_path: &'a Option<std::path::PathBuf>,
-    pub(crate) output: OutputFormat,
-    pub(crate) threads: usize,
-    pub(crate) entry_points: bool,
-    pub(crate) files: bool,
-    pub(crate) plugins: bool,
-    pub(crate) production: bool,
+pub struct ListOptions<'a> {
+    pub root: &'a std::path::Path,
+    pub config_path: &'a Option<std::path::PathBuf>,
+    pub output: OutputFormat,
+    pub threads: usize,
+    pub entry_points: bool,
+    pub files: bool,
+    pub plugins: bool,
+    pub production: bool,
 }
 
-pub(crate) fn run_list(opts: &ListOptions<'_>) -> ExitCode {
+pub fn run_list(opts: &ListOptions<'_>) -> ExitCode {
     let config = match load_config(
         opts.root,
         opts.config_path,
@@ -38,11 +38,10 @@ pub(crate) fn run_list(opts: &ListOptions<'_>) -> ExitCode {
         let registry = fallow_core::plugins::PluginRegistry::new(config.external_plugins.clone());
 
         let pkg_path = opts.root.join("package.json");
-        let mut result = if let Ok(pkg) = fallow_config::PackageJson::load(&pkg_path) {
-            registry.run(&pkg, opts.root, &file_paths)
-        } else {
-            fallow_core::plugins::AggregatedPluginResult::default()
-        };
+        let mut result = fallow_config::PackageJson::load(&pkg_path).map_or_else(
+            |_| fallow_core::plugins::AggregatedPluginResult::default(),
+            |pkg| registry.run(&pkg, opts.root, &file_paths),
+        );
 
         // Also run plugins for workspace packages
         let workspaces = fallow_config::discover_workspaces(opts.root);

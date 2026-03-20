@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-pub(crate) fn validate_git_ref(s: &str) -> Result<&str, String> {
+pub fn validate_git_ref(s: &str) -> Result<&str, String> {
     if s.is_empty() {
         return Err("git ref cannot be empty".to_string());
     }
@@ -29,7 +29,7 @@ pub(crate) fn validate_git_ref(s: &str) -> Result<&str, String> {
     Ok(s)
 }
 
-pub(crate) fn validate_root(root: &std::path::Path) -> Result<PathBuf, String> {
+pub fn validate_root(root: &std::path::Path) -> Result<PathBuf, String> {
     let canonical = root
         .canonicalize()
         .map_err(|e| format!("invalid root path '{}': {e}", root.display()))?;
@@ -42,7 +42,7 @@ pub(crate) fn validate_root(root: &std::path::Path) -> Result<PathBuf, String> {
 /// Reject strings containing control characters (bytes < 0x20) except
 /// newline (0x0A) and tab (0x09). This prevents agents from accidentally
 /// passing invisible characters in CLI arguments.
-pub(crate) fn validate_no_control_chars(s: &str, arg_name: &str) -> Result<(), String> {
+pub fn validate_no_control_chars(s: &str, arg_name: &str) -> Result<(), String> {
     for (i, byte) in s.bytes().enumerate() {
         if byte < 0x20 && byte != b'\n' && byte != b'\t' {
             return Err(format!(

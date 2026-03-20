@@ -16,7 +16,7 @@ use super::{byte_offset_to_line_col, read_source};
 ///
 /// Collects all `Identifier.member` static member accesses from all modules,
 /// maps them to their imported names, and filters out members that are accessed.
-pub(crate) fn find_unused_members(
+pub fn find_unused_members(
     graph: &ModuleGraph,
     _config: &ResolvedConfig,
     resolved_modules: &[ResolvedModule],

@@ -528,6 +528,7 @@ impl FallowConfig {
 
     /// Generate JSON Schema for the configuration format.
     pub fn json_schema() -> serde_json::Value {
+        #[allow(clippy::use_self)] // schemars macro requires the concrete type name
         serde_json::to_value(schemars::schema_for!(FallowConfig)).unwrap_or_default()
     }
 

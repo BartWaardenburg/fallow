@@ -10,20 +10,20 @@ use crate::{emit_error, load_config};
 // ── Issue type filters ──────────────────────────────────────────
 
 #[allow(clippy::struct_excessive_bools)]
-pub(crate) struct IssueFilters {
-    pub(crate) unused_files: bool,
-    pub(crate) unused_exports: bool,
-    pub(crate) unused_deps: bool,
-    pub(crate) unused_types: bool,
-    pub(crate) unused_enum_members: bool,
-    pub(crate) unused_class_members: bool,
-    pub(crate) unresolved_imports: bool,
-    pub(crate) unlisted_deps: bool,
-    pub(crate) duplicate_exports: bool,
+pub struct IssueFilters {
+    pub unused_files: bool,
+    pub unused_exports: bool,
+    pub unused_deps: bool,
+    pub unused_types: bool,
+    pub unused_enum_members: bool,
+    pub unused_class_members: bool,
+    pub unresolved_imports: bool,
+    pub unlisted_deps: bool,
+    pub duplicate_exports: bool,
 }
 
 impl IssueFilters {
-    pub(crate) fn any_active(&self) -> bool {
+    pub const fn any_active(&self) -> bool {
         self.unused_files
             || self.unused_exports
             || self.unused_deps
@@ -36,7 +36,7 @@ impl IssueFilters {
     }
 
     /// When any filter is active, clear issue types that were NOT requested.
-    pub(crate) fn apply(&self, results: &mut fallow_core::results::AnalysisResults) {
+    pub fn apply(&self, results: &mut fallow_core::results::AnalysisResults) {
         if !self.any_active() {
             return;
         }
@@ -73,15 +73,15 @@ impl IssueFilters {
 
 // ── Trace options ───────────────────────────────────────────────
 
-pub(crate) struct TraceOptions {
-    pub(crate) trace_export: Option<String>,
-    pub(crate) trace_file: Option<String>,
-    pub(crate) trace_dependency: Option<String>,
-    pub(crate) performance: bool,
+pub struct TraceOptions {
+    pub trace_export: Option<String>,
+    pub trace_file: Option<String>,
+    pub trace_dependency: Option<String>,
+    pub performance: bool,
 }
 
 impl TraceOptions {
-    pub(crate) fn any_active(&self) -> bool {
+    pub const fn any_active(&self) -> bool {
         self.trace_export.is_some()
             || self.trace_file.is_some()
             || self.trace_dependency.is_some()
@@ -272,17 +272,20 @@ fn resolve_workspace_filter(
         return Err(emit_error(&msg, 2, output));
     }
 
-    match workspaces.iter().find(|ws| ws.name == workspace_name) {
-        Some(ws) => Ok(ws.root.clone()),
-        None => {
-            let names: Vec<&str> = workspaces.iter().map(|ws| ws.name.as_str()).collect();
-            let msg = format!(
-                "workspace '{workspace_name}' not found. Available workspaces: {}",
-                names.join(", ")
-            );
-            Err(emit_error(&msg, 2, output))
-        }
-    }
+    workspaces
+        .iter()
+        .find(|ws| ws.name == workspace_name)
+        .map_or_else(
+            || {
+                let names: Vec<&str> = workspaces.iter().map(|ws| ws.name.as_str()).collect();
+                let msg = format!(
+                    "workspace '{workspace_name}' not found. Available workspaces: {}",
+                    names.join(", ")
+                );
+                Err(emit_error(&msg, 2, output))
+            },
+            |ws| Ok(ws.root.clone()),
+        )
 }
 
 // ── Changed files ────────────────────────────────────────────────
@@ -332,26 +335,27 @@ fn get_changed_files(
 // ── Check command ────────────────────────────────────────────────
 
 #[allow(clippy::struct_excessive_bools)]
-pub(crate) struct CheckOptions<'a> {
-    pub(crate) root: &'a std::path::Path,
-    pub(crate) config_path: &'a Option<std::path::PathBuf>,
-    pub(crate) output: OutputFormat,
-    pub(crate) no_cache: bool,
-    pub(crate) threads: usize,
-    pub(crate) quiet: bool,
-    pub(crate) fail_on_issues: bool,
-    pub(crate) filters: &'a IssueFilters,
-    pub(crate) changed_since: Option<&'a str>,
-    pub(crate) baseline: Option<&'a std::path::Path>,
-    pub(crate) save_baseline: Option<&'a std::path::Path>,
-    pub(crate) sarif_file: Option<&'a std::path::Path>,
-    pub(crate) production: bool,
-    pub(crate) workspace: Option<&'a str>,
-    pub(crate) include_dupes: bool,
-    pub(crate) trace_opts: &'a TraceOptions,
+pub struct CheckOptions<'a> {
+    pub root: &'a std::path::Path,
+    pub config_path: &'a Option<std::path::PathBuf>,
+    pub output: OutputFormat,
+    pub no_cache: bool,
+    pub threads: usize,
+    pub quiet: bool,
+    pub fail_on_issues: bool,
+    pub filters: &'a IssueFilters,
+    pub changed_since: Option<&'a str>,
+    pub baseline: Option<&'a std::path::Path>,
+    pub save_baseline: Option<&'a std::path::Path>,
+    pub sarif_file: Option<&'a std::path::Path>,
+    pub production: bool,
+    pub workspace: Option<&'a str>,
+    pub include_dupes: bool,
+    pub trace_opts: &'a TraceOptions,
 }
 
-pub(crate) fn run_check(opts: &CheckOptions<'_>) -> ExitCode {
+#[allow(clippy::cognitive_complexity)] // Top-level command orchestration is inherently complex
+pub fn run_check(opts: &CheckOptions<'_>) -> ExitCode {
     let start = Instant::now();
 
     let config = match load_config(

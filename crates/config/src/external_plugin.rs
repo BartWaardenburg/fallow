@@ -19,9 +19,9 @@ pub enum PluginDetection {
     /// Plugin detected if this file pattern matches.
     FileExists { pattern: String },
     /// All conditions must be true.
-    All { conditions: Vec<PluginDetection> },
+    All { conditions: Vec<Self> },
     /// Any condition must be true.
-    Any { conditions: Vec<PluginDetection> },
+    Any { conditions: Vec<Self> },
 }
 
 /// A declarative plugin definition loaded from a standalone file or inline config.
@@ -106,6 +106,7 @@ pub struct ExternalUsedExport {
 impl ExternalPluginDef {
     /// Generate JSON Schema for the external plugin format.
     pub fn json_schema() -> serde_json::Value {
+        #[allow(clippy::use_self)] // schemars macro requires the concrete type name
         serde_json::to_value(schemars::schema_for!(ExternalPluginDef)).unwrap_or_default()
     }
 }

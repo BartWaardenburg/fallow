@@ -138,10 +138,10 @@ impl LanguageServer for FallowLspServer {
         // Read file content once for computing line positions and edit ranges.
         // Prefer in-memory document text (from did_change), fall back to disk.
         let documents = self.documents.read().await;
-        let file_content = match documents.get(uri) {
-            Some(text) => text.clone(),
-            None => std::fs::read_to_string(&file_path).unwrap_or_default(),
-        };
+        let file_content = documents
+            .get(uri)
+            .cloned()
+            .unwrap_or_else(|| std::fs::read_to_string(&file_path).unwrap_or_default());
         drop(documents);
         let file_lines: Vec<&str> = file_content.lines().collect();
 

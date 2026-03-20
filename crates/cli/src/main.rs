@@ -262,10 +262,10 @@ enum Format {
 impl From<Format> for fallow_config::OutputFormat {
     fn from(f: Format) -> Self {
         match f {
-            Format::Human => fallow_config::OutputFormat::Human,
-            Format::Json => fallow_config::OutputFormat::Json,
-            Format::Sarif => fallow_config::OutputFormat::Sarif,
-            Format::Compact => fallow_config::OutputFormat::Compact,
+            Format::Human => Self::Human,
+            Format::Json => Self::Json,
+            Format::Sarif => Self::Sarif,
+            Format::Compact => Self::Compact,
         }
     }
 }

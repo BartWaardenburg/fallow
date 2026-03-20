@@ -120,15 +120,13 @@ pub fn discover_files(config: &ResolvedConfig) -> Vec<DiscoveredFile> {
         .filter(|entry| !config.ignore_patterns.is_match(entry.path()))
         .filter(|entry| {
             // In production mode, exclude test/story/dev files
-            if let Some(ref excludes) = production_excludes {
+            production_excludes.as_ref().is_none_or(|excludes| {
                 let relative = entry
                     .path()
                     .strip_prefix(&config.root)
                     .unwrap_or(entry.path());
                 !excludes.is_match(relative)
-            } else {
-                true
-            }
+            })
         })
         .enumerate()
         .map(|(idx, entry)| {

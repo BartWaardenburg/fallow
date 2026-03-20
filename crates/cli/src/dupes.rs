@@ -8,7 +8,7 @@ use crate::report;
 use crate::{emit_error, load_config};
 
 #[derive(Clone, clap::ValueEnum)]
-pub(crate) enum DupesMode {
+pub enum DupesMode {
     Strict,
     Mild,
     Weak,
@@ -16,26 +16,26 @@ pub(crate) enum DupesMode {
 }
 
 #[allow(clippy::struct_excessive_bools)]
-pub(crate) struct DupesOptions<'a> {
-    pub(crate) root: &'a std::path::Path,
-    pub(crate) config_path: &'a Option<std::path::PathBuf>,
-    pub(crate) output: OutputFormat,
-    pub(crate) no_cache: bool,
-    pub(crate) threads: usize,
-    pub(crate) quiet: bool,
-    pub(crate) mode: DupesMode,
-    pub(crate) min_tokens: usize,
-    pub(crate) min_lines: usize,
-    pub(crate) threshold: f64,
-    pub(crate) skip_local: bool,
-    pub(crate) cross_language: bool,
-    pub(crate) baseline_path: Option<&'a std::path::Path>,
-    pub(crate) save_baseline_path: Option<&'a std::path::Path>,
-    pub(crate) production: bool,
-    pub(crate) trace: Option<&'a str>,
+pub struct DupesOptions<'a> {
+    pub root: &'a std::path::Path,
+    pub config_path: &'a Option<std::path::PathBuf>,
+    pub output: OutputFormat,
+    pub no_cache: bool,
+    pub threads: usize,
+    pub quiet: bool,
+    pub mode: DupesMode,
+    pub min_tokens: usize,
+    pub min_lines: usize,
+    pub threshold: f64,
+    pub skip_local: bool,
+    pub cross_language: bool,
+    pub baseline_path: Option<&'a std::path::Path>,
+    pub save_baseline_path: Option<&'a std::path::Path>,
+    pub production: bool,
+    pub trace: Option<&'a str>,
 }
 
-pub(crate) fn run_dupes(opts: &DupesOptions<'_>) -> ExitCode {
+pub fn run_dupes(opts: &DupesOptions<'_>) -> ExitCode {
     let start = Instant::now();
 
     let config = match load_config(

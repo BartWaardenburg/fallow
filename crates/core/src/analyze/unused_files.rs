@@ -19,7 +19,7 @@ use super::predicates::{is_barrel_with_reachable_sources, is_config_file, is_dec
 /// Barrel files (index.ts that only re-export) are excluded when their re-export
 /// sources are reachable — they serve an organizational purpose even if consumers
 /// import directly from the source files rather than through the barrel.
-pub(crate) fn find_unused_files(
+pub fn find_unused_files(
     graph: &ModuleGraph,
     suppressions_by_file: &FxHashMap<FileId, &[Suppression]>,
 ) -> Vec<UnusedFile> {

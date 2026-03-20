@@ -340,13 +340,7 @@ fn expression_to_string_array(expr: &Expression) -> Vec<String> {
             .iter()
             .filter_map(|el| match el {
                 ArrayExpressionElement::SpreadElement(_) => None,
-                _ => {
-                    if let Some(expr) = el.as_expression() {
-                        expression_to_string(expr)
-                    } else {
-                        None
-                    }
-                }
+                _ => el.as_expression().and_then(expression_to_string),
             })
             .collect(),
         _ => vec![],

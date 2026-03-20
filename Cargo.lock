@@ -630,7 +630,7 @@ dependencies = [
  "miette",
  "notify",
  "notify-debouncer-mini",
- "rustc-hash",
+ "rustc-hash 2.1.1",
  "serde",
  "serde_json",
  "tempfile",
@@ -647,7 +647,7 @@ dependencies = [
  "globset",
  "json_comments",
  "miette",
- "rustc-hash",
+ "rustc-hash 2.1.1",
  "schemars",
  "serde",
  "serde_json",
@@ -678,7 +678,7 @@ dependencies = [
  "proptest",
  "rayon",
  "regex",
- "rustc-hash",
+ "rustc-hash 2.1.1",
  "serde",
  "serde_json",
  "tempfile",
@@ -701,7 +701,7 @@ dependencies = [
  "oxc_span",
  "rayon",
  "regex",
- "rustc-hash",
+ "rustc-hash 2.1.1",
  "tracing",
  "xxhash-rust",
 ]
@@ -719,7 +719,7 @@ dependencies = [
  "oxc_span",
  "proptest",
  "rayon",
- "rustc-hash",
+ "rustc-hash 2.1.1",
  "tracing",
 ]
 
@@ -729,7 +729,7 @@ version = "0.3.0"
 dependencies = [
  "fallow-config",
  "fallow-core",
- "rustc-hash",
+ "rustc-hash 2.1.1",
  "serde_json",
  "tokio",
  "tower-lsp",

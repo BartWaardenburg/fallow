@@ -106,6 +106,13 @@ redundant_closure_for_method_calls = "allow"
 similar_names = "allow"
 wildcard_imports = "allow"
 unnested_or_patterns = "allow"
+# Nursery lints (selectively enabled)
+cognitive_complexity = "warn"
+option_if_let_else = "warn"
+redundant_pub_crate = "warn"
+use_self = "warn"
+missing_const_for_fn = "warn"
+unnecessary_fallible_conversions = "warn"
 
 [workspace.lints.rust]
 unsafe_code = "warn"

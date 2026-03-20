@@ -65,6 +65,7 @@ pub fn parse_suppressions(comments: &[Comment], source: &str) -> Vec<Suppression
 
 /// Parse suppressions from raw source text using simple string scanning.
 /// Used for SFC files where comment byte offsets don't correspond to the original file.
+#[allow(clippy::option_if_let_else)] // Chained if-let-else is more readable here
 pub fn parse_suppressions_from_source(source: &str) -> Vec<Suppression> {
     let mut suppressions = Vec::new();
 

@@ -290,11 +290,10 @@ fn run_plugins(
 
     // Run plugins for root project (full run with external plugins, inline config, etc.)
     let pkg_path = config.root.join("package.json");
-    let mut result = if let Ok(pkg) = PackageJson::load(&pkg_path) {
-        registry.run(&pkg, &config.root, &file_paths)
-    } else {
-        plugins::AggregatedPluginResult::default()
-    };
+    let mut result = PackageJson::load(&pkg_path).map_or_else(
+        |_| plugins::AggregatedPluginResult::default(),
+        |pkg| registry.run(&pkg, &config.root, &file_paths),
+    );
 
     if workspaces.is_empty() {
         return result;

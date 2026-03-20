@@ -85,7 +85,7 @@ pub(crate) struct ModuleInfoExtractor {
 }
 
 impl ModuleInfoExtractor {
-    pub(crate) fn new() -> Self {
+    pub(crate) const fn new() -> Self {
         Self {
             exports: Vec::new(),
             imports: Vec::new(),
