@@ -27,7 +27,7 @@ pub struct ModuleInfo {
     /// Identifiers used in "all members consumed" patterns
     /// (Object.values, Object.keys, Object.entries, for..in, spread, computed dynamic access).
     pub whole_object_uses: Vec<String>,
-    /// Whether this module uses CommonJS exports (`module.exports` or `exports.*`).
+    /// Whether this module uses `CommonJS` exports (`module.exports` or `exports.*`).
     pub has_cjs_exports: bool,
     /// xxh3 hash of the file content for incremental caching.
     pub content_hash: u64,

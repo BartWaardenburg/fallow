@@ -93,7 +93,7 @@ pub struct ResolvedModule {
     pub member_accesses: Vec<fallow_types::extract::MemberAccess>,
     /// Identifiers used as whole objects (Object.values, for..in, spread, etc.).
     pub whole_object_uses: Vec<String>,
-    /// Whether this module uses CommonJS exports.
+    /// Whether this module uses `CommonJS` exports.
     pub has_cjs_exports: bool,
 }
 
