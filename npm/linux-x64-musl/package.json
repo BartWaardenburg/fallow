@@ -1,6 +1,6 @@
 {
   "name": "@fallow-cli/linux-x64-musl",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Fallow CLI binary for Linux x64 (musl)",
   "license": "MIT",
   "repository": {
