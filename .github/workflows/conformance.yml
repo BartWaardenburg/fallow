@@ -1,0 +1,135 @@
+name: Conformance
+
+on:
+  schedule:
+    # Run weekly on Mondays at 06:00 UTC
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  conformance:
+    name: Fallow vs Knip
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Build fallow
+        run: cargo build --release -p fallow-cli
+
+      - name: Run conformance suite
+        id: conformance
+        run: |
+          REPORT="$(./tests/conformance/run.sh --fallow-bin ./target/release/fallow 2>conformance-stderr.txt)"
+          echo "${REPORT}" > conformance-report.json
+
+          # Extract summary values for the step summary
+          FALLOW_TOTAL="$(echo "${REPORT}" | python3 -c "import json,sys; print(json.load(sys.stdin)['summary']['fallow_total'])")"
+          KNIP_TOTAL="$(echo "${REPORT}" | python3 -c "import json,sys; print(json.load(sys.stdin)['summary']['knip_total'])")"
+          AGREED="$(echo "${REPORT}" | python3 -c "import json,sys; print(json.load(sys.stdin)['summary']['agreed'])")"
+          FALLOW_ONLY="$(echo "${REPORT}" | python3 -c "import json,sys; print(json.load(sys.stdin)['summary']['fallow_only'])")"
+          KNIP_ONLY="$(echo "${REPORT}" | python3 -c "import json,sys; print(json.load(sys.stdin)['summary']['knip_only'])")"
+          AGREEMENT_PCT="$(echo "${REPORT}" | python3 -c "import json,sys; print(json.load(sys.stdin)['summary']['agreement_pct'])")"
+
+          echo "fallow_total=${FALLOW_TOTAL}" >> "$GITHUB_OUTPUT"
+          echo "knip_total=${KNIP_TOTAL}" >> "$GITHUB_OUTPUT"
+          echo "agreed=${AGREED}" >> "$GITHUB_OUTPUT"
+          echo "fallow_only=${FALLOW_ONLY}" >> "$GITHUB_OUTPUT"
+          echo "knip_only=${KNIP_ONLY}" >> "$GITHUB_OUTPUT"
+          echo "agreement_pct=${AGREEMENT_PCT}" >> "$GITHUB_OUTPUT"
+        # Never fail -- this is informational
+        continue-on-error: true
+
+      - name: Post step summary
+        if: always()
+        env:
+          FALLOW_TOTAL: ${{ steps.conformance.outputs.fallow_total }}
+          KNIP_TOTAL: ${{ steps.conformance.outputs.knip_total }}
+          AGREED: ${{ steps.conformance.outputs.agreed }}
+          FALLOW_ONLY: ${{ steps.conformance.outputs.fallow_only }}
+          KNIP_ONLY: ${{ steps.conformance.outputs.knip_only }}
+          AGREEMENT_PCT: ${{ steps.conformance.outputs.agreement_pct }}
+        run: |
+          if [[ ! -f conformance-report.json ]]; then
+            echo "## Conformance Test" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "Conformance suite did not produce a report. Check the logs for errors." >> "$GITHUB_STEP_SUMMARY"
+            if [[ -f conformance-stderr.txt ]]; then
+              echo "" >> "$GITHUB_STEP_SUMMARY"
+              echo '```' >> "$GITHUB_STEP_SUMMARY"
+              cat conformance-stderr.txt >> "$GITHUB_STEP_SUMMARY"
+              echo '```' >> "$GITHUB_STEP_SUMMARY"
+            fi
+            exit 0
+          fi
+
+          echo "## Conformance Test: Fallow vs Knip" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Metric | Count |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|--------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Fallow issues | ${FALLOW_TOTAL} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Knip issues | ${KNIP_TOTAL} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Agreed | ${AGREED} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Fallow-only | ${FALLOW_ONLY} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Knip-only | ${KNIP_ONLY} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Agreement** | **${AGREEMENT_PCT}%** |" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          # Add per-type breakdown
+          echo "### By Issue Type" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          python3 -c "
+          import json
+          with open('conformance-report.json') as f:
+              r = json.load(f)
+          print('| Type | Fallow | Knip | Agreed | Agreement |')
+          print('|------|--------|------|--------|-----------|')
+          for t, d in sorted(r['by_type'].items()):
+              print(f\"| {t} | {d['fallow_count']} | {d['knip_count']} | {d['agreed']} | {d['agreement_pct']}% |\")
+          " >> "$GITHUB_STEP_SUMMARY"
+
+          # Add disagreement details
+          python3 -c "
+          import json
+          with open('conformance-report.json') as f:
+              r = json.load(f)
+          details = r['details']
+          if details['fallow_only']:
+              print()
+              print('### Fallow-only findings')
+              print()
+              print('Issues found by fallow but not by knip:')
+              print()
+              for d in details['fallow_only']:
+                  name = f' (\`{d[\"name\"]}\`)' if d['name'] else ''
+                  print(f'- \`{d[\"type\"]}\` in \`{d[\"file\"]}\`{name}')
+          if details['knip_only']:
+              print()
+              print('### Knip-only findings')
+              print()
+              print('Issues found by knip but not by fallow:')
+              print()
+              for d in details['knip_only']:
+                  name = f' (\`{d[\"name\"]}\`)' if d['name'] else ''
+                  print(f'- \`{d[\"type\"]}\` in \`{d[\"file\"]}\`{name}')
+          " >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: conformance-report
+          path: |
+            conformance-report.json
+            conformance-stderr.txt
+          retention-days: 30

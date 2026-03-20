@@ -1,0 +1,12 @@
+{
+  "name": "conformance-basic",
+  "version": "1.0.0",
+  "main": "src/index.ts",
+  "dependencies": {
+    "lodash": "^4.17.21",
+    "unused-pkg": "^1.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}
