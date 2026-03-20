@@ -13,16 +13,16 @@ export const getAutoDownload = (): boolean =>
 
 export const getIssueTypes = (): IssueTypeConfig =>
   getConfig().get<IssueTypeConfig>("issueTypes", {
-    unusedFiles: true,
-    unusedExports: true,
-    unusedTypes: true,
-    unusedDependencies: true,
-    unusedDevDependencies: true,
-    unusedEnumMembers: true,
-    unusedClassMembers: true,
-    unresolvedImports: true,
-    unlistedDependencies: true,
-    duplicateExports: true,
+    "unused-files": true,
+    "unused-exports": true,
+    "unused-types": true,
+    "unused-dependencies": true,
+    "unused-dev-dependencies": true,
+    "unused-enum-members": true,
+    "unused-class-members": true,
+    "unresolved-imports": true,
+    "unlisted-dependencies": true,
+    "duplicate-exports": true,
   });
 
 export const getDuplicationThreshold = (): number =>

@@ -74,29 +74,29 @@
         "fallow.issueTypes": {
           "type": "object",
           "default": {
-            "unusedFiles": true,
-            "unusedExports": true,
-            "unusedTypes": true,
-            "unusedDependencies": true,
-            "unusedDevDependencies": true,
-            "unusedEnumMembers": true,
-            "unusedClassMembers": true,
-            "unresolvedImports": true,
-            "unlistedDependencies": true,
-            "duplicateExports": true
+            "unused-files": true,
+            "unused-exports": true,
+            "unused-types": true,
+            "unused-dependencies": true,
+            "unused-dev-dependencies": true,
+            "unused-enum-members": true,
+            "unused-class-members": true,
+            "unresolved-imports": true,
+            "unlisted-dependencies": true,
+            "duplicate-exports": true
           },
-          "description": "Toggle individual issue types on or off.",
+          "description": "Toggle individual issue types on or off. Uses kebab-case names matching fallow's rules config.",
           "properties": {
-            "unusedFiles": { "type": "boolean" },
-            "unusedExports": { "type": "boolean" },
-            "unusedTypes": { "type": "boolean" },
-            "unusedDependencies": { "type": "boolean" },
-            "unusedDevDependencies": { "type": "boolean" },
-            "unusedEnumMembers": { "type": "boolean" },
-            "unusedClassMembers": { "type": "boolean" },
-            "unresolvedImports": { "type": "boolean" },
-            "unlistedDependencies": { "type": "boolean" },
-            "duplicateExports": { "type": "boolean" }
+            "unused-files": { "type": "boolean" },
+            "unused-exports": { "type": "boolean" },
+            "unused-types": { "type": "boolean" },
+            "unused-dependencies": { "type": "boolean" },
+            "unused-dev-dependencies": { "type": "boolean" },
+            "unused-enum-members": { "type": "boolean" },
+            "unused-class-members": { "type": "boolean" },
+            "unresolved-imports": { "type": "boolean" },
+            "unlisted-dependencies": { "type": "boolean" },
+            "duplicate-exports": { "type": "boolean" }
           }
         },
         "fallow.duplication.threshold": {

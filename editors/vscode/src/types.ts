@@ -1,14 +1,14 @@
 export interface IssueTypeConfig {
-  readonly unusedFiles: boolean;
-  readonly unusedExports: boolean;
-  readonly unusedTypes: boolean;
-  readonly unusedDependencies: boolean;
-  readonly unusedDevDependencies: boolean;
-  readonly unusedEnumMembers: boolean;
-  readonly unusedClassMembers: boolean;
-  readonly unresolvedImports: boolean;
-  readonly unlistedDependencies: boolean;
-  readonly duplicateExports: boolean;
+  readonly "unused-files": boolean;
+  readonly "unused-exports": boolean;
+  readonly "unused-types": boolean;
+  readonly "unused-dependencies": boolean;
+  readonly "unused-dev-dependencies": boolean;
+  readonly "unused-enum-members": boolean;
+  readonly "unused-class-members": boolean;
+  readonly "unresolved-imports": boolean;
+  readonly "unlisted-dependencies": boolean;
+  readonly "duplicate-exports": boolean;
 }
 
 export type DuplicationMode = "strict" | "mild" | "weak" | "semantic";
