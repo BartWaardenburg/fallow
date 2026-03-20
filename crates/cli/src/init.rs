@@ -4,7 +4,7 @@ use fallow_config::{ExternalPluginDef, FallowConfig};
 
 pub(crate) fn run_init(root: &std::path::Path, use_toml: bool) -> ExitCode {
     // Check if any config file already exists
-    let existing_names = ["fallow.jsonc", "fallow.json", "fallow.toml", ".fallow.toml"];
+    let existing_names = [".fallowrc.json", "fallow.toml", ".fallow.toml"];
     for name in &existing_names {
         let path = root.join(name);
         if path.exists() {
@@ -22,25 +22,18 @@ pub(crate) fn run_init(root: &std::path::Path, use_toml: bool) -> ExitCode {
 # entry = ["src/workers/*.ts"]
 
 # Patterns to ignore
-# ignore = ["**/*.generated.ts"]
+# ignorePatterns = ["**/*.generated.ts"]
 
 # Dependencies to ignore (always considered used)
 # ignoreDependencies = ["autoprefixer"]
 
-[detect]
-unusedFiles = true
-unusedExports = true
-unusedDependencies = true
-unusedDevDependencies = true
-unusedTypes = true
-
 # Per-issue-type severity: "error" (fail CI), "warn" (report only), "off" (ignore)
 # All default to "error" when omitted.
 # [rules]
-# unusedFiles = "error"
-# unusedExports = "warn"
-# unusedTypes = "off"
-# unresolvedImports = "error"
+# unused-files = "error"
+# unused-exports = "warn"
+# unused-types = "off"
+# unresolved-imports = "error"
 "#;
         if let Err(e) = std::fs::write(&config_path, default_config) {
             eprintln!("Error: Failed to write fallow.toml: {e}");
@@ -48,44 +41,17 @@ unusedTypes = true
         }
         eprintln!("Created fallow.toml");
     } else {
-        let config_path = root.join("fallow.jsonc");
+        let config_path = root.join(".fallowrc.json");
         let default_config = r#"{
-  // fallow.jsonc - Dead code analysis configuration
-  // See https://github.com/fallow-rs/fallow for documentation
   "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
-
-  // Additional entry points (beyond auto-detected ones)
-  // "entry": ["src/workers/*.ts"],
-
-  // Patterns to ignore
-  // "ignore": ["**/*.generated.ts"],
-
-  // Dependencies to ignore (always considered used)
-  // "ignoreDependencies": ["autoprefixer"],
-
-  "detect": {
-    "unusedFiles": true,
-    "unusedExports": true,
-    "unusedDependencies": true,
-    "unusedDevDependencies": true,
-    "unusedTypes": true
-  }
-
-  // Per-issue-type severity: "error" (fail CI), "warn" (report only), "off" (ignore)
-  // All default to "error" when omitted.
-  // "rules": {
-  //   "unusedFiles": "error",
-  //   "unusedExports": "warn",
-  //   "unusedTypes": "off",
-  //   "unresolvedImports": "error"
-  // }
+  "rules": {}
 }
 "#;
         if let Err(e) = std::fs::write(&config_path, default_config) {
-            eprintln!("Error: Failed to write fallow.jsonc: {e}");
+            eprintln!("Error: Failed to write .fallowrc.json: {e}");
             return ExitCode::from(2);
         }
-        eprintln!("Created fallow.jsonc");
+        eprintln!("Created .fallowrc.json");
     }
     ExitCode::SUCCESS
 }

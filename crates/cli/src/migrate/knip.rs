@@ -2,16 +2,16 @@ use super::{MigrationWarning, string_or_array};
 
 /// Knip rule names mapped to fallow rule names.
 const KNIP_RULE_MAP: &[(&str, &str)] = &[
-    ("files", "unusedFiles"),
-    ("dependencies", "unusedDependencies"),
-    ("devDependencies", "unusedDevDependencies"),
-    ("exports", "unusedExports"),
-    ("types", "unusedTypes"),
-    ("enumMembers", "unusedEnumMembers"),
-    ("classMembers", "unusedClassMembers"),
-    ("unlisted", "unlistedDependencies"),
-    ("unresolved", "unresolvedImports"),
-    ("duplicates", "duplicateExports"),
+    ("files", "unused-files"),
+    ("dependencies", "unused-dependencies"),
+    ("devDependencies", "unused-dev-dependencies"),
+    ("exports", "unused-exports"),
+    ("types", "unused-types"),
+    ("enumMembers", "unused-enum-members"),
+    ("classMembers", "unused-class-members"),
+    ("unlisted", "unlisted-dependencies"),
+    ("unresolved", "unresolved-imports"),
+    ("duplicates", "duplicate-exports"),
 ];
 
 /// Knip fields that cannot be mapped and generate warnings.
@@ -185,12 +185,12 @@ pub(super) fn migrate_knip(
         }
     }
 
-    // ignore -> ignore
+    // ignore -> ignorePatterns
     if let Some(ignore_val) = obj.get("ignore") {
         let ignores = string_or_array(ignore_val);
         if !ignores.is_empty() {
             config.insert(
-                "ignore".to_string(),
+                "ignorePatterns".to_string(),
                 serde_json::Value::Array(
                     ignores.into_iter().map(serde_json::Value::String).collect(),
                 ),
@@ -406,9 +406,9 @@ mod tests {
         migrate_knip(&knip, &mut config, &mut warnings);
 
         let rules = config.get("rules").unwrap().as_object().unwrap();
-        assert_eq!(rules.get("unusedFiles").unwrap(), "warn");
-        assert_eq!(rules.get("unusedExports").unwrap(), "off");
-        assert_eq!(rules.get("unusedDependencies").unwrap(), "error");
+        assert_eq!(rules.get("unused-files").unwrap(), "warn");
+        assert_eq!(rules.get("unused-exports").unwrap(), "off");
+        assert_eq!(rules.get("unused-dependencies").unwrap(), "error");
     }
 
     #[test]
@@ -420,8 +420,8 @@ mod tests {
         migrate_knip(&knip, &mut config, &mut warnings);
 
         let rules = config.get("rules").unwrap().as_object().unwrap();
-        assert_eq!(rules.get("unusedFiles").unwrap(), "off");
-        assert_eq!(rules.get("unusedTypes").unwrap(), "off");
+        assert_eq!(rules.get("unused-files").unwrap(), "off");
+        assert_eq!(rules.get("unused-types").unwrap(), "off");
     }
 
     #[test]
@@ -434,15 +434,15 @@ mod tests {
 
         let rules = config.get("rules").unwrap().as_object().unwrap();
         // Included types should NOT be set to "off"
-        assert!(!rules.contains_key("unusedFiles") || rules.get("unusedFiles").unwrap() != "off");
+        assert!(!rules.contains_key("unused-files") || rules.get("unused-files").unwrap() != "off");
         assert!(
-            !rules.contains_key("unusedExports") || rules.get("unusedExports").unwrap() != "off"
+            !rules.contains_key("unused-exports") || rules.get("unused-exports").unwrap() != "off"
         );
         // Non-included types should be "off"
-        assert_eq!(rules.get("unusedDependencies").unwrap(), "off");
-        assert_eq!(rules.get("unusedTypes").unwrap(), "off");
-        assert_eq!(rules.get("unusedEnumMembers").unwrap(), "off");
-        assert_eq!(rules.get("unusedClassMembers").unwrap(), "off");
+        assert_eq!(rules.get("unused-dependencies").unwrap(), "off");
+        assert_eq!(rules.get("unused-types").unwrap(), "off");
+        assert_eq!(rules.get("unused-enum-members").unwrap(), "off");
+        assert_eq!(rules.get("unused-class-members").unwrap(), "off");
     }
 
     #[test]
@@ -454,7 +454,7 @@ mod tests {
         migrate_knip(&knip, &mut config, &mut warnings);
 
         assert_eq!(
-            config.get("ignore").unwrap(),
+            config.get("ignorePatterns").unwrap(),
             &serde_json::json!(["src/generated/**", "**/*.test.ts"])
         );
     }
@@ -553,7 +553,7 @@ mod tests {
         migrate_knip(&knip, &mut config, &mut warnings);
 
         let rules = config.get("rules").unwrap().as_object().unwrap();
-        assert_eq!(rules.get("unusedFiles").unwrap(), "error");
+        assert_eq!(rules.get("unused-files").unwrap(), "error");
         assert!(!rules.contains_key("binaries"));
 
         assert_eq!(warnings.len(), 1);

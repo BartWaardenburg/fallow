@@ -1,9 +1,17 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "FallowConfig",
-  "description": "User-facing configuration loaded from `fallow.jsonc`, `fallow.json`, or `fallow.toml`.",
+  "description": "User-facing configuration loaded from `.fallowrc.json` or `fallow.toml`.",
   "type": "object",
   "properties": {
+    "extends": {
+      "description": "Paths to base config files to extend from.\nPaths are resolved relative to the config file containing the `extends`.\nBase configs are loaded first, then this config's values override them.\nLater entries in the array override earlier ones.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "writeOnly": true
+    },
     "entry": {
       "description": "Additional entry point glob patterns.",
       "type": "array",
@@ -12,29 +20,13 @@
       },
       "default": []
     },
-    "ignore": {
+    "ignorePatterns": {
       "description": "Glob patterns to ignore from analysis.",
       "type": "array",
       "items": {
         "type": "string"
       },
       "default": []
-    },
-    "detect": {
-      "description": "What to detect.",
-      "$ref": "#/$defs/DetectConfig",
-      "default": {
-        "unusedFiles": true,
-        "unusedExports": true,
-        "unusedDependencies": true,
-        "unusedDevDependencies": true,
-        "unusedTypes": true,
-        "unusedEnumMembers": true,
-        "unusedClassMembers": true,
-        "unresolvedImports": true,
-        "unlistedDependencies": true,
-        "duplicateExports": true
-      }
     },
     "framework": {
       "description": "Custom framework definitions (inline plugin definitions).",
@@ -72,11 +64,6 @@
       },
       "default": []
     },
-    "output": {
-      "description": "Output format.",
-      "$ref": "#/$defs/OutputFormat",
-      "default": "human"
-    },
     "duplicates": {
       "description": "Duplication detection settings.",
       "$ref": "#/$defs/DuplicatesConfig",
@@ -96,16 +83,16 @@
       "description": "Per-issue-type severity rules.",
       "$ref": "#/$defs/RulesConfig",
       "default": {
-        "unusedFiles": "error",
-        "unusedExports": "error",
-        "unusedTypes": "error",
-        "unusedDependencies": "error",
-        "unusedDevDependencies": "error",
-        "unusedEnumMembers": "error",
-        "unusedClassMembers": "error",
-        "unresolvedImports": "error",
-        "unlistedDependencies": "error",
-        "duplicateExports": "error"
+        "unused-files": "error",
+        "unused-exports": "error",
+        "unused-types": "error",
+        "unused-dependencies": "error",
+        "unused-dev-dependencies": "error",
+        "unused-enum-members": "error",
+        "unused-class-members": "error",
+        "unresolved-imports": "error",
+        "unlisted-dependencies": "error",
+        "duplicate-exports": "error"
       }
     },
     "production": {
@@ -120,66 +107,18 @@
         "type": "string"
       },
       "default": []
+    },
+    "overrides": {
+      "description": "Per-file rule overrides matching oxlint's overrides pattern.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/ConfigOverride"
+      },
+      "default": []
     }
   },
   "additionalProperties": false,
   "$defs": {
-    "DetectConfig": {
-      "description": "Controls which analyses to run.",
-      "type": "object",
-      "properties": {
-        "unusedFiles": {
-          "description": "Detect unused files (not reachable from entry points).",
-          "type": "boolean",
-          "default": true
-        },
-        "unusedExports": {
-          "description": "Detect unused exports (exported but never imported).",
-          "type": "boolean",
-          "default": true
-        },
-        "unusedDependencies": {
-          "description": "Detect unused production dependencies.",
-          "type": "boolean",
-          "default": true
-        },
-        "unusedDevDependencies": {
-          "description": "Detect unused dev dependencies.",
-          "type": "boolean",
-          "default": true
-        },
-        "unusedTypes": {
-          "description": "Detect unused type exports.",
-          "type": "boolean",
-          "default": true
-        },
-        "unusedEnumMembers": {
-          "description": "Detect unused enum members.",
-          "type": "boolean",
-          "default": true
-        },
-        "unusedClassMembers": {
-          "description": "Detect unused class members.",
-          "type": "boolean",
-          "default": true
-        },
-        "unresolvedImports": {
-          "description": "Detect unresolved imports.",
-          "type": "boolean",
-          "default": true
-        },
-        "unlistedDependencies": {
-          "description": "Detect unlisted dependencies (used but not in package.json).",
-          "type": "boolean",
-          "default": true
-        },
-        "duplicateExports": {
-          "description": "Detect duplicate exports.",
-          "type": "boolean",
-          "default": true
-        }
-      }
-    },
     "ExternalPluginDef": {
       "description": "A declarative plugin definition loaded from a standalone file or inline config.\n\nExternal plugins provide the same static pattern capabilities as built-in\nplugins (entry points, always-used files, used exports, tooling dependencies),\nbut are defined in standalone files or inline in the fallow config rather than\ncompiled Rust code.\n\nThey cannot do AST-based config parsing (`resolve_config()`), but cover the\nvast majority of framework integration use cases.\n\nSupports JSONC, JSON, and TOML formats. All use camelCase field names.\n\n```json\n{\n  \"$schema\": \"https://raw.githubusercontent.com/fallow-rs/fallow/main/plugin-schema.json\",\n  \"name\": \"my-framework\",\n  \"enablers\": [\"my-framework\", \"@my-framework/core\"],\n  \"entryPoints\": [\"src/routes/**/*.{ts,tsx}\"],\n  \"configPatterns\": [\"my-framework.config.{ts,js}\"],\n  \"alwaysUsed\": [\"src/setup.ts\"],\n  \"toolingDependencies\": [\"my-framework-cli\"],\n  \"usedExports\": [\n    { \"pattern\": \"src/routes/**/*.{ts,tsx}\", \"exports\": [\"default\", \"loader\", \"action\"] }\n  ]\n}\n```",
       "type": "object",
@@ -388,31 +327,6 @@
         "exports"
       ]
     },
-    "OutputFormat": {
-      "description": "Output format for results.",
-      "oneOf": [
-        {
-          "description": "Human-readable terminal output with source context.",
-          "type": "string",
-          "const": "human"
-        },
-        {
-          "description": "Machine-readable JSON.",
-          "type": "string",
-          "const": "json"
-        },
-        {
-          "description": "SARIF format for GitHub Code Scanning.",
-          "type": "string",
-          "const": "sarif"
-        },
-        {
-          "description": "One issue per line (grep-friendly).",
-          "type": "string",
-          "const": "compact"
-        }
-      ]
-    },
     "DuplicatesConfig": {
       "description": "Configuration for code duplication detection.",
       "type": "object",
@@ -525,46 +439,46 @@
       }
     },
     "RulesConfig": {
-      "description": "Per-issue-type severity configuration.\n\nControls which issue types cause CI failure, are reported as warnings,\nor are suppressed entirely. All fields default to `Severity::Error`\nfor backwards compatibility.",
+      "description": "Per-issue-type severity configuration.\n\nControls which issue types cause CI failure, are reported as warnings,\nor are suppressed entirely. All fields default to `Severity::Error`.\n\nRule names use kebab-case in config files (e.g., `\"unused-files\": \"error\"`).",
       "type": "object",
       "properties": {
-        "unusedFiles": {
+        "unused-files": {
           "$ref": "#/$defs/Severity",
           "default": "error"
         },
-        "unusedExports": {
+        "unused-exports": {
           "$ref": "#/$defs/Severity",
           "default": "error"
         },
-        "unusedTypes": {
+        "unused-types": {
           "$ref": "#/$defs/Severity",
           "default": "error"
         },
-        "unusedDependencies": {
+        "unused-dependencies": {
           "$ref": "#/$defs/Severity",
           "default": "error"
         },
-        "unusedDevDependencies": {
+        "unused-dev-dependencies": {
           "$ref": "#/$defs/Severity",
           "default": "error"
         },
-        "unusedEnumMembers": {
+        "unused-enum-members": {
           "$ref": "#/$defs/Severity",
           "default": "error"
         },
-        "unusedClassMembers": {
+        "unused-class-members": {
           "$ref": "#/$defs/Severity",
           "default": "error"
         },
-        "unresolvedImports": {
+        "unresolved-imports": {
           "$ref": "#/$defs/Severity",
           "default": "error"
         },
-        "unlistedDependencies": {
+        "unlisted-dependencies": {
           "$ref": "#/$defs/Severity",
           "default": "error"
         },
-        "duplicateExports": {
+        "duplicate-exports": {
           "$ref": "#/$defs/Severity",
           "default": "error"
         }
@@ -589,6 +503,134 @@
           "const": "off"
         }
       ]
+    },
+    "ConfigOverride": {
+      "description": "Per-file override entry.",
+      "type": "object",
+      "properties": {
+        "files": {
+          "description": "Glob patterns to match files against (relative to config file location).",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "rules": {
+          "description": "Partial rules — only specified fields override the base rules.",
+          "$ref": "#/$defs/PartialRulesConfig",
+          "default": {}
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "files"
+      ]
+    },
+    "PartialRulesConfig": {
+      "description": "Partial per-issue-type severity for overrides. All fields optional.",
+      "type": "object",
+      "properties": {
+        "unused-files": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unused-exports": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unused-types": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unused-dependencies": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unused-dev-dependencies": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unused-enum-members": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unused-class-members": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unresolved-imports": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unlisted-dependencies": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "duplicate-exports": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
     }
   }
 }

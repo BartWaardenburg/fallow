@@ -2081,5 +2081,4 @@ mod tests {
             "source's foo should be referenced (propagated through 2-level chain)"
         );
     }
-
 }

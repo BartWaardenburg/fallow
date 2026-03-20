@@ -46,7 +46,7 @@ See the [README](README.md) for full feature details, benchmarks, and configurat
 ### 1.0 Criteria
 
 - [x] **Trustworthy results on the top 20 JS/TS project archetypes** — validated on 5 representative real-world projects (dub.sh, elk, nestjs-boilerplate, showtime-frontend, trpc). FP rates reduced to <30% across all archetypes. Six critical fixes shipped to address cross-archetype issues.
-- [ ] **Stable config format** — no breaking changes to `fallow.jsonc`/`fallow.toml` without a major version bump. Backwards compatibility policy documented (`docs/backwards-compatibility.md`); needs public announcement.
+- [ ] **Stable config format** — no breaking changes to `.fallowrc.json`/`fallow.toml` without a major version bump. Backwards compatibility policy documented (`docs/backwards-compatibility.md`); needs public announcement.
 - [ ] **Stable JSON output schema** — CI consumers can depend on the JSON structure without breaking across minor versions. Schema created (`docs/output-schema.json`); needs versioning in output.
 
 ### Remaining work

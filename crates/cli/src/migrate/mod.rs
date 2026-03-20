@@ -42,7 +42,7 @@ pub(crate) fn run_migrate(
     from: Option<&Path>,
 ) -> ExitCode {
     // Check if a fallow config already exists
-    let existing_names = ["fallow.jsonc", "fallow.json", "fallow.toml", ".fallow.toml"];
+    let existing_names = [".fallowrc.json", "fallow.toml", ".fallow.toml"];
     if !dry_run {
         for name in &existing_names {
             let path = root.join(name);
@@ -87,7 +87,7 @@ pub(crate) fn run_migrate(
         let filename = if use_toml {
             "fallow.toml"
         } else {
-            "fallow.jsonc"
+            ".fallowrc.json"
         };
         let output_path = root.join(filename);
         if let Err(e) = std::fs::write(&output_path, &output_content) {
@@ -316,7 +316,10 @@ fn generate_jsonc(result: &MigrationResult) -> String {
         "  \"$schema\": \"https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json\",\n",
     );
 
-    let obj = result.config.as_object().expect("config is always an Object");
+    let obj = result
+        .config
+        .as_object()
+        .expect("config is always an Object");
     let source_comment = result.sources.join(", ");
     let _ = writeln!(output, "  // Migrated from {source_comment}");
 
@@ -324,7 +327,7 @@ fn generate_jsonc(result: &MigrationResult) -> String {
     // Sort keys for consistent output
     let key_order = [
         "entry",
-        "ignore",
+        "ignorePatterns",
         "ignoreDependencies",
         "rules",
         "duplicates",
@@ -376,11 +379,14 @@ fn generate_toml(result: &MigrationResult) -> String {
     let source_comment = result.sources.join(", ");
     let _ = writeln!(output, "# Migrated from {source_comment}\n");
 
-    let obj = result.config.as_object().expect("config is always an Object");
+    let obj = result
+        .config
+        .as_object()
+        .expect("config is always an Object");
 
     // Top-level simple fields first
     // Note: fallow config uses #[serde(rename_all = "camelCase")] so TOML keys must be camelCase
-    for key in &["entry", "ignore", "ignoreDependencies"] {
+    for key in &["entry", "ignorePatterns", "ignoreDependencies"] {
         if let Some(value) = obj.get(*key)
             && let Some(arr) = value.as_array()
         {
@@ -455,14 +461,14 @@ mod tests {
             serde_json::from_str(r#"{"entry": ["src/index.ts"], "ignore": ["dist/**"]}"#).unwrap();
         let jscpd: serde_json::Value =
             serde_json::from_str(r#"{"minTokens": 100, "skipLocal": true}"#).unwrap();
-        let mut config = empty_config();
+        let mut config_map = empty_config();
         let mut warnings = Vec::new();
-        migrate_knip(&knip, &mut config, &mut warnings);
-        migrate_jscpd(&jscpd, &mut config, &mut warnings);
+        migrate_knip(&knip, &mut config_map, &mut warnings);
+        migrate_jscpd(&jscpd, &mut config_map, &mut warnings);
 
-        assert!(config.contains_key("entry"));
-        assert!(config.contains_key("ignore"));
-        assert!(config.contains_key("duplicates"));
+        assert!(config_map.contains_key("entry"));
+        assert!(config_map.contains_key("ignorePatterns"));
+        assert!(config_map.contains_key("duplicates"));
     }
 
     // -- Output format tests -------------------------------------------------
@@ -506,8 +512,8 @@ mod tests {
         let result = MigrationResult {
             config: serde_json::json!({
                 "rules": {
-                    "unusedFiles": "error",
-                    "unusedExports": "warn"
+                    "unused-files": "error",
+                    "unused-exports": "warn"
                 }
             }),
             warnings: vec![],
@@ -515,8 +521,8 @@ mod tests {
         };
         let output = generate_toml(&result);
         assert!(output.contains("[rules]"));
-        assert!(output.contains("unusedFiles = \"error\""));
-        assert!(output.contains("unusedExports = \"warn\""));
+        assert!(output.contains("unused-files = \"error\""));
+        assert!(output.contains("unused-exports = \"warn\""));
     }
 
     #[test]
@@ -544,11 +550,11 @@ mod tests {
         let result = MigrationResult {
             config: serde_json::json!({
                 "entry": ["src/index.ts"],
-                "ignore": ["dist/**"],
+                "ignorePatterns": ["dist/**"],
                 "ignoreDependencies": ["lodash"],
                 "rules": {
-                    "unusedFiles": "error",
-                    "unusedExports": "warn"
+                    "unused-files": "error",
+                    "unused-exports": "warn"
                 },
                 "duplicates": {
                     "minTokens": 100,
@@ -561,7 +567,7 @@ mod tests {
         let output = generate_toml(&result);
         let config: fallow_config::FallowConfig = toml::from_str(&output).unwrap();
         assert_eq!(config.entry, vec!["src/index.ts"]);
-        assert_eq!(config.ignore, vec!["dist/**"]);
+        assert_eq!(config.ignore_patterns, vec!["dist/**"]);
         assert_eq!(config.ignore_dependencies, vec!["lodash"]);
     }
 
@@ -572,7 +578,7 @@ mod tests {
                 "entry": ["src/index.ts"],
                 "ignoreDependencies": ["lodash"],
                 "rules": {
-                    "unusedFiles": "warn"
+                    "unused-files": "warn"
                 }
             }),
             warnings: vec![],

@@ -15,7 +15,7 @@ pub struct AnalyzeParams {
     /// Root directory of the project to analyze. Defaults to current working directory.
     pub root: Option<String>,
 
-    /// Path to fallow config file (fallow.jsonc, fallow.json, or fallow.toml).
+    /// Path to fallow config file (.fallowrc.json or fallow.toml).
     pub config: Option<String>,
 
     /// Only analyze production code (excludes tests, stories, dev files).

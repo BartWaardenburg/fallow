@@ -147,37 +147,30 @@ jscpd is a mature, well-established duplication detector. fallow dupes offers si
 Create a config file in your project root, or run `fallow init`:
 
 ```jsonc
-// fallow.jsonc
+// .fallowrc.json
 {
   "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
   "entry": ["src/workers/*.ts", "scripts/*.ts"],
-  "ignore": ["**/*.generated.ts", "**/*.d.ts"],
-  "ignore_dependencies": ["autoprefixer", "@types/node"],
-  "detect": {
-    "unused_files": true,
-    "unused_exports": true,
-    "unused_dependencies": true,
-    "unused_types": true,
-    "duplicate_exports": true
-  },
+  "ignorePatterns": ["**/*.generated.ts", "**/*.d.ts"],
+  "ignoreDependencies": ["autoprefixer", "@types/node"],
   // Per-issue-type severity: "error" (fail CI), "warn" (report only), "off" (ignore)
   "rules": {
-    "unused_files": "error",
-    "unused_exports": "warn",
-    "unused_types": "off",
-    "unresolved_imports": "error"
+    "unused-files": "error",
+    "unused-exports": "warn",
+    "unused-types": "off",
+    "unresolved-imports": "error"
   }
 }
 ```
 
-TOML is also supported (`fallow init --toml` creates `fallow.toml`). See the [full configuration reference](https://github.com/fallow-rs/fallow/wiki/Configuration) for all options, including `rules` severity levels, `duplicates` settings, `ignore_exports` rules, and custom framework presets.
+TOML is also supported (`fallow init --toml` creates `fallow.toml`). See the [full configuration reference](https://github.com/fallow-rs/fallow/wiki/Configuration) for all options, including `rules` severity levels, `duplicates` settings, `ignoreExports` rules, and custom framework presets.
 
 ### Migrating from knip or jscpd
 
 If you have an existing knip or jscpd config, fallow can migrate it automatically:
 
 ```sh
-fallow migrate            # Auto-detect knip/jscpd configs, write fallow.jsonc
+fallow migrate            # Auto-detect knip/jscpd configs, write .fallowrc.json
 fallow migrate --toml     # Output as TOML instead
 fallow migrate --dry-run  # Preview without writing
 ```

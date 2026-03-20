@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use fallow_config::{DetectConfig, FallowConfig, OutputFormat, RulesConfig};
+use fallow_config::{FallowConfig, OutputFormat, RulesConfig};
 
 fn fixture_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -16,20 +16,20 @@ fn fixture_path(name: &str) -> PathBuf {
 fn create_config(root: PathBuf) -> fallow_config::ResolvedConfig {
     FallowConfig {
         schema: None,
+        extends: vec![],
         entry: vec![],
-        ignore: vec![],
-        detect: DetectConfig::default(),
+        ignore_patterns: vec![],
         framework: vec![],
         workspaces: None,
         ignore_dependencies: vec![],
         ignore_exports: vec![],
-        output: OutputFormat::Human,
         duplicates: fallow_config::DuplicatesConfig::default(),
         rules: RulesConfig::default(),
         production: false,
         plugins: vec![],
+        overrides: vec![],
     }
-    .resolve(root, 4, true)
+    .resolve(root, OutputFormat::Human, 4, true)
 }
 
 #[test]
@@ -574,70 +574,70 @@ fn duplicate_exports_detected() {
     );
 }
 
-// ── Detect config toggles ─────────────────────────────────────
+// ── Rules "off" disables detection ─────────────────────────────
 
 #[test]
-fn detect_config_disables_unused_files() {
+fn rules_off_disables_unused_files() {
     let root = fixture_path("detect-config");
     let mut config = create_config(root.clone());
-    config.detect.unused_files = false;
+    config.rules.unused_files = fallow_config::Severity::Off;
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(
         results.unused_files.is_empty(),
-        "unused files should be empty when detection is disabled"
+        "unused files should be empty when rule is off"
     );
 }
 
 #[test]
-fn detect_config_disables_unused_exports() {
+fn rules_off_disables_unused_exports() {
     let root = fixture_path("detect-config");
     let mut config = create_config(root.clone());
-    config.detect.unused_exports = false;
+    config.rules.unused_exports = fallow_config::Severity::Off;
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(
         results.unused_exports.is_empty(),
-        "unused exports should be empty when detection is disabled"
+        "unused exports should be empty when rule is off"
     );
 }
 
 #[test]
-fn detect_config_disables_unused_types() {
+fn rules_off_disables_unused_types() {
     let root = fixture_path("detect-config");
     let mut config = create_config(root.clone());
-    config.detect.unused_types = false;
+    config.rules.unused_types = fallow_config::Severity::Off;
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(
         results.unused_types.is_empty(),
-        "unused types should be empty when detection is disabled"
+        "unused types should be empty when rule is off"
     );
 }
 
 #[test]
-fn detect_config_disables_unused_dependencies() {
+fn rules_off_disables_unused_dependencies() {
     let root = fixture_path("detect-config");
     let mut config = create_config(root.clone());
-    config.detect.unused_dependencies = false;
+    config.rules.unused_dependencies = fallow_config::Severity::Off;
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(
         results.unused_dependencies.is_empty(),
-        "unused dependencies should be empty when detection is disabled"
+        "unused dependencies should be empty when rule is off"
     );
 }
 
 #[test]
-fn detect_config_disables_duplicate_exports() {
+fn rules_off_disables_duplicate_exports() {
     let root = fixture_path("duplicate-exports");
     let mut config = create_config(root.clone());
-    config.detect.duplicate_exports = false;
+    config.rules.duplicate_exports = fallow_config::Severity::Off;
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
 
     assert!(
         results.duplicate_exports.is_empty(),
-        "duplicate exports should be empty when detection is disabled"
+        "duplicate exports should be empty when rule is off"
     );
 }
 
@@ -648,9 +648,9 @@ fn ignore_exports_wildcard() {
     let root = fixture_path("ignore-exports");
     let config = FallowConfig {
         schema: None,
+        extends: vec![],
         entry: vec![],
-        ignore: vec![],
-        detect: DetectConfig::default(),
+        ignore_patterns: vec![],
         framework: vec![],
         workspaces: None,
         ignore_dependencies: vec![],
@@ -658,13 +658,13 @@ fn ignore_exports_wildcard() {
             file: "src/utils.ts".to_string(),
             exports: vec!["*".to_string()],
         }],
-        output: OutputFormat::Human,
         duplicates: fallow_config::DuplicatesConfig::default(),
         rules: RulesConfig::default(),
         production: false,
         plugins: vec![],
+        overrides: vec![],
     }
-    .resolve(root.clone(), 4, true);
+    .resolve(root.clone(), OutputFormat::Human, 4, true);
 
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
 
@@ -689,9 +689,9 @@ fn ignore_exports_specific() {
     let root = fixture_path("ignore-exports");
     let config = FallowConfig {
         schema: None,
+        extends: vec![],
         entry: vec![],
-        ignore: vec![],
-        detect: DetectConfig::default(),
+        ignore_patterns: vec![],
         framework: vec![],
         workspaces: None,
         ignore_dependencies: vec![],
@@ -699,13 +699,13 @@ fn ignore_exports_specific() {
             file: "src/utils.ts".to_string(),
             exports: vec!["ignored".to_string()],
         }],
-        output: OutputFormat::Human,
         duplicates: fallow_config::DuplicatesConfig::default(),
         rules: RulesConfig::default(),
         production: false,
         plugins: vec![],
+        overrides: vec![],
     }
-    .resolve(root.clone(), 4, true);
+    .resolve(root.clone(), OutputFormat::Human, 4, true);
 
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
 
@@ -779,20 +779,20 @@ fn ignore_dependencies_config() {
     let root = fixture_path("basic-project");
     let config = FallowConfig {
         schema: None,
+        extends: vec![],
         entry: vec![],
-        ignore: vec![],
-        detect: DetectConfig::default(),
+        ignore_patterns: vec![],
         framework: vec![],
         workspaces: None,
         ignore_dependencies: vec!["unused-dep".to_string()],
         ignore_exports: vec![],
-        output: OutputFormat::Human,
         duplicates: fallow_config::DuplicatesConfig::default(),
         rules: RulesConfig::default(),
         production: false,
         plugins: vec![],
+        overrides: vec![],
     }
-    .resolve(root.clone(), 4, true);
+    .resolve(root.clone(), OutputFormat::Human, 4, true);
 
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
 
@@ -842,14 +842,6 @@ fn workspace_project_discovers_workspace_packages() {
         let _ = std::os::unix::fs::symlink(root.join("packages/shared"), nm.join("shared"));
         let _ =
             std::os::unix::fs::symlink(root.join("packages/utils"), nm.join("@workspace/utils"));
-    }
-    #[cfg(windows)]
-    {
-        let _ = std::os::windows::fs::symlink_dir(root.join("packages/shared"), nm.join("shared"));
-        let _ = std::os::windows::fs::symlink_dir(
-            root.join("packages/utils"),
-            nm.join("@workspace/utils"),
-        );
     }
 
     let config = create_config(root.clone());
@@ -1861,20 +1853,20 @@ fn external_plugin_entry_points_discovered() {
     let root = fixture_path("external-plugins");
     let config = FallowConfig {
         schema: None,
+        extends: vec![],
         entry: vec![],
-        ignore: vec![],
-        detect: DetectConfig::default(),
+        ignore_patterns: vec![],
         framework: vec![],
         workspaces: None,
         ignore_dependencies: vec![],
         ignore_exports: vec![],
-        output: OutputFormat::Human,
         duplicates: fallow_config::DuplicatesConfig::default(),
         rules: RulesConfig::default(),
         production: false,
         plugins: vec![],
+        overrides: vec![],
     }
-    .resolve(root.clone(), 4, true);
+    .resolve(root.clone(), OutputFormat::Human, 4, true);
 
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
 
@@ -1908,20 +1900,20 @@ fn external_plugin_used_exports_respected() {
     let root = fixture_path("external-plugins");
     let config = FallowConfig {
         schema: None,
+        extends: vec![],
         entry: vec![],
-        ignore: vec![],
-        detect: DetectConfig::default(),
+        ignore_patterns: vec![],
         framework: vec![],
         workspaces: None,
         ignore_dependencies: vec![],
         ignore_exports: vec![],
-        output: OutputFormat::Human,
         duplicates: fallow_config::DuplicatesConfig::default(),
         rules: RulesConfig::default(),
         production: false,
         plugins: vec![],
+        overrides: vec![],
     }
-    .resolve(root.clone(), 4, true);
+    .resolve(root.clone(), OutputFormat::Human, 4, true);
 
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
 
@@ -1953,20 +1945,20 @@ fn external_plugin_tooling_dependencies_not_flagged() {
     let root = fixture_path("external-plugins");
     let config = FallowConfig {
         schema: None,
+        extends: vec![],
         entry: vec![],
-        ignore: vec![],
-        detect: DetectConfig::default(),
+        ignore_patterns: vec![],
         framework: vec![],
         workspaces: None,
         ignore_dependencies: vec![],
         ignore_exports: vec![],
-        output: OutputFormat::Human,
         duplicates: fallow_config::DuplicatesConfig::default(),
         rules: RulesConfig::default(),
         production: false,
         plugins: vec![],
+        overrides: vec![],
     }
-    .resolve(root.clone(), 4, true);
+    .resolve(root.clone(), OutputFormat::Human, 4, true);
 
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
 
@@ -1988,20 +1980,20 @@ fn external_plugin_active_in_list() {
     let root = fixture_path("external-plugins");
     let config = FallowConfig {
         schema: None,
+        extends: vec![],
         entry: vec![],
-        ignore: vec![],
-        detect: DetectConfig::default(),
+        ignore_patterns: vec![],
         framework: vec![],
         workspaces: None,
         ignore_dependencies: vec![],
         ignore_exports: vec![],
-        output: OutputFormat::Human,
         duplicates: fallow_config::DuplicatesConfig::default(),
         rules: RulesConfig::default(),
         production: false,
         plugins: vec![],
+        overrides: vec![],
     }
-    .resolve(root.clone(), 4, true);
+    .resolve(root.clone(), OutputFormat::Human, 4, true);
 
     let files = fallow_core::discover::discover_files(&config);
     let file_paths: Vec<std::path::PathBuf> = files.iter().map(|f| f.path.clone()).collect();
@@ -2024,20 +2016,20 @@ fn external_plugin_config_patterns_always_used() {
     let root = fixture_path("external-plugins");
     let config = FallowConfig {
         schema: None,
+        extends: vec![],
         entry: vec![],
-        ignore: vec![],
-        detect: DetectConfig::default(),
+        ignore_patterns: vec![],
         framework: vec![],
         workspaces: None,
         ignore_dependencies: vec![],
         ignore_exports: vec![],
-        output: OutputFormat::Human,
         duplicates: fallow_config::DuplicatesConfig::default(),
         rules: RulesConfig::default(),
         production: false,
         plugins: vec![],
+        overrides: vec![],
     }
-    .resolve(root.clone(), 4, true);
+    .resolve(root.clone(), OutputFormat::Human, 4, true);
 
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
 
@@ -2172,20 +2164,20 @@ fn create_config_with_cache(
 ) -> fallow_config::ResolvedConfig {
     let mut config = FallowConfig {
         schema: None,
+        extends: vec![],
         entry: vec![],
-        ignore: vec![],
-        detect: DetectConfig::default(),
+        ignore_patterns: vec![],
         framework: vec![],
         workspaces: None,
         ignore_dependencies: vec![],
         ignore_exports: vec![],
-        output: OutputFormat::Human,
         duplicates: fallow_config::DuplicatesConfig::default(),
         rules: RulesConfig::default(),
         production: false,
         plugins: vec![],
+        overrides: vec![],
     }
-    .resolve(root, 4, false); // no_cache = false to enable caching
+    .resolve(root, OutputFormat::Human, 4, false); // no_cache = false to enable caching
     config.cache_dir = cache_dir;
     config
 }

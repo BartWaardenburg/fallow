@@ -1,7 +1,7 @@
 use std::process::ExitCode;
 use std::time::Instant;
 
-use fallow_config::{OutputFormat, RulesConfig, Severity, discover_workspaces};
+use fallow_config::{OutputFormat, ResolvedConfig, RulesConfig, Severity, discover_workspaces};
 
 use crate::baseline::{BaselineData, filter_new_issues};
 use crate::report;
@@ -91,31 +91,62 @@ impl TraceOptions {
 
 // ── Rules helpers ────────────────────────────────────────────────
 
-/// Remove issues whose severity is `Off` from the results.
-fn apply_rules(results: &mut fallow_core::results::AnalysisResults, rules: &RulesConfig) {
-    if rules.unused_files == Severity::Off {
-        results.unused_files.clear();
+/// Remove issues whose effective severity is `Off` from the results.
+///
+/// When overrides are configured, per-file rule resolution is used for
+/// file-scoped issue types. Non-file-scoped issues (unused deps, unlisted deps,
+/// duplicate exports) use the base rules only.
+fn apply_rules(results: &mut fallow_core::results::AnalysisResults, config: &ResolvedConfig) {
+    let rules = &config.rules;
+    let has_overrides = !config.overrides.is_empty();
+
+    // File-scoped issue types: filter per-file when overrides exist
+    if has_overrides {
+        results
+            .unused_files
+            .retain(|f| config.resolve_rules_for_path(&f.path).unused_files != Severity::Off);
+        results
+            .unused_exports
+            .retain(|e| config.resolve_rules_for_path(&e.path).unused_exports != Severity::Off);
+        results
+            .unused_types
+            .retain(|e| config.resolve_rules_for_path(&e.path).unused_types != Severity::Off);
+        results.unused_enum_members.retain(|m| {
+            config.resolve_rules_for_path(&m.path).unused_enum_members != Severity::Off
+        });
+        results.unused_class_members.retain(|m| {
+            config.resolve_rules_for_path(&m.path).unused_class_members != Severity::Off
+        });
+        results
+            .unresolved_imports
+            .retain(|i| config.resolve_rules_for_path(&i.path).unresolved_imports != Severity::Off);
+    } else {
+        if rules.unused_files == Severity::Off {
+            results.unused_files.clear();
+        }
+        if rules.unused_exports == Severity::Off {
+            results.unused_exports.clear();
+        }
+        if rules.unused_types == Severity::Off {
+            results.unused_types.clear();
+        }
+        if rules.unused_enum_members == Severity::Off {
+            results.unused_enum_members.clear();
+        }
+        if rules.unused_class_members == Severity::Off {
+            results.unused_class_members.clear();
+        }
+        if rules.unresolved_imports == Severity::Off {
+            results.unresolved_imports.clear();
+        }
     }
-    if rules.unused_exports == Severity::Off {
-        results.unused_exports.clear();
-    }
-    if rules.unused_types == Severity::Off {
-        results.unused_types.clear();
-    }
+
+    // Non-file-scoped issue types: always use base rules
     if rules.unused_dependencies == Severity::Off {
         results.unused_dependencies.clear();
     }
     if rules.unused_dev_dependencies == Severity::Off {
         results.unused_dev_dependencies.clear();
-    }
-    if rules.unused_enum_members == Severity::Off {
-        results.unused_enum_members.clear();
-    }
-    if rules.unused_class_members == Severity::Off {
-        results.unused_class_members.clear();
-    }
-    if rules.unresolved_imports == Severity::Off {
-        results.unresolved_imports.clear();
     }
     if rules.unlisted_dependencies == Severity::Off {
         results.unlisted_dependencies.clear();
@@ -126,20 +157,57 @@ fn apply_rules(results: &mut fallow_core::results::AnalysisResults, rules: &Rule
 }
 
 /// Check whether any issue type with `Severity::Error` has remaining issues.
+///
+/// When overrides are configured, per-file rule resolution is used for
+/// file-scoped issue types to determine if any individual issue has Error severity.
 fn has_error_severity_issues(
     results: &fallow_core::results::AnalysisResults,
     rules: &RulesConfig,
+    config: Option<&ResolvedConfig>,
 ) -> bool {
-    (rules.unused_files == Severity::Error && !results.unused_files.is_empty())
-        || (rules.unused_exports == Severity::Error && !results.unused_exports.is_empty())
-        || (rules.unused_types == Severity::Error && !results.unused_types.is_empty())
+    let has_overrides = config.is_some_and(|c| !c.overrides.is_empty());
+
+    // File-scoped issue types: check per-file when overrides exist
+    let file_scoped_errors = if has_overrides {
+        let config = config.unwrap();
+        results
+            .unused_files
+            .iter()
+            .any(|f| config.resolve_rules_for_path(&f.path).unused_files == Severity::Error)
+            || results
+                .unused_exports
+                .iter()
+                .any(|e| config.resolve_rules_for_path(&e.path).unused_exports == Severity::Error)
+            || results
+                .unused_types
+                .iter()
+                .any(|e| config.resolve_rules_for_path(&e.path).unused_types == Severity::Error)
+            || results.unused_enum_members.iter().any(|m| {
+                config.resolve_rules_for_path(&m.path).unused_enum_members == Severity::Error
+            })
+            || results.unused_class_members.iter().any(|m| {
+                config.resolve_rules_for_path(&m.path).unused_class_members == Severity::Error
+            })
+            || results.unresolved_imports.iter().any(|i| {
+                config.resolve_rules_for_path(&i.path).unresolved_imports == Severity::Error
+            })
+    } else {
+        (rules.unused_files == Severity::Error && !results.unused_files.is_empty())
+            || (rules.unused_exports == Severity::Error && !results.unused_exports.is_empty())
+            || (rules.unused_types == Severity::Error && !results.unused_types.is_empty())
+            || (rules.unused_enum_members == Severity::Error
+                && !results.unused_enum_members.is_empty())
+            || (rules.unused_class_members == Severity::Error
+                && !results.unused_class_members.is_empty())
+            || (rules.unresolved_imports == Severity::Error
+                && !results.unresolved_imports.is_empty())
+    };
+
+    // Non-file-scoped issue types: always use base rules
+    file_scoped_errors
         || (rules.unused_dependencies == Severity::Error && !results.unused_dependencies.is_empty())
         || (rules.unused_dev_dependencies == Severity::Error
             && !results.unused_dev_dependencies.is_empty())
-        || (rules.unused_enum_members == Severity::Error && !results.unused_enum_members.is_empty())
-        || (rules.unused_class_members == Severity::Error
-            && !results.unused_class_members.is_empty())
-        || (rules.unresolved_imports == Severity::Error && !results.unresolved_imports.is_empty())
         || (rules.unlisted_dependencies == Severity::Error
             && !results.unlisted_dependencies.is_empty())
         || (rules.duplicate_exports == Severity::Error && !results.duplicate_exports.is_empty())
@@ -412,8 +480,8 @@ pub(crate) fn run_check(opts: &CheckOptions<'_>) -> ExitCode {
             .retain(|i| changed.contains(&i.path));
     }
 
-    // Apply rules: remove issues with Severity::Off
-    apply_rules(&mut results, &config.rules);
+    // Apply rules: remove issues with Severity::Off (respects per-file overrides)
+    apply_rules(&mut results, &config);
 
     // Snapshot results for cross-reference AFTER rules/workspace/changed-files filtering
     // but BEFORE CLI issue-type filters (--unused-files etc.), so combined findings
@@ -542,7 +610,7 @@ pub(crate) fn run_check(opts: &CheckOptions<'_>) -> ExitCode {
         }
     }
 
-    if has_error_severity_issues(&results, &effective_rules) {
+    if has_error_severity_issues(&results, &effective_rules, Some(&config)) {
         ExitCode::from(1)
     } else {
         ExitCode::SUCCESS
@@ -639,6 +707,31 @@ mod tests {
             unlisted_deps: false,
             duplicate_exports: false,
         }
+    }
+
+    /// Build a minimal ResolvedConfig from a RulesConfig for testing.
+    fn config_with_rules(rules: RulesConfig) -> ResolvedConfig {
+        fallow_config::FallowConfig {
+            schema: None,
+            extends: vec![],
+            entry: vec![],
+            ignore_patterns: vec![],
+            framework: vec![],
+            workspaces: None,
+            ignore_dependencies: vec![],
+            ignore_exports: vec![],
+            duplicates: fallow_config::DuplicatesConfig::default(),
+            rules,
+            production: false,
+            plugins: vec![],
+            overrides: vec![],
+        }
+        .resolve(
+            PathBuf::from("/project"),
+            fallow_config::OutputFormat::Human,
+            1,
+            true,
+        )
     }
 
     // ── IssueFilters::any_active ─────────────────────────────────
@@ -794,9 +887,9 @@ mod tests {
     #[test]
     fn apply_rules_default_error_preserves_all() {
         let mut results = make_results();
-        let rules = RulesConfig::default();
+        let config = config_with_rules(RulesConfig::default());
         let original_total = results.total_issues();
-        apply_rules(&mut results, &rules);
+        apply_rules(&mut results, &config);
         assert_eq!(results.total_issues(), original_total);
     }
 
@@ -805,7 +898,8 @@ mod tests {
         let mut results = make_results();
         let mut rules = RulesConfig::default();
         rules.unused_files = Severity::Off;
-        apply_rules(&mut results, &rules);
+        let config = config_with_rules(rules);
+        apply_rules(&mut results, &config);
         assert!(results.unused_files.is_empty());
         // Other types are preserved
         assert!(!results.unused_exports.is_empty());
@@ -816,7 +910,8 @@ mod tests {
         let mut results = make_results();
         let mut rules = RulesConfig::default();
         rules.unused_exports = Severity::Warn;
-        apply_rules(&mut results, &rules);
+        let config = config_with_rules(rules);
+        apply_rules(&mut results, &config);
         assert_eq!(results.unused_exports.len(), 1);
     }
 
@@ -835,7 +930,8 @@ mod tests {
             unlisted_dependencies: Severity::Off,
             duplicate_exports: Severity::Off,
         };
-        apply_rules(&mut results, &rules);
+        let config = config_with_rules(rules);
+        apply_rules(&mut results, &config);
         assert_eq!(results.total_issues(), 0);
     }
 
@@ -889,7 +985,8 @@ mod tests {
             let mut results = make_results();
             let mut rules = RulesConfig::default();
             set_off(&mut rules);
-            apply_rules(&mut results, &rules);
+            let config = config_with_rules(rules);
+            apply_rules(&mut results, &config);
             assert!(
                 check_empty(&results),
                 "Setting a rule to Off should clear the corresponding results"
@@ -903,14 +1000,14 @@ mod tests {
     fn empty_results_no_error_issues() {
         let results = AnalysisResults::default();
         let rules = RulesConfig::default();
-        assert!(!has_error_severity_issues(&results, &rules));
+        assert!(!has_error_severity_issues(&results, &rules, None));
     }
 
     #[test]
     fn error_severity_with_issues_returns_true() {
         let results = make_results();
         let rules = RulesConfig::default(); // all Error
-        assert!(has_error_severity_issues(&results, &rules));
+        assert!(has_error_severity_issues(&results, &rules, None));
     }
 
     #[test]
@@ -928,7 +1025,7 @@ mod tests {
             unlisted_dependencies: Severity::Warn,
             duplicate_exports: Severity::Warn,
         };
-        assert!(!has_error_severity_issues(&results, &rules));
+        assert!(!has_error_severity_issues(&results, &rules, None));
     }
 
     #[test]
@@ -950,11 +1047,11 @@ mod tests {
             duplicate_exports: Severity::Warn,
         };
         // Only unused_files present, but set to Warn — should not trigger
-        assert!(!has_error_severity_issues(&results, &rules));
+        assert!(!has_error_severity_issues(&results, &rules, None));
 
         // Promote unused_files to Error — should now trigger
         rules.unused_files = Severity::Error;
-        assert!(has_error_severity_issues(&results, &rules));
+        assert!(has_error_severity_issues(&results, &rules, None));
     }
 
     #[test]
@@ -969,7 +1066,7 @@ mod tests {
         let mut rules = RulesConfig::default();
         rules.unresolved_imports = Severity::Off;
         // Other fields are default (Error) but have no issues
-        assert!(!has_error_severity_issues(&results, &rules));
+        assert!(!has_error_severity_issues(&results, &rules, None));
     }
 
     // ── filter_to_workspace ──────────────────────────────────────

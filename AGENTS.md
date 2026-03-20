@@ -113,10 +113,10 @@ fallow list --frameworks --format json --quiet
 
 ### `init`
 
-Create a config file in the project root. Defaults to `fallow.jsonc` (JSONC with comments and `$schema` for IDE autocomplete). Use `--toml` for TOML format.
+Create a config file in the project root. Defaults to `.fallowrc.json` (JSON with JSONC comment support and `$schema` for IDE autocomplete). Use `--toml` for TOML format.
 
 ```bash
-fallow init          # creates fallow.jsonc
+fallow init          # creates .fallowrc.json
 fallow init --toml   # creates fallow.toml
 ```
 
@@ -125,7 +125,7 @@ fallow init --toml   # creates fallow.toml
 Migrate configuration from knip and/or jscpd to fallow. Auto-detects config files in the project root (knip.json, knip.jsonc, .knip.json, .knip.jsonc, .jscpd.json, and package.json embedded configs).
 
 ```bash
-fallow migrate              # auto-detect and write fallow.jsonc
+fallow migrate              # auto-detect and write .fallowrc.json
 fallow migrate --toml       # output as TOML
 fallow migrate --dry-run    # preview without writing
 fallow migrate --from PATH  # specify source config file
@@ -220,18 +220,18 @@ fallow schema
 
 ## Configuration
 
-Fallow reads config from the project root in priority order: `fallow.jsonc` > `fallow.json` > `fallow.toml` > `.fallow.toml`. Run `fallow init` to generate one. Framework presets (Next.js, Vite, Jest, Storybook, etc.) are auto-detected -- no configuration required for most projects.
+Fallow reads config from the project root in priority order: `.fallowrc.json` > `fallow.toml` > `.fallow.toml`. Run `fallow init` to generate one. Framework presets (Next.js, Vite, Jest, Storybook, etc.) are auto-detected -- no configuration required for most projects.
 
 ### Rules (per-issue-type severity)
 
 ```jsonc
-// fallow.jsonc
+// .fallowrc.json
 {
   "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
   "rules": {
-    "unused_files": "error",       // fail CI (exit 1)
-    "unused_exports": "warn",      // report but don't fail
-    "unused_types": "off"          // ignore entirely
+    "unused-files": "error",       // fail CI (exit 1)
+    "unused-exports": "warn",      // report but don't fail
+    "unused-types": "off"          // ignore entirely
   }
 }
 ```

@@ -1,6 +1,8 @@
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
 
+use rustc_hash::FxHashSet;
+
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -12,9 +14,9 @@ use crate::workspace::WorkspaceConfig;
 ///
 /// `find_and_load` checks these names in order within each directory,
 /// returning the first match found.
-const CONFIG_NAMES: &[&str] = &["fallow.jsonc", "fallow.json", "fallow.toml", ".fallow.toml"];
+const CONFIG_NAMES: &[&str] = &[".fallowrc.json", "fallow.toml", ".fallow.toml"];
 
-/// User-facing configuration loaded from `fallow.jsonc`, `fallow.json`, or `fallow.toml`.
+/// User-facing configuration loaded from `.fallowrc.json` or `fallow.toml`.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct FallowConfig {
@@ -23,17 +25,20 @@ pub struct FallowConfig {
     #[schemars(skip)]
     pub schema: Option<String>,
 
+    /// Paths to base config files to extend from.
+    /// Paths are resolved relative to the config file containing the `extends`.
+    /// Base configs are loaded first, then this config's values override them.
+    /// Later entries in the array override earlier ones.
+    #[serde(default, skip_serializing)]
+    pub extends: Vec<String>,
+
     /// Additional entry point glob patterns.
     #[serde(default)]
     pub entry: Vec<String>,
 
     /// Glob patterns to ignore from analysis.
     #[serde(default)]
-    pub ignore: Vec<String>,
-
-    /// What to detect.
-    #[serde(default)]
-    pub detect: DetectConfig,
+    pub ignore_patterns: Vec<String>,
 
     /// Custom framework definitions (inline plugin definitions).
     #[serde(default)]
@@ -50,10 +55,6 @@ pub struct FallowConfig {
     /// Export ignore rules.
     #[serde(default)]
     pub ignore_exports: Vec<IgnoreExportRule>,
-
-    /// Output format.
-    #[serde(default)]
-    pub output: OutputFormat,
 
     /// Duplication detection settings.
     #[serde(default)]
@@ -76,6 +77,10 @@ pub struct FallowConfig {
     /// - `fallow-plugin-*.{toml,json,jsonc}` files in the project root
     #[serde(default)]
     pub plugins: Vec<String>,
+
+    /// Per-file rule overrides matching oxlint's overrides pattern.
+    #[serde(default)]
+    pub overrides: Vec<ConfigOverride>,
 }
 
 /// Configuration for code duplication detection.
@@ -242,72 +247,10 @@ const fn default_min_lines() -> usize {
     5
 }
 
-/// Controls which analyses to run.
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-#[allow(clippy::struct_excessive_bools)]
-pub struct DetectConfig {
-    /// Detect unused files (not reachable from entry points).
-    #[serde(default = "default_true")]
-    pub unused_files: bool,
-
-    /// Detect unused exports (exported but never imported).
-    #[serde(default = "default_true")]
-    pub unused_exports: bool,
-
-    /// Detect unused production dependencies.
-    #[serde(default = "default_true")]
-    pub unused_dependencies: bool,
-
-    /// Detect unused dev dependencies.
-    #[serde(default = "default_true")]
-    pub unused_dev_dependencies: bool,
-
-    /// Detect unused type exports.
-    #[serde(default = "default_true")]
-    pub unused_types: bool,
-
-    /// Detect unused enum members.
-    #[serde(default = "default_true")]
-    pub unused_enum_members: bool,
-
-    /// Detect unused class members.
-    #[serde(default = "default_true")]
-    pub unused_class_members: bool,
-
-    /// Detect unresolved imports.
-    #[serde(default = "default_true")]
-    pub unresolved_imports: bool,
-
-    /// Detect unlisted dependencies (used but not in package.json).
-    #[serde(default = "default_true")]
-    pub unlisted_dependencies: bool,
-
-    /// Detect duplicate exports.
-    #[serde(default = "default_true")]
-    pub duplicate_exports: bool,
-}
-
-impl Default for DetectConfig {
-    fn default() -> Self {
-        Self {
-            unused_files: true,
-            unused_exports: true,
-            unused_dependencies: true,
-            unused_dev_dependencies: true,
-            unused_types: true,
-            unused_enum_members: true,
-            unused_class_members: true,
-            unresolved_imports: true,
-            unlisted_dependencies: true,
-            duplicate_exports: true,
-        }
-    }
-}
-
 /// Output format for results.
-#[derive(Debug, Default, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "lowercase")]
+///
+/// This is CLI-only (via `--format` flag), not stored in config files.
+#[derive(Debug, Default, Clone)]
 pub enum OutputFormat {
     /// Human-readable terminal output with source context.
     #[default]
@@ -329,13 +272,56 @@ pub struct IgnoreExportRule {
     pub exports: Vec<String>,
 }
 
+/// Per-file override entry.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct ConfigOverride {
+    /// Glob patterns to match files against (relative to config file location).
+    pub files: Vec<String>,
+    /// Partial rules — only specified fields override the base rules.
+    #[serde(default)]
+    pub rules: PartialRulesConfig,
+}
+
+/// Partial per-issue-type severity for overrides. All fields optional.
+#[derive(Debug, Default, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub struct PartialRulesConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unused_files: Option<Severity>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unused_exports: Option<Severity>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unused_types: Option<Severity>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unused_dependencies: Option<Severity>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unused_dev_dependencies: Option<Severity>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unused_enum_members: Option<Severity>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unused_class_members: Option<Severity>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unresolved_imports: Option<Severity>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unlisted_dependencies: Option<Severity>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duplicate_exports: Option<Severity>,
+}
+
+/// Resolved override with pre-compiled glob matchers.
+#[derive(Debug)]
+pub struct ResolvedOverride {
+    pub matchers: Vec<globset::GlobMatcher>,
+    pub rules: PartialRulesConfig,
+}
+
 /// Fully resolved configuration with all globs pre-compiled.
 #[derive(Debug)]
 pub struct ResolvedConfig {
     pub root: PathBuf,
     pub entry_patterns: Vec<String>,
     pub ignore_patterns: GlobSet,
-    pub detect: DetectConfig,
     pub output: OutputFormat,
     pub cache_dir: PathBuf,
     pub threads: usize,
@@ -348,61 +334,166 @@ pub struct ResolvedConfig {
     pub production: bool,
     /// External plugin definitions (from plugin files + inline framework definitions).
     pub external_plugins: Vec<ExternalPluginDef>,
+    /// Per-file rule overrides with pre-compiled glob matchers.
+    pub overrides: Vec<ResolvedOverride>,
 }
 
 /// Detect config format from file extension.
 enum ConfigFormat {
     Toml,
     Json,
-    Jsonc,
 }
 
 impl ConfigFormat {
     fn from_path(path: &Path) -> Self {
         match path.extension().and_then(|e| e.to_str()) {
-            Some("jsonc") => Self::Jsonc,
             Some("json") => Self::Json,
             _ => Self::Toml,
         }
     }
 }
 
+const MAX_EXTENDS_DEPTH: usize = 10;
+
+/// Deep-merge two JSON values. `base` is lower-priority, `overlay` is higher.
+/// Objects: merge field by field. Arrays/scalars: overlay replaces base.
+fn deep_merge_json(base: &mut serde_json::Value, overlay: serde_json::Value) {
+    match (base, overlay) {
+        (serde_json::Value::Object(base_map), serde_json::Value::Object(overlay_map)) => {
+            for (key, value) in overlay_map {
+                if let Some(base_value) = base_map.get_mut(&key) {
+                    deep_merge_json(base_value, value);
+                } else {
+                    base_map.insert(key, value);
+                }
+            }
+        }
+        (base, overlay) => {
+            *base = overlay;
+        }
+    }
+}
+
+fn parse_config_to_value(path: &Path) -> Result<serde_json::Value, miette::Report> {
+    let content = std::fs::read_to_string(path)
+        .map_err(|e| miette::miette!("Failed to read config file {}: {}", path.display(), e))?;
+
+    match ConfigFormat::from_path(path) {
+        ConfigFormat::Toml => {
+            let toml_value: toml::Value = toml::from_str(&content).map_err(|e| {
+                miette::miette!("Failed to parse config file {}: {}", path.display(), e)
+            })?;
+            serde_json::to_value(toml_value).map_err(|e| {
+                miette::miette!(
+                    "Failed to convert TOML to JSON for {}: {}",
+                    path.display(),
+                    e
+                )
+            })
+        }
+        ConfigFormat::Json => {
+            let mut stripped = String::new();
+            json_comments::StripComments::new(content.as_bytes())
+                .read_to_string(&mut stripped)
+                .map_err(|e| {
+                    miette::miette!("Failed to strip comments from {}: {}", path.display(), e)
+                })?;
+            serde_json::from_str(&stripped).map_err(|e| {
+                miette::miette!("Failed to parse config file {}: {}", path.display(), e)
+            })
+        }
+    }
+}
+
+fn resolve_extends(
+    path: &Path,
+    visited: &mut FxHashSet<PathBuf>,
+    depth: usize,
+) -> Result<serde_json::Value, miette::Report> {
+    if depth > MAX_EXTENDS_DEPTH {
+        return Err(miette::miette!(
+            "Config extends chain too deep (>{MAX_EXTENDS_DEPTH} levels) at {}",
+            path.display()
+        ));
+    }
+
+    let canonical = path
+        .canonicalize()
+        .map_err(|e| miette::miette!("Failed to resolve config path {}: {}", path.display(), e))?;
+
+    if !visited.insert(canonical.clone()) {
+        return Err(miette::miette!(
+            "Circular extends detected: {} was already visited in the extends chain",
+            path.display()
+        ));
+    }
+
+    let mut value = parse_config_to_value(path)?;
+
+    let extends = value
+        .as_object_mut()
+        .and_then(|obj| obj.remove("extends"))
+        .and_then(|v| match v {
+            serde_json::Value::Array(arr) => Some(
+                arr.into_iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect::<Vec<_>>(),
+            ),
+            serde_json::Value::String(s) => Some(vec![s]),
+            _ => None,
+        })
+        .unwrap_or_default();
+
+    if extends.is_empty() {
+        return Ok(value);
+    }
+
+    let config_dir = path.parent().unwrap_or_else(|| Path::new("."));
+    let mut merged = serde_json::Value::Object(serde_json::Map::new());
+
+    for extend_path_str in &extends {
+        let extend_path = config_dir.join(extend_path_str);
+        if !extend_path.exists() {
+            return Err(miette::miette!(
+                "Extended config file not found: {} (referenced from {})",
+                extend_path.display(),
+                path.display()
+            ));
+        }
+        let base = resolve_extends(&extend_path, visited, depth + 1)?;
+        deep_merge_json(&mut merged, base);
+    }
+
+    deep_merge_json(&mut merged, value);
+    Ok(merged)
+}
+
 impl FallowConfig {
-    /// Load config from a fallow config file (TOML, JSON, or JSONC).
+    /// Load config from a fallow config file (TOML or JSON/JSONC).
     ///
     /// The format is detected from the file extension:
     /// - `.toml` → TOML
-    /// - `.json` → JSON
-    /// - `.jsonc` → JSONC (JSON with comments)
+    /// - `.json` → JSON (with JSONC comment stripping)
+    ///
+    /// Supports `extends` for config inheritance. Extended configs are loaded
+    /// and deep-merged before this config's values are applied.
     pub fn load(path: &Path) -> Result<Self, miette::Report> {
-        let content = std::fs::read_to_string(path)
-            .map_err(|e| miette::miette!("Failed to read config file {}: {}", path.display(), e))?;
+        let mut visited = FxHashSet::default();
+        let merged = resolve_extends(path, &mut visited, 0)?;
 
-        match ConfigFormat::from_path(path) {
-            ConfigFormat::Toml => toml::from_str(&content).map_err(|e| {
-                miette::miette!("Failed to parse config file {}: {}", path.display(), e)
-            }),
-            ConfigFormat::Json => serde_json::from_str(&content).map_err(|e| {
-                miette::miette!("Failed to parse config file {}: {}", path.display(), e)
-            }),
-            ConfigFormat::Jsonc => {
-                let mut stripped = String::new();
-                json_comments::StripComments::new(content.as_bytes())
-                    .read_to_string(&mut stripped)
-                    .map_err(|e| {
-                        miette::miette!("Failed to strip comments from {}: {}", path.display(), e)
-                    })?;
-                serde_json::from_str(&stripped).map_err(|e| {
-                    miette::miette!("Failed to parse config file {}: {}", path.display(), e)
-                })
-            }
-        }
+        serde_json::from_value(merged).map_err(|e| {
+            miette::miette!(
+                "Failed to deserialize config from {}: {}",
+                path.display(),
+                e
+            )
+        })
     }
 
     /// Find and load config from the current directory or ancestors.
     ///
     /// Checks for config files in priority order:
-    /// `fallow.jsonc` > `fallow.json` > `fallow.toml` > `.fallow.toml`
+    /// `.fallowrc.json` > `fallow.toml` > `.fallow.toml`
     ///
     /// Stops searching at the first directory containing `.git` or `package.json`,
     /// to avoid picking up unrelated config files above the project root.
@@ -442,9 +533,15 @@ impl FallowConfig {
 
     /// Resolve into a fully resolved config with compiled globs.
     #[allow(clippy::print_stderr)]
-    pub fn resolve(self, root: PathBuf, threads: usize, no_cache: bool) -> ResolvedConfig {
+    pub fn resolve(
+        self,
+        root: PathBuf,
+        output: OutputFormat,
+        threads: usize,
+        no_cache: bool,
+    ) -> ResolvedConfig {
         let mut ignore_builder = GlobSetBuilder::new();
-        for pattern in &self.ignore {
+        for pattern in &self.ignore_patterns {
             match Glob::new(pattern) {
                 Ok(glob) => {
                     ignore_builder.add(glob);
@@ -473,12 +570,10 @@ impl FallowConfig {
             }
         }
 
-        let ignore_patterns = ignore_builder.build().unwrap_or_default();
+        let compiled_ignore_patterns = ignore_builder.build().unwrap_or_default();
         let cache_dir = root.join(".fallow");
 
-        // Merge detect booleans into rules: detect=false forces Severity::Off
         let mut rules = self.rules;
-        rules.merge_detect(&self.detect);
 
         // In production mode, force unused_dev_dependencies off
         let production = self.production;
@@ -490,12 +585,38 @@ impl FallowConfig {
         // Merge inline framework definitions into external plugins
         external_plugins.extend(self.framework);
 
+        // Pre-compile override glob matchers
+        let overrides = self
+            .overrides
+            .into_iter()
+            .filter_map(|o| {
+                let matchers: Vec<globset::GlobMatcher> = o
+                    .files
+                    .iter()
+                    .filter_map(|pattern| match Glob::new(pattern) {
+                        Ok(glob) => Some(glob.compile_matcher()),
+                        Err(e) => {
+                            eprintln!("Warning: Invalid override glob pattern '{pattern}': {e}");
+                            None
+                        }
+                    })
+                    .collect();
+                if matchers.is_empty() {
+                    None
+                } else {
+                    Some(ResolvedOverride {
+                        matchers,
+                        rules: o.rules,
+                    })
+                }
+            })
+            .collect();
+
         ResolvedConfig {
             root,
             entry_patterns: self.entry,
-            ignore_patterns,
-            detect: self.detect,
-            output: self.output,
+            ignore_patterns: compiled_ignore_patterns,
+            output,
             cache_dir,
             threads,
             no_cache,
@@ -505,7 +626,33 @@ impl FallowConfig {
             rules,
             production,
             external_plugins,
+            overrides,
         }
+    }
+}
+
+impl ResolvedConfig {
+    /// Resolve the effective rules for a given file path.
+    /// Starts with base rules and applies matching overrides in order.
+    pub fn resolve_rules_for_path(&self, path: &Path) -> RulesConfig {
+        if self.overrides.is_empty() {
+            return self.rules.clone();
+        }
+
+        let relative = path.strip_prefix(&self.root).unwrap_or(path);
+        let relative_str = relative.to_string_lossy();
+
+        let mut rules = self.rules.clone();
+        for override_entry in &self.overrides {
+            let matches = override_entry
+                .matchers
+                .iter()
+                .any(|m| m.is_match(relative_str.as_ref()));
+            if matches {
+                rules.apply_partial(&override_entry.rules);
+            }
+        }
+        rules
     }
 }
 
@@ -557,10 +704,11 @@ impl std::str::FromStr for Severity {
 /// Per-issue-type severity configuration.
 ///
 /// Controls which issue types cause CI failure, are reported as warnings,
-/// or are suppressed entirely. All fields default to `Severity::Error`
-/// for backwards compatibility.
+/// or are suppressed entirely. All fields default to `Severity::Error`.
+///
+/// Rule names use kebab-case in config files (e.g., `"unused-files": "error"`).
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "kebab-case")]
 pub struct RulesConfig {
     #[serde(default)]
     pub unused_files: Severity,
@@ -602,37 +750,37 @@ impl Default for RulesConfig {
 }
 
 impl RulesConfig {
-    /// Merge `DetectConfig` booleans: if `detect.X = false`, force `rules.X = Off`.
-    pub fn merge_detect(&mut self, detect: &DetectConfig) {
-        if !detect.unused_files {
-            self.unused_files = Severity::Off;
+    /// Apply a partial rules config on top. Only `Some` fields override.
+    pub fn apply_partial(&mut self, partial: &PartialRulesConfig) {
+        if let Some(s) = partial.unused_files {
+            self.unused_files = s;
         }
-        if !detect.unused_exports {
-            self.unused_exports = Severity::Off;
+        if let Some(s) = partial.unused_exports {
+            self.unused_exports = s;
         }
-        if !detect.unused_types {
-            self.unused_types = Severity::Off;
+        if let Some(s) = partial.unused_types {
+            self.unused_types = s;
         }
-        if !detect.unused_dependencies {
-            self.unused_dependencies = Severity::Off;
+        if let Some(s) = partial.unused_dependencies {
+            self.unused_dependencies = s;
         }
-        if !detect.unused_dev_dependencies {
-            self.unused_dev_dependencies = Severity::Off;
+        if let Some(s) = partial.unused_dev_dependencies {
+            self.unused_dev_dependencies = s;
         }
-        if !detect.unused_enum_members {
-            self.unused_enum_members = Severity::Off;
+        if let Some(s) = partial.unused_enum_members {
+            self.unused_enum_members = s;
         }
-        if !detect.unused_class_members {
-            self.unused_class_members = Severity::Off;
+        if let Some(s) = partial.unused_class_members {
+            self.unused_class_members = s;
         }
-        if !detect.unresolved_imports {
-            self.unresolved_imports = Severity::Off;
+        if let Some(s) = partial.unresolved_imports {
+            self.unresolved_imports = s;
         }
-        if !detect.unlisted_dependencies {
-            self.unlisted_dependencies = Severity::Off;
+        if let Some(s) = partial.unlisted_dependencies {
+            self.unlisted_dependencies = s;
         }
-        if !detect.duplicate_exports {
-            self.duplicate_exports = Severity::Off;
+        if let Some(s) = partial.duplicate_exports {
+            self.duplicate_exports = s;
         }
     }
 }
@@ -641,21 +789,6 @@ impl RulesConfig {
 mod tests {
     use super::*;
     use crate::PackageJson;
-
-    #[test]
-    fn detect_config_default_all_true() {
-        let config = DetectConfig::default();
-        assert!(config.unused_files);
-        assert!(config.unused_exports);
-        assert!(config.unused_dependencies);
-        assert!(config.unused_dev_dependencies);
-        assert!(config.unused_types);
-        assert!(config.unused_enum_members);
-        assert!(config.unused_class_members);
-        assert!(config.unresolved_imports);
-        assert!(config.unlisted_dependencies);
-        assert!(config.duplicate_exports);
-    }
 
     #[test]
     fn output_format_default_is_human() {
@@ -670,24 +803,7 @@ entry = ["src/main.ts"]
 "#;
         let config: FallowConfig = toml::from_str(toml_str).unwrap();
         assert_eq!(config.entry, vec!["src/main.ts"]);
-        assert!(config.ignore.is_empty());
-        assert!(config.detect.unused_files); // default true
-    }
-
-    #[test]
-    fn fallow_config_deserialize_detect_overrides() {
-        let toml_str = r#"
-[detect]
-unusedFiles = false
-unusedExports = true
-unusedDependencies = false
-"#;
-        let config: FallowConfig = toml::from_str(toml_str).unwrap();
-        assert!(!config.detect.unused_files);
-        assert!(config.detect.unused_exports);
-        assert!(!config.detect.unused_dependencies);
-        // Others should default to true
-        assert!(config.detect.unused_types);
+        assert!(config.ignore_patterns.is_empty());
     }
 
     #[test]
@@ -721,20 +837,20 @@ ignoreDependencies = ["autoprefixer", "postcss"]
     fn fallow_config_resolve_default_ignores() {
         let config = FallowConfig {
             schema: None,
+            extends: vec![],
             entry: vec![],
-            ignore: vec![],
-            detect: DetectConfig::default(),
+            ignore_patterns: vec![],
             framework: vec![],
             workspaces: None,
             ignore_dependencies: vec![],
             ignore_exports: vec![],
-            output: OutputFormat::Human,
             duplicates: DuplicatesConfig::default(),
             rules: RulesConfig::default(),
             production: false,
             plugins: vec![],
+            overrides: vec![],
         };
-        let resolved = config.resolve(PathBuf::from("/tmp/test"), 4, true);
+        let resolved = config.resolve(PathBuf::from("/tmp/test"), OutputFormat::Human, 4, true);
 
         // Default ignores should be compiled
         assert!(resolved.ignore_patterns.is_match("node_modules/foo/bar.ts"));
@@ -750,20 +866,20 @@ ignoreDependencies = ["autoprefixer", "postcss"]
     fn fallow_config_resolve_custom_ignores() {
         let config = FallowConfig {
             schema: None,
+            extends: vec![],
             entry: vec!["src/**/*.ts".to_string()],
-            ignore: vec!["**/*.generated.ts".to_string()],
-            detect: DetectConfig::default(),
+            ignore_patterns: vec!["**/*.generated.ts".to_string()],
             framework: vec![],
             workspaces: None,
             ignore_dependencies: vec![],
             ignore_exports: vec![],
-            output: OutputFormat::Json,
             duplicates: DuplicatesConfig::default(),
             rules: RulesConfig::default(),
             production: false,
             plugins: vec![],
+            overrides: vec![],
         };
-        let resolved = config.resolve(PathBuf::from("/tmp/test"), 4, false);
+        let resolved = config.resolve(PathBuf::from("/tmp/test"), OutputFormat::Json, 4, false);
 
         assert!(resolved.ignore_patterns.is_match("src/foo.generated.ts"));
         assert_eq!(resolved.entry_patterns, vec!["src/**/*.ts"]);
@@ -775,20 +891,20 @@ ignoreDependencies = ["autoprefixer", "postcss"]
     fn fallow_config_resolve_cache_dir() {
         let config = FallowConfig {
             schema: None,
+            extends: vec![],
             entry: vec![],
-            ignore: vec![],
-            detect: DetectConfig::default(),
+            ignore_patterns: vec![],
             framework: vec![],
             workspaces: None,
             ignore_dependencies: vec![],
             ignore_exports: vec![],
-            output: OutputFormat::Human,
             duplicates: DuplicatesConfig::default(),
             rules: RulesConfig::default(),
             production: false,
             plugins: vec![],
+            overrides: vec![],
         };
-        let resolved = config.resolve(PathBuf::from("/tmp/project"), 4, true);
+        let resolved = config.resolve(PathBuf::from("/tmp/project"), OutputFormat::Human, 4, true);
         assert_eq!(resolved.cache_dir, PathBuf::from("/tmp/project/.fallow"));
         assert!(resolved.no_cache);
     }
@@ -900,14 +1016,15 @@ ignoreDependencies = ["autoprefixer", "postcss"]
     }
 
     #[test]
-    fn rules_deserialize_mixed_severities() {
-        let toml_str = r#"
-[rules]
-unusedFiles = "error"
-unusedExports = "warn"
-unusedTypes = "off"
-"#;
-        let config: FallowConfig = toml::from_str(toml_str).unwrap();
+    fn rules_deserialize_kebab_case() {
+        let json_str = r#"{
+            "rules": {
+                "unused-files": "error",
+                "unused-exports": "warn",
+                "unused-types": "off"
+            }
+        }"#;
+        let config: FallowConfig = serde_json::from_str(json_str).unwrap();
         assert_eq!(config.rules.unused_files, Severity::Error);
         assert_eq!(config.rules.unused_exports, Severity::Warn);
         assert_eq!(config.rules.unused_types, Severity::Off);
@@ -916,33 +1033,19 @@ unusedTypes = "off"
     }
 
     #[test]
-    fn detect_false_forces_severity_off() {
+    fn rules_deserialize_toml_kebab_case() {
         let toml_str = r#"
-[detect]
-unusedFiles = false
-
 [rules]
-unusedFiles = "error"
+unused-files = "error"
+unused-exports = "warn"
+unused-types = "off"
 "#;
         let config: FallowConfig = toml::from_str(toml_str).unwrap();
-        let resolved = config.resolve(PathBuf::from("/tmp/test"), 4, true);
-        // detect=false overrides rules=error → off
-        assert_eq!(resolved.rules.unused_files, Severity::Off);
-    }
-
-    #[test]
-    fn rules_off_independent_of_detect() {
-        let toml_str = r#"
-[detect]
-unusedFiles = true
-
-[rules]
-unusedFiles = "off"
-"#;
-        let config: FallowConfig = toml::from_str(toml_str).unwrap();
-        let resolved = config.resolve(PathBuf::from("/tmp/test"), 4, true);
-        // detect=true but rules=off → off (rules win when detect is true)
-        assert_eq!(resolved.rules.unused_files, Severity::Off);
+        assert_eq!(config.rules.unused_files, Severity::Error);
+        assert_eq!(config.rules.unused_exports, Severity::Warn);
+        assert_eq!(config.rules.unused_types, Severity::Off);
+        // Unset fields default to error
+        assert_eq!(config.rules.unresolved_imports, Severity::Error);
     }
 
     #[test]
@@ -975,12 +1078,10 @@ unknown_field = true
     }
 
     #[test]
-    fn fallow_config_deserialize_json_camel_case() {
-        let json_str = r#"{"entry": ["src/main.ts"], "detect": {"unusedFiles": false}}"#;
+    fn fallow_config_deserialize_json() {
+        let json_str = r#"{"entry": ["src/main.ts"]}"#;
         let config: FallowConfig = serde_json::from_str(json_str).unwrap();
         assert_eq!(config.entry, vec!["src/main.ts"]);
-        assert!(!config.detect.unused_files);
-        assert!(config.detect.unused_exports); // default true
     }
 
     #[test]
@@ -989,7 +1090,7 @@ unknown_field = true
             // This is a comment
             "entry": ["src/main.ts"],
             "rules": {
-                "unusedFiles": "warn"
+                "unused-files": "warn"
             }
         }"#;
         let mut stripped = String::new();
@@ -1023,12 +1124,8 @@ unknown_field = true
             ConfigFormat::Toml
         ));
         assert!(matches!(
-            ConfigFormat::from_path(Path::new("fallow.json")),
+            ConfigFormat::from_path(Path::new(".fallowrc.json")),
             ConfigFormat::Json
-        ));
-        assert!(matches!(
-            ConfigFormat::from_path(Path::new("fallow.jsonc")),
-            ConfigFormat::Jsonc
         ));
         assert!(matches!(
             ConfigFormat::from_path(Path::new(".fallow.toml")),
@@ -1038,20 +1135,19 @@ unknown_field = true
 
     #[test]
     fn config_names_priority_order() {
-        assert_eq!(CONFIG_NAMES[0], "fallow.jsonc");
-        assert_eq!(CONFIG_NAMES[1], "fallow.json");
-        assert_eq!(CONFIG_NAMES[2], "fallow.toml");
-        assert_eq!(CONFIG_NAMES[3], ".fallow.toml");
+        assert_eq!(CONFIG_NAMES[0], ".fallowrc.json");
+        assert_eq!(CONFIG_NAMES[1], "fallow.toml");
+        assert_eq!(CONFIG_NAMES[2], ".fallow.toml");
     }
 
     #[test]
     fn load_json_config_file() {
         let dir = std::env::temp_dir().join("fallow-test-json-config");
         let _ = std::fs::create_dir_all(&dir);
-        let config_path = dir.join("fallow.json");
+        let config_path = dir.join(".fallowrc.json");
         std::fs::write(
             &config_path,
-            r#"{"entry": ["src/index.ts"], "rules": {"unusedExports": "warn"}}"#,
+            r#"{"entry": ["src/index.ts"], "rules": {"unused-exports": "warn"}}"#,
         )
         .unwrap();
 
@@ -1066,7 +1162,7 @@ unknown_field = true
     fn load_jsonc_config_file() {
         let dir = std::env::temp_dir().join("fallow-test-jsonc-config");
         let _ = std::fs::create_dir_all(&dir);
-        let config_path = dir.join("fallow.jsonc");
+        let config_path = dir.join(".fallowrc.json");
         std::fs::write(
             &config_path,
             r#"{
@@ -1074,7 +1170,7 @@ unknown_field = true
                 "entry": ["src/index.ts"],
                 /* Block comment */
                 "rules": {
-                    "unusedExports": "warn"
+                    "unused-exports": "warn"
                 }
             }"#,
         )
@@ -1095,33 +1191,21 @@ unknown_field = true
     }
 
     #[test]
-    fn json_config_all_camel_case_fields() {
+    fn json_config_all_fields() {
         let json_str = r#"{
             "ignoreDependencies": ["lodash"],
             "ignoreExports": [{"file": "src/*.ts", "exports": ["*"]}],
-            "detect": {
-                "unusedFiles": false,
-                "unusedExports": true,
-                "unusedDependencies": false,
-                "unusedDevDependencies": true,
-                "unusedTypes": false,
-                "unusedEnumMembers": true,
-                "unusedClassMembers": false,
-                "unresolvedImports": true,
-                "unlistedDependencies": false,
-                "duplicateExports": true
-            },
             "rules": {
-                "unusedFiles": "off",
-                "unusedExports": "warn",
-                "unusedDependencies": "error",
-                "unusedDevDependencies": "off",
-                "unusedTypes": "warn",
-                "unusedEnumMembers": "error",
-                "unusedClassMembers": "off",
-                "unresolvedImports": "warn",
-                "unlistedDependencies": "error",
-                "duplicateExports": "off"
+                "unused-files": "off",
+                "unused-exports": "warn",
+                "unused-dependencies": "error",
+                "unused-dev-dependencies": "off",
+                "unused-types": "warn",
+                "unused-enum-members": "error",
+                "unused-class-members": "off",
+                "unresolved-imports": "warn",
+                "unlisted-dependencies": "error",
+                "duplicate-exports": "off"
             },
             "duplicates": {
                 "minTokens": 100,
@@ -1131,15 +1215,313 @@ unknown_field = true
         }"#;
         let config: FallowConfig = serde_json::from_str(json_str).unwrap();
         assert_eq!(config.ignore_dependencies, vec!["lodash"]);
-        assert!(!config.detect.unused_files);
-        assert!(config.detect.unused_exports);
-        assert!(config.detect.unused_enum_members);
-        assert!(!config.detect.unused_class_members);
         assert_eq!(config.rules.unused_files, Severity::Off);
         assert_eq!(config.rules.unused_exports, Severity::Warn);
         assert_eq!(config.rules.unused_dependencies, Severity::Error);
         assert_eq!(config.duplicates.min_tokens, 100);
         assert_eq!(config.duplicates.min_lines, 10);
         assert!(config.duplicates.skip_local);
+    }
+
+    // ── extends tests ──────────────────────────────────────────────
+
+    #[test]
+    fn extends_single_base() {
+        let dir = std::env::temp_dir().join("fallow-test-extends-single");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        std::fs::write(
+            dir.join("base.json"),
+            r#"{"rules": {"unused-files": "warn"}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join(".fallowrc.json"),
+            r#"{"extends": ["base.json"], "entry": ["src/index.ts"]}"#,
+        )
+        .unwrap();
+
+        let config = FallowConfig::load(&dir.join(".fallowrc.json")).unwrap();
+        assert_eq!(config.rules.unused_files, Severity::Warn);
+        assert_eq!(config.entry, vec!["src/index.ts"]);
+        // Unset fields from base still default
+        assert_eq!(config.rules.unused_exports, Severity::Error);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn extends_overlay_overrides_base() {
+        let dir = std::env::temp_dir().join("fallow-test-extends-overlay");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        std::fs::write(
+            dir.join("base.json"),
+            r#"{"rules": {"unused-files": "warn", "unused-exports": "off"}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join(".fallowrc.json"),
+            r#"{"extends": ["base.json"], "rules": {"unused-files": "error"}}"#,
+        )
+        .unwrap();
+
+        let config = FallowConfig::load(&dir.join(".fallowrc.json")).unwrap();
+        // Overlay overrides base
+        assert_eq!(config.rules.unused_files, Severity::Error);
+        // Base value preserved when not overridden
+        assert_eq!(config.rules.unused_exports, Severity::Off);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn extends_chained() {
+        let dir = std::env::temp_dir().join("fallow-test-extends-chained");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        std::fs::write(
+            dir.join("grandparent.json"),
+            r#"{"rules": {"unused-files": "off", "unused-exports": "warn"}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("parent.json"),
+            r#"{"extends": ["grandparent.json"], "rules": {"unused-files": "warn"}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join(".fallowrc.json"),
+            r#"{"extends": ["parent.json"]}"#,
+        )
+        .unwrap();
+
+        let config = FallowConfig::load(&dir.join(".fallowrc.json")).unwrap();
+        // grandparent: off -> parent: warn -> child: inherits warn
+        assert_eq!(config.rules.unused_files, Severity::Warn);
+        // grandparent: warn, not overridden
+        assert_eq!(config.rules.unused_exports, Severity::Warn);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn extends_circular_detected() {
+        let dir = std::env::temp_dir().join("fallow-test-extends-circular");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        std::fs::write(dir.join("a.json"), r#"{"extends": ["b.json"]}"#).unwrap();
+        std::fs::write(dir.join("b.json"), r#"{"extends": ["a.json"]}"#).unwrap();
+
+        let result = FallowConfig::load(&dir.join("a.json"));
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(
+            err_msg.contains("Circular extends"),
+            "Expected circular error, got: {err_msg}"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn extends_missing_file_errors() {
+        let dir = std::env::temp_dir().join("fallow-test-extends-missing");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        std::fs::write(
+            dir.join(".fallowrc.json"),
+            r#"{"extends": ["nonexistent.json"]}"#,
+        )
+        .unwrap();
+
+        let result = FallowConfig::load(&dir.join(".fallowrc.json"));
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(
+            err_msg.contains("not found"),
+            "Expected not found error, got: {err_msg}"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn extends_string_sugar() {
+        let dir = std::env::temp_dir().join("fallow-test-extends-string");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        std::fs::write(dir.join("base.json"), r#"{"ignorePatterns": ["gen/**"]}"#).unwrap();
+        // String form instead of array
+        std::fs::write(dir.join(".fallowrc.json"), r#"{"extends": "base.json"}"#).unwrap();
+
+        let config = FallowConfig::load(&dir.join(".fallowrc.json")).unwrap();
+        assert_eq!(config.ignore_patterns, vec!["gen/**"]);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn extends_deep_merge_preserves_arrays() {
+        let dir = std::env::temp_dir().join("fallow-test-extends-array");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        std::fs::write(dir.join("base.json"), r#"{"entry": ["src/a.ts"]}"#).unwrap();
+        std::fs::write(
+            dir.join(".fallowrc.json"),
+            r#"{"extends": ["base.json"], "entry": ["src/b.ts"]}"#,
+        )
+        .unwrap();
+
+        let config = FallowConfig::load(&dir.join(".fallowrc.json")).unwrap();
+        // Arrays are replaced, not merged (overlay replaces base)
+        assert_eq!(config.entry, vec!["src/b.ts"]);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ── overrides tests ────────────────────────────────────────────
+
+    #[test]
+    fn overrides_deserialize() {
+        let json_str = r#"{
+            "overrides": [{
+                "files": ["*.test.ts"],
+                "rules": {
+                    "unused-exports": "off"
+                }
+            }]
+        }"#;
+        let config: FallowConfig = serde_json::from_str(json_str).unwrap();
+        assert_eq!(config.overrides.len(), 1);
+        assert_eq!(config.overrides[0].files, vec!["*.test.ts"]);
+        assert_eq!(
+            config.overrides[0].rules.unused_exports,
+            Some(Severity::Off)
+        );
+        assert_eq!(config.overrides[0].rules.unused_files, None);
+    }
+
+    #[test]
+    fn apply_partial_only_some_fields() {
+        let mut rules = RulesConfig::default();
+        let partial = PartialRulesConfig {
+            unused_files: Some(Severity::Warn),
+            unused_exports: Some(Severity::Off),
+            ..Default::default()
+        };
+        rules.apply_partial(&partial);
+        assert_eq!(rules.unused_files, Severity::Warn);
+        assert_eq!(rules.unused_exports, Severity::Off);
+        // Unset fields unchanged
+        assert_eq!(rules.unused_types, Severity::Error);
+        assert_eq!(rules.unresolved_imports, Severity::Error);
+    }
+
+    #[test]
+    fn resolve_rules_for_path_no_overrides() {
+        let config = FallowConfig {
+            schema: None,
+            extends: vec![],
+            entry: vec![],
+            ignore_patterns: vec![],
+            framework: vec![],
+            workspaces: None,
+            ignore_dependencies: vec![],
+            ignore_exports: vec![],
+            duplicates: DuplicatesConfig::default(),
+            rules: RulesConfig::default(),
+            production: false,
+            plugins: vec![],
+            overrides: vec![],
+        };
+        let resolved = config.resolve(PathBuf::from("/project"), OutputFormat::Human, 1, true);
+        let rules = resolved.resolve_rules_for_path(Path::new("/project/src/foo.ts"));
+        assert_eq!(rules.unused_files, Severity::Error);
+    }
+
+    #[test]
+    fn resolve_rules_for_path_with_matching_override() {
+        let config = FallowConfig {
+            schema: None,
+            extends: vec![],
+            entry: vec![],
+            ignore_patterns: vec![],
+            framework: vec![],
+            workspaces: None,
+            ignore_dependencies: vec![],
+            ignore_exports: vec![],
+            duplicates: DuplicatesConfig::default(),
+            rules: RulesConfig::default(),
+            production: false,
+            plugins: vec![],
+            overrides: vec![ConfigOverride {
+                files: vec!["*.test.ts".to_string()],
+                rules: PartialRulesConfig {
+                    unused_exports: Some(Severity::Off),
+                    ..Default::default()
+                },
+            }],
+        };
+        let resolved = config.resolve(PathBuf::from("/project"), OutputFormat::Human, 1, true);
+
+        // Test file matches override
+        let test_rules = resolved.resolve_rules_for_path(Path::new("/project/src/utils.test.ts"));
+        assert_eq!(test_rules.unused_exports, Severity::Off);
+        assert_eq!(test_rules.unused_files, Severity::Error); // not overridden
+
+        // Non-test file does not match
+        let src_rules = resolved.resolve_rules_for_path(Path::new("/project/src/utils.ts"));
+        assert_eq!(src_rules.unused_exports, Severity::Error);
+    }
+
+    #[test]
+    fn resolve_rules_for_path_later_override_wins() {
+        let config = FallowConfig {
+            schema: None,
+            extends: vec![],
+            entry: vec![],
+            ignore_patterns: vec![],
+            framework: vec![],
+            workspaces: None,
+            ignore_dependencies: vec![],
+            ignore_exports: vec![],
+            duplicates: DuplicatesConfig::default(),
+            rules: RulesConfig::default(),
+            production: false,
+            plugins: vec![],
+            overrides: vec![
+                ConfigOverride {
+                    files: vec!["*.ts".to_string()],
+                    rules: PartialRulesConfig {
+                        unused_files: Some(Severity::Warn),
+                        ..Default::default()
+                    },
+                },
+                ConfigOverride {
+                    files: vec!["*.test.ts".to_string()],
+                    rules: PartialRulesConfig {
+                        unused_files: Some(Severity::Off),
+                        ..Default::default()
+                    },
+                },
+            ],
+        };
+        let resolved = config.resolve(PathBuf::from("/project"), OutputFormat::Human, 1, true);
+
+        // First override matches *.ts, second matches *.test.ts; second wins
+        let rules = resolved.resolve_rules_for_path(Path::new("/project/foo.test.ts"));
+        assert_eq!(rules.unused_files, Severity::Off);
+
+        // Non-test .ts file only matches first override
+        let rules2 = resolved.resolve_rules_for_path(Path::new("/project/foo.ts"));
+        assert_eq!(rules2.unused_files, Severity::Warn);
     }
 }

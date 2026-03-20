@@ -170,7 +170,7 @@ cd benchmarks && npm run generate:dupes && npm run bench:dupes  # vs jscpd
 - `dupes` — find code duplication with clone families, refactoring suggestions, --baseline/--save-baseline, --mode (strict/mild/weak/semantic), --min-tokens, --min-lines, --threshold, --skip-local, --cross-language, --trace FILE:LINE (trace all clones at a specific location)
 - `watch` — file watcher with debounced re-analysis
 - `fix` — auto-remove unused exports and deps (--dry-run, --yes/--force for non-TTY confirmation, --format json for structured output)
-- `init` — create fallow.jsonc (default) or fallow.toml (`--toml`), includes `$schema` for IDE autocomplete
+- `init` — create .fallowrc.json (default) or fallow.toml (`--toml`), includes `$schema` for IDE autocomplete
 - `migrate` — migrate config from knip and/or jscpd to fallow (--toml, --dry-run, --from PATH; auto-detects knip.json/knip.jsonc/.knip.json/.knip.jsonc/package.json#knip and .jscpd.json/package.json#jscpd)
 - `list` — show active plugins, entry points, files (--format json for structured output)
 - `schema` — dump CLI interface as machine-readable JSON for agent introspection
@@ -238,12 +238,12 @@ npm run package  # vsce package
 
 ## Configuration format
 
-Supports JSONC (default), JSON, and TOML. Config files are searched in priority order:
-`fallow.jsonc` > `fallow.json` > `fallow.toml` > `.fallow.toml`
+Supports JSON (with JSONC comment support) and TOML. Config files are searched in priority order:
+`.fallowrc.json` > `fallow.toml` > `.fallow.toml`
 
-- JSONC is the default for `fallow init` — matches the Oxc ecosystem (oxlint, oxfmt, Biome)
+- `.fallowrc.json` is the default for `fallow init` — matches the Oxc ecosystem (oxlint's `.oxlintrc.json`)
 - TOML is still fully supported via `fallow init --toml`
-- A `$schema` field in JSON/JSONC enables IDE autocomplete and validation
+- A `$schema` field in JSON enables IDE autocomplete and validation
 - Run `fallow config-schema` to generate the JSON Schema, or reference it from GitHub
 - The `schema.json` file is checked into the repo root
 
@@ -252,14 +252,14 @@ Supports JSONC (default), JSON, and TOML. Config files are searched in priority 
 Per-issue-type severity for incremental CI adoption:
 
 ```jsonc
-// fallow.jsonc
+// .fallowrc.json
 {
   "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
   "rules": {
-    "unused_files": "error",       // fail CI (exit 1)
-    "unused_exports": "warn",      // report but don't fail
-    "unused_types": "off",         // ignore entirely
-    "unresolved_imports": "error"
+    "unused-files": "error",       // fail CI (exit 1)
+    "unused-exports": "warn",      // report but don't fail
+    "unused-types": "off",         // ignore entirely
+    "unresolved-imports": "error"
   }
 }
 ```
@@ -268,17 +268,16 @@ Or equivalently in TOML:
 
 ```toml
 [rules]
-unused_files = "error"       # fail CI (exit 1)
-unused_exports = "warn"      # report but don't fail
-unused_types = "off"         # ignore entirely
-unresolved_imports = "error"
+unused-files = "error"       # fail CI (exit 1)
+unused-exports = "warn"      # report but don't fail
+unused-types = "off"         # ignore entirely
+unresolved-imports = "error"
 ```
 
 - `error` — report and fail CI (non-zero exit code)
 - `warn` — report but exit 0
 - `off` — don't detect or report
-- All default to `error` when omitted (backwards compatible)
-- `[detect] unused_X = false` still works and forces `Severity::Off`
+- All default to `error` when omitted
 - `--fail-on-issues` promotes all `warn` to `error` for that run
 - Human output colors reflect severity; SARIF levels are dynamic
 

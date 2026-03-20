@@ -16,7 +16,7 @@ inputs:
     required: false
     default: '.'
   config:
-    description: 'Path to config file (fallow.jsonc, fallow.json, or fallow.toml)'
+    description: 'Path to config file (.fallowrc.json or fallow.toml)'
     required: false
   format:
     description: 'Output format (human, json, sarif, compact)'

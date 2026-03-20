@@ -380,20 +380,25 @@ mod tests {
     fn test_config() -> ResolvedConfig {
         fallow_config::FallowConfig {
             schema: None,
+            extends: vec![],
             entry: vec![],
-            ignore: vec![],
-            detect: fallow_config::DetectConfig::default(),
+            ignore_patterns: vec![],
             framework: vec![],
             workspaces: None,
             ignore_dependencies: vec![],
             ignore_exports: vec![],
-            output: fallow_config::OutputFormat::Human,
             duplicates: fallow_config::DuplicatesConfig::default(),
             rules: fallow_config::RulesConfig::default(),
             production: false,
             plugins: vec![],
+            overrides: vec![],
         }
-        .resolve(PathBuf::from("/tmp/test"), 1, true)
+        .resolve(
+            PathBuf::from("/tmp/test"),
+            fallow_config::OutputFormat::Human,
+            1,
+            true,
+        )
     }
 
     fn make_export(name: &str, span_start: u32, span_end: u32) -> ExportSymbol {

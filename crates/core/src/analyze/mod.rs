@@ -6,7 +6,7 @@ mod unused_members;
 
 use rustc_hash::FxHashMap;
 
-use fallow_config::{PackageJson, ResolvedConfig};
+use fallow_config::{PackageJson, ResolvedConfig, Severity};
 
 use crate::discover::FileId;
 use crate::extract::ModuleInfo;
@@ -75,28 +75,30 @@ pub fn find_dead_code_full(
 
     let mut results = AnalysisResults::default();
 
-    if config.detect.unused_files {
+    if config.rules.unused_files != Severity::Off {
         results.unused_files = find_unused_files(graph, &suppressions_by_file);
     }
 
-    if config.detect.unused_exports || config.detect.unused_types {
+    if config.rules.unused_exports != Severity::Off || config.rules.unused_types != Severity::Off {
         let (exports, types) =
             find_unused_exports(graph, config, plugin_result, &suppressions_by_file);
-        if config.detect.unused_exports {
+        if config.rules.unused_exports != Severity::Off {
             results.unused_exports = exports;
         }
-        if config.detect.unused_types {
+        if config.rules.unused_types != Severity::Off {
             results.unused_types = types;
         }
     }
 
-    if config.detect.unused_enum_members || config.detect.unused_class_members {
+    if config.rules.unused_enum_members != Severity::Off
+        || config.rules.unused_class_members != Severity::Off
+    {
         let (enum_members, class_members) =
             find_unused_members(graph, config, resolved_modules, &suppressions_by_file);
-        if config.detect.unused_enum_members {
+        if config.rules.unused_enum_members != Severity::Off {
             results.unused_enum_members = enum_members;
         }
-        if config.detect.unused_class_members {
+        if config.rules.unused_class_members != Severity::Off {
             results.unused_class_members = class_members;
         }
     }
@@ -105,24 +107,26 @@ pub fn find_dead_code_full(
     let pkg_path = config.root.join("package.json");
     let pkg = PackageJson::load(&pkg_path).ok();
     if let Some(ref pkg) = pkg {
-        if config.detect.unused_dependencies || config.detect.unused_dev_dependencies {
+        if config.rules.unused_dependencies != Severity::Off
+            || config.rules.unused_dev_dependencies != Severity::Off
+        {
             let (deps, dev_deps) =
                 find_unused_dependencies(graph, pkg, config, plugin_result, workspaces);
-            if config.detect.unused_dependencies {
+            if config.rules.unused_dependencies != Severity::Off {
                 results.unused_dependencies = deps;
             }
-            if config.detect.unused_dev_dependencies {
+            if config.rules.unused_dev_dependencies != Severity::Off {
                 results.unused_dev_dependencies = dev_deps;
             }
         }
 
-        if config.detect.unlisted_dependencies {
+        if config.rules.unlisted_dependencies != Severity::Off {
             results.unlisted_dependencies =
                 find_unlisted_dependencies(graph, pkg, config, workspaces, plugin_result);
         }
     }
 
-    if config.detect.unresolved_imports && !resolved_modules.is_empty() {
+    if config.rules.unresolved_imports != Severity::Off && !resolved_modules.is_empty() {
         let virtual_prefixes: Vec<&str> = plugin_result
             .map(|pr| {
                 pr.virtual_module_prefixes
@@ -139,7 +143,7 @@ pub fn find_dead_code_full(
         );
     }
 
-    if config.detect.duplicate_exports {
+    if config.rules.duplicate_exports != Severity::Off {
         results.duplicate_exports = find_duplicate_exports(graph, config, &suppressions_by_file);
     }
 

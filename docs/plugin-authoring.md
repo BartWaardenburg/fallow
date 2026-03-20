@@ -179,7 +179,7 @@ Fallow discovers external plugins in this order (first occurrence of a plugin na
 Point to specific plugin files or directories:
 
 ```jsonc
-// fallow.jsonc
+// .fallowrc.json
 {
   "plugins": [
     "tools/fallow-plugins/",

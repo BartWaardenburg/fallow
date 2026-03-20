@@ -397,23 +397,33 @@ pub(crate) fn default_config(root: &Path) -> ResolvedConfig {
         .ok()
         .flatten();
     match user_config {
-        Some((config, _path)) => config.resolve(root.to_path_buf(), num_cpus(), false),
+        Some((config, _path)) => config.resolve(
+            root.to_path_buf(),
+            fallow_config::OutputFormat::Human,
+            num_cpus(),
+            false,
+        ),
         None => fallow_config::FallowConfig {
             schema: None,
+            extends: vec![],
             entry: vec![],
-            ignore: vec![],
-            detect: fallow_config::DetectConfig::default(),
+            ignore_patterns: vec![],
             framework: vec![],
             workspaces: None,
             ignore_dependencies: vec![],
             ignore_exports: vec![],
-            output: fallow_config::OutputFormat::Human,
             duplicates: fallow_config::DuplicatesConfig::default(),
             rules: fallow_config::RulesConfig::default(),
             production: false,
             plugins: vec![],
+            overrides: vec![],
         }
-        .resolve(root.to_path_buf(), num_cpus(), false),
+        .resolve(
+            root.to_path_buf(),
+            fallow_config::OutputFormat::Human,
+            num_cpus(),
+            false,
+        ),
     }
 }
 

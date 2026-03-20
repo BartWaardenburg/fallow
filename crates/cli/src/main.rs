@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
-use fallow_config::{FallowConfig, OutputFormat};
+use fallow_config::FallowConfig;
 
 mod baseline;
 mod check;
@@ -40,7 +40,7 @@ struct Cli {
     #[arg(short, long, global = true)]
     root: Option<PathBuf>,
 
-    /// Path to config file (fallow.jsonc, fallow.json, or fallow.toml)
+    /// Path to config file (.fallowrc.json or fallow.toml)
     #[arg(short, long, global = true)]
     config: Option<PathBuf>,
 
@@ -173,7 +173,7 @@ enum Command {
         yes: bool,
     },
 
-    /// Initialize a fallow.jsonc configuration file
+    /// Initialize a .fallowrc.json configuration file
     Init {
         /// Generate TOML instead of JSONC
         #[arg(long)]
@@ -259,13 +259,13 @@ enum Format {
     Compact,
 }
 
-impl From<Format> for OutputFormat {
+impl From<Format> for fallow_config::OutputFormat {
     fn from(f: Format) -> Self {
         match f {
-            Format::Human => OutputFormat::Human,
-            Format::Json => OutputFormat::Json,
-            Format::Sarif => OutputFormat::Sarif,
-            Format::Compact => OutputFormat::Compact,
+            Format::Human => fallow_config::OutputFormat::Human,
+            Format::Json => fallow_config::OutputFormat::Json,
+            Format::Sarif => fallow_config::OutputFormat::Sarif,
+            Format::Compact => fallow_config::OutputFormat::Compact,
         }
     }
 }
@@ -274,8 +274,8 @@ impl From<Format> for OutputFormat {
 
 /// Emit an error as structured JSON on stdout when `--format json` is active,
 /// then return the given exit code. For non-JSON formats, emit to stderr as usual.
-fn emit_error(message: &str, exit_code: u8, output: &OutputFormat) -> ExitCode {
-    if matches!(output, OutputFormat::Json) {
+fn emit_error(message: &str, exit_code: u8, output: &fallow_config::OutputFormat) -> ExitCode {
+    if matches!(output, fallow_config::OutputFormat::Json) {
         let error_obj = serde_json::json!({
             "error": true,
             "message": message,
@@ -317,7 +317,7 @@ fn quiet_from_env() -> bool {
 fn load_config(
     root: &std::path::Path,
     config_path: &Option<PathBuf>,
-    output: OutputFormat,
+    output: fallow_config::OutputFormat,
     no_cache: bool,
     threads: usize,
     production: bool,
@@ -342,29 +342,28 @@ fn load_config(
 
     Ok(match user_config {
         Some(mut config) => {
-            config.output = output;
             // CLI --production flag overrides config
             if production {
                 config.production = true;
             }
-            config.resolve(root.to_path_buf(), threads, no_cache)
+            config.resolve(root.to_path_buf(), output, threads, no_cache)
         }
         None => FallowConfig {
             schema: None,
+            extends: vec![],
             entry: vec![],
-            ignore: vec![],
-            detect: fallow_config::DetectConfig::default(),
+            ignore_patterns: vec![],
             framework: vec![],
             workspaces: None,
             ignore_dependencies: vec![],
             ignore_exports: vec![],
-            output,
             duplicates: fallow_config::DuplicatesConfig::default(),
             rules: fallow_config::RulesConfig::default(),
             production,
             plugins: vec![],
+            overrides: vec![],
         }
-        .resolve(root.to_path_buf(), threads, no_cache),
+        .resolve(root.to_path_buf(), output, threads, no_cache),
     })
 }
 
@@ -399,7 +398,7 @@ fn main() -> ExitCode {
     // Resolve quiet: CLI --quiet flag > FALLOW_QUIET env var > false
     let quiet = cli.quiet || quiet_from_env();
 
-    let output: OutputFormat = format.clone().into();
+    let output: fallow_config::OutputFormat = format.clone().into();
 
     // Set up tracing
     if !quiet {
@@ -606,7 +605,7 @@ mod tests {
 
     #[test]
     fn emit_error_returns_given_exit_code() {
-        let code = emit_error("test error", 2, &OutputFormat::Human);
+        let code = emit_error("test error", 2, &fallow_config::OutputFormat::Human);
         assert_eq!(code, ExitCode::from(2));
     }
 
