@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-03-20
+
+### Fixed
+- Windows build: restrict `DiscoveredFile` size assertion to unix (different `PathBuf` layout on Windows MSVC)
+
 ## [1.0.0] - 2026-03-20
 
 ### Added
@@ -131,7 +136,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[Unreleased]: https://github.com/fallow-rs/fallow/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/fallow-rs/fallow/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/fallow-rs/fallow/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/fallow-rs/fallow/compare/v0.3.0...v1.0.0
 [0.3.0]: https://github.com/fallow-rs/fallow/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/fallow-rs/fallow/compare/v0.1.7...v0.2.0

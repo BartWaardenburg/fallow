@@ -1,6 +1,6 @@
 {
   "name": "@fallow-cli/linux-arm64-musl",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Fallow CLI binary for Linux ARM64 (musl)",
   "license": "MIT",
   "repository": {
