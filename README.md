@@ -94,6 +94,14 @@ Measured on real-world open-source projects (median of 5 runs, 2 warmup). Apple 
 
 The speedup narrows on larger projects as actual analysis time dominates over startup: 26-36x on real-world projects vs knip v5 (10-14x vs v6), 3-9x on 1,000+ file projects. fallow stays sub-second even at 5,000 files.
 
+Memory usage is equally striking — fallow uses 10-15x less memory than knip v5 and 3-8x less than knip v6:
+
+| Project | fallow | knip v5 | knip v6 |
+|:--------|-------:|--------:|--------:|
+| zod (174 files) | **20 MB** | 248 MB | 160 MB |
+| fastify (286 files) | **27 MB** | 288 MB | 111 MB |
+| synthetic (5,000 files) | **61 MB** | 279 MB | 179 MB |
+
 fallow uses the [Oxc](https://oxc.rs) parser for syntactic analysis and [rayon](https://github.com/rayon-rs/rayon) for parallel parsing — no TypeScript compiler, no Node.js runtime. Dead code detection is a graph problem on import/export edges; you don't need type information for that.
 
 ### Duplication detection: fallow dupes vs jscpd
@@ -127,6 +135,7 @@ node bench-dupes.mjs                 # Run duplication benchmarks (fallow vs jsc
 |:--|:-------|:-----|
 | Speed vs knip v5 | **3-36x faster** | Baseline |
 | Speed vs knip v6 | **2-14x faster** | Baseline |
+| Memory usage | **3-15x less** | Baseline |
 | Dead code detection | 10 issue types | Comparable |
 | Duplication detection | Built-in | Not included |
 | Framework plugins | 84 (30 with config parsing) | 140+ (runtime config loading) |
@@ -169,7 +178,7 @@ Create a config file in your project root, or run `fallow init`:
 }
 ```
 
-TOML is also supported (`fallow init --toml` creates `fallow.toml`). See the [full configuration reference](https://docs.fallow.tools/configuration) for all options, including `rules` severity levels, `duplicates` settings, `ignoreExports` rules, and custom framework presets.
+TOML is also supported (`fallow init --toml` creates `fallow.toml`). See the [full configuration reference](https://docs.fallow.tools/configuration/overview) for all options, including `rules` severity levels, `duplicates` settings, `ignoreExports` rules, and custom framework presets.
 
 ### Migrating from knip or jscpd
 
@@ -185,7 +194,7 @@ This reads your knip.json/knip.jsonc/.knip.json/.knip.jsonc and/or .jscpd.json (
 
 ## Framework support
 
-84 built-in plugins covering frameworks (Next.js, Nuxt, Remix, SvelteKit, Gatsby, Astro, Angular, React Router, TanStack Router, React Native, Expo, NestJS, Docusaurus, Nitro, Capacitor, Sanity, VitePress, next-intl, Relay, Electron, i18next), bundlers (Vite, Webpack, Rspack, Rsbuild, Rollup, Rolldown, Tsup, Tsdown, Parcel), testing (Vitest, Jest, Playwright, Cypress, Mocha, Ava, Storybook, Karma, Cucumber, WebdriverIO), linting & formatting (ESLint, Biome, Stylelint, Commitlint, Prettier, Oxlint, markdownlint, cspell, remark), transpilation & runtime (TypeScript, Babel, SWC, Bun), CSS (Tailwind, PostCSS), databases (Prisma, Drizzle, Knex, TypeORM, Kysely), monorepos (Turborepo, Nx, Changesets, Syncpack), CI/CD (semantic-release, Commitizen), deployment (Wrangler, Sentry), git hooks (husky, lint-staged, lefthook, simple-git-hooks), and more (GraphQL Codegen, MSW, SVGO, SVGR, TypeDoc, openapi-ts, Plop, c8, nyc, nodemon, PM2, dependency-cruiser). If your framework isn't listed, you can add a [custom preset](https://docs.fallow.tools/custom-presets) in your config file.
+84 built-in plugins covering frameworks (Next.js, Nuxt, Remix, SvelteKit, Gatsby, Astro, Angular, React Router, TanStack Router, React Native, Expo, NestJS, Docusaurus, Nitro, Capacitor, Sanity, VitePress, next-intl, Relay, Electron, i18next), bundlers (Vite, Webpack, Rspack, Rsbuild, Rollup, Rolldown, Tsup, Tsdown, Parcel), testing (Vitest, Jest, Playwright, Cypress, Mocha, Ava, Storybook, Karma, Cucumber, WebdriverIO), linting & formatting (ESLint, Biome, Stylelint, Commitlint, Prettier, Oxlint, markdownlint, cspell, remark), transpilation & runtime (TypeScript, Babel, SWC, Bun), CSS (Tailwind, PostCSS), databases (Prisma, Drizzle, Knex, TypeORM, Kysely), monorepos (Turborepo, Nx, Changesets, Syncpack), CI/CD (semantic-release, Commitizen), deployment (Wrangler, Sentry), git hooks (husky, lint-staged, lefthook, simple-git-hooks), and more (GraphQL Codegen, MSW, SVGO, SVGR, TypeDoc, openapi-ts, Plop, c8, nyc, nodemon, PM2, dependency-cruiser). If your framework isn't listed, you can add a [custom preset](https://docs.fallow.tools/frameworks/custom-plugins) in your config file.
 
 ## CI integration
 
@@ -199,7 +208,7 @@ This reads your knip.json/knip.jsonc/.knip.json/.knip.jsonc and/or .jscpd.json (
 - run: npx fallow check --format sarif > results.sarif
 ```
 
-Supports `--changed-since main` for PR-only analysis, `--baseline` for failing only on new issues, `--format json` for machine-readable output, and per-issue-type severity rules (`error`/`warn`/`off`) for incremental adoption. See the [CI guide](https://docs.fallow.tools/ci-integration) for full workflow examples.
+Supports `--changed-since main` for PR-only analysis, `--baseline` for failing only on new issues, `--format json` for machine-readable output, and per-issue-type severity rules (`error`/`warn`/`off`) for incremental adoption. See the [CI guide](https://docs.fallow.tools/integrations/ci) for full workflow examples.
 
 ## Additional features
 
@@ -241,7 +250,7 @@ Issue type tokens: `unused-file`, `unused-export`, `unused-type`, `unused-depend
 
 ## Limitations
 
-fallow uses syntactic analysis only — no type information. This is what makes it fast, but it means type-level dead code is out of scope. Svelte files skip individual export analysis (props can't be distinguished from utility exports without compiler semantics), so unused exports in `.svelte` files may go undetected. Use [inline suppression comments](#inline-suppression-comments) or [`ignore_exports`](https://docs.fallow.tools/configuration#ignoring-specific-exports) for any remaining edge cases.
+fallow uses syntactic analysis only — no type information. This is what makes it fast, but it means type-level dead code is out of scope. Svelte files skip individual export analysis (props can't be distinguished from utility exports without compiler semantics), so unused exports in `.svelte` files may go undetected. Use [inline suppression comments](#inline-suppression-comments) or [`ignore_exports`](https://docs.fallow.tools/configuration/overview#ignoring-specific-exports) for any remaining edge cases.
 
 ## Custom plugins
 
@@ -264,8 +273,8 @@ Fallow auto-discovers `fallow-plugin-*.toml` files in your project root and `.fa
 ## Learn more
 
 - [Documentation](https://docs.fallow.tools)
-- [Migrating from knip](https://docs.fallow.tools/migrating-from-knip)
-- [Full plugin list](https://docs.fallow.tools/frameworks)
+- [Migrating from knip](https://docs.fallow.tools/migration/from-knip)
+- [Full plugin list](https://docs.fallow.tools/frameworks/built-in)
 - [Plugin Authoring Guide](docs/plugin-authoring.md)
 
 ## Contributing

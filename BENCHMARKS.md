@@ -123,6 +123,38 @@ Benchmark results vary with hardware. Key factors:
 
 When publishing results, always include the environment info printed by the benchmark scripts.
 
+## Reference Results (2026-03-20)
+
+Environment: Apple M5 (10 cores), 32 GB RAM, macOS 25.2.0, Node v22.21.1, rustc 1.93.0. fallow v0.3.0, knip 5.87.0, knip 6.0.0, jscpd 4.0.8. Median of 5 runs, 2 warmup.
+
+### Dead code: fallow check vs knip
+
+| Project | Files | fallow | knip v5 | knip v6 | vs v5 | vs v6 | fallow RSS | knip v5 RSS | knip v6 RSS |
+|:--------|------:|-------:|--------:|--------:|------:|------:|-----------:|------------:|------------:|
+| zod | 174 | 23ms | 590ms | 308ms | 26.1x | 13.6x | 20 MB | 248 MB | 160 MB |
+| fastify | 286 | 22ms | 804ms | 236ms | 36.2x | 10.6x | 27 MB | 288 MB | 111 MB |
+| preact | 244 | 24ms | 799ms | —* | 33.9x | — | 21 MB | 233 MB | — |
+| synthetic (1k) | 1,001 | 45ms | 380ms | 196ms | 8.5x | 4.4x | 22 MB | 203 MB | 109 MB |
+| synthetic (5k) | 5,001 | 201ms | 646ms | 340ms | 3.2x | 1.7x | 61 MB | 279 MB | 179 MB |
+
+\* knip v6 excluded for preact due to a v6 regression.
+
+### Duplication: fallow dupes vs jscpd
+
+| Project | Files | fallow | jscpd | Speedup | fallow RSS | jscpd RSS |
+|:--------|------:|-------:|------:|--------:|-----------:|----------:|
+| zod | 174 | 49ms | 1.01s | 20.6x | 53 MB | 198 MB |
+| fastify | 286 | 82ms | 2.09s | 25.5x | 101 MB | 321 MB |
+| preact | 244 | 46ms | 1.53s | 33.3x | 57 MB | 252 MB |
+
+### Summary ranges
+
+| Comparison | Speed | Memory |
+|:-----------|:------|:-------|
+| fallow vs knip v5 | 3-36x faster | 10-15x less |
+| fallow vs knip v6 | 2-14x faster | 3-8x less |
+| fallow vs jscpd | 20-33x faster | 3-4x less |
+
 ## CI Integration
 
 The `.github/workflows/bench.yml` workflow runs Criterion benchmarks on every PR and push to main:
