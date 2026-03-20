@@ -274,7 +274,7 @@ pub struct IgnoreExportRule {
 
 /// Per-file override entry.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct ConfigOverride {
     /// Glob patterns to match files against (relative to config file location).
     pub files: Vec<String>,
@@ -410,16 +410,20 @@ fn resolve_extends(
     visited: &mut FxHashSet<PathBuf>,
     depth: usize,
 ) -> Result<serde_json::Value, miette::Report> {
-    if depth > MAX_EXTENDS_DEPTH {
+    if depth >= MAX_EXTENDS_DEPTH {
         return Err(miette::miette!(
-            "Config extends chain too deep (>{MAX_EXTENDS_DEPTH} levels) at {}",
+            "Config extends chain too deep (>={MAX_EXTENDS_DEPTH} levels) at {}",
             path.display()
         ));
     }
 
-    let canonical = path
-        .canonicalize()
-        .map_err(|e| miette::miette!("Failed to resolve config path {}: {}", path.display(), e))?;
+    let canonical = path.canonicalize().map_err(|e| {
+        miette::miette!(
+            "Config file not found or unresolvable: {}: {}",
+            path.display(),
+            e
+        )
+    })?;
 
     if !visited.insert(canonical.clone()) {
         return Err(miette::miette!(
@@ -452,6 +456,13 @@ fn resolve_extends(
     let mut merged = serde_json::Value::Object(serde_json::Map::new());
 
     for extend_path_str in &extends {
+        if Path::new(extend_path_str).is_absolute() {
+            return Err(miette::miette!(
+                "extends paths must be relative, got absolute path: {} (in {})",
+                extend_path_str,
+                path.display()
+            ));
+        }
         let extend_path = config_dir.join(extend_path_str);
         if !extend_path.exists() {
             return Err(miette::miette!(

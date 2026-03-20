@@ -25,7 +25,7 @@ const KNIP_UNMAPPABLE_FIELDS: &[(&str, &str, Option<&str>)] = &[
     (
         "ignoreFiles",
         "No separate concept in fallow",
-        Some("use `ignore` patterns instead"),
+        Some("use the `ignorePatterns` field instead"),
     ),
     (
         "ignoreBinaries",
@@ -40,7 +40,7 @@ const KNIP_UNMAPPABLE_FIELDS: &[(&str, &str, Option<&str>)] = &[
     (
         "ignoreUnresolved",
         "Unresolved import filtering is not configurable in fallow",
-        Some("use inline suppression comments: // fallow-ignore-next-line unresolved-import"),
+        Some("use inline suppression comments: // fallow-ignore-next-line unresolved-imports"),
     ),
     ("ignoreExportsUsedInFile", "No equivalent in fallow", None),
     (
