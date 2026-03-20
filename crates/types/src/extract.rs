@@ -122,6 +122,16 @@ pub enum ImportedName {
     SideEffect,
 }
 
+// Size assertions to prevent memory regressions in hot-path types.
+// These types are stored in Vecs inside `ModuleInfo` (one per file) and are
+// iterated during graph construction and analysis. Keeping them compact
+// improves cache locality on large projects with thousands of files.
+const _: () = assert!(std::mem::size_of::<ExportInfo>() == 88);
+const _: () = assert!(std::mem::size_of::<ImportInfo>() == 88);
+const _: () = assert!(std::mem::size_of::<ExportName>() == 24);
+const _: () = assert!(std::mem::size_of::<ImportedName>() == 24);
+const _: () = assert!(std::mem::size_of::<MemberAccess>() == 48);
+
 /// A re-export declaration.
 #[derive(Debug, Clone)]
 pub struct ReExportInfo {

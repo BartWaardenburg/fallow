@@ -78,6 +78,11 @@ pub struct Suppression {
     pub kind: Option<IssueKind>,
 }
 
+// Size assertions to prevent memory regressions.
+// `Suppression` is stored in a Vec per file; `IssueKind` appears in every suppression.
+const _: () = assert!(std::mem::size_of::<Suppression>() == 8);
+const _: () = assert!(std::mem::size_of::<IssueKind>() == 1);
+
 #[cfg(test)]
 mod tests {
     use super::*;

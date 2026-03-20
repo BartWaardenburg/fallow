@@ -111,6 +111,17 @@ struct ImportedSymbol {
     import_span: oxc_span::Span,
 }
 
+// Size assertions to prevent memory regressions in hot-path graph types.
+// `Edge` is stored in a flat contiguous Vec for cache-friendly traversal.
+// `ImportedSymbol` is stored in a Vec per Edge.
+// `ExportSymbol` and `SymbolReference` are stored in Vecs per module node.
+// `ReExportEdge` is stored in a Vec per module for re-export chain resolution.
+const _: () = assert!(std::mem::size_of::<Edge>() == 32);
+const _: () = assert!(std::mem::size_of::<ImportedSymbol>() == 56);
+const _: () = assert!(std::mem::size_of::<ExportSymbol>() == 88);
+const _: () = assert!(std::mem::size_of::<SymbolReference>() == 16);
+const _: () = assert!(std::mem::size_of::<ReExportEdge>() == 56);
+
 impl ModuleGraph {
     /// Build the module graph from resolved modules and entry points.
     pub fn build(
@@ -2067,4 +2078,5 @@ mod tests {
             "source's foo should be referenced (propagated through 2-level chain)"
         );
     }
+
 }

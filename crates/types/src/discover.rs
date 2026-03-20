@@ -15,6 +15,12 @@ pub struct DiscoveredFile {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct FileId(pub u32);
 
+// Size assertions to prevent memory regressions in hot-path types.
+// These types are stored in large Vecs (one per project file) and iterated
+// in tight loops during discovery, parsing, and graph construction.
+const _: () = assert!(std::mem::size_of::<FileId>() == 4);
+const _: () = assert!(std::mem::size_of::<DiscoveredFile>() == 40);
+
 /// An entry point into the module graph.
 #[derive(Debug, Clone)]
 pub struct EntryPoint {
