@@ -67,7 +67,8 @@ fallow check --format json --quiet --changed-since main
 - `--save-baseline <path>` -- save current results as a baseline
 - `--production` -- exclude test/story/dev files, only start/build scripts, report type-only dependencies
 - `--workspace <name>` -- scope output to a single workspace package (monorepo support)
-- Issue type filters: `--unused-files`, `--unused-exports`, `--unused-deps`, `--unused-types`, `--unused-enum-members`, `--unused-class-members`, `--unresolved-imports`, `--unlisted-deps`, `--duplicate-exports`
+- `--ci` -- CI mode: equivalent to `--format sarif --fail-on-issues --quiet`
+- Issue type filters: `--unused-files`, `--unused-exports`, `--unused-deps`, `--unused-types`, `--unused-enum-members`, `--unused-class-members`, `--unresolved-imports`, `--unlisted-deps`, `--duplicate-exports`, `--circular-deps`
 
 ### `dupes`
 
@@ -252,9 +253,23 @@ Source-level suppression for false positives:
 // fallow-ignore-file unused-export
 ```
 
-Issue type tokens: `unused-file`, `unused-export`, `unused-type`, `unused-dependency`, `unused-dev-dependency`, `unused-enum-member`, `unused-class-member`, `unresolved-import`, `unlisted-dependency`, `duplicate-export`.
+Issue type tokens: `unused-file`, `unused-export`, `unused-type`, `unused-dependency`, `unused-dev-dependency`, `unused-enum-member`, `unused-class-member`, `unresolved-import`, `unlisted-dependency`, `duplicate-export`, `circular-dependency`.
 
 Unknown tokens are silently ignored (the comment has no effect). When an agent adds a suppression comment, always use the exact tokens listed above.
+
+## Agent Skills
+
+For agents that support the [Agent Skills](https://agentskills.io) specification, install structured fallow skills with workflows, gotchas, and patterns:
+
+```bash
+# Claude Code
+/install fallow-rs/fallow-skills
+
+# Other agents — clone into your agent's skills directory
+git clone https://github.com/fallow-rs/fallow-skills.git
+```
+
+See the [fallow-skills repository](https://github.com/fallow-rs/fallow-skills) for installation instructions for all supported agents.
 
 ## Invariants
 
