@@ -543,11 +543,12 @@ fn bench_cache_round_trip(c: &mut Criterion) {
         has_cjs_exports: false,
         content_hash: 0xDEAD_BEEF_CAFE_1234,
         suppressions: vec![],
+        line_offsets: vec![0],
     };
 
     c.bench_function("cache_round_trip", |b| {
         b.iter(|| {
-            let cached = module_to_cached(&module);
+            let cached = module_to_cached(&module, 0, 0);
             let _restored = cached_to_module(&cached, FileId(0));
         });
     });

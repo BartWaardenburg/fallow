@@ -123,6 +123,7 @@ impl ModuleInfoExtractor {
             has_cjs_exports: self.has_cjs_exports,
             content_hash,
             suppressions,
+            line_offsets: Vec::new(),
         }
     }
 

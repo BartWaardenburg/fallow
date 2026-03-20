@@ -13,7 +13,11 @@ const ENTRY_PATTERNS: &[&str] = &[
     "support/**/*.{ts,js}",
 ];
 
-const ALWAYS_USED: &[&str] = &["cucumber.{js,cjs,mjs}", ".cucumber.{js,yml}"];
+const ALWAYS_USED: &[&str] = &[
+    "cucumber.{js,cjs,mjs,ts}",
+    "cucumber.config.{js,cjs,mjs,ts}",
+    ".cucumber.{js,yml}",
+];
 
 const TOOLING_DEPENDENCIES: &[&str] = &["@cucumber/cucumber"];
 

@@ -32,19 +32,67 @@ pub struct AnalysisOutput {
     pub graph: Option<graph::ModuleGraph>,
 }
 
+/// Update cache: write freshly parsed modules and refresh stale mtime/size entries.
+fn update_cache(
+    store: &mut cache::CacheStore,
+    modules: &[extract::ModuleInfo],
+    files: &[discover::DiscoveredFile],
+) {
+    for module in modules {
+        if let Some(file) = files.get(module.file_id.0 as usize) {
+            let (mt, sz) = file_mtime_and_size(&file.path);
+            // If content hash matches, just refresh mtime/size if stale (e.g. `touch`ed file)
+            if let Some(cached) = store.get_by_path_only(&file.path)
+                && cached.content_hash == module.content_hash
+            {
+                if cached.mtime_secs != mt || cached.file_size != sz {
+                    store.insert(&file.path, cache::module_to_cached(module, mt, sz));
+                }
+                continue;
+            }
+            store.insert(&file.path, cache::module_to_cached(module, mt, sz));
+        }
+    }
+    store.retain_paths(files);
+}
+
+/// Extract mtime (seconds since epoch) and file size from a path.
+fn file_mtime_and_size(path: &std::path::Path) -> (u64, u64) {
+    std::fs::metadata(path)
+        .map(|m| {
+            let mt = m
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::SystemTime::UNIX_EPOCH).ok())
+                .map_or(0, |d| d.as_secs());
+            (mt, m.len())
+        })
+        .unwrap_or((0, 0))
+}
+
 /// Run the full analysis pipeline.
 pub fn analyze(config: &ResolvedConfig) -> Result<AnalysisResults, FallowError> {
-    let output = analyze_full(config, false)?;
+    let output = analyze_full(config, false, false)?;
+    Ok(output.results)
+}
+
+/// Run the full analysis pipeline with export usage collection (for LSP Code Lens).
+pub fn analyze_with_usages(config: &ResolvedConfig) -> Result<AnalysisResults, FallowError> {
+    let output = analyze_full(config, false, true)?;
     Ok(output.results)
 }
 
 /// Run the full analysis pipeline with optional performance timings and graph retention.
 pub fn analyze_with_trace(config: &ResolvedConfig) -> Result<AnalysisOutput, FallowError> {
-    analyze_full(config, true)
+    analyze_full(config, true, false)
 }
 
 #[allow(clippy::unnecessary_wraps)] // Result kept for future error handling
-fn analyze_full(config: &ResolvedConfig, retain: bool) -> Result<AnalysisOutput, FallowError> {
+fn analyze_full(
+    config: &ResolvedConfig,
+    retain: bool,
+    collect_usages: bool,
+) -> Result<AnalysisOutput, FallowError> {
     let _span = tracing::info_span!("fallow_analyze").entered();
     let pipeline_start = Instant::now();
 
@@ -143,25 +191,11 @@ fn analyze_full(config: &ResolvedConfig, retain: bool) -> Result<AnalysisOutput,
     let cache_misses = parse_result.cache_misses;
     let parse_ms = t.elapsed().as_secs_f64() * 1000.0;
 
-    // Update cache — only write modules that were freshly parsed (cache misses).
-    // Unchanged files are already in the cache with the correct hash, so
-    // re-serializing them would be wasted work.
+    // Update cache with freshly parsed modules and refresh stale mtime/size entries.
     let t = Instant::now();
     if !config.no_cache {
         let store = cache_store.get_or_insert_with(cache::CacheStore::new);
-        for module in &modules {
-            if let Some(file) = files.get(module.file_id.0 as usize) {
-                // Skip modules that came from cache (content_hash already matches)
-                if let Some(cached) = store.get_by_path_only(&file.path)
-                    && cached.content_hash == module.content_hash
-                {
-                    continue;
-                }
-                store.insert(&file.path, cache::module_to_cached(module));
-            }
-        }
-        // Prune cache entries for files that no longer exist in the project
-        store.retain_paths(files);
+        update_cache(store, &modules, files);
         if let Err(e) = store.save(&config.cache_dir) {
             tracing::warn!("Failed to save cache: {e}");
         }
@@ -205,6 +239,7 @@ fn analyze_full(config: &ResolvedConfig, retain: bool) -> Result<AnalysisOutput,
         Some(&plugin_result),
         workspaces,
         &modules,
+        collect_usages,
     );
     let analyze_ms = t.elapsed().as_secs_f64() * 1000.0;
 
@@ -384,10 +419,10 @@ fn run_plugins(
     result
 }
 
-/// Run analysis on a project directory.
+/// Run analysis on a project directory (with export usages for LSP Code Lens).
 pub fn analyze_project(root: &Path) -> Result<AnalysisResults, FallowError> {
     let config = default_config(root);
-    analyze(&config)
+    analyze_with_usages(&config)
 }
 
 /// Create a default config for a project root.

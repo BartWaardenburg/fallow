@@ -11,7 +11,7 @@ use crate::suppress::{self, IssueKind, Suppression};
 use super::predicates::{
     is_builtin_module, is_implicit_dependency, is_path_alias, is_virtual_module,
 };
-use super::{byte_offset_to_line_col, read_source};
+use super::{LineOffsetsMap, byte_offset_to_line_col};
 
 /// Find dependencies in package.json that are never imported.
 ///
@@ -362,13 +362,11 @@ pub fn find_unresolved_imports(
     _config: &ResolvedConfig,
     suppressions_by_file: &FxHashMap<FileId, &[Suppression]>,
     virtual_prefixes: &[&str],
+    line_offsets_by_file: &LineOffsetsMap<'_>,
 ) -> Vec<UnresolvedImport> {
     let mut unresolved = Vec::new();
 
     for module in resolved_modules {
-        // Lazily load source content for line/col computation
-        let mut source_content: Option<String> = None;
-
         for import in &module.resolved_imports {
             if let crate::resolve::ResolveResult::Unresolvable(spec) = &import.target {
                 // Skip virtual module imports using the `virtual:` convention
@@ -385,8 +383,11 @@ pub fn find_unresolved_imports(
                     continue;
                 }
 
-                let source = source_content.get_or_insert_with(|| read_source(&module.path));
-                let (line, col) = byte_offset_to_line_col(source, import.info.span.start);
+                let (line, col) = byte_offset_to_line_col(
+                    line_offsets_by_file,
+                    module.file_id,
+                    import.info.span.start,
+                );
 
                 // Check inline suppression
                 if let Some(supps) = suppressions_by_file.get(&module.file_id)

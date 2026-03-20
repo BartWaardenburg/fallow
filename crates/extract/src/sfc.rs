@@ -125,6 +125,7 @@ pub(crate) fn parse_sfc_to_module(file_id: FileId, source: &str, content_hash: u
         has_cjs_exports: false,
         content_hash,
         suppressions,
+        line_offsets: fallow_types::extract::compute_line_offsets(source),
     };
 
     for script in &scripts {

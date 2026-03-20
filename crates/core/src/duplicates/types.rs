@@ -77,7 +77,7 @@ pub struct CloneFamily {
 }
 
 /// Overall duplication analysis report.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct DuplicationReport {
     /// All detected clone groups.
     pub clone_groups: Vec<CloneGroup>,
@@ -88,7 +88,7 @@ pub struct DuplicationReport {
 }
 
 /// Aggregate duplication statistics.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct DuplicationStats {
     /// Total files analyzed.
     pub total_files: usize,

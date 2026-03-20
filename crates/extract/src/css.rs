@@ -72,6 +72,32 @@ fn is_css_url_import(source: &str) -> bool {
     source.starts_with("http://") || source.starts_with("https://") || source.starts_with("data:")
 }
 
+/// Normalize a CSS/SCSS import path to use `./` prefix for relative paths.
+/// CSS/SCSS resolve imports without `./` prefix as relative by default,
+/// unlike JS where unprefixed specifiers are bare (npm) specifiers.
+/// Only applies to paths with CSS/SCSS extensions — extensionless imports
+/// like `@import "tailwindcss"` are actual npm package imports.
+fn normalize_css_import_path(path: String) -> String {
+    if path.starts_with('.') || path.starts_with('/') || path.contains("://") {
+        return path;
+    }
+    // Paths with CSS/SCSS extensions are relative file imports
+    let ext = std::path::Path::new(&path)
+        .extension()
+        .and_then(|e| e.to_str());
+    match ext {
+        Some(e)
+            if e.eq_ignore_ascii_case("css")
+                || e.eq_ignore_ascii_case("scss")
+                || e.eq_ignore_ascii_case("sass")
+                || e.eq_ignore_ascii_case("less") =>
+        {
+            format!("./{path}")
+        }
+        _ => path,
+    }
+}
+
 /// Strip comments from CSS/SCSS source to avoid matching directives inside comments.
 fn strip_css_comments(source: &str, is_scss: bool) -> String {
     let stripped = CSS_COMMENT_RE.replace_all(source, "");
@@ -133,6 +159,9 @@ pub(crate) fn parse_css_to_module(
             && !src.is_empty()
             && !is_css_url_import(&src)
         {
+            // CSS/SCSS @import resolves relative paths without ./ prefix,
+            // so normalize to ./ to avoid bare-specifier misclassification
+            let src = normalize_css_import_path(src);
             imports.push(ImportInfo {
                 source: src,
                 imported_name: ImportedName::SideEffect,
@@ -148,7 +177,7 @@ pub(crate) fn parse_css_to_module(
         for cap in SCSS_USE_RE.captures_iter(&stripped) {
             if let Some(m) = cap.get(1) {
                 imports.push(ImportInfo {
-                    source: m.as_str().to_string(),
+                    source: normalize_css_import_path(m.as_str().to_string()),
                     imported_name: ImportedName::SideEffect,
                     local_name: String::new(),
                     is_type_only: false,
@@ -192,6 +221,7 @@ pub(crate) fn parse_css_to_module(
         has_cjs_exports: false,
         content_hash,
         suppressions,
+        line_offsets: fallow_types::extract::compute_line_offsets(source),
     }
 }
 

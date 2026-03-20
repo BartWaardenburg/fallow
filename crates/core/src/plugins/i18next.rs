@@ -4,7 +4,7 @@
 
 use super::Plugin;
 
-const ENABLERS: &[&str] = &["i18next", "react-i18next", "vue-i18n"];
+const ENABLERS: &[&str] = &["i18next", "react-i18next", "vue-i18n", "next-i18next"];
 
 const ENTRY_PATTERNS: &[&str] = &[
     "src/i18n.{ts,js,mjs}",
@@ -29,6 +29,7 @@ const TOOLING_DEPENDENCIES: &[&str] = &[
     "i18next",
     "react-i18next",
     "vue-i18n",
+    "next-i18next",
     "i18next-parser",
     "i18next-scanner",
 ];

@@ -3,12 +3,12 @@
   "title": "Fallow JSON Output Schema",
   "description": "Schema for the JSON output of `fallow check --format json`. The `fallow dupes` command has a separate output structure (clone_groups, clone_families, stats) sharing only the metadata fields (schema_version, version, elapsed_ms).",
   "type": "object",
-  "required": ["schema_version", "version", "elapsed_ms", "total_issues", "unused_files", "unused_exports", "unused_types", "unused_dependencies", "unused_dev_dependencies", "unused_enum_members", "unused_class_members", "unresolved_imports", "unlisted_dependencies", "duplicate_exports", "type_only_dependencies"],
+  "required": ["schema_version", "version", "elapsed_ms", "total_issues", "unused_files", "unused_exports", "unused_types", "unused_dependencies", "unused_dev_dependencies", "unused_enum_members", "unused_class_members", "unresolved_imports", "unlisted_dependencies", "duplicate_exports", "type_only_dependencies", "circular_dependencies"],
   "properties": {
     "schema_version": {
-      "type": "string",
-      "description": "Schema version for this output format (semver, independent of tool version). Consumers should check this field to detect structural changes.",
-      "examples": ["1.0.0"]
+      "type": "integer",
+      "description": "Schema version for this output format (independent of tool version). Consumers should check this field to detect structural changes.",
+      "examples": [1]
     },
     "version": {
       "type": "string",
@@ -66,6 +66,10 @@
     "type_only_dependencies": {
       "type": "array",
       "items": { "$ref": "#/definitions/TypeOnlyDependency" }
+    },
+    "circular_dependencies": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/CircularDependency" }
     }
   },
   "definitions": {
@@ -225,6 +229,21 @@
         "path": {
           "type": "string",
           "description": "Path to the package.json where this dependency is listed."
+        }
+      }
+    },
+    "CircularDependency": {
+      "type": "object",
+      "required": ["files", "length"],
+      "properties": {
+        "files": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "File paths forming the import cycle, in cycle order."
+        },
+        "length": {
+          "type": "integer",
+          "description": "Number of files in the cycle."
         }
       }
     }

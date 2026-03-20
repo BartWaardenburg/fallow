@@ -79,6 +79,19 @@ pub fn build_compact_lines(results: &AnalysisResults, root: &Path) -> Vec<String
     for dup in &results.duplicate_exports {
         lines.push(format!("duplicate-export:{}", dup.export_name));
     }
+    for cycle in &results.circular_dependencies {
+        let chain: Vec<String> = cycle.files.iter().map(|p| rel(p)).collect();
+        let mut display_chain = chain.clone();
+        if let Some(first) = chain.first() {
+            display_chain.push(first.clone());
+        }
+        let first_file = chain.first().map_or_else(String::new, Clone::clone);
+        lines.push(format!(
+            "circular-dependency:{}:0:{}",
+            first_file,
+            display_chain.join(" \u{2192} ")
+        ));
+    }
 
     lines
 }

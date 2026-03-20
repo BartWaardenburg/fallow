@@ -26,6 +26,7 @@ use fallow_types::discover::{DiscoveredFile, FileId};
 pub use fallow_types::extract::{
     DynamicImportInfo, DynamicImportPattern, ExportInfo, ExportName, ImportInfo, ImportedName,
     MemberAccess, MemberInfo, MemberKind, ModuleInfo, ParseResult, ReExportInfo, RequireCallInfo,
+    compute_line_offsets,
 };
 
 // Re-export extraction functions for internal use and fuzzing
@@ -65,7 +66,24 @@ pub fn parse_all_files(files: &[DiscoveredFile], cache: Option<&CacheStore>) -> 
     }
 }
 
+/// Extract mtime (seconds since epoch) from file metadata.
+/// Returns 0 if mtime cannot be determined (pre-epoch, unsupported OS, etc.).
+fn mtime_secs(metadata: &std::fs::Metadata) -> u64 {
+    metadata
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::SystemTime::UNIX_EPOCH).ok())
+        .map_or(0, |d| d.as_secs())
+}
+
 /// Parse a single file, consulting the cache first.
+///
+/// Cache validation strategy (fast path -> slow path):
+/// 1. `stat()` the file to get mtime + size (single syscall, no file read)
+/// 2. If mtime+size match the cached entry -> cache hit, return immediately
+/// 3. If mtime+size differ -> read file, compute content hash
+/// 4. If content hash matches cached entry -> cache hit (file was `touch`ed but unchanged)
+/// 5. Otherwise -> cache miss, full parse
 fn parse_single_file_cached(
     file: &DiscoveredFile,
     cache: Option<&CacheStore>,
@@ -74,10 +92,24 @@ fn parse_single_file_cached(
 ) -> Option<ModuleInfo> {
     use std::sync::atomic::Ordering;
 
+    // Fast path: check mtime+size before reading file content.
+    // A single stat() syscall is ~100x cheaper than read()+hash().
+    if let Some(store) = cache
+        && let Ok(metadata) = std::fs::metadata(&file.path)
+    {
+        let mt = mtime_secs(&metadata);
+        let sz = metadata.len();
+        if let Some(cached) = store.get_by_metadata(&file.path, mt, sz) {
+            cache_hits.fetch_add(1, Ordering::Relaxed);
+            return Some(cache::cached_to_module(cached, file.id));
+        }
+    }
+
+    // Slow path: read file content and compute content hash.
     let source = std::fs::read_to_string(&file.path).ok()?;
     let content_hash = xxhash_rust::xxh3::xxh3_64(source.as_bytes());
 
-    // Check cache before parsing
+    // Check cache by content hash (handles touch/save-without-change)
     if let Some(store) = cache
         && let Some(cached) = store.get(&file.path, content_hash)
     {
@@ -1261,6 +1293,21 @@ More content.
         let info = parse_css(r#"@import "tailwindcss";"#, "styles.css");
         assert_eq!(info.imports.len(), 1);
         assert_eq!(info.imports[0].source, "tailwindcss");
+    }
+
+    #[test]
+    fn scss_import_without_dot_slash_normalized() {
+        let info = parse_css("@import 'app.scss';", "index.scss");
+        assert_eq!(info.imports.len(), 1);
+        assert_eq!(info.imports[0].source, "./app.scss");
+    }
+
+    #[test]
+    fn scss_import_bare_extensionless_stays_bare() {
+        // Extensionless imports like Tailwind should stay bare
+        let info = parse_css(r#"@import "some-package";"#, "styles.scss");
+        assert_eq!(info.imports.len(), 1);
+        assert_eq!(info.imports[0].source, "some-package");
     }
 
     #[test]

@@ -273,7 +273,7 @@ fn check_unresolved_import(
                 },
                 end: Position {
                     line: import_line,
-                    character: import.col,
+                    character: import.col + import.specifier.len() as u32,
                 },
             }),
         });
@@ -388,30 +388,12 @@ mod tests {
         }
     }
 
-    fn empty_duplication() -> DuplicationReport {
-        DuplicationReport {
-            clone_groups: vec![],
-            clone_families: vec![],
-            stats: DuplicationStats {
-                total_files: 0,
-                files_with_clones: 0,
-                total_lines: 0,
-                duplicated_lines: 0,
-                total_tokens: 0,
-                duplicated_tokens: 0,
-                clone_groups: 0,
-                clone_instances: 0,
-                duplication_percentage: 0.0,
-            },
-        }
-    }
-
     #[test]
     fn no_hover_for_clean_file() {
         let root = test_root();
         let path = root.join("src/clean.ts");
         let results = AnalysisResults::default();
-        let duplication = empty_duplication();
+        let duplication = DuplicationReport::default();
         let pos = Position {
             line: 5,
             character: 0,
@@ -427,7 +409,7 @@ mod tests {
         let path = root.join("src/dead.ts");
         let mut results = AnalysisResults::default();
         results.unused_files.push(UnusedFile { path: path.clone() });
-        let duplication = empty_duplication();
+        let duplication = DuplicationReport::default();
         let pos = Position {
             line: 10,
             character: 0,
@@ -457,7 +439,7 @@ mod tests {
             span_start: 40,
             is_re_export: false,
         });
-        let duplication = empty_duplication();
+        let duplication = DuplicationReport::default();
         let pos = Position {
             line: 4, // 0-based
             character: 10,
@@ -492,7 +474,7 @@ mod tests {
             span_start: 20,
             is_re_export: false,
         });
-        let duplication = empty_duplication();
+        let duplication = DuplicationReport::default();
         let pos = Position {
             line: 2, // 0-based
             character: 3,
@@ -532,7 +514,7 @@ mod tests {
                 },
             ],
         });
-        let duplication = empty_duplication();
+        let duplication = DuplicationReport::default();
         let pos = Position {
             line: 9, // 0-based
             character: 10,
@@ -567,7 +549,7 @@ mod tests {
                 col: 0,
             }],
         });
-        let duplication = empty_duplication();
+        let duplication = DuplicationReport::default();
         let pos = Position {
             line: 4,
             character: 0,
@@ -597,7 +579,7 @@ mod tests {
             reference_count: 0,
             reference_locations: vec![],
         });
-        let duplication = empty_duplication();
+        let duplication = DuplicationReport::default();
         let pos = Position {
             line: 4,
             character: 0,
@@ -622,7 +604,7 @@ mod tests {
             line: 4,
             col: 2,
         });
-        let duplication = empty_duplication();
+        let duplication = DuplicationReport::default();
         let pos = Position {
             line: 3,
             character: 5,
@@ -651,7 +633,7 @@ mod tests {
             line: 20,
             col: 4,
         });
-        let duplication = empty_duplication();
+        let duplication = DuplicationReport::default();
         let pos = Position {
             line: 19,
             character: 6,
@@ -678,7 +660,7 @@ mod tests {
             line: 3,
             col: 20,
         });
-        let duplication = empty_duplication();
+        let duplication = DuplicationReport::default();
         let pos = Position {
             line: 2,
             character: 25,
@@ -823,7 +805,7 @@ mod tests {
             reference_count: 3,
             reference_locations: vec![],
         });
-        let duplication = empty_duplication();
+        let duplication = DuplicationReport::default();
         let pos = Position {
             line: 4,
             character: 0,
@@ -854,7 +836,7 @@ mod tests {
             span_start: 0,
             is_re_export: false,
         });
-        let duplication = empty_duplication();
+        let duplication = DuplicationReport::default();
 
         // Line 10, but export is on line 5 (0-based: 4)
         let pos = Position {

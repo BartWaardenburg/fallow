@@ -23,13 +23,12 @@ pub(super) fn print_json(results: &AnalysisResults, elapsed: Duration) -> ExitCo
     }
 }
 
-/// JSON output schema version (independent of tool version).
+/// JSON output schema version as an integer (independent of tool version).
 ///
-/// Bump this when the structure of the JSON output changes:
-/// - Major: removing or renaming fields, changing types
-/// - Minor: adding new fields or issue types
-/// - Patch: documentation-only changes
-const SCHEMA_VERSION: &str = "1.0.0";
+/// Bump this when the structure of the JSON output changes in a
+/// backwards-incompatible way (removing/renaming fields, changing types).
+/// Adding new fields is always backwards-compatible and does not require a bump.
+const SCHEMA_VERSION: u32 = 1;
 
 /// Build the JSON output value for analysis results.
 ///
@@ -193,6 +192,10 @@ mod tests {
             export_name: "Config".to_string(),
             locations: vec![root.join("src/config.ts"), root.join("src/types.ts")],
         });
+        r.circular_dependencies.push(CircularDependency {
+            files: vec![root.join("src/a.ts"), root.join("src/b.ts")],
+            length: 2,
+        });
 
         r
     }
@@ -203,7 +206,7 @@ mod tests {
         let elapsed = Duration::from_millis(123);
         let output = build_json(&results, elapsed).expect("should serialize");
 
-        assert_eq!(output["schema_version"], "1.0.0");
+        assert_eq!(output["schema_version"], 1);
         assert!(output["version"].is_string());
         assert_eq!(output["elapsed_ms"], 123);
         assert_eq!(output["total_issues"], 0);

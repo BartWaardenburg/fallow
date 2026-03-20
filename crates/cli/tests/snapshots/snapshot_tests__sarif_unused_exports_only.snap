@@ -102,6 +102,15 @@ expression: redact_sarif_version(&json_str)
               "defaultConfiguration": {
                 "level": "error"
               }
+            },
+            {
+              "id": "fallow/circular-dependency",
+              "shortDescription": {
+                "text": "Circular dependency chain detected"
+              },
+              "defaultConfiguration": {
+                "level": "error"
+              }
             }
           ]
         }

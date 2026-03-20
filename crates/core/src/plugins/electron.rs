@@ -12,7 +12,11 @@ const ENABLERS: &[&str] = &[
     "electron-vite",
 ];
 
-const ENTRY_PATTERNS: &[&str] = &["src/main/**/*.{ts,js}", "src/preload/**/*.{ts,js}"];
+const ENTRY_PATTERNS: &[&str] = &[
+    "src/main/**/*.{ts,js}",
+    "src/preload/**/*.{ts,js}",
+    "electron/main.{ts,js}",
+];
 
 const ALWAYS_USED: &[&str] = &[
     "electron-builder.{yml,yaml,json,json5,toml}",
@@ -25,6 +29,7 @@ const TOOLING_DEPENDENCIES: &[&str] = &[
     "electron-builder",
     "electron-vite",
     "@electron/rebuild",
+    "@electron-forge/cli",
 ];
 
 define_plugin! {

@@ -162,6 +162,25 @@ pub(super) fn print_human(
         );
     }
 
+    print_human_section(
+        &results.circular_dependencies,
+        "Circular dependencies",
+        severity_to_level(rules.circular_dependencies),
+        |cycle| {
+            let chain: Vec<String> = cycle
+                .files
+                .iter()
+                .map(|p| relative_path(p, root).display().to_string())
+                .collect();
+            // Repeat the first file at the end to make the cycle visually clear
+            let mut display_chain = chain.clone();
+            if let Some(first) = chain.first() {
+                display_chain.push(first.clone());
+            }
+            vec![format!("  {}", display_chain.join(" \u{2192} "))]
+        },
+    );
+
     if !quiet {
         let total = results.total_issues();
         if total == 0 {

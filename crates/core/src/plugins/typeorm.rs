@@ -13,6 +13,12 @@ const ENTRY_PATTERNS: &[&str] = &[
     "src/migrations/**/*.{ts,js}",
     "src/subscriber/**/*.{ts,js}",
     "src/subscribers/**/*.{ts,js}",
+    "entity/**/*.{ts,js}",
+    "entities/**/*.{ts,js}",
+    "migration/**/*.{ts,js}",
+    "migrations/**/*.{ts,js}",
+    "subscriber/**/*.{ts,js}",
+    "subscribers/**/*.{ts,js}",
 ];
 
 const ALWAYS_USED: &[&str] = &[

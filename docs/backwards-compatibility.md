@@ -17,7 +17,7 @@ These interfaces are covered by semver — breaking changes only happen in major
 ### JSON output schema
 
 - **Top-level structure**: `schema_version`, `version`, `elapsed_ms`, `total_issues`, and all issue arrays
-- **Issue type arrays**: `unused_files`, `unused_exports`, `unused_types`, `unused_dependencies`, `unused_dev_dependencies`, `unused_enum_members`, `unused_class_members`, `unresolved_imports`, `unlisted_dependencies`, `duplicate_exports`, `type_only_dependencies`
+- **Issue type arrays**: `unused_files`, `unused_exports`, `unused_types`, `unused_dependencies`, `unused_dev_dependencies`, `unused_enum_members`, `unused_class_members`, `unresolved_imports`, `unlisted_dependencies`, `duplicate_exports`, `type_only_dependencies`, `circular_dependencies`
 - **Issue object fields**: all fields documented in `docs/output-schema.json`
 - **Schema version**: the `schema_version` field follows its own versioning (independent of the tool version). The schema version is bumped when the JSON output structure changes.
 

@@ -1,6 +1,5 @@
 ---
 source: crates/cli/tests/snapshot_tests.rs
-assertion_line: 118
 expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"CARGO_PKG_VERSION\")),\n\"\\\"version\\\": \\\"[VERSION]\\\"\",)"
 ---
 {
@@ -99,6 +98,15 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
               "id": "fallow/duplicate-export",
               "shortDescription": {
                 "text": "Export name appears in multiple modules"
+              },
+              "defaultConfiguration": {
+                "level": "error"
+              }
+            },
+            {
+              "id": "fallow/circular-dependency",
+              "shortDescription": {
+                "text": "Circular dependency chain detected"
               },
               "defaultConfiguration": {
                 "level": "error"
@@ -299,6 +307,22 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
               "physicalLocation": {
                 "artifactLocation": {
                   "uri": "src/types.ts"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "fallow/circular-dependency",
+          "level": "error",
+          "message": {
+            "text": "Circular dependency: src/a.ts → src/b.ts → src/a.ts"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/a.ts"
                 }
               }
             }

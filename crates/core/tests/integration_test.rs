@@ -295,7 +295,11 @@ fn circular_import_does_not_crash() {
     let config = create_config(temp_dir.clone());
     // This should not crash or infinite loop
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
-    let _ = &results; // ensure analysis completed without panic
+    assert!(
+        !results.circular_dependencies.is_empty(),
+        "should detect circular dependency between a.ts and b.ts"
+    );
+    assert_eq!(results.circular_dependencies[0].length, 2);
 
     let _ = std::fs::remove_dir_all(&temp_dir);
 }
@@ -472,6 +476,8 @@ fn cache_roundtrip() {
 
     let cached = fallow_core::cache::CachedModule {
         content_hash: 12345,
+        mtime_secs: 0,
+        file_size: 0,
         exports: vec![],
         imports: vec![],
         re_exports: vec![],
@@ -482,6 +488,7 @@ fn cache_roundtrip() {
         dynamic_import_patterns: vec![],
         has_cjs_exports: false,
         suppressions: vec![],
+        line_offsets: vec![],
     };
 
     store.insert(std::path::Path::new("test.ts"), cached);
@@ -2206,7 +2213,10 @@ fn incremental_with_cache_all_hits() {
     let mut cache_store = fallow_core::cache::CacheStore::new();
     for module in &first.modules {
         if let Some(file) = files.get(module.file_id.0 as usize) {
-            cache_store.insert(&file.path, fallow_core::cache::module_to_cached(module));
+            cache_store.insert(
+                &file.path,
+                fallow_core::cache::module_to_cached(module, 0, 0),
+            );
         }
     }
 
@@ -2229,7 +2239,10 @@ fn incremental_results_identical() {
     let mut cache_store = fallow_core::cache::CacheStore::new();
     for module in &first.modules {
         if let Some(file) = files.get(module.file_id.0 as usize) {
-            cache_store.insert(&file.path, fallow_core::cache::module_to_cached(module));
+            cache_store.insert(
+                &file.path,
+                fallow_core::cache::module_to_cached(module, 0, 0),
+            );
         }
     }
 
@@ -2279,6 +2292,8 @@ fn incremental_cache_prune_stale_entries() {
     let mut store = fallow_core::cache::CacheStore::new();
     let make_module = || fallow_core::cache::CachedModule {
         content_hash: 1,
+        mtime_secs: 0,
+        file_size: 0,
         exports: vec![],
         imports: vec![],
         re_exports: vec![],
@@ -2289,6 +2304,7 @@ fn incremental_cache_prune_stale_entries() {
         dynamic_import_patterns: vec![],
         has_cjs_exports: false,
         suppressions: vec![],
+        line_offsets: vec![],
     };
 
     store.insert(std::path::Path::new("/project/existing.ts"), make_module());

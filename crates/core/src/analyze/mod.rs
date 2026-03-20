@@ -23,19 +23,27 @@ use unused_exports::{collect_export_usages, find_duplicate_exports, find_unused_
 use unused_files::find_unused_files;
 use unused_members::find_unused_members;
 
-/// Convert a byte offset in source text to a 1-based line and 0-based column (byte offset from
-/// start of the line). Uses byte counting to stay consistent with Oxc's byte-offset spans.
-fn byte_offset_to_line_col(source: &str, byte_offset: u32) -> (u32, u32) {
-    let byte_offset = byte_offset as usize;
-    let prefix = &source[..byte_offset.min(source.len())];
-    let line = prefix.bytes().filter(|&b| b == b'\n').count() as u32 + 1;
-    let col = prefix
-        .rfind('\n')
-        .map_or(byte_offset, |pos| byte_offset - pos - 1) as u32;
-    (line, col)
+/// Pre-computed line offset tables indexed by `FileId`, built during parse and
+/// carried through the cache. Eliminates redundant file reads during analysis.
+pub(crate) type LineOffsetsMap<'a> = FxHashMap<FileId, &'a [u32]>;
+
+/// Convert a byte offset to (line, col) using pre-computed line offsets.
+/// Falls back to `(1, byte_offset)` when no line table is available.
+pub(crate) fn byte_offset_to_line_col(
+    line_offsets_map: &LineOffsetsMap<'_>,
+    file_id: FileId,
+    byte_offset: u32,
+) -> (u32, u32) {
+    line_offsets_map
+        .get(&file_id)
+        .map_or((1, byte_offset), |offsets| {
+            fallow_types::extract::byte_offset_to_line_col(offsets, byte_offset)
+        })
 }
 
 /// Read source content from disk, returning empty string on failure.
+/// Only used for LSP Code Lens reference resolution where the referencing
+/// file may not be in the line offsets map.
 fn read_source(path: &std::path::Path) -> String {
     std::fs::read_to_string(path).unwrap_or_default()
 }
@@ -52,7 +60,15 @@ pub fn find_dead_code_with_resolved(
     resolved_modules: &[ResolvedModule],
     plugin_result: Option<&crate::plugins::AggregatedPluginResult>,
 ) -> AnalysisResults {
-    find_dead_code_full(graph, config, resolved_modules, plugin_result, &[], &[])
+    find_dead_code_full(
+        graph,
+        config,
+        resolved_modules,
+        plugin_result,
+        &[],
+        &[],
+        false,
+    )
 }
 
 /// Find all dead code, with optional resolved module data, plugin context, and workspace info.
@@ -63,6 +79,7 @@ pub fn find_dead_code_full(
     plugin_result: Option<&crate::plugins::AggregatedPluginResult>,
     workspaces: &[fallow_config::WorkspaceInfo],
     modules: &[ModuleInfo],
+    collect_usages: bool,
 ) -> AnalysisResults {
     let _span = tracing::info_span!("find_dead_code").entered();
 
@@ -73,6 +90,14 @@ pub fn find_dead_code_full(
         .map(|m| (m.file_id, m.suppressions.as_slice()))
         .collect();
 
+    // Build line offset index: FileId -> pre-computed line start offsets.
+    // Eliminates redundant file reads for byte-to-line/col conversion.
+    let line_offsets_by_file: LineOffsetsMap<'_> = modules
+        .iter()
+        .filter(|m| !m.line_offsets.is_empty())
+        .map(|m| (m.file_id, m.line_offsets.as_slice()))
+        .collect();
+
     let mut results = AnalysisResults::default();
 
     if config.rules.unused_files != Severity::Off {
@@ -80,8 +105,13 @@ pub fn find_dead_code_full(
     }
 
     if config.rules.unused_exports != Severity::Off || config.rules.unused_types != Severity::Off {
-        let (exports, types) =
-            find_unused_exports(graph, config, plugin_result, &suppressions_by_file);
+        let (exports, types) = find_unused_exports(
+            graph,
+            config,
+            plugin_result,
+            &suppressions_by_file,
+            &line_offsets_by_file,
+        );
         if config.rules.unused_exports != Severity::Off {
             results.unused_exports = exports;
         }
@@ -93,8 +123,13 @@ pub fn find_dead_code_full(
     if config.rules.unused_enum_members != Severity::Off
         || config.rules.unused_class_members != Severity::Off
     {
-        let (enum_members, class_members) =
-            find_unused_members(graph, config, resolved_modules, &suppressions_by_file);
+        let (enum_members, class_members) = find_unused_members(
+            graph,
+            config,
+            resolved_modules,
+            &suppressions_by_file,
+            &line_offsets_by_file,
+        );
         if config.rules.unused_enum_members != Severity::Off {
             results.unused_enum_members = enum_members;
         }
@@ -140,6 +175,7 @@ pub fn find_dead_code_full(
             config,
             &suppressions_by_file,
             &virtual_prefixes,
+            &line_offsets_by_file,
         );
     }
 
@@ -155,86 +191,135 @@ pub fn find_dead_code_full(
             find_type_only_dependencies(graph, pkg, config, workspaces);
     }
 
-    // Collect export usage counts for Code Lens (LSP feature)
-    results.export_usages = collect_export_usages(graph);
+    // Detect circular dependencies
+    if config.rules.circular_dependencies != Severity::Off {
+        let cycles = graph.find_cycles();
+        results.circular_dependencies = cycles
+            .into_iter()
+            .map(|cycle| {
+                let files: Vec<std::path::PathBuf> = cycle
+                    .iter()
+                    .map(|&id| graph.modules[id.0 as usize].path.clone())
+                    .collect();
+                let length = files.len();
+                CircularDependency { files, length }
+            })
+            .collect();
+    }
+
+    // Collect export usage counts for Code Lens (LSP feature).
+    // Skipped in CLI mode since the field is #[serde(skip)] in all output formats.
+    if collect_usages {
+        results.export_usages = collect_export_usages(graph, &line_offsets_by_file);
+    }
 
     results
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use fallow_types::extract::{byte_offset_to_line_col, compute_line_offsets};
 
-    // byte_offset_to_line_col tests
+    // Helper: compute line offsets from source and convert byte offset
+    fn line_col(source: &str, byte_offset: u32) -> (u32, u32) {
+        let offsets = compute_line_offsets(source);
+        byte_offset_to_line_col(&offsets, byte_offset)
+    }
+
+    // ── compute_line_offsets ─────────────────────────────────────
+
+    #[test]
+    fn compute_offsets_empty() {
+        assert_eq!(compute_line_offsets(""), vec![0]);
+    }
+
+    #[test]
+    fn compute_offsets_single_line() {
+        assert_eq!(compute_line_offsets("hello"), vec![0]);
+    }
+
+    #[test]
+    fn compute_offsets_multiline() {
+        assert_eq!(compute_line_offsets("abc\ndef\nghi"), vec![0, 4, 8]);
+    }
+
+    #[test]
+    fn compute_offsets_trailing_newline() {
+        assert_eq!(compute_line_offsets("abc\n"), vec![0, 4]);
+    }
+
+    #[test]
+    fn compute_offsets_crlf() {
+        assert_eq!(compute_line_offsets("ab\r\ncd"), vec![0, 4]);
+    }
+
+    #[test]
+    fn compute_offsets_consecutive_newlines() {
+        assert_eq!(compute_line_offsets("\n\n"), vec![0, 1, 2]);
+    }
+
+    // ── byte_offset_to_line_col ─────────────────────────────────
+
     #[test]
     fn byte_offset_empty_source() {
-        assert_eq!(byte_offset_to_line_col("", 0), (1, 0));
+        assert_eq!(line_col("", 0), (1, 0));
     }
 
     #[test]
     fn byte_offset_single_line_start() {
-        assert_eq!(byte_offset_to_line_col("hello", 0), (1, 0));
+        assert_eq!(line_col("hello", 0), (1, 0));
     }
 
     #[test]
     fn byte_offset_single_line_middle() {
-        assert_eq!(byte_offset_to_line_col("hello", 4), (1, 4));
+        assert_eq!(line_col("hello", 4), (1, 4));
     }
 
     #[test]
     fn byte_offset_multiline_start_of_line2() {
-        // "line1\nline2\nline3"
-        //  01234 5 678901 2
-        // offset 6 = start of "line2"
-        let source = "line1\nline2\nline3";
-        assert_eq!(byte_offset_to_line_col(source, 6), (2, 0));
+        assert_eq!(line_col("line1\nline2\nline3", 6), (2, 0));
     }
 
     #[test]
     fn byte_offset_multiline_middle_of_line3() {
-        // "line1\nline2\nline3"
-        //  01234 5 67890 1 23456
-        //                1 12345
-        // offset 14 = 'n' in "line3" (col 2)
-        let source = "line1\nline2\nline3";
-        assert_eq!(byte_offset_to_line_col(source, 14), (3, 2));
+        assert_eq!(line_col("line1\nline2\nline3", 14), (3, 2));
     }
 
     #[test]
     fn byte_offset_at_newline_boundary() {
-        // "line1\nline2"
-        // offset 5 = the '\n' character itself
-        let source = "line1\nline2";
-        assert_eq!(byte_offset_to_line_col(source, 5), (1, 5));
-    }
-
-    #[test]
-    fn byte_offset_beyond_source_length() {
-        // Line count is clamped (prefix is sliced to source.len()), but the
-        // byte-offset column is passed through unclamped because the function
-        // uses the raw byte_offset for the column fallback.
-        let source = "hello";
-        assert_eq!(byte_offset_to_line_col(source, 100), (1, 100));
+        assert_eq!(line_col("line1\nline2", 5), (1, 5));
     }
 
     #[test]
     fn byte_offset_multibyte_utf8() {
-        // Emoji is 4 bytes: "hi\n" (3 bytes) + emoji (4 bytes) + "x" (1 byte)
         let source = "hi\n\u{1F600}x";
-        // offset 3 = start of line 2, col 0
-        assert_eq!(byte_offset_to_line_col(source, 3), (2, 0));
-        // offset 7 = 'x' (after 4-byte emoji), col 4 (byte-based)
-        assert_eq!(byte_offset_to_line_col(source, 7), (2, 4));
+        assert_eq!(line_col(source, 3), (2, 0));
+        assert_eq!(line_col(source, 7), (2, 4));
     }
 
     #[test]
     fn byte_offset_multibyte_accented_chars() {
-        // 'e' with accent (U+00E9) is 2 bytes in UTF-8
         let source = "caf\u{00E9}\nbar";
-        // "caf\u{00E9}" = 3 + 2 = 5 bytes, then '\n' at offset 5
-        // 'b' at offset 6 -> line 2, col 0
-        assert_eq!(byte_offset_to_line_col(source, 6), (2, 0));
-        // '\u{00E9}' starts at offset 3, col 3 (byte-based)
-        assert_eq!(byte_offset_to_line_col(source, 3), (1, 3));
+        assert_eq!(line_col(source, 6), (2, 0));
+        assert_eq!(line_col(source, 3), (1, 3));
+    }
+
+    #[test]
+    fn byte_offset_via_map_fallback() {
+        use super::*;
+        let map: LineOffsetsMap<'_> = FxHashMap::default();
+        assert_eq!(
+            super::byte_offset_to_line_col(&map, FileId(99), 42),
+            (1, 42)
+        );
+    }
+
+    #[test]
+    fn byte_offset_via_map_lookup() {
+        use super::*;
+        let offsets = compute_line_offsets("abc\ndef\nghi");
+        let mut map: LineOffsetsMap<'_> = FxHashMap::default();
+        map.insert(FileId(0), &offsets);
+        assert_eq!(super::byte_offset_to_line_col(&map, FileId(0), 5), (2, 1));
     }
 }

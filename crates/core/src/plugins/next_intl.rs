@@ -14,12 +14,7 @@ const ENTRY_PATTERNS: &[&str] = &[
     "messages/**/*.json",
 ];
 
-const ALWAYS_USED: &[&str] = &[
-    "src/i18n.{ts,js}",
-    "src/i18n/request.{ts,js}",
-    "i18n.{ts,js}",
-    "i18n/request.{ts,js}",
-];
+const ALWAYS_USED: &[&str] = &["messages/**/*.json"];
 
 const TOOLING_DEPENDENCIES: &[&str] = &["next-intl"];
 

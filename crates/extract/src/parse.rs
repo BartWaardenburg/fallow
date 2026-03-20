@@ -66,5 +66,7 @@ pub fn parse_source_to_module(
         }
     }
 
-    extractor.into_module_info(file_id, content_hash, suppressions)
+    let mut info = extractor.into_module_info(file_id, content_hash, suppressions);
+    info.line_offsets = fallow_types::extract::compute_line_offsets(source);
+    info
 }

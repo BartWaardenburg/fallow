@@ -219,21 +219,7 @@ impl LanguageServer for FallowLspServer {
         let position = params.text_document_position_params.position;
 
         let duplication = self.duplication.read().await;
-        let empty_report = fallow_core::duplicates::DuplicationReport {
-            clone_groups: vec![],
-            clone_families: vec![],
-            stats: fallow_core::duplicates::DuplicationStats {
-                total_files: 0,
-                files_with_clones: 0,
-                total_lines: 0,
-                duplicated_lines: 0,
-                total_tokens: 0,
-                duplicated_tokens: 0,
-                clone_groups: 0,
-                clone_instances: 0,
-                duplication_percentage: 0.0,
-            },
-        };
+        let empty_report = fallow_core::duplicates::DuplicationReport::default();
         let duplication_ref = duplication.as_ref().unwrap_or(&empty_report);
 
         Ok(hover::build_hover(

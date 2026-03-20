@@ -98,6 +98,10 @@ struct Cli {
 enum Command {
     /// Run dead code analysis (default)
     Check {
+        /// CI mode: equivalent to --format sarif --fail-on-issues --quiet
+        #[arg(long)]
+        ci: bool,
+
         /// Exit with code 1 if issues are found
         #[arg(long)]
         fail_on_issues: bool,
@@ -141,6 +145,10 @@ enum Command {
         /// Only report duplicate exports
         #[arg(long)]
         duplicate_exports: bool,
+
+        /// Only report circular dependencies
+        #[arg(long)]
+        circular_deps: bool,
 
         /// Also run duplication analysis and cross-reference with dead code
         #[arg(long)]
@@ -386,9 +394,8 @@ fn main() -> ExitCode {
     // Resolve output format: CLI flag > FALLOW_FORMAT env var > default ("human").
     // clap sets the default to "human", so we only override with the env var
     // when the user did NOT explicitly pass --format on the CLI.
-    let cli_format_was_explicit = std::env::args().any(|a| {
-        a == "--format" || a == "--output" || a.starts_with("--format=") || a.starts_with("-f")
-    });
+    let cli_format_was_explicit = std::env::args()
+        .any(|a| a == "--format" || a == "--output" || a.starts_with("--format=") || a == "-f");
     let format: Format = if cli_format_was_explicit {
         cli.format
     } else {
@@ -456,6 +463,7 @@ fn main() -> ExitCode {
     });
 
     match cli.command.unwrap_or(Command::Check {
+        ci: false,
         fail_on_issues: false,
         sarif_file: None,
         unused_files: false,
@@ -467,13 +475,15 @@ fn main() -> ExitCode {
         unresolved_imports: false,
         unlisted_deps: false,
         duplicate_exports: false,
+        circular_deps: false,
         include_dupes: false,
         trace: None,
         trace_file: None,
         trace_dependency: None,
     }) {
         Command::Check {
-            fail_on_issues,
+            ci,
+            mut fail_on_issues,
             sarif_file,
             unused_files,
             unused_exports,
@@ -484,11 +494,25 @@ fn main() -> ExitCode {
             unresolved_imports,
             unlisted_deps,
             duplicate_exports,
+            circular_deps,
             include_dupes,
             trace,
             trace_file,
             trace_dependency,
         } => {
+            // Apply CI defaults: --format sarif, --fail-on-issues, --quiet
+            // Only override format if user didn't explicitly pass --format
+            let (output, quiet) = if ci {
+                let ci_output = if !cli_format_was_explicit && format_from_env().is_none() {
+                    fallow_config::OutputFormat::Sarif
+                } else {
+                    output
+                };
+                fail_on_issues = true;
+                (ci_output, true)
+            } else {
+                (output, quiet)
+            };
             let filters = IssueFilters {
                 unused_files,
                 unused_exports,
@@ -499,6 +523,7 @@ fn main() -> ExitCode {
                 unresolved_imports,
                 unlisted_deps,
                 duplicate_exports,
+                circular_deps,
             };
             let trace_opts = TraceOptions {
                 trace_export: trace,

@@ -92,7 +92,8 @@
         "unused-class-members": "error",
         "unresolved-imports": "error",
         "unlisted-dependencies": "error",
-        "duplicate-exports": "error"
+        "duplicate-exports": "error",
+        "circular-dependencies": "error"
       }
     },
     "production": {
@@ -481,6 +482,10 @@
         "duplicate-exports": {
           "$ref": "#/$defs/Severity",
           "default": "error"
+        },
+        "circular-dependencies": {
+          "$ref": "#/$defs/Severity",
+          "default": "error"
         }
       }
     },
@@ -521,7 +526,6 @@
           "default": {}
         }
       },
-      "additionalProperties": false,
       "required": [
         "files"
       ]
@@ -621,6 +625,16 @@
           ]
         },
         "duplicate-exports": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "circular-dependencies": {
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"

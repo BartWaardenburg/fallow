@@ -102,6 +102,15 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
               "defaultConfiguration": {
                 "level": "warning"
               }
+            },
+            {
+              "id": "fallow/circular-dependency",
+              "shortDescription": {
+                "text": "Circular dependency chain detected"
+              },
+              "defaultConfiguration": {
+                "level": "warning"
+              }
             }
           ]
         }
@@ -298,6 +307,22 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
               "physicalLocation": {
                 "artifactLocation": {
                   "uri": "src/types.ts"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "fallow/circular-dependency",
+          "level": "warning",
+          "message": {
+            "text": "Circular dependency: src/a.ts → src/b.ts → src/a.ts"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/a.ts"
                 }
               }
             }

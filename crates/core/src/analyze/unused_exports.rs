@@ -7,7 +7,7 @@ use crate::graph::ModuleGraph;
 use crate::results::*;
 use crate::suppress::{self, IssueKind, Suppression};
 
-use super::{byte_offset_to_line_col, read_source};
+use super::{LineOffsetsMap, byte_offset_to_line_col, read_source};
 
 /// Find exports that are never imported by other files.
 pub fn find_unused_exports(
@@ -15,6 +15,7 @@ pub fn find_unused_exports(
     config: &ResolvedConfig,
     plugin_result: Option<&crate::plugins::AggregatedPluginResult>,
     suppressions_by_file: &FxHashMap<FileId, &[Suppression]>,
+    line_offsets_by_file: &LineOffsetsMap<'_>,
 ) -> (Vec<UnusedExport>, Vec<UnusedExport>) {
     let mut unused_exports = Vec::new();
     let mut unused_types = Vec::new();
@@ -96,9 +97,6 @@ pub fn find_unused_exports(
             .map(|(_, exports)| exports)
             .collect();
 
-        // Lazily load source content for line/col computation
-        let mut source_content: Option<String> = None;
-
         for export in &module.exports {
             if export.references.is_empty() {
                 let export_str = export.name.to_string();
@@ -119,8 +117,11 @@ pub fn find_unused_exports(
                     continue;
                 }
 
-                let source = source_content.get_or_insert_with(|| read_source(&module.path));
-                let (line, col) = byte_offset_to_line_col(source, export.span.start);
+                let (line, col) = byte_offset_to_line_col(
+                    line_offsets_by_file,
+                    module.file_id,
+                    export.span.start,
+                );
 
                 // Barrel re-exports are synthesized in graph.rs with Span::new(0, 0) as a sentinel.
                 let is_re_export = export.span.start == 0 && export.span.end == 0;
@@ -256,7 +257,10 @@ pub fn find_duplicate_exports(
 /// reference count and reference locations. This data is used by the LSP server to show
 /// Code Lens annotations (e.g., "3 references") above export declarations, with
 /// click-to-navigate support via `editor.action.showReferences`.
-pub fn collect_export_usages(graph: &ModuleGraph) -> Vec<ExportUsage> {
+pub fn collect_export_usages(
+    graph: &ModuleGraph,
+    line_offsets_by_file: &LineOffsetsMap<'_>,
+) -> Vec<ExportUsage> {
     let mut usages = Vec::new();
 
     // Build FileId -> path index for resolving reference locations
@@ -266,7 +270,8 @@ pub fn collect_export_usages(graph: &ModuleGraph) -> Vec<ExportUsage> {
         .map(|m| (m.file_id, m.path.as_path()))
         .collect();
 
-    // Cache source content per file for byte offset -> line/col conversion
+    // Fallback source cache for reference locations not in the line offsets map.
+    // Only populated when a referencing file's line offsets are unavailable.
     let mut source_cache: FxHashMap<FileId, String> = FxHashMap::default();
 
     for module in &graph.modules {
@@ -276,9 +281,6 @@ pub fn collect_export_usages(graph: &ModuleGraph) -> Vec<ExportUsage> {
             continue;
         }
 
-        // Lazily load source content for byte offset -> line/col conversion
-        let mut source_content: Option<String> = None;
-
         for export in &module.exports {
             // Skip synthetic re-export entries (span 0..0) — these are generated
             // by graph construction, not real local declarations in the source
@@ -286,8 +288,8 @@ pub fn collect_export_usages(graph: &ModuleGraph) -> Vec<ExportUsage> {
                 continue;
             }
 
-            let source = source_content.get_or_insert_with(|| read_source(&module.path));
-            let (line, col) = byte_offset_to_line_col(source, export.span.start);
+            let (line, col) =
+                byte_offset_to_line_col(line_offsets_by_file, module.file_id, export.span.start);
 
             // Resolve reference locations for Code Lens navigation
             let reference_locations: Vec<ReferenceLocation> = export
@@ -299,11 +301,23 @@ pub fn collect_export_usages(graph: &ModuleGraph) -> Vec<ExportUsage> {
                         return None;
                     }
                     let ref_path = file_paths.get(&r.from_file)?;
-                    let ref_source = source_cache
-                        .entry(r.from_file)
-                        .or_insert_with(|| read_source(ref_path));
-                    let (ref_line, ref_col) =
-                        byte_offset_to_line_col(ref_source, r.import_span.start);
+                    // Use pre-computed line offsets when available, fall back to disk read
+                    let (ref_line, ref_col) = if line_offsets_by_file.contains_key(&r.from_file) {
+                        byte_offset_to_line_col(
+                            line_offsets_by_file,
+                            r.from_file,
+                            r.import_span.start,
+                        )
+                    } else {
+                        let ref_source = source_cache
+                            .entry(r.from_file)
+                            .or_insert_with(|| read_source(ref_path));
+                        let offsets = fallow_types::extract::compute_line_offsets(ref_source);
+                        fallow_types::extract::byte_offset_to_line_col(
+                            &offsets,
+                            r.import_span.start,
+                        )
+                    };
                     Some(ReferenceLocation {
                         path: ref_path.to_path_buf(),
                         line: ref_line,
@@ -635,7 +649,7 @@ mod tests {
     #[test]
     fn collect_usages_empty_graph() {
         let graph = build_graph(&[]);
-        let result = collect_export_usages(&graph);
+        let result = collect_export_usages(&graph, &FxHashMap::default());
         assert!(result.is_empty());
     }
 
@@ -643,7 +657,7 @@ mod tests {
     fn collect_usages_skips_unreachable_modules() {
         let mut graph = build_graph(&[("/src/dead.ts", false)]);
         graph.modules[0].exports = vec![make_export("unused", 10, 20)];
-        let result = collect_export_usages(&graph);
+        let result = collect_export_usages(&graph, &FxHashMap::default());
         assert!(result.is_empty());
     }
 
@@ -651,7 +665,7 @@ mod tests {
     fn collect_usages_skips_synthetic_exports() {
         let mut graph = build_graph(&[("/src/barrel.ts", true)]);
         graph.modules[0].exports = vec![make_export("reexported", 0, 0)];
-        let result = collect_export_usages(&graph);
+        let result = collect_export_usages(&graph, &FxHashMap::default());
         assert!(result.is_empty());
     }
 
@@ -659,7 +673,7 @@ mod tests {
     fn collect_usages_counts_references() {
         let mut graph = build_graph(&[("/src/utils.ts", true), ("/src/app.ts", false)]);
         graph.modules[0].exports = vec![make_referenced_export("helper", 10, 20, 1)];
-        let result = collect_export_usages(&graph);
+        let result = collect_export_usages(&graph, &FxHashMap::default());
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].export_name, "helper");
         assert_eq!(result[0].reference_count, 1);
@@ -669,7 +683,7 @@ mod tests {
     fn collect_usages_zero_references_still_reported() {
         let mut graph = build_graph(&[("/src/utils.ts", true)]);
         graph.modules[0].exports = vec![make_export("unused", 10, 20)];
-        let result = collect_export_usages(&graph);
+        let result = collect_export_usages(&graph, &FxHashMap::default());
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].export_name, "unused");
         assert_eq!(result[0].reference_count, 0);
@@ -680,7 +694,7 @@ mod tests {
     fn collect_usages_multiple_exports_same_module() {
         let mut graph = build_graph(&[("/src/utils.ts", true)]);
         graph.modules[0].exports = vec![make_export("alpha", 10, 20), make_export("beta", 30, 40)];
-        let result = collect_export_usages(&graph);
+        let result = collect_export_usages(&graph, &FxHashMap::default());
         assert_eq!(result.len(), 2);
         let names: FxHashSet<&str> = result.iter().map(|u| u.export_name.as_str()).collect();
         assert!(names.contains("alpha"));

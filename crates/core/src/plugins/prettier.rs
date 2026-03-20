@@ -8,8 +8,8 @@ const ENABLERS: &[&str] = &["prettier"];
 
 const ALWAYS_USED: &[&str] = &[
     ".prettierrc",
-    ".prettierrc.{json,json5,yml,yaml,js,cjs,mjs,ts,toml}",
-    "prettier.config.{js,cjs,mjs,ts}",
+    ".prettierrc.{json,json5,yml,yaml,js,cjs,mjs,ts,cts,toml}",
+    "prettier.config.{js,cjs,mjs,ts,cts}",
     ".prettierignore",
 ];
 

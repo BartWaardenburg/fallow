@@ -6,7 +6,7 @@ use super::Plugin;
 
 const ENABLERS: &[&str] = &["c8"];
 
-const ALWAYS_USED: &[&str] = &[];
+const ALWAYS_USED: &[&str] = &[".c8rc", ".c8rc.json"];
 
 const TOOLING_DEPENDENCIES: &[&str] = &["c8"];
 

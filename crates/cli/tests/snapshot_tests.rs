@@ -71,6 +71,10 @@ fn sample_results(root: &Path) -> AnalysisResults {
         export_name: "Config".to_string(),
         locations: vec![root.join("src/config.ts"), root.join("src/types.ts")],
     });
+    r.circular_dependencies.push(CircularDependency {
+        files: vec![root.join("src/a.ts"), root.join("src/b.ts")],
+        length: 2,
+    });
 
     r
 }
@@ -430,6 +434,7 @@ fn sarif_mixed_severity_snapshot() {
         unresolved_imports: fallow_config::Severity::Error,
         unlisted_dependencies: fallow_config::Severity::Error,
         duplicate_exports: fallow_config::Severity::Warn,
+        circular_dependencies: fallow_config::Severity::Warn,
     };
     let sarif = build_sarif(&results, &root, &rules);
     let json_str = serde_json::to_string_pretty(&sarif).expect("should serialize");

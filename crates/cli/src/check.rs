@@ -20,6 +20,7 @@ pub struct IssueFilters {
     pub unresolved_imports: bool,
     pub unlisted_deps: bool,
     pub duplicate_exports: bool,
+    pub circular_deps: bool,
 }
 
 impl IssueFilters {
@@ -33,6 +34,7 @@ impl IssueFilters {
             || self.unresolved_imports
             || self.unlisted_deps
             || self.duplicate_exports
+            || self.circular_deps
     }
 
     /// When any filter is active, clear issue types that were NOT requested.
@@ -67,6 +69,9 @@ impl IssueFilters {
         }
         if !self.duplicate_exports {
             results.duplicate_exports.clear();
+        }
+        if !self.circular_deps {
+            results.circular_dependencies.clear();
         }
     }
 }
@@ -710,6 +715,7 @@ mod tests {
             unresolved_imports: false,
             unlisted_deps: false,
             duplicate_exports: false,
+            circular_deps: false,
         }
     }
 
@@ -933,6 +939,7 @@ mod tests {
             unresolved_imports: Severity::Off,
             unlisted_dependencies: Severity::Off,
             duplicate_exports: Severity::Off,
+            circular_dependencies: Severity::Off,
         };
         let config = config_with_rules(rules);
         apply_rules(&mut results, &config);
@@ -1028,6 +1035,7 @@ mod tests {
             unresolved_imports: Severity::Warn,
             unlisted_dependencies: Severity::Warn,
             duplicate_exports: Severity::Warn,
+            circular_dependencies: Severity::Warn,
         };
         assert!(!has_error_severity_issues(&results, &rules, None));
     }
@@ -1049,6 +1057,7 @@ mod tests {
             unresolved_imports: Severity::Warn,
             unlisted_dependencies: Severity::Warn,
             duplicate_exports: Severity::Warn,
+            circular_dependencies: Severity::Warn,
         };
         // Only unused_files present, but set to Warn — should not trigger
         assert!(!has_error_severity_issues(&results, &rules, None));

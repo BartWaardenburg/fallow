@@ -1311,4 +1311,26 @@ mod tests {
         assert_eq!(cached.file_size, 6789);
         assert_eq!(cached.content_hash, 42);
     }
+
+    #[test]
+    fn module_to_cached_roundtrip_line_offsets() {
+        let module = ModuleInfo {
+            file_id: FileId(0),
+            exports: vec![],
+            imports: vec![],
+            re_exports: vec![],
+            dynamic_imports: vec![],
+            require_calls: vec![],
+            member_accesses: vec![],
+            whole_object_uses: vec![],
+            dynamic_import_patterns: vec![],
+            has_cjs_exports: false,
+            content_hash: 0,
+            suppressions: vec![],
+            line_offsets: vec![0, 15, 30, 45],
+        };
+        let cached = module_to_cached(&module, 0, 0);
+        let restored = cached_to_module(&cached, FileId(0));
+        assert_eq!(restored.line_offsets, vec![0, 15, 30, 45]);
+    }
 }

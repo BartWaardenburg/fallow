@@ -1,6 +1,5 @@
 ---
 source: crates/cli/tests/snapshot_tests.rs
-assertion_line: 147
 expression: output
 ---
 unused-file:src/dead.ts
@@ -13,3 +12,4 @@ unused-class-member:src/service.ts:42:UserService.legacyMethod
 unresolved-import:src/app.ts:3:./missing-module
 unlisted-dep:chalk
 duplicate-export:Config
+circular-dependency:src/a.ts:0:src/a.ts → src/b.ts → src/a.ts

@@ -19,6 +19,7 @@ pub const ZERO_RANGE: Range = Range {
 };
 
 /// Build all LSP diagnostics from analysis results and duplication report, keyed by file URI.
+#[allow(clippy::cognitive_complexity)]
 pub fn build_diagnostics(
     results: &AnalysisResults,
     duplication: &DuplicationReport,
@@ -291,6 +292,36 @@ pub fn build_diagnostics(
                     } else {
                         Some(related_info)
                     },
+                    ..Default::default()
+                });
+        }
+    }
+
+    // Circular dependency diagnostics: one diagnostic per cycle on the first file
+    for cycle in &results.circular_dependencies {
+        if let Some(first_file) = cycle.files.first()
+            && let Ok(uri) = Url::from_file_path(first_file)
+        {
+            let chain: Vec<String> = cycle
+                .files
+                .iter()
+                .map(|f| {
+                    f.file_name().map_or_else(
+                        || f.display().to_string(),
+                        |n| n.to_string_lossy().into_owned(),
+                    )
+                })
+                .collect();
+            let message = format!("Circular dependency: {}", chain.join(" \u{2192} "));
+            diagnostics_by_file
+                .entry(uri)
+                .or_default()
+                .push(Diagnostic {
+                    range: ZERO_RANGE,
+                    severity: Some(DiagnosticSeverity::WARNING),
+                    source: Some("fallow".to_string()),
+                    code: Some(NumberOrString::String("circular-dependency".to_string())),
+                    message,
                     ..Default::default()
                 });
         }

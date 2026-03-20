@@ -68,6 +68,7 @@ pub(crate) fn is_mdx_file(path: &Path) -> bool {
 /// Parse an MDX file by extracting import/export statements.
 pub(crate) fn parse_mdx_to_module(file_id: FileId, source: &str, content_hash: u64) -> ModuleInfo {
     let suppressions = crate::suppress::parse_suppressions_from_source(source);
+    let line_offsets = fallow_types::extract::compute_line_offsets(source);
     let statements = extract_mdx_statements(source);
 
     if !statements.is_empty() {
@@ -76,10 +77,14 @@ pub(crate) fn parse_mdx_to_module(file_id: FileId, source: &str, content_hash: u
         let parser_return = Parser::new(&allocator, &statements, source_type).parse();
         let mut extractor = ModuleInfoExtractor::new();
         extractor.visit_program(&parser_return.program);
-        return extractor.into_module_info(file_id, content_hash, suppressions);
+        let mut info = extractor.into_module_info(file_id, content_hash, suppressions);
+        info.line_offsets = line_offsets;
+        return info;
     }
 
-    ModuleInfoExtractor::new().into_module_info(file_id, content_hash, suppressions)
+    let mut info = ModuleInfoExtractor::new().into_module_info(file_id, content_hash, suppressions);
+    info.line_offsets = line_offsets;
+    info
 }
 
 #[cfg(test)]

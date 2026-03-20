@@ -307,6 +307,8 @@ pub struct PartialRulesConfig {
     pub unlisted_dependencies: Option<Severity>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duplicate_exports: Option<Severity>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub circular_dependencies: Option<Severity>,
 }
 
 /// Resolved override with pre-compiled glob matchers.
@@ -742,6 +744,8 @@ pub struct RulesConfig {
     pub unlisted_dependencies: Severity,
     #[serde(default)]
     pub duplicate_exports: Severity,
+    #[serde(default)]
+    pub circular_dependencies: Severity,
 }
 
 impl Default for RulesConfig {
@@ -757,6 +761,7 @@ impl Default for RulesConfig {
             unresolved_imports: Severity::Error,
             unlisted_dependencies: Severity::Error,
             duplicate_exports: Severity::Error,
+            circular_dependencies: Severity::Error,
         }
     }
 }
@@ -793,6 +798,9 @@ impl RulesConfig {
         }
         if let Some(s) = partial.duplicate_exports {
             self.duplicate_exports = s;
+        }
+        if let Some(s) = partial.circular_dependencies {
+            self.circular_dependencies = s;
         }
     }
 }

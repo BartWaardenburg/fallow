@@ -254,6 +254,27 @@ pub fn build_sarif(
         }
     }
 
+    push_sarif_results(
+        &mut sarif_results,
+        &results.circular_dependencies,
+        |cycle| {
+            let chain: Vec<String> = cycle.files.iter().map(|p| relative_uri(p, root)).collect();
+            let mut display_chain = chain.clone();
+            if let Some(first) = chain.first() {
+                display_chain.push(first.clone());
+            }
+            let first_uri = chain.first().map_or_else(String::new, Clone::clone);
+            SarifFields {
+                rule_id: "fallow/circular-dependency",
+                level: severity_to_sarif_level(rules.circular_dependencies),
+                message: format!("Circular dependency: {}", display_chain.join(" \u{2192} ")),
+                uri: first_uri,
+                region: None,
+                properties: None,
+            }
+        },
+    );
+
     serde_json::json!({
         "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
         "version": "2.1.0",
@@ -313,6 +334,11 @@ pub fn build_sarif(
                             "id": "fallow/duplicate-export",
                             "shortDescription": { "text": "Export name appears in multiple modules" },
                             "defaultConfiguration": { "level": severity_to_sarif_level(rules.duplicate_exports) }
+                        },
+                        {
+                            "id": "fallow/circular-dependency",
+                            "shortDescription": { "text": "Circular dependency chain detected" },
+                            "defaultConfiguration": { "level": severity_to_sarif_level(rules.circular_dependencies) }
                         }
                     ]
                 }
@@ -460,6 +486,10 @@ mod tests {
             export_name: "Config".to_string(),
             locations: vec![root.join("src/config.ts"), root.join("src/types.ts")],
         });
+        r.circular_dependencies.push(CircularDependency {
+            files: vec![root.join("src/a.ts"), root.join("src/b.ts")],
+            length: 2,
+        });
 
         r
     }
@@ -494,7 +524,7 @@ mod tests {
     }
 
     #[test]
-    fn sarif_declares_all_ten_rules() {
+    fn sarif_declares_all_rules() {
         let root = PathBuf::from("/project");
         let results = AnalysisResults::default();
         let sarif = build_sarif(&results, &root, &RulesConfig::default());
@@ -502,7 +532,7 @@ mod tests {
         let rules = sarif["runs"][0]["tool"]["driver"]["rules"]
             .as_array()
             .expect("rules should be an array");
-        assert_eq!(rules.len(), 10);
+        assert_eq!(rules.len(), 11);
 
         let rule_ids: Vec<&str> = rules.iter().map(|r| r["id"].as_str().unwrap()).collect();
         assert!(rule_ids.contains(&"fallow/unused-file"));
@@ -515,6 +545,7 @@ mod tests {
         assert!(rule_ids.contains(&"fallow/unresolved-import"));
         assert!(rule_ids.contains(&"fallow/unlisted-dependency"));
         assert!(rule_ids.contains(&"fallow/duplicate-export"));
+        assert!(rule_ids.contains(&"fallow/circular-dependency"));
     }
 
     #[test]
@@ -668,8 +699,8 @@ mod tests {
         let sarif = build_sarif(&results, &root, &RulesConfig::default());
 
         let entries = sarif["runs"][0]["results"].as_array().unwrap();
-        // 10 issues but duplicate_exports has 2 locations => 11 SARIF results
-        assert_eq!(entries.len(), 11);
+        // 11 issues but duplicate_exports has 2 locations => 12 SARIF results
+        assert_eq!(entries.len(), 12);
 
         let rule_ids: Vec<&str> = entries
             .iter()

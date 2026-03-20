@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::extract::MemberKind;
 use crate::serde_path;
@@ -33,6 +33,8 @@ pub struct AnalysisResults {
     /// Production dependencies only used via type-only imports (could be devDependencies).
     /// Only populated in production mode.
     pub type_only_dependencies: Vec<TypeOnlyDependency>,
+    /// Circular dependency chains detected in the module graph.
+    pub circular_dependencies: Vec<CircularDependency>,
     /// Usage counts for all exports across the project. Used by the LSP for Code Lens.
     /// Not included in issue counts -- this is metadata, not an issue type.
     /// Skipped during serialization: this is internal LSP data, not part of the JSON output schema.
@@ -54,6 +56,7 @@ impl AnalysisResults {
             + self.unlisted_dependencies.len()
             + self.duplicate_exports.len()
             + self.type_only_dependencies.len()
+            + self.circular_dependencies.len()
     }
 
     /// Whether any issues were found.
@@ -175,6 +178,16 @@ pub struct TypeOnlyDependency {
     /// Path to the package.json where the dependency is listed.
     #[serde(serialize_with = "serde_path::serialize")]
     pub path: PathBuf,
+}
+
+/// A circular dependency chain detected in the module graph.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CircularDependency {
+    /// Files forming the cycle, in import order.
+    #[serde(serialize_with = "serde_path::serialize_vec")]
+    pub files: Vec<PathBuf>,
+    /// Number of files in the cycle.
+    pub length: usize,
 }
 
 /// Usage count for an export symbol. Used by the LSP Code Lens to show
@@ -310,8 +323,12 @@ mod tests {
             export_name: "dup".to_string(),
             locations: vec![PathBuf::from("h.ts"), PathBuf::from("i.ts")],
         });
+        results.circular_dependencies.push(CircularDependency {
+            files: vec![PathBuf::from("a.ts"), PathBuf::from("b.ts")],
+            length: 2,
+        });
 
-        assert_eq!(results.total_issues(), 10);
+        assert_eq!(results.total_issues(), 11);
         assert!(results.has_issues());
     }
 }

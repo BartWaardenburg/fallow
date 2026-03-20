@@ -25,6 +25,8 @@ pub enum IssueKind {
     DuplicateExport,
     /// Code duplication.
     CodeDuplication,
+    /// A circular dependency chain.
+    CircularDependency,
 }
 
 impl IssueKind {
@@ -42,6 +44,7 @@ impl IssueKind {
             "unlisted-dependency" => Some(Self::UnlistedDependency),
             "duplicate-export" => Some(Self::DuplicateExport),
             "code-duplication" => Some(Self::CodeDuplication),
+            "circular-dependency" => Some(Self::CircularDependency),
             _ => None,
         }
     }
@@ -60,6 +63,7 @@ impl IssueKind {
             Self::UnlistedDependency => 9,
             Self::DuplicateExport => 10,
             Self::CodeDuplication => 11,
+            Self::CircularDependency => 12,
         }
     }
 
@@ -77,6 +81,7 @@ impl IssueKind {
             9 => Some(Self::UnlistedDependency),
             10 => Some(Self::DuplicateExport),
             11 => Some(Self::CodeDuplication),
+            12 => Some(Self::CircularDependency),
             _ => None,
         }
     }
@@ -136,6 +141,10 @@ mod tests {
             IssueKind::parse("duplicate-export"),
             Some(IssueKind::DuplicateExport)
         );
+        assert_eq!(
+            IssueKind::parse("circular-dependency"),
+            Some(IssueKind::CircularDependency)
+        );
     }
 
     #[test]
@@ -158,6 +167,7 @@ mod tests {
             IssueKind::UnlistedDependency,
             IssueKind::DuplicateExport,
             IssueKind::CodeDuplication,
+            IssueKind::CircularDependency,
         ] {
             assert_eq!(
                 IssueKind::from_discriminant(kind.to_discriminant()),
@@ -165,6 +175,6 @@ mod tests {
             );
         }
         assert_eq!(IssueKind::from_discriminant(0), None);
-        assert_eq!(IssueKind::from_discriminant(12), None);
+        assert_eq!(IssueKind::from_discriminant(13), None);
     }
 }

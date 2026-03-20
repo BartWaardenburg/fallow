@@ -21,7 +21,7 @@ crates/
     report/     — Output formatting (mod.rs dispatch, human.rs, json.rs, sarif.rs, compact.rs)
     migrate/    — Config migration (mod.rs, knip.rs, jscpd.rs)
   lsp/      — LSP server, split into modules
-    main.rs, diagnostics.rs, code_actions.rs, code_lens.rs
+    main.rs, diagnostics.rs, code_actions.rs, code_lens.rs, hover.rs
   mcp/      — MCP server for AI agent integration (stdio transport, wraps CLI)
 editors/
   vscode/   — VS Code extension (LSP client, tree views, status bar, auto-download)
@@ -71,7 +71,7 @@ Key modules in fallow-core (re-exports fallow-extract, fallow-graph for backward
 - `duplicates/normalize.rs` — Configurable token normalization with `ResolvedNormalization`: mode defaults (strict/mild/weak/semantic) merged with user-specified overrides (`ignore_identifiers`, `ignore_string_values`, `ignore_numeric_values`)
 - `duplicates/tokenize.rs` — AST-based tokenizer with optional type annotation stripping (`strip_types` flag) for cross-language clone detection between `.ts` and `.js` files
 - `cross_reference.rs` — Cross-references duplication findings with dead code analysis: identifies clone instances that are also unused (in unused files or overlapping unused exports) as high-priority combined findings
-- `plugins/` — Plugin system: `Plugin` trait, registry (84 built-in plugins, ~30 with AST-based config parsing); `config_parser.rs` provides Oxc-based helpers for extracting imports, string arrays, object keys, require() sources, and string-or-array values from JS/TS/JSON config files; `tooling.rs` contains general tooling dependency detection (`is_known_tooling_dependency`) for dev deps not tied to any single plugin
+- `plugins/` — Plugin system: `Plugin` trait, registry (84 built-in plugins, ~31 with AST-based config parsing); `config_parser.rs` provides Oxc-based helpers for extracting imports, string arrays, object keys, require() sources, and string-or-array values from JS/TS/JSON config files; `tooling.rs` contains general tooling dependency detection (`is_known_tooling_dependency`) for dev deps not tied to any single plugin
 - `trace.rs` — Debug & trace tooling: trace export usage (`trace_export`), file edges (`trace_file`), dependency usage (`trace_dependency`), clone location (`trace_clone`), and `PipelineTimings` struct for `--performance` output
 - `progress.rs` — indicatif progress bars
 - `errors.rs` — Error types
@@ -81,7 +81,7 @@ Key modules in fallow-cli:
 - `check.rs` — `check` command: analysis pipeline, tracing, filtering, output
 - `dupes.rs` — `dupes` command: duplication detection, baseline, cross-reference
 - `watch.rs` — `watch` command: file watcher with debounced re-analysis
-- `fix.rs` — `fix` command: auto-remove unused exports/deps
+- `fix.rs` — `fix` command: auto-remove unused exports, enum members, and deps
 - `init.rs` — `init` command: generate config files
 - `list.rs` — `list` command: show plugins, entry points, files
 - `schema.rs` — `schema` + `config-schema` + `plugin-schema` commands
@@ -94,6 +94,7 @@ Key modules in fallow-lsp:
 - `diagnostics.rs` — Diagnostic generation for all issue types
 - `code_actions.rs` — Quick-fix and refactor code actions
 - `code_lens.rs` — Reference count Code Lens above export declarations
+- `hover.rs` — Hover information showing export usage, unused status, and duplicate block locations
 
 ## Building & Testing
 
@@ -142,6 +143,7 @@ cd benchmarks && npm run generate:dupes && npm run bench:dupes  # vs jscpd
 24. Tsconfig path alias resolution (`TsconfigDiscovery::Auto`): per-file tsconfig discovery resolves path aliases (e.g., `@/utils`) by finding the nearest `tsconfig.json` for each file, supporting monorepos with per-package tsconfig files.
 25. React Native platform extensions: `.web.ts`, `.ios.ts`, `.android.ts`, `.native.ts` variants are resolved alongside standard extensions so platform-specific files are not falsely reported as unused.
 26. Decorated class member skip: class members with decorators (NestJS `@Get()`, Angular `@Input()`, TypeORM `@Column()`, etc.) are not reported as unused, since decorator-driven frameworks consume them via reflection.
+27. Circular dependency detection: Tarjan's SCC algorithm detects import cycles in the module graph. Configurable via `circular-dependencies` rule.
 
 ## Framework support (84 plugins)
 
@@ -182,7 +184,7 @@ cd benchmarks && npm run generate:dupes && npm run bench:dupes  # vs jscpd
 - `check` — analyze with --format (human/json/sarif/compact), --changed-since, --baseline, --save-baseline, --fail-on-issues, --include-dupes (cross-reference with duplication), issue type filters (--unused-files, --unused-exports, etc.), --trace FILE:EXPORT (trace export usage), --trace-file PATH (trace file edges), --trace-dependency PACKAGE (trace dependency usage)
 - `dupes` — find code duplication with clone families, refactoring suggestions, --baseline/--save-baseline, --mode (strict/mild/weak/semantic), --min-tokens, --min-lines, --threshold, --skip-local, --cross-language, --trace FILE:LINE (trace all clones at a specific location)
 - `watch` — file watcher with debounced re-analysis
-- `fix` — auto-remove unused exports and deps (--dry-run, --yes/--force for non-TTY confirmation, --format json for structured output)
+- `fix` — auto-remove unused exports, enum members, and deps (--dry-run, --yes/--force for non-TTY confirmation, --format json for structured output)
 - `init` — create .fallowrc.json (default) or fallow.toml (`--toml`), includes `$schema` for IDE autocomplete
 - `migrate` — migrate config from knip and/or jscpd to fallow (--toml, --dry-run, --from PATH; auto-detects knip.json/knip.jsonc/.knip.json/.knip.jsonc/package.json#knip and .jscpd.json/package.json#jscpd)
 - `list` — show active plugins, entry points, files (--format json for structured output)
@@ -220,7 +222,7 @@ See `AGENTS.md` for AI agent integration guide.
 
 **Features:**
 - LSP client with auto-detection and auto-download of the `fallow-lsp` binary
-- Real-time diagnostics for all 10 dead code issue types via the LSP
+- Real-time diagnostics for all 11 dead code issue types via the LSP
 - Quick-fix code actions (remove unused export, delete unused file)
 - Refactor code action: "Extract duplicate into function" for code duplication (extracts clone instances into shared functions, replaces all instances in the file)
 - Duplication diagnostics with related locations (links to all other instances of the same clone group)
@@ -311,7 +313,7 @@ unresolved-imports = "error"
 ## Key design decisions
 
 - **No TypeScript compiler dependency**: Syntactic analysis only via Oxc. This is the speed advantage.
-- **Plugin system**: Single source of truth for framework support. Rust trait-based plugins with static patterns for common cases and optional AST-based config parsing via Oxc for ~30 plugins (no JavaScript evaluation), many with rich config extraction (entry points, dependencies, setup files from config objects). 84 built-in plugins covering the most popular JS/TS frameworks.
+- **Plugin system**: Single source of truth for framework support. Rust trait-based plugins with static patterns for common cases and optional AST-based config parsing via Oxc for ~31 plugins (no JavaScript evaluation), many with rich config extraction (entry points, dependencies, setup files from config objects). 84 built-in plugins covering the most popular JS/TS frameworks.
 - **Flat edge storage**: Contiguous `Vec<Edge>` with range indices for cache-friendly traversal.
 - **Lock-free parallel resolution**: Bare specifier cache uses `DashMap` (sharded concurrent map) for contention-free reads under rayon work-stealing.
 - **Re-export chain resolution**: Iterative propagation through barrel files with cycle detection.
