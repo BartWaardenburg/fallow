@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-03-20
+
 ### Added
 - TypeScript project references: workspace discovery from `tsconfig.json` `references` field (additive with npm/pnpm workspaces, deduplicated by canonical path)
 - Elementary cycle enumeration for circular dependencies (individual cycles within SCCs, max 20 per SCC, deterministic output)
@@ -22,6 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Nuxt `resolve_config()` for deep config parsing (modules, css, plugins, extends, postcss, path aliases)
 - Circular dependency benchmarks vs madge and dpdm
 - Inline suppression for circular dependencies (`fallow-ignore-file circular-dependency`)
+- Backwards compatibility policy (`docs/backwards-compatibility.md`)
+- JSON output schema documentation (`docs/output-schema.json`)
 
 ### Fixed
 - UTF-8 boundary handling in duplication detection (multi-byte character safety)
@@ -127,7 +131,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[Unreleased]: https://github.com/fallow-rs/fallow/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/fallow-rs/fallow/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/fallow-rs/fallow/compare/v0.3.0...v1.0.0
 [0.3.0]: https://github.com/fallow-rs/fallow/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/fallow-rs/fallow/compare/v0.1.7...v0.2.0
 [0.1.7]: https://github.com/fallow-rs/fallow/compare/v0.1.6...v0.1.7
