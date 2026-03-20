@@ -57,3 +57,7 @@ workspace = true
 [[bench]]
 name = "analysis"
 harness = false
+
+[[bench]]
+name = "large_analysis"
+harness = false
