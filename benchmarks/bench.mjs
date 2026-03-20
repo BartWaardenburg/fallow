@@ -210,8 +210,11 @@ if (results.length > 0) {
   console.log(`Average speedup vs knip v5 (cold): ${(results.reduce((s,r) => s+r.speedupColdV5, 0)/results.length).toFixed(1)}x`);
   console.log(`Average speedup vs knip v5 (warm): ${(results.reduce((s,r) => s+r.speedupWarmV5, 0)/results.length).toFixed(1)}x`);
   if (hasKnip6) {
-    console.log(`Average speedup vs knip v6 (cold): ${(results.reduce((s,r) => s+(r.speedupColdV6??0), 0)/results.length).toFixed(1)}x`);
-    console.log(`Average speedup vs knip v6 (warm): ${(results.reduce((s,r) => s+(r.speedupWarmV6??0), 0)/results.length).toFixed(1)}x`);
+    const v6Results = results.filter(r => r.speedupColdV6 != null);
+    if (v6Results.length > 0) {
+      console.log(`Average speedup vs knip v6 (cold): ${(v6Results.reduce((s,r) => s+r.speedupColdV6, 0)/v6Results.length).toFixed(1)}x`);
+      console.log(`Average speedup vs knip v6 (warm): ${(v6Results.reduce((s,r) => s+r.speedupWarmV6, 0)/v6Results.length).toFixed(1)}x`);
+    }
   }
   console.log(`Average cache effect:              ${(results.reduce((s,r) => s+r.cacheSpeedup, 0)/results.length).toFixed(2)}x\n`);
 }

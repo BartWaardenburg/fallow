@@ -86,9 +86,11 @@ Measured on real-world open-source projects (median of 5 runs, 2 warmup). Apple 
 |:--------|------:|-------:|--------:|--------:|------:|------:|
 | [zod](https://github.com/colinhacks/zod) | 174 | **23ms** | 590ms | 308ms | **26.1x** | **13.6x** |
 | [fastify](https://github.com/fastify/fastify) | 286 | **22ms** | 804ms | 236ms | **36.2x** | **10.6x** |
-| [preact](https://github.com/preactjs/preact) | 244 | **24ms** | 799ms | — | **33.9x** | — |
+| [preact](https://github.com/preactjs/preact) | 244 | **24ms** | 799ms | —* | **33.9x** | — |
 | synthetic (1,000 files) | 1,000 | **45ms** | 380ms | 196ms | **8.5x** | **4.4x** |
 | synthetic (5,000 files) | 5,000 | **201ms** | 646ms | 340ms | **3.2x** | **1.7x** |
+
+\* knip v6 excluded for preact due to a v6 regression on this project.
 
 The speedup narrows on larger projects as actual analysis time dominates over startup: 26-36x on real-world projects vs knip v5 (10-14x vs v6), 3-9x on 1,000+ file projects. fallow stays sub-second even at 5,000 files.
 
