@@ -618,7 +618,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-cli"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "clap",
  "colored",
@@ -642,7 +642,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-config"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "glob",
  "globset",
@@ -657,7 +657,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-core"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "bincode",
  "criterion",
@@ -691,7 +691,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-extract"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "bincode",
  "fallow-types",
@@ -709,7 +709,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-graph"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "dashmap 6.1.0",
  "fallow-config",
@@ -726,7 +726,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-lsp"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "fallow-config",
  "fallow-core",
@@ -740,7 +740,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-mcp"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "rmcp",
  "schemars",
@@ -753,7 +753,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-types"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "bincode",
  "oxc_span",
