@@ -5,8 +5,8 @@ use dashmap::DashMap;
 use oxc_resolver::{ResolveOptions, Resolver};
 use rayon::prelude::*;
 
-use crate::discover::{DiscoveredFile, FileId};
-use crate::extract::{ImportInfo, ModuleInfo, ReExportInfo};
+use fallow_types::discover::{DiscoveredFile, FileId};
+use fallow_types::extract::{ImportInfo, ModuleInfo, ReExportInfo};
 
 /// Thread-safe cache for bare specifier resolutions using lock-free concurrent reads.
 /// Bare specifiers (like `react`, `lodash/merge`) resolve to the same target
@@ -65,12 +65,12 @@ pub struct ResolvedReExport {
 pub struct ResolvedModule {
     pub file_id: FileId,
     pub path: PathBuf,
-    pub exports: Vec<crate::extract::ExportInfo>,
+    pub exports: Vec<fallow_types::extract::ExportInfo>,
     pub re_exports: Vec<ResolvedReExport>,
     pub resolved_imports: Vec<ResolvedImport>,
     pub resolved_dynamic_imports: Vec<ResolvedImport>,
-    pub resolved_dynamic_patterns: Vec<(crate::extract::DynamicImportPattern, Vec<FileId>)>,
-    pub member_accesses: Vec<crate::extract::MemberAccess>,
+    pub resolved_dynamic_patterns: Vec<(fallow_types::extract::DynamicImportPattern, Vec<FileId>)>,
+    pub member_accesses: Vec<fallow_types::extract::MemberAccess>,
     pub whole_object_uses: Vec<String>,
     pub has_cjs_exports: bool,
 }
@@ -178,7 +178,7 @@ pub fn resolve_all_imports(
                             .map(|name| ResolvedImport {
                                 info: ImportInfo {
                                     source: imp.source.clone(),
-                                    imported_name: crate::extract::ImportedName::Named(
+                                    imported_name: fallow_types::extract::ImportedName::Named(
                                         name.clone(),
                                     ),
                                     local_name: name.clone(),
@@ -193,7 +193,7 @@ pub fn resolve_all_imports(
                         vec![ResolvedImport {
                             info: ImportInfo {
                                 source: imp.source.clone(),
-                                imported_name: crate::extract::ImportedName::Namespace,
+                                imported_name: fallow_types::extract::ImportedName::Namespace,
                                 local_name: imp.local_name.clone().unwrap_or_default(),
                                 is_type_only: false,
                                 span: imp.span,
@@ -205,7 +205,7 @@ pub fn resolve_all_imports(
                         vec![ResolvedImport {
                             info: ImportInfo {
                                 source: imp.source.clone(),
-                                imported_name: crate::extract::ImportedName::SideEffect,
+                                imported_name: fallow_types::extract::ImportedName::SideEffect,
                                 local_name: String::new(),
                                 is_type_only: false,
                                 span: imp.span,
@@ -256,7 +256,7 @@ pub fn resolve_all_imports(
                         vec![ResolvedImport {
                             info: ImportInfo {
                                 source: req.source.clone(),
-                                imported_name: crate::extract::ImportedName::Namespace,
+                                imported_name: fallow_types::extract::ImportedName::Namespace,
                                 local_name: req.local_name.clone().unwrap_or_default(),
                                 is_type_only: false,
                                 span: req.span,
@@ -269,7 +269,7 @@ pub fn resolve_all_imports(
                             .map(|name| ResolvedImport {
                                 info: ImportInfo {
                                     source: req.source.clone(),
-                                    imported_name: crate::extract::ImportedName::Named(
+                                    imported_name: fallow_types::extract::ImportedName::Named(
                                         name.clone(),
                                     ),
                                     local_name: name.clone(),
@@ -293,7 +293,7 @@ pub fn resolve_all_imports(
                 .and_then(|p| p.parent())
                 .unwrap_or(file_path);
             let resolved_dynamic_patterns: Vec<(
-                crate::extract::DynamicImportPattern,
+                fallow_types::extract::DynamicImportPattern,
                 Vec<FileId>,
             )> = module
                 .dynamic_import_patterns
@@ -820,7 +820,7 @@ fn try_pnpm_workspace_fallback(
 }
 
 /// Convert a `DynamicImportPattern` to a glob string for file matching.
-fn make_glob_from_pattern(pattern: &crate::extract::DynamicImportPattern) -> String {
+fn make_glob_from_pattern(pattern: &fallow_types::extract::DynamicImportPattern) -> String {
     // If the prefix already contains glob characters (from import.meta.glob), use as-is
     if pattern.prefix.contains('*') || pattern.prefix.contains('{') {
         return pattern.prefix.clone();

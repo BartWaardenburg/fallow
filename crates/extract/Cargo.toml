@@ -1,0 +1,35 @@
+[package]
+name = "fallow-extract"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Parsing and extraction engine for the fallow dead code analyzer"
+
+[dependencies]
+fallow-types = { workspace = true }
+
+# Parsing & analysis
+oxc_allocator = { workspace = true }
+oxc_ast = { workspace = true }
+oxc_ast_visit = { workspace = true }
+oxc_parser = { workspace = true }
+oxc_span = { workspace = true }
+
+# Parallelism
+rayon = { workspace = true }
+
+# File system
+regex = { workspace = true }
+
+# Hashing
+xxhash-rust = { workspace = true }
+
+# Caching
+bincode = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+[lints]
+workspace = true

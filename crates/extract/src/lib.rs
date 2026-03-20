@@ -1,16 +1,24 @@
+//! Parsing and extraction engine for the fallow dead code analyzer.
+//!
+//! This crate handles all file parsing: JS/TS via Oxc, Vue/Svelte SFC extraction,
+//! Astro frontmatter, MDX import/export extraction, CSS Module class name extraction,
+//! and incremental caching of parse results.
+
 pub mod astro;
+pub mod cache;
 pub mod css;
 pub mod mdx;
 mod parse;
-pub(crate) mod sfc;
-pub(crate) mod visitor;
+pub mod sfc;
+pub mod suppress;
+pub mod visitor;
 
 use std::path::Path;
 
 use rayon::prelude::*;
 
-use crate::cache::CacheStore;
-use crate::discover::{DiscoveredFile, FileId};
+use cache::CacheStore;
+use fallow_types::discover::{DiscoveredFile, FileId};
 
 // Re-export all extract types from fallow-types
 pub use fallow_types::extract::{
@@ -72,7 +80,7 @@ fn parse_single_file_cached(
         && let Some(cached) = store.get(&file.path, content_hash)
     {
         cache_hits.fetch_add(1, Ordering::Relaxed);
-        return Some(crate::cache::cached_to_module(cached, file.id));
+        return Some(cache::cached_to_module(cached, file.id));
     }
     cache_misses.fetch_add(1, Ordering::Relaxed);
 
@@ -217,7 +225,6 @@ mod tests {
         let info = parse_source(
             "import { Status, MyClass } from './types';\nconsole.log(Status.Active);\nMyClass.create();",
         );
-        // Should capture: console.log, Status.Active, MyClass.create
         assert!(info.member_accesses.len() >= 2);
         let has_status_active = info
             .member_accesses
@@ -244,7 +251,6 @@ mod tests {
     fn extracts_mixed_import_default_and_named() {
         let info = parse_source("import React, { useState, useEffect } from 'react';");
         assert_eq!(info.imports.len(), 3);
-        // Oxc orders: named specifiers first, then default
         assert_eq!(info.imports[0].imported_name, ImportedName::Default);
         assert_eq!(info.imports[0].local_name, "React");
         assert_eq!(
@@ -305,7 +311,6 @@ mod tests {
     fn class_constructor_is_excluded() {
         let info = parse_source("export class Foo { constructor() {} greet() {} }");
         assert_eq!(info.exports.len(), 1);
-        // Members should NOT include constructor
         let members: Vec<&str> = info.exports[0]
             .members
             .iter()
@@ -396,7 +401,6 @@ mod tests {
     #[test]
     fn dynamic_import_non_string_ignored() {
         let info = parse_source("const mod = import(variable);");
-        // Dynamic import with non-string literal should not be captured
         assert_eq!(info.dynamic_imports.len(), 0);
     }
 
@@ -544,7 +548,6 @@ mod tests {
 
     #[test]
     fn multi_expression_template_uses_globstar() {
-        // `./plugins/${cat}/${name}.js` has 2 expressions → prefix gets **/
         let info = parse_source("const m = import(`./plugins/${cat}/${name}.js`);");
         assert_eq!(info.dynamic_import_patterns.len(), 1);
         assert_eq!(info.dynamic_import_patterns[0].prefix, "./plugins/**/");
@@ -881,7 +884,6 @@ import { ref } from 'vue';
 </script>"#,
             "DataSrc.vue",
         );
-        // data-src should NOT be treated as src — only the vue import should exist
         assert_eq!(info.imports.len(), 1);
         assert_eq!(info.imports[0].source, "vue");
     }
@@ -897,15 +899,12 @@ import { ref } from 'vue';
 "#,
             "CommentString.vue",
         );
-        // The string containing <!-- --> should not affect import extraction
         assert_eq!(info.imports.len(), 1);
         assert_eq!(info.imports[0].source, "vue");
     }
 
     #[test]
     fn vue_script_spanning_html_comment() {
-        // An HTML comment that wraps a <script> block should exclude it,
-        // but a real <script> block after should still be found
         let info = parse_sfc(
             r#"
 <!-- disabled:
@@ -1077,7 +1076,6 @@ Content here.
 "#,
             0,
         );
-        // 3 named specifiers from a single import statement
         assert_eq!(info.imports.len(), 3);
         assert!(info.imports.iter().all(|i| i.source == "./components"));
     }
@@ -1153,7 +1151,6 @@ More content.
 
     #[test]
     fn dynamic_import_without_await_captures_local_name() {
-        // `const mod = import('./service')` (promise, no await)
         let info = parse_source("const mod = import('./service');");
         assert_eq!(info.dynamic_imports.len(), 1);
         assert_eq!(info.dynamic_imports[0].source, "./service");
@@ -1180,14 +1177,12 @@ More content.
         );
         assert_eq!(info.dynamic_imports.len(), 1);
         assert_eq!(info.dynamic_imports[0].source, "./module");
-        // Has rest element → conservative namespace (no destructured_names, no local_name)
         assert!(info.dynamic_imports[0].local_name.is_none());
         assert!(info.dynamic_imports[0].destructured_names.is_empty());
     }
 
     #[test]
     fn dynamic_import_side_effect_only() {
-        // No variable assignment → side-effect import
         let info = parse_source("async function f() { await import('./side-effect'); }");
         assert_eq!(info.dynamic_imports.len(), 1);
         assert_eq!(info.dynamic_imports[0].source, "./side-effect");
@@ -1197,8 +1192,6 @@ More content.
 
     #[test]
     fn dynamic_import_no_duplicate_entries() {
-        // When handled via visit_variable_declaration, visit_import_expression should skip it.
-        // There should be exactly 1 DynamicImportInfo, not 2.
         let info = parse_source("async function f() { const mod = await import('./service'); }");
         assert_eq!(info.dynamic_imports.len(), 1);
     }
@@ -1334,7 +1327,6 @@ More content.
     #[test]
     fn scss_use_not_extracted_from_css() {
         let info = parse_css(r#"@use "./variables";"#, "styles.css");
-        // @use is SCSS-only, should not be extracted from .css files
         assert_eq!(info.imports.len(), 0);
     }
 
@@ -1351,7 +1343,6 @@ More content.
 "#,
             "styles.css",
         );
-        // Should have exactly one synthetic tailwindcss import (not one per @apply)
         let tw_imports: Vec<_> = info
             .imports
             .iter()
@@ -1387,7 +1378,6 @@ More content.
 "#,
             "app.scss",
         );
-        // 3 file imports + 1 synthetic tailwindcss
         assert_eq!(info.imports.len(), 4);
         assert!(info.imports.iter().any(|i| i.source == "./variables"));
         assert!(info.imports.iter().any(|i| i.source == "./mixins"));
@@ -1499,7 +1489,7 @@ More content.
 "#,
             "styles.css",
         );
-        assert_eq!(info.imports.len(), 2); // real-import.css + tailwindcss
+        assert_eq!(info.imports.len(), 2);
         assert!(info.imports.iter().any(|i| i.source == "./real-import.css"));
         assert!(info.imports.iter().any(|i| i.source == "tailwindcss"));
     }
@@ -1520,7 +1510,6 @@ More content.
         let export_names: Vec<&ExportName> = info.exports.iter().map(|e| &e.name).collect();
         assert!(export_names.contains(&&ExportName::Named("header".to_string())));
         assert!(export_names.contains(&&ExportName::Named("footer".to_string())));
-        // No default export — default import handling is done at the graph level
         assert!(!export_names.contains(&&ExportName::Default));
     }
 

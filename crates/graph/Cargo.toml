@@ -1,0 +1,33 @@
+[package]
+name = "fallow-graph"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Module graph construction, resolution, and project state for the fallow dead code analyzer"
+
+[dependencies]
+fallow-types = { workspace = true }
+fallow-config = { workspace = true }
+
+# Resolution
+oxc_resolver = { workspace = true }
+oxc_span = { workspace = true }
+
+# Parallelism
+rayon = { workspace = true }
+
+# Concurrent data structures
+dashmap = { workspace = true }
+
+# File system (glob matching for dynamic import patterns)
+globset = { workspace = true }
+
+# Graph
+fixedbitset = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+[lints]
+workspace = true

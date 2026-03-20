@@ -5,13 +5,13 @@ use oxc_ast_visit::Visit;
 use oxc_parser::Parser;
 use oxc_span::SourceType;
 
-use super::ModuleInfo;
-use super::astro::{is_astro_file, parse_astro_to_module};
-use super::css::{is_css_file, parse_css_to_module};
-use super::mdx::{is_mdx_file, parse_mdx_to_module};
-use super::sfc::{is_sfc_file, parse_sfc_to_module};
-use super::visitor::ModuleInfoExtractor;
-use crate::discover::FileId;
+use crate::ModuleInfo;
+use crate::astro::{is_astro_file, parse_astro_to_module};
+use crate::css::{is_css_file, parse_css_to_module};
+use crate::mdx::{is_mdx_file, parse_mdx_to_module};
+use crate::sfc::{is_sfc_file, parse_sfc_to_module};
+use crate::visitor::ModuleInfoExtractor;
+use fallow_types::discover::FileId;
 
 /// Parse source text into a [`ModuleInfo`](super::ModuleInfo).
 pub(crate) fn parse_source_to_module(

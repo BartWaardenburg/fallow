@@ -3,14 +3,14 @@ use oxc_ast_visit::Visit;
 use oxc_ast_visit::walk;
 use oxc_span::Span;
 
-use super::{
+use crate::suppress::Suppression;
+use crate::{
     DynamicImportInfo, DynamicImportPattern, ExportInfo, ExportName, ImportInfo, ImportedName,
     MemberAccess, MemberInfo, MemberKind, ModuleInfo, ReExportInfo, RequireCallInfo,
 };
-use crate::suppress::Suppression;
 
 /// Extract class members (methods and properties) from a class declaration.
-pub(super) fn extract_class_members(class: &Class<'_>) -> Vec<MemberInfo> {
+pub(crate) fn extract_class_members(class: &Class<'_>) -> Vec<MemberInfo> {
     let mut members = Vec::new();
     for element in &class.body.body {
         match element {
@@ -69,15 +69,15 @@ fn is_meta_url_arg(arg: &Argument<'_>) -> bool {
 
 /// AST visitor that extracts all import/export information in a single pass.
 pub(crate) struct ModuleInfoExtractor {
-    pub(super) exports: Vec<ExportInfo>,
-    pub(super) imports: Vec<ImportInfo>,
-    pub(super) re_exports: Vec<ReExportInfo>,
-    pub(super) dynamic_imports: Vec<DynamicImportInfo>,
-    pub(super) dynamic_import_patterns: Vec<DynamicImportPattern>,
-    pub(super) require_calls: Vec<RequireCallInfo>,
-    pub(super) member_accesses: Vec<MemberAccess>,
-    pub(super) whole_object_uses: Vec<String>,
-    pub(super) has_cjs_exports: bool,
+    pub(crate) exports: Vec<ExportInfo>,
+    pub(crate) imports: Vec<ImportInfo>,
+    pub(crate) re_exports: Vec<ReExportInfo>,
+    pub(crate) dynamic_imports: Vec<DynamicImportInfo>,
+    pub(crate) dynamic_import_patterns: Vec<DynamicImportPattern>,
+    pub(crate) require_calls: Vec<RequireCallInfo>,
+    pub(crate) member_accesses: Vec<MemberAccess>,
+    pub(crate) whole_object_uses: Vec<String>,
+    pub(crate) has_cjs_exports: bool,
     /// Spans of `require()` calls already handled via destructured require detection.
     handled_require_spans: Vec<Span>,
     /// Spans of `import()` expressions already handled via variable declarator detection.
@@ -104,7 +104,7 @@ impl ModuleInfoExtractor {
     /// Convert this extractor into a `ModuleInfo`, consuming its fields.
     pub(crate) fn into_module_info(
         self,
-        file_id: crate::discover::FileId,
+        file_id: fallow_types::discover::FileId,
         content_hash: u64,
         suppressions: Vec<Suppression>,
     ) -> ModuleInfo {
@@ -809,12 +809,12 @@ fn extract_trailing_string(expr: &Expression<'_>) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::discover::FileId;
-    use crate::extract::parse::parse_source_to_module;
+    use crate::parse::parse_source_to_module;
+    use fallow_types::discover::FileId;
     use std::path::Path;
 
     /// Helper: parse TypeScript source and return ModuleInfo.
-    fn parse(source: &str) -> super::super::ModuleInfo {
+    fn parse(source: &str) -> crate::ModuleInfo {
         parse_source_to_module(FileId(0), Path::new("test.ts"), source, 0)
     }
 

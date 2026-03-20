@@ -6,10 +6,10 @@ use oxc_ast_visit::Visit;
 use oxc_parser::Parser;
 use oxc_span::SourceType;
 
-use super::ModuleInfo;
-use super::sfc::SfcScript;
-use super::visitor::ModuleInfoExtractor;
-use crate::discover::FileId;
+use crate::ModuleInfo;
+use crate::sfc::SfcScript;
+use crate::visitor::ModuleInfoExtractor;
+use fallow_types::discover::FileId;
 
 /// Regex to extract Astro frontmatter (content between `---` delimiters at file start).
 static ASTRO_FRONTMATTER_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
@@ -30,14 +30,14 @@ pub fn extract_astro_frontmatter(source: &str) -> Option<SfcScript> {
     })
 }
 
-pub(super) fn is_astro_file(path: &Path) -> bool {
+pub(crate) fn is_astro_file(path: &Path) -> bool {
     path.extension()
         .and_then(|e| e.to_str())
         .is_some_and(|ext| ext == "astro")
 }
 
 /// Parse an Astro file by extracting the frontmatter section.
-pub(super) fn parse_astro_to_module(
+pub(crate) fn parse_astro_to_module(
     file_id: FileId,
     source: &str,
     content_hash: u64,

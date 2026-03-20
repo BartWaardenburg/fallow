@@ -627,10 +627,10 @@ version = "0.3.0"
 dependencies = [
  "bincode",
  "criterion",
- "dashmap 6.1.0",
  "fallow-config",
+ "fallow-extract",
+ "fallow-graph",
  "fallow-types",
- "fixedbitset",
  "glob",
  "globset",
  "ignore",
@@ -639,7 +639,6 @@ dependencies = [
  "oxc_ast",
  "oxc_ast_visit",
  "oxc_parser",
- "oxc_resolver",
  "oxc_span",
  "oxc_syntax",
  "rayon",
@@ -651,6 +650,38 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "xxhash-rust",
+]
+
+[[package]]
+name = "fallow-extract"
+version = "0.3.0"
+dependencies = [
+ "bincode",
+ "fallow-types",
+ "oxc_allocator",
+ "oxc_ast",
+ "oxc_ast_visit",
+ "oxc_parser",
+ "oxc_span",
+ "rayon",
+ "regex",
+ "tracing",
+ "xxhash-rust",
+]
+
+[[package]]
+name = "fallow-graph"
+version = "0.3.0"
+dependencies = [
+ "dashmap 6.1.0",
+ "fallow-config",
+ "fallow-types",
+ "fixedbitset",
+ "globset",
+ "oxc_resolver",
+ "oxc_span",
+ "rayon",
+ "tracing",
 ]
 
 [[package]]

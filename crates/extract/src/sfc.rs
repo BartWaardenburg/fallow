@@ -6,9 +6,9 @@ use oxc_ast_visit::Visit;
 use oxc_parser::Parser;
 use oxc_span::SourceType;
 
-use super::visitor::ModuleInfoExtractor;
-use super::{ImportInfo, ImportedName, ModuleInfo};
-use crate::discover::FileId;
+use crate::visitor::ModuleInfoExtractor;
+use crate::{ImportInfo, ImportedName, ModuleInfo};
+use fallow_types::discover::FileId;
 use oxc_span::Span;
 
 /// Regex to extract `<script>` block content from Vue/Svelte SFCs.
@@ -95,7 +95,7 @@ pub fn is_sfc_file(path: &Path) -> bool {
 }
 
 /// Parse an SFC file by extracting and combining all `<script>` blocks.
-pub(super) fn parse_sfc_to_module(file_id: FileId, source: &str, content_hash: u64) -> ModuleInfo {
+pub(crate) fn parse_sfc_to_module(file_id: FileId, source: &str, content_hash: u64) -> ModuleInfo {
     let scripts = extract_sfc_scripts(source);
 
     // For SFC files, use string scanning for suppression comments since script block

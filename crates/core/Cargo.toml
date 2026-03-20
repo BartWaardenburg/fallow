@@ -8,6 +8,8 @@ description = "Core analysis engine for the fallow dead code analyzer"
 
 [dependencies]
 fallow-config = { workspace = true }
+fallow-extract = { workspace = true }
+fallow-graph = { workspace = true }
 fallow-types = { workspace = true }
 
 # Parsing & analysis
@@ -15,15 +17,11 @@ oxc_allocator = { workspace = true }
 oxc_ast = { workspace = true }
 oxc_ast_visit = { workspace = true }
 oxc_parser = { workspace = true }
-oxc_resolver = { workspace = true }
 oxc_span = { workspace = true }
 oxc_syntax = { workspace = true }
 
 # Parallelism
 rayon = { workspace = true }
-
-# Concurrent data structures
-dashmap = { workspace = true }
 
 # File system
 ignore = { workspace = true }
@@ -40,9 +38,6 @@ xxhash-rust = { workspace = true }
 
 # Caching
 bincode = { workspace = true }
-
-# Graph
-fixedbitset = { workspace = true }
 
 # Progress
 indicatif = { workspace = true }

@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use fallow_config::WorkspaceInfo;
 
-use crate::discover::{DiscoveredFile, FileId};
+use fallow_types::discover::{DiscoveredFile, FileId};
 
 /// Centralized project state owning the file registry and workspace metadata.
 ///

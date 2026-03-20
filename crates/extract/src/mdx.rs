@@ -5,9 +5,9 @@ use oxc_ast_visit::Visit;
 use oxc_parser::Parser;
 use oxc_span::SourceType;
 
-use super::ModuleInfo;
-use super::visitor::ModuleInfoExtractor;
-use crate::discover::FileId;
+use crate::ModuleInfo;
+use crate::visitor::ModuleInfoExtractor;
+use fallow_types::discover::FileId;
 
 /// Extract import/export statements from MDX content.
 ///
@@ -54,14 +54,14 @@ pub fn extract_mdx_statements(source: &str) -> String {
     statements.join("\n")
 }
 
-pub(super) fn is_mdx_file(path: &Path) -> bool {
+pub(crate) fn is_mdx_file(path: &Path) -> bool {
     path.extension()
         .and_then(|e| e.to_str())
         .is_some_and(|ext| ext == "mdx")
 }
 
 /// Parse an MDX file by extracting import/export statements.
-pub(super) fn parse_mdx_to_module(file_id: FileId, source: &str, content_hash: u64) -> ModuleInfo {
+pub(crate) fn parse_mdx_to_module(file_id: FileId, source: &str, content_hash: u64) -> ModuleInfo {
     let suppressions = crate::suppress::parse_suppressions_from_source(source);
     let statements = extract_mdx_statements(source);
 

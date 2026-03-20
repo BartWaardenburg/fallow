@@ -5,15 +5,17 @@ pub mod discover;
 pub mod duplicates;
 pub mod errors;
 pub mod extract;
-pub mod graph;
 pub mod plugins;
 pub mod progress;
-pub mod project;
-pub mod resolve;
 pub mod results;
 pub mod scripts;
 pub mod suppress;
 pub mod trace;
+
+// Re-export from fallow-graph for backwards compatibility
+pub use fallow_graph::graph;
+pub use fallow_graph::project;
+pub use fallow_graph::resolve;
 
 use std::path::Path;
 use std::time::Instant;

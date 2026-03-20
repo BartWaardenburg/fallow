@@ -3,8 +3,8 @@ use std::sync::LazyLock;
 
 use oxc_span::Span;
 
-use super::{ExportInfo, ExportName, ImportInfo, ImportedName, ModuleInfo};
-use crate::discover::FileId;
+use crate::{ExportInfo, ExportName, ImportInfo, ImportedName, ModuleInfo};
+use fallow_types::discover::FileId;
 
 /// Regex to extract CSS @import sources.
 /// Matches: @import "path"; @import 'path'; @import url("path"); @import url('path'); @import url(path);
@@ -48,7 +48,7 @@ static CSS_NON_SELECTOR_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
     regex::Regex::new(r#"(?s)"[^"]*"|'[^']*'|url\([^)]*\)"#).expect("valid regex")
 });
 
-pub(super) fn is_css_file(path: &Path) -> bool {
+pub(crate) fn is_css_file(path: &Path) -> bool {
     path.extension()
         .and_then(|e| e.to_str())
         .is_some_and(|ext| ext == "css" || ext == "scss")
@@ -100,7 +100,7 @@ pub fn extract_css_module_exports(source: &str) -> Vec<ExportInfo> {
 }
 
 /// Parse a CSS/SCSS file, extracting @import, @use, @forward, @apply, and @tailwind directives.
-pub(super) fn parse_css_to_module(
+pub(crate) fn parse_css_to_module(
     file_id: FileId,
     path: &Path,
     source: &str,

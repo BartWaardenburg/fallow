@@ -12,6 +12,8 @@ repository = "https://github.com/fallow-rs/fallow"
 [workspace.dependencies]
 fallow-core = { version = "0.3.0", path = "crates/core" }
 fallow-config = { version = "0.3.0", path = "crates/config" }
+fallow-extract = { version = "0.3.0", path = "crates/extract" }
+fallow-graph = { version = "0.3.0", path = "crates/graph" }
 fallow-types = { version = "0.3.0", path = "crates/types" }
 
 # Parsing & analysis

@@ -4,9 +4,9 @@ use std::path::PathBuf;
 
 use fixedbitset::FixedBitSet;
 
-use crate::discover::{DiscoveredFile, EntryPoint, FileId};
-use crate::extract::{ExportName, ImportedName};
 use crate::resolve::{ResolveResult, ResolvedModule};
+use fallow_types::discover::{DiscoveredFile, EntryPoint, FileId};
+use fallow_types::extract::{ExportName, ImportedName};
 
 /// The core module dependency graph.
 #[derive(Debug)]
@@ -70,7 +70,7 @@ pub struct ExportSymbol {
     /// Which files reference this export.
     pub references: Vec<SymbolReference>,
     /// Members of this export (enum members, class members).
-    pub members: Vec<crate::extract::MemberInfo>,
+    pub members: Vec<fallow_types::extract::MemberInfo>,
 }
 
 /// A reference to an export from another file.
@@ -859,9 +859,9 @@ fn export_matches(export: &ExportName, import: &ImportedName) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
-    use crate::extract::{ExportName, ImportInfo, ImportedName};
     use crate::resolve::{ResolveResult, ResolvedImport, ResolvedModule, ResolvedReExport};
+    use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
+    use fallow_types::extract::{ExportName, ImportInfo, ImportedName};
     use std::path::PathBuf;
 
     #[test]
@@ -968,14 +968,14 @@ mod tests {
                 file_id: FileId(1),
                 path: PathBuf::from("/project/src/utils.ts"),
                 exports: vec![
-                    crate::extract::ExportInfo {
+                    fallow_types::extract::ExportInfo {
                         name: ExportName::Named("foo".to_string()),
                         local_name: Some("foo".to_string()),
                         is_type_only: false,
                         span: oxc_span::Span::new(0, 20),
                         members: vec![],
                     },
-                    crate::extract::ExportInfo {
+                    fallow_types::extract::ExportInfo {
                         name: ExportName::Named("bar".to_string()),
                         local_name: Some("bar".to_string()),
                         is_type_only: false,
@@ -1104,7 +1104,7 @@ mod tests {
             ResolvedModule {
                 file_id: FileId(1),
                 path: PathBuf::from("/project/utils.ts"),
-                exports: vec![crate::extract::ExportInfo {
+                exports: vec![fallow_types::extract::ExportInfo {
                     name: ExportName::Named("foo".to_string()),
                     local_name: Some("foo".to_string()),
                     is_type_only: false,
@@ -1185,7 +1185,7 @@ mod tests {
             ResolvedModule {
                 file_id: FileId(1),
                 path: PathBuf::from("/project/utils.ts"),
-                exports: vec![crate::extract::ExportInfo {
+                exports: vec![fallow_types::extract::ExportInfo {
                     name: ExportName::Named("foo".to_string()),
                     local_name: Some("foo".to_string()),
                     is_type_only: false,
@@ -1203,7 +1203,7 @@ mod tests {
             ResolvedModule {
                 file_id: FileId(2),
                 path: PathBuf::from("/project/orphan.ts"),
-                exports: vec![crate::extract::ExportInfo {
+                exports: vec![fallow_types::extract::ExportInfo {
                     name: ExportName::Named("orphan".to_string()),
                     local_name: Some("orphan".to_string()),
                     is_type_only: false,
@@ -1336,7 +1336,7 @@ mod tests {
             ResolvedModule {
                 file_id: FileId(1),
                 path: PathBuf::from("/project/barrel.ts"),
-                exports: vec![crate::extract::ExportInfo {
+                exports: vec![fallow_types::extract::ExportInfo {
                     name: ExportName::Named("foo".to_string()),
                     local_name: Some("foo".to_string()),
                     is_type_only: false,
@@ -1344,7 +1344,7 @@ mod tests {
                     members: vec![],
                 }],
                 re_exports: vec![ResolvedReExport {
-                    info: crate::extract::ReExportInfo {
+                    info: fallow_types::extract::ReExportInfo {
                         source: "./source".to_string(),
                         imported_name: "foo".to_string(),
                         exported_name: "foo".to_string(),
@@ -1363,7 +1363,7 @@ mod tests {
             ResolvedModule {
                 file_id: FileId(2),
                 path: PathBuf::from("/project/source.ts"),
-                exports: vec![crate::extract::ExportInfo {
+                exports: vec![fallow_types::extract::ExportInfo {
                     name: ExportName::Named("foo".to_string()),
                     local_name: Some("foo".to_string()),
                     is_type_only: false,
@@ -1434,8 +1434,6 @@ mod tests {
 
     #[test]
     fn barrel_re_export_creates_export_symbol() {
-        // barrel.ts has `export { foo } from './source'`
-        // The barrel should have an ExportSymbol for "foo" so references can attach.
         let files = vec![
             DiscoveredFile {
                 id: FileId(0),
@@ -1481,13 +1479,12 @@ mod tests {
                 whole_object_uses: vec![],
                 has_cjs_exports: false,
             },
-            // barrel re-exports "foo" from source (no local exports)
             ResolvedModule {
                 file_id: FileId(1),
                 path: PathBuf::from("/project/barrel.ts"),
-                exports: vec![], // barrel has NO local exports
+                exports: vec![],
                 re_exports: vec![ResolvedReExport {
-                    info: crate::extract::ReExportInfo {
+                    info: fallow_types::extract::ReExportInfo {
                         source: "./source".to_string(),
                         imported_name: "foo".to_string(),
                         exported_name: "foo".to_string(),
@@ -1505,7 +1502,7 @@ mod tests {
             ResolvedModule {
                 file_id: FileId(2),
                 path: PathBuf::from("/project/source.ts"),
-                exports: vec![crate::extract::ExportInfo {
+                exports: vec![fallow_types::extract::ExportInfo {
                     name: ExportName::Named("foo".to_string()),
                     local_name: Some("foo".to_string()),
                     is_type_only: false,
@@ -1524,7 +1521,6 @@ mod tests {
 
         let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
 
-        // The barrel should have an ExportSymbol for "foo" created from its re-export
         let barrel = &graph.modules[1];
         let foo_export = barrel.exports.iter().find(|e| e.name.to_string() == "foo");
         assert!(
@@ -1532,14 +1528,12 @@ mod tests {
             "barrel should have ExportSymbol for re-exported 'foo'"
         );
 
-        // The barrel's foo export should have a reference from entry.ts
         let foo = foo_export.unwrap();
         assert!(
             !foo.references.is_empty(),
             "barrel's foo should have a reference from entry.ts"
         );
 
-        // The source module's foo should also have propagated references
         let source = &graph.modules[2];
         let source_foo = source
             .exports
@@ -1554,8 +1548,6 @@ mod tests {
 
     #[test]
     fn barrel_unused_re_export_has_no_references() {
-        // barrel.ts re-exports both foo and bar from source
-        // entry.ts only imports foo — bar should have no references on barrel
         let files = vec![
             DiscoveredFile {
                 id: FileId(0),
@@ -1607,7 +1599,7 @@ mod tests {
                 exports: vec![],
                 re_exports: vec![
                     ResolvedReExport {
-                        info: crate::extract::ReExportInfo {
+                        info: fallow_types::extract::ReExportInfo {
                             source: "./source".to_string(),
                             imported_name: "foo".to_string(),
                             exported_name: "foo".to_string(),
@@ -1616,7 +1608,7 @@ mod tests {
                         target: ResolveResult::InternalModule(FileId(2)),
                     },
                     ResolvedReExport {
-                        info: crate::extract::ReExportInfo {
+                        info: fallow_types::extract::ReExportInfo {
                             source: "./source".to_string(),
                             imported_name: "bar".to_string(),
                             exported_name: "bar".to_string(),
@@ -1636,14 +1628,14 @@ mod tests {
                 file_id: FileId(2),
                 path: PathBuf::from("/project/source.ts"),
                 exports: vec![
-                    crate::extract::ExportInfo {
+                    fallow_types::extract::ExportInfo {
                         name: ExportName::Named("foo".to_string()),
                         local_name: Some("foo".to_string()),
                         is_type_only: false,
                         span: oxc_span::Span::new(0, 20),
                         members: vec![],
                     },
-                    crate::extract::ExportInfo {
+                    fallow_types::extract::ExportInfo {
                         name: ExportName::Named("bar".to_string()),
                         local_name: Some("bar".to_string()),
                         is_type_only: false,
@@ -1664,7 +1656,6 @@ mod tests {
         let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
 
         let barrel = &graph.modules[1];
-        // foo should be referenced, bar should NOT
         let foo = barrel
             .exports
             .iter()
@@ -1685,7 +1676,6 @@ mod tests {
 
     #[test]
     fn type_only_re_export_creates_type_only_export_symbol() {
-        // barrel has: export type { FooType } from './source'
         let files = vec![
             DiscoveredFile {
                 id: FileId(0),
@@ -1737,7 +1727,7 @@ mod tests {
                 exports: vec![],
                 re_exports: vec![
                     ResolvedReExport {
-                        info: crate::extract::ReExportInfo {
+                        info: fallow_types::extract::ReExportInfo {
                             source: "./source".to_string(),
                             imported_name: "UsedType".to_string(),
                             exported_name: "UsedType".to_string(),
@@ -1746,7 +1736,7 @@ mod tests {
                         target: ResolveResult::InternalModule(FileId(2)),
                     },
                     ResolvedReExport {
-                        info: crate::extract::ReExportInfo {
+                        info: fallow_types::extract::ReExportInfo {
                             source: "./source".to_string(),
                             imported_name: "UnusedType".to_string(),
                             exported_name: "UnusedType".to_string(),
@@ -1766,14 +1756,14 @@ mod tests {
                 file_id: FileId(2),
                 path: PathBuf::from("/project/source.ts"),
                 exports: vec![
-                    crate::extract::ExportInfo {
+                    fallow_types::extract::ExportInfo {
                         name: ExportName::Named("UsedType".to_string()),
                         local_name: Some("UsedType".to_string()),
                         is_type_only: true,
                         span: oxc_span::Span::new(0, 20),
                         members: vec![],
                     },
-                    crate::extract::ExportInfo {
+                    fallow_types::extract::ExportInfo {
                         name: ExportName::Named("UnusedType".to_string()),
                         local_name: Some("UnusedType".to_string()),
                         is_type_only: true,
@@ -1795,7 +1785,6 @@ mod tests {
 
         let barrel = &graph.modules[1];
 
-        // Both type re-exports should create type-only ExportSymbols
         let used_type = barrel
             .exports
             .iter()
@@ -1821,7 +1810,6 @@ mod tests {
 
     #[test]
     fn default_re_export_creates_default_export_symbol() {
-        // barrel has: export { default as Accordion } from './Accordion'
         let files = vec![
             DiscoveredFile {
                 id: FileId(0),
@@ -1872,7 +1860,7 @@ mod tests {
                 path: PathBuf::from("/project/barrel.ts"),
                 exports: vec![],
                 re_exports: vec![ResolvedReExport {
-                    info: crate::extract::ReExportInfo {
+                    info: fallow_types::extract::ReExportInfo {
                         source: "./source".to_string(),
                         imported_name: "default".to_string(),
                         exported_name: "Accordion".to_string(),
@@ -1890,7 +1878,7 @@ mod tests {
             ResolvedModule {
                 file_id: FileId(2),
                 path: PathBuf::from("/project/source.ts"),
-                exports: vec![crate::extract::ExportInfo {
+                exports: vec![fallow_types::extract::ExportInfo {
                     name: ExportName::Default,
                     local_name: None,
                     is_type_only: false,
@@ -1909,7 +1897,6 @@ mod tests {
 
         let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
 
-        // Barrel should have "Accordion" as an export
         let barrel = &graph.modules[1];
         let accordion = barrel
             .exports
@@ -1921,7 +1908,6 @@ mod tests {
             "Accordion should have reference from entry.ts"
         );
 
-        // Source's default export should have propagated references
         let source = &graph.modules[2];
         let default_export = source
             .exports
@@ -1936,7 +1922,6 @@ mod tests {
 
     #[test]
     fn multi_level_re_export_chain_propagation() {
-        // entry.ts -> barrel1.ts -re-exports-> barrel2.ts -re-exports-> source.ts
         let files = vec![
             DiscoveredFile {
                 id: FileId(0),
@@ -1987,13 +1972,12 @@ mod tests {
                 whole_object_uses: vec![],
                 has_cjs_exports: false,
             },
-            // barrel1 re-exports foo from barrel2
             ResolvedModule {
                 file_id: FileId(1),
                 path: PathBuf::from("/project/barrel1.ts"),
                 exports: vec![],
                 re_exports: vec![ResolvedReExport {
-                    info: crate::extract::ReExportInfo {
+                    info: fallow_types::extract::ReExportInfo {
                         source: "./barrel2".to_string(),
                         imported_name: "foo".to_string(),
                         exported_name: "foo".to_string(),
@@ -2008,13 +1992,12 @@ mod tests {
                 whole_object_uses: vec![],
                 has_cjs_exports: false,
             },
-            // barrel2 re-exports foo from source
             ResolvedModule {
                 file_id: FileId(2),
                 path: PathBuf::from("/project/barrel2.ts"),
                 exports: vec![],
                 re_exports: vec![ResolvedReExport {
-                    info: crate::extract::ReExportInfo {
+                    info: fallow_types::extract::ReExportInfo {
                         source: "./source".to_string(),
                         imported_name: "foo".to_string(),
                         exported_name: "foo".to_string(),
@@ -2032,7 +2015,7 @@ mod tests {
             ResolvedModule {
                 file_id: FileId(3),
                 path: PathBuf::from("/project/source.ts"),
-                exports: vec![crate::extract::ExportInfo {
+                exports: vec![fallow_types::extract::ExportInfo {
                     name: ExportName::Named("foo".to_string()),
                     local_name: Some("foo".to_string()),
                     is_type_only: false,
@@ -2051,7 +2034,6 @@ mod tests {
 
         let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
 
-        // All modules in the chain should have foo referenced
         let barrel1 = &graph.modules[1];
         let b1_foo = barrel1
             .exports
