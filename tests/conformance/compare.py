@@ -37,9 +37,14 @@ def normalize_path(path, project_root):
     # Handle both absolute and relative paths
     if os.path.isabs(path):
         try:
-            return os.path.relpath(path, project_root)
+            path = os.path.relpath(path, project_root)
         except ValueError:
-            return path
+            pass
+    # Normalize separators to forward slashes for cross-platform consistency
+    path = path.replace(os.sep, "/")
+    # Strip leading ./ if present
+    if path.startswith("./"):
+        path = path[2:]
     return path
 
 

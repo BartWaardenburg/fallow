@@ -136,10 +136,15 @@ struct ImportedSymbol {
 // `ImportedSymbol` is stored in a Vec per Edge.
 // `ExportSymbol` and `SymbolReference` are stored in Vecs per module node.
 // `ReExportEdge` is stored in a Vec per module for re-export chain resolution.
+#[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<Edge>() == 32);
+#[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<ImportedSymbol>() == 56);
+#[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<ExportSymbol>() == 88);
+#[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<SymbolReference>() == 16);
+#[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<ReExportEdge>() == 56);
 
 impl ModuleGraph {

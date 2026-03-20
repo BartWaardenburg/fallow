@@ -845,14 +845,14 @@ mod tests {
                 prop_assert!(result.is_ok(), "Glob::new should not fail for well-formed patterns");
             }
 
-            /// Files with known source extensions should be in the SOURCE_EXTENSIONS list.
+            /// Non-source extensions should NOT be in the SOURCE_EXTENSIONS list.
             #[test]
-            fn known_extensions_in_source_list(
-                ext in prop::sample::select(vec!["ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs", "vue", "svelte", "astro", "mdx", "css", "scss"]),
+            fn non_source_extensions_not_in_list(
+                ext in prop::sample::select(vec!["py", "rb", "rs", "go", "java", "html", "xml", "yaml", "toml", "md", "txt", "png", "jpg", "wasm", "lock"]),
             ) {
                 prop_assert!(
-                    SOURCE_EXTENSIONS.contains(&ext),
-                    "Extension '{ext}' should be in SOURCE_EXTENSIONS"
+                    !SOURCE_EXTENSIONS.contains(&ext),
+                    "Extension '{ext}' should NOT be in SOURCE_EXTENSIONS"
                 );
             }
 

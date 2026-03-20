@@ -487,9 +487,11 @@ fn nested_output_dirs_last_position() {
             false
         }
     });
+    assert!(last_pos.is_some(), "should find an output dir");
+    let found = components[last_pos.unwrap()];
     assert_eq!(
-        last_pos,
-        Some(5),
+        found,
+        std::path::Component::Normal(std::ffi::OsStr::new("esm")),
         "should find 'esm' as the last output dir"
     );
 }

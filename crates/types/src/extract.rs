@@ -160,10 +160,15 @@ pub enum ImportedName {
 // These types are stored in Vecs inside `ModuleInfo` (one per file) and are
 // iterated during graph construction and analysis. Keeping them compact
 // improves cache locality on large projects with thousands of files.
+#[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<ExportInfo>() == 88);
+#[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<ImportInfo>() == 88);
+#[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<ExportName>() == 24);
+#[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<ImportedName>() == 24);
+#[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<MemberAccess>() == 48);
 
 /// A re-export declaration.

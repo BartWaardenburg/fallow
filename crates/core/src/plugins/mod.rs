@@ -217,9 +217,16 @@ mod astro;
 mod ava;
 mod babel;
 mod biome;
+mod bun;
+mod c8;
+mod capacitor;
 mod changesets;
+mod commitizen;
 mod commitlint;
+mod cspell;
+mod cucumber;
 mod cypress;
+mod dependency_cruiser;
 mod docusaurus;
 mod drizzle;
 mod eslint;
@@ -228,35 +235,60 @@ mod gatsby;
 mod graphql_codegen;
 mod husky;
 mod jest;
+mod karma;
 mod knex;
 mod lefthook;
 mod lint_staged;
+mod markdownlint;
 mod mocha;
 mod msw;
 mod nestjs;
+mod next_intl;
 mod nextjs;
+mod nitro;
+mod nodemon;
 mod nuxt;
 mod nx;
+mod nyc;
+mod openapi_ts;
+mod oxlint;
+mod parcel;
 mod playwright;
+mod plop;
+mod pm2;
 mod postcss;
+mod prettier;
 mod prisma;
 mod react_native;
 mod react_router;
+mod relay;
+mod remark;
 mod remix;
 mod rollup;
+mod rsbuild;
 mod rspack;
+mod sanity;
 mod semantic_release;
 mod sentry;
+mod simple_git_hooks;
 mod storybook;
 mod stylelint;
 mod sveltekit;
+mod svgo;
+mod svgr;
+mod swc;
+mod syncpack;
 mod tailwind;
+mod tanstack_router;
 mod tsdown;
 mod tsup;
 mod turborepo;
+mod typedoc;
 mod typescript;
 mod vite;
+mod vitepress;
 mod vitest;
+mod webdriverio;
 mod webpack;
 mod wrangler;
 
@@ -308,19 +340,28 @@ impl PluginRegistry {
             Box::new(astro::AstroPlugin),
             Box::new(angular::AngularPlugin),
             Box::new(react_router::ReactRouterPlugin),
+            Box::new(tanstack_router::TanstackRouterPlugin),
             Box::new(react_native::ReactNativePlugin),
             Box::new(expo::ExpoPlugin),
             Box::new(nestjs::NestJsPlugin),
             Box::new(docusaurus::DocusaurusPlugin),
             Box::new(gatsby::GatsbyPlugin),
             Box::new(sveltekit::SvelteKitPlugin),
+            Box::new(nitro::NitroPlugin),
+            Box::new(capacitor::CapacitorPlugin),
+            Box::new(sanity::SanityPlugin),
+            Box::new(vitepress::VitePressPlugin),
+            Box::new(next_intl::NextIntlPlugin),
+            Box::new(relay::RelayPlugin),
             // Bundlers
             Box::new(vite::VitePlugin),
             Box::new(webpack::WebpackPlugin),
             Box::new(rollup::RollupPlugin),
             Box::new(rspack::RspackPlugin),
+            Box::new(rsbuild::RsbuildPlugin),
             Box::new(tsup::TsupPlugin),
             Box::new(tsdown::TsdownPlugin),
+            Box::new(parcel::ParcelPlugin),
             // Testing
             Box::new(vitest::VitestPlugin),
             Box::new(jest::JestPlugin),
@@ -329,13 +370,22 @@ impl PluginRegistry {
             Box::new(mocha::MochaPlugin),
             Box::new(ava::AvaPlugin),
             Box::new(storybook::StorybookPlugin),
+            Box::new(karma::KarmaPlugin),
+            Box::new(cucumber::CucumberPlugin),
+            Box::new(webdriverio::WebdriverioPlugin),
             // Linting & formatting
             Box::new(eslint::EslintPlugin),
             Box::new(biome::BiomePlugin),
             Box::new(stylelint::StylelintPlugin),
+            Box::new(prettier::PrettierPlugin),
+            Box::new(oxlint::OxlintPlugin),
+            Box::new(markdownlint::MarkdownlintPlugin),
+            Box::new(cspell::CspellPlugin),
+            Box::new(remark::RemarkPlugin),
             // Transpilation & language
             Box::new(typescript::TypeScriptPlugin),
             Box::new(babel::BabelPlugin),
+            Box::new(swc::SwcPlugin),
             // CSS
             Box::new(tailwind::TailwindPlugin),
             Box::new(postcss::PostCssPlugin),
@@ -347,8 +397,10 @@ impl PluginRegistry {
             Box::new(turborepo::TurborepoPlugin),
             Box::new(nx::NxPlugin),
             Box::new(changesets::ChangesetsPlugin),
+            Box::new(syncpack::SyncpackPlugin),
             // CI/CD & release
             Box::new(commitlint::CommitlintPlugin),
+            Box::new(commitizen::CommitizenPlugin),
             Box::new(semantic_release::SemanticReleasePlugin),
             // Deployment
             Box::new(wrangler::WranglerPlugin),
@@ -357,9 +409,25 @@ impl PluginRegistry {
             Box::new(husky::HuskyPlugin),
             Box::new(lint_staged::LintStagedPlugin),
             Box::new(lefthook::LefthookPlugin),
-            // Other tools
+            Box::new(simple_git_hooks::SimpleGitHooksPlugin),
+            // Media & assets
+            Box::new(svgo::SvgoPlugin),
+            Box::new(svgr::SvgrPlugin),
+            // Code generation & docs
             Box::new(graphql_codegen::GraphqlCodegenPlugin),
+            Box::new(typedoc::TypedocPlugin),
+            Box::new(openapi_ts::OpenapiTsPlugin),
+            Box::new(plop::PlopPlugin),
+            // Coverage
+            Box::new(c8::C8Plugin),
+            Box::new(nyc::NycPlugin),
+            // Other tools
             Box::new(msw::MswPlugin),
+            Box::new(nodemon::NodemonPlugin),
+            Box::new(pm2::Pm2Plugin),
+            Box::new(dependency_cruiser::DependencyCruiserPlugin),
+            // Runtime
+            Box::new(bun::BunPlugin),
         ];
         Self {
             plugins,
@@ -739,6 +807,7 @@ impl Default for PluginRegistry {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_types)]
 mod tests {
     use super::*;
     use fallow_config::{ExternalPluginDef, ExternalUsedExport, PluginDetection};

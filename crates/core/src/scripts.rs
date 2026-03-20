@@ -992,14 +992,16 @@ mod tests {
             }
 
             /// Chained scripts should produce at least as many commands as operators + 1
-            /// when each segment is a valid binary.
+            /// when each segment is a valid binary (excluding package managers and builtins).
             #[test]
             fn chained_binaries_produce_multiple_commands(
                 bins in prop::collection::vec("[a-z][a-z0-9]{0,10}", 2..5),
             ) {
+                let reserved = ["npm", "npx", "yarn", "pnpm", "pnpx", "bun", "bunx",
+                    "node", "env", "cross", "sh", "bash", "exec", "sudo", "nohup"];
+                prop_assume!(!bins.iter().any(|b| reserved.contains(&b.as_str())));
                 let script = bins.join(" && ");
                 let commands = parse_script(&script);
-                // Each binary separated by && should produce one command
                 prop_assert!(
                     commands.len() >= 2,
                     "Chained commands should produce multiple parsed commands, got {}",

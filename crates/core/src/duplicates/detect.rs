@@ -931,6 +931,7 @@ const fn empty_report(total_files: usize) -> DuplicationReport {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_types)]
 mod tests {
     use std::collections::HashMap;
 

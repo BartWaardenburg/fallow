@@ -2,7 +2,8 @@ use std::path::PathBuf;
 
 /// The underlying error kind, describing what went wrong.
 #[derive(Debug)]
-pub enum FallowErrorKind {
+#[allow(clippy::enum_variant_names)]
+pub(crate) enum FallowErrorKind {
     /// Failed to read a source file.
     FileReadError {
         path: PathBuf,
@@ -54,7 +55,7 @@ impl FallowError {
             source,
         })
         .with_code("E001")
-        .with_help("Check file permissions and encoding")
+        .with_help("Check that the file exists and is readable")
     }
 
     /// Create a parse error with default help text.
@@ -109,8 +110,8 @@ impl FallowError {
     }
 
     /// Returns the error kind.
-    #[must_use]
-    pub fn kind(&self) -> &FallowErrorKind {
+    #[cfg(test)]
+    fn kind(&self) -> &FallowErrorKind {
         &self.kind
     }
 
@@ -147,14 +148,10 @@ impl std::fmt::Display for FallowError {
             FallowErrorKind::FileReadError { path, source } => {
                 write!(f, "Failed to read {}: {source}", path.display())?;
             }
-            FallowErrorKind::ParseError { path, errors } => {
-                write!(
-                    f,
-                    "Parse errors in {} ({} errors)",
-                    path.display(),
-                    errors.len()
-                )?;
-            }
+            FallowErrorKind::ParseError { path, errors } => match errors.len() {
+                0 | 1 => write!(f, "Parse error in {}", path.display())?,
+                n => write!(f, "Parse errors in {} ({n} errors)", path.display())?,
+            },
             FallowErrorKind::ResolveError {
                 from_file,
                 specifier,
@@ -185,7 +182,14 @@ impl std::fmt::Display for FallowError {
     }
 }
 
-impl std::error::Error for FallowError {}
+impl std::error::Error for FallowError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match &*self.kind {
+            FallowErrorKind::FileReadError { source, .. } => Some(source),
+            _ => None,
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -327,12 +331,12 @@ mod tests {
     }
 
     #[test]
-    fn file_read_default_help_mentions_permissions() {
+    fn file_read_default_help_mentions_exists() {
         let err = FallowError::file_read(
             "x.ts",
             std::io::Error::new(std::io::ErrorKind::NotFound, "missing"),
         );
-        assert!(err.help().unwrap().contains("permissions"));
+        assert!(err.help().unwrap().contains("exists"));
     }
 
     #[test]

@@ -21,6 +21,7 @@ pub struct FileId(pub u32);
 // These types are stored in large Vecs (one per project file) and iterated
 // in tight loops during discovery, parsing, and graph construction.
 const _: () = assert!(std::mem::size_of::<FileId>() == 4);
+#[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<DiscoveredFile>() == 40);
 
 /// An entry point into the module graph.

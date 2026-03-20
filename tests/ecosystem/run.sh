@@ -177,14 +177,14 @@ for entry in "${PROJECTS[@]}"; do
     # Clone
     if ! clone_project "$repo" "$branch" "$dest"; then
         echo "    SKIP: clone failed"
-        ((skipped++))
+        skipped=$((skipped + 1))
         continue
     fi
 
     # Install
     if ! install_deps "$project_dir" "$install_cmd"; then
         echo "    SKIP: install failed"
-        ((skipped++))
+        skipped=$((skipped + 1))
         continue
     fi
 
@@ -195,13 +195,13 @@ for entry in "${PROJECTS[@]}"; do
 
     if [[ $exit_code -eq 0 ]]; then
         echo "    PASS (no issues)"
-        ((passed++))
+        passed=$((passed + 1))
     elif [[ $exit_code -eq 1 ]]; then
         echo "    PASS (issues found — expected)"
-        ((issues_found++))
+        issues_found=$((issues_found + 1))
     else
         echo "    CRASH (exit code $exit_code)"
-        ((crashed++))
+        crashed=$((crashed + 1))
         crash_projects+=("$name (exit $exit_code)")
     fi
 done

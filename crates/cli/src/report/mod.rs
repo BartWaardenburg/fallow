@@ -23,7 +23,7 @@ fn relative_uri(path: &Path, root: &Path) -> String {
 }
 
 /// Normalize a path string to use forward slashes for cross-platform compatibility.
-pub(super) fn normalize_uri(path_str: &str) -> String {
+pub fn normalize_uri(path_str: &str) -> String {
     path_str.replace('\\', "/")
 }
 
