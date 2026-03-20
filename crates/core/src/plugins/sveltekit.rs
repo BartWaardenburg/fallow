@@ -119,6 +119,14 @@ impl Plugin for SvelteKitPlugin {
         VIRTUAL_MODULE_PREFIXES
     }
 
+    fn path_aliases(&self, _root: &Path) -> Vec<(&'static str, String)> {
+        // $lib/ is SvelteKit's built-in alias for src/lib/
+        vec![
+            ("$lib/", "src/lib".to_string()),
+            ("$lib", "src/lib".to_string()),
+        ]
+    }
+
     fn used_exports(&self) -> Vec<(&'static str, &'static [&'static str])> {
         vec![
             ("src/routes/**/+page.svelte", PAGE_EXPORTS),

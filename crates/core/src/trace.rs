@@ -5,6 +5,27 @@ use serde::Serialize;
 use crate::duplicates::{CloneInstance, DuplicationReport};
 use crate::graph::{ModuleGraph, ReferenceKind};
 
+/// Match a user-provided file path against a module's actual path.
+///
+/// Handles monorepo scenarios where module paths may be canonicalized
+/// (symlinks resolved) while user-provided paths are not.
+fn path_matches(module_path: &Path, root: &Path, user_path: &str) -> bool {
+    let rel = module_path.strip_prefix(root).unwrap_or(module_path);
+    let rel_str = rel.to_string_lossy();
+    if rel_str == user_path || module_path.to_string_lossy() == user_path {
+        return true;
+    }
+    if root.canonicalize().is_ok_and(|canonical_root| {
+        module_path
+            .strip_prefix(&canonical_root)
+            .is_ok_and(|rel| rel.to_string_lossy() == user_path)
+    }) {
+        return true;
+    }
+    let module_str = module_path.to_string_lossy();
+    module_str.ends_with(&format!("/{user_path}"))
+}
+
 /// Result of tracing an export: why is it considered used or unused?
 #[derive(Debug, Serialize)]
 pub struct ExportTrace {
@@ -127,11 +148,10 @@ pub fn trace_export(
     export_name: &str,
 ) -> Option<ExportTrace> {
     // Find the file in the graph
-    let module = graph.modules.iter().find(|m| {
-        let rel = m.path.strip_prefix(root).unwrap_or(&m.path);
-        let rel_str = rel.to_string_lossy();
-        rel_str == file_path || m.path.to_string_lossy() == file_path
-    })?;
+    let module = graph
+        .modules
+        .iter()
+        .find(|m| path_matches(&m.path, root, file_path))?;
 
     // Find the export
     let export = module.exports.iter().find(|e| {
@@ -225,11 +245,10 @@ pub fn trace_export(
 
 /// Trace all edges for a file.
 pub fn trace_file(graph: &ModuleGraph, root: &Path, file_path: &str) -> Option<FileTrace> {
-    let module = graph.modules.iter().find(|m| {
-        let rel = m.path.strip_prefix(root).unwrap_or(&m.path);
-        let rel_str = rel.to_string_lossy();
-        rel_str == file_path || m.path.to_string_lossy() == file_path
-    })?;
+    let module = graph
+        .modules
+        .iter()
+        .find(|m| path_matches(&m.path, root, file_path))?;
 
     let exports: Vec<TracedExport> = module
         .exports

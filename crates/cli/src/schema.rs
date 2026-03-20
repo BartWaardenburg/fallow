@@ -133,6 +133,22 @@ pub fn build_cli_schema(cmd: &clap::Command) -> serde_json::Value {
                 "fixable": false,
                 "suppressible": true,
                 "suppress_comment": "// fallow-ignore-file duplicate-export"
+            },
+            {
+                "id": "type-only-dependency",
+                "description": "Production dependency only used via import type (should be devDependency)",
+                "filter_flag": null,
+                "fixable": false,
+                "suppressible": false,
+                "note": "Only reported in --production mode"
+            },
+            {
+                "id": "circular-dependency",
+                "description": "Files form a circular import chain",
+                "filter_flag": "--circular-deps",
+                "fixable": false,
+                "suppressible": false,
+                "note": "Circular dependencies are graph-level issues; inline suppression is not supported"
             }
         ],
         "suppression_comments": {

@@ -29,6 +29,9 @@ const TOOLING_DEPENDENCIES: &[&str] = &[
     "@angular/cli",
     "@angular-devkit/build-angular",
     "@angular/compiler-cli",
+    "@angular/compiler",
+    "zone.js",
+    "tslib",
 ];
 
 define_plugin! {

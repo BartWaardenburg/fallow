@@ -176,6 +176,29 @@ export class DeadCodeTreeProvider
       )
     );
 
+    if (this.result.type_only_dependencies) {
+      addCategory(
+        "type-only-dependencies",
+        this.result.type_only_dependencies.map(
+          (d) => new IssueItem(d.package_name, d.path, 1, 0)
+        )
+      );
+    }
+
+    if (this.result.circular_dependencies) {
+      addCategory(
+        "circular-dependencies",
+        this.result.circular_dependencies.map(
+          (c) => new IssueItem(
+            `${c.length} files`,
+            c.files[0] ?? "",
+            1,
+            0
+          )
+        )
+      );
+    }
+
     return categories;
   }
 

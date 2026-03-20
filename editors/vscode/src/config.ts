@@ -23,6 +23,8 @@ export const getIssueTypes = (): IssueTypeConfig =>
     "unresolved-imports": true,
     "unlisted-dependencies": true,
     "duplicate-exports": true,
+    "type-only-dependencies": true,
+    "circular-dependencies": true,
   });
 
 export const getDuplicationThreshold = (): number =>

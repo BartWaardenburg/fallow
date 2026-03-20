@@ -11,11 +11,17 @@
     "bench:real-world": "node bench.mjs --real-world",
     "bench:dupes": "node bench-dupes.mjs",
     "bench:dupes:synthetic": "node bench-dupes.mjs --synthetic",
-    "bench:dupes:real-world": "node bench-dupes.mjs --real-world"
+    "bench:dupes:real-world": "node bench-dupes.mjs --real-world",
+    "generate:circular": "node generate-circular-fixtures.mjs",
+    "bench:circular": "node bench-circular.mjs",
+    "bench:circular:synthetic": "node bench-circular.mjs --synthetic",
+    "bench:circular:real-world": "node bench-circular.mjs --real-world"
   },
   "dependencies": {
+    "dpdm": "^4.0.0",
     "jscpd": "^4.0.0",
     "knip": "^5.0.0",
+    "madge": "^8.0.0",
     "tinybench": "^3.0.0"
   }
 }

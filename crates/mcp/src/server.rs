@@ -27,7 +27,7 @@ pub struct AnalyzeParams {
     /// Issue types to include. When set, only these types are reported.
     /// Valid values: unused-files, unused-exports, unused-types, unused-deps,
     /// unused-enum-members, unused-class-members, unresolved-imports,
-    /// unlisted-deps, duplicate-exports.
+    /// unlisted-deps, duplicate-exports, circular-deps.
     pub issue_types: Option<Vec<String>>,
 }
 
@@ -144,6 +144,7 @@ const ISSUE_TYPE_FLAGS: &[(&str, &str)] = &[
     ("unresolved-imports", "--unresolved-imports"),
     ("unlisted-deps", "--unlisted-deps"),
     ("duplicate-exports", "--duplicate-exports"),
+    ("circular-deps", "--circular-deps"),
 ];
 
 #[tool_router]
@@ -489,7 +490,7 @@ mod tests {
 
     #[test]
     fn issue_type_flags_are_complete() {
-        assert_eq!(ISSUE_TYPE_FLAGS.len(), 9);
+        assert_eq!(ISSUE_TYPE_FLAGS.len(), 10);
         for &(name, flag) in ISSUE_TYPE_FLAGS {
             assert!(
                 flag.starts_with("--"),

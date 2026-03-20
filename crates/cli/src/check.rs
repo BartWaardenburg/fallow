@@ -159,6 +159,9 @@ fn apply_rules(results: &mut fallow_core::results::AnalysisResults, config: &Res
     if rules.duplicate_exports == Severity::Off {
         results.duplicate_exports.clear();
     }
+    if rules.circular_dependencies == Severity::Off {
+        results.circular_dependencies.clear();
+    }
 }
 
 /// Check whether any issue type with `Severity::Error` has remaining issues.
@@ -216,6 +219,8 @@ fn has_error_severity_issues(
         || (rules.unlisted_dependencies == Severity::Error
             && !results.unlisted_dependencies.is_empty())
         || (rules.duplicate_exports == Severity::Error && !results.duplicate_exports.is_empty())
+        || (rules.circular_dependencies == Severity::Error
+            && !results.circular_dependencies.is_empty())
 }
 
 // ── Workspace filtering ──────────────────────────────────────────
@@ -260,6 +265,11 @@ fn filter_to_workspace(
         dup.locations.retain(|p| p.starts_with(ws_root));
     }
     results.duplicate_exports.retain(|d| d.locations.len() >= 2);
+
+    // Circular deps: keep cycles where at least one file is in this workspace
+    results
+        .circular_dependencies
+        .retain(|c| c.files.iter().any(|f| f.starts_with(ws_root)));
 }
 
 /// Resolve `--workspace <name>` to a workspace root path, or exit with an error.
@@ -272,7 +282,8 @@ fn resolve_workspace_filter(
     if workspaces.is_empty() {
         let msg = format!(
             "--workspace '{workspace_name}' specified but no workspaces found. \
-             Ensure root package.json has a \"workspaces\" field or pnpm-workspace.yaml exists."
+             Ensure root package.json has a \"workspaces\" field, pnpm-workspace.yaml exists, \
+             or tsconfig.json has \"references\"."
         );
         return Err(emit_error(&msg, 2, output));
     }
@@ -589,6 +600,9 @@ pub fn run_check(opts: &CheckOptions<'_>) -> ExitCode {
         }
         if r.duplicate_exports == Severity::Warn {
             r.duplicate_exports = Severity::Error;
+        }
+        if r.circular_dependencies == Severity::Warn {
+            r.circular_dependencies = Severity::Error;
         }
         r
     } else {

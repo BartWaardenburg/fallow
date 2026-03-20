@@ -2390,3 +2390,56 @@ fn css_modules_exports_tracked() {
         "regular.css should be unused: {unused_file_names:?}"
     );
 }
+
+// ── TypeScript project references ──────────────────────────────
+
+#[test]
+fn tsconfig_references_discovers_workspaces() {
+    use fallow_config::discover_workspaces;
+
+    let root = fixture_path("tsconfig-references");
+    let workspaces = discover_workspaces(&root);
+
+    // Should discover both referenced projects from tsconfig.json references
+    assert!(
+        workspaces.len() >= 2,
+        "Expected at least 2 workspaces from tsconfig references, got: {workspaces:?}"
+    );
+    assert!(
+        workspaces.iter().any(|ws| ws.name == "@project/core"),
+        "Should discover @project/core from package.json name: {workspaces:?}"
+    );
+    assert!(
+        workspaces.iter().any(|ws| ws.name == "ui"),
+        "Should discover ui from directory name (no package.json): {workspaces:?}"
+    );
+}
+
+#[test]
+fn tsconfig_references_analysis_detects_unused() {
+    let root = fixture_path("tsconfig-references");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_file_names: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|f| f.path.file_name().unwrap().to_string_lossy().to_string())
+        .collect();
+
+    // unused.ts in core and orphan.ts in ui should be detected as unused
+    assert!(
+        unused_file_names.contains(&"unused.ts".to_string()),
+        "unused.ts should be detected as unused file: {unused_file_names:?}"
+    );
+    assert!(
+        unused_file_names.contains(&"orphan.ts".to_string()),
+        "orphan.ts should be detected as unused file: {unused_file_names:?}"
+    );
+
+    // index.ts files should NOT be unused (core/index.ts is imported by ui/index.ts)
+    assert!(
+        !unused_file_names.contains(&"index.ts".to_string()),
+        "index.ts should not be unused: {unused_file_names:?}"
+    );
+}

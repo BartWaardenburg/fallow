@@ -808,9 +808,17 @@ fn build_clone_instance_fast(
     let (start_line, start_col) = byte_offset_to_line_col_fast(source, start_byte, line_table);
     let (end_line, end_col) = byte_offset_to_line_col_fast(source, end_byte, line_table);
 
-    // Extract the fragment.
+    // Extract the fragment, snapping to valid char boundaries.
     let fragment = if end_byte <= source.len() {
-        source[start_byte..end_byte].to_string()
+        let mut sb = start_byte;
+        while sb > 0 && !source.is_char_boundary(sb) {
+            sb -= 1;
+        }
+        let mut eb = end_byte;
+        while eb < source.len() && !source.is_char_boundary(eb) {
+            eb += 1;
+        }
+        source[sb..eb].to_string()
     } else {
         String::new()
     };
@@ -832,7 +840,11 @@ fn byte_offset_to_line_col_fast(
     byte_offset: usize,
     line_table: &[usize],
 ) -> (usize, usize) {
-    let offset = byte_offset.min(source.len());
+    let mut offset = byte_offset.min(source.len());
+    // Snap to a valid char boundary (byte_offset may land inside a multi-byte char)
+    while offset > 0 && !source.is_char_boundary(offset) {
+        offset -= 1;
+    }
     // Binary search: find the number of newlines before this offset.
     let line_idx = line_table.partition_point(|&nl_pos| nl_pos < offset);
     let line = line_idx + 1; // 1-based
@@ -848,7 +860,10 @@ fn byte_offset_to_line_col_fast(
 /// Convert a byte offset into a 1-based line number and 0-based character column.
 #[cfg(test)]
 fn byte_offset_to_line_col(source: &str, byte_offset: usize) -> (usize, usize) {
-    let offset = byte_offset.min(source.len());
+    let mut offset = byte_offset.min(source.len());
+    while offset > 0 && !source.is_char_boundary(offset) {
+        offset -= 1;
+    }
     let before = &source[..offset];
     let line = before.matches('\n').count() + 1;
     let line_start = before.rfind('\n').map_or(0, |pos| pos + 1);
