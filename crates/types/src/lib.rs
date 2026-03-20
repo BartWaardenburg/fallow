@@ -6,4 +6,5 @@
 pub mod discover;
 pub mod extract;
 pub mod results;
+pub mod serde_path;
 pub mod suppress;

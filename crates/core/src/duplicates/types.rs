@@ -2,6 +2,8 @@ use std::path::PathBuf;
 
 use serde::Serialize;
 
+use fallow_types::serde_path;
+
 // Re-export the canonical types from fallow-config.
 pub use fallow_config::{DetectionMode, DuplicatesConfig};
 
@@ -9,6 +11,7 @@ pub use fallow_config::{DetectionMode, DuplicatesConfig};
 #[derive(Debug, Clone, Serialize)]
 pub struct CloneInstance {
     /// Path to the file containing this clone instance.
+    #[serde(serialize_with = "serde_path::serialize")]
     pub file: PathBuf,
     /// 1-based start line of the clone.
     pub start_line: usize,
@@ -61,6 +64,7 @@ pub struct RefactoringSuggestion {
 #[derive(Debug, Clone, Serialize)]
 pub struct CloneFamily {
     /// The files involved in this family (sorted for stable output).
+    #[serde(serialize_with = "serde_path::serialize_vec")]
     pub files: Vec<PathBuf>,
     /// Clone groups belonging to this family.
     pub groups: Vec<CloneGroup>,

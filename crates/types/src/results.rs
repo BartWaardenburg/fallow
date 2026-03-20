@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use serde::Serialize;
 
 use crate::extract::MemberKind;
+use crate::serde_path;
 
 /// Complete analysis results.
 #[derive(Debug, Default, Clone, Serialize)]
@@ -52,12 +53,14 @@ impl AnalysisResults {
 /// A file that is not reachable from any entry point.
 #[derive(Debug, Clone, Serialize)]
 pub struct UnusedFile {
+    #[serde(serialize_with = "serde_path::serialize")]
     pub path: PathBuf,
 }
 
 /// An export that is never imported by other modules.
 #[derive(Debug, Clone, Serialize)]
 pub struct UnusedExport {
+    #[serde(serialize_with = "serde_path::serialize")]
     pub path: PathBuf,
     pub export_name: String,
     pub is_type_only: bool,
@@ -76,6 +79,7 @@ pub struct UnusedDependency {
     pub location: DependencyLocation,
     /// Path to the package.json where this dependency is listed.
     /// For root deps this is `<root>/package.json`, for workspace deps it is `<ws>/package.json`.
+    #[serde(serialize_with = "serde_path::serialize")]
     pub path: PathBuf,
 }
 
@@ -90,6 +94,7 @@ pub enum DependencyLocation {
 /// An unused enum or class member.
 #[derive(Debug, Clone, Serialize)]
 pub struct UnusedMember {
+    #[serde(serialize_with = "serde_path::serialize")]
     pub path: PathBuf,
     pub parent_name: String,
     pub member_name: String,
@@ -101,6 +106,7 @@ pub struct UnusedMember {
 /// An import that could not be resolved.
 #[derive(Debug, Clone, Serialize)]
 pub struct UnresolvedImport {
+    #[serde(serialize_with = "serde_path::serialize")]
     pub path: PathBuf,
     pub specifier: String,
     pub line: u32,
@@ -111,6 +117,7 @@ pub struct UnresolvedImport {
 #[derive(Debug, Clone, Serialize)]
 pub struct UnlistedDependency {
     pub package_name: String,
+    #[serde(serialize_with = "serde_path::serialize_vec")]
     pub imported_from: Vec<PathBuf>,
 }
 
@@ -118,6 +125,7 @@ pub struct UnlistedDependency {
 #[derive(Debug, Clone, Serialize)]
 pub struct DuplicateExport {
     pub export_name: String,
+    #[serde(serialize_with = "serde_path::serialize_vec")]
     pub locations: Vec<PathBuf>,
 }
 
@@ -128,6 +136,7 @@ pub struct DuplicateExport {
 pub struct TypeOnlyDependency {
     pub package_name: String,
     /// Path to the package.json where the dependency is listed.
+    #[serde(serialize_with = "serde_path::serialize")]
     pub path: PathBuf,
 }
 
@@ -135,6 +144,7 @@ pub struct TypeOnlyDependency {
 /// reference counts above each export declaration.
 #[derive(Debug, Clone, Serialize)]
 pub struct ExportUsage {
+    #[serde(serialize_with = "serde_path::serialize")]
     pub path: PathBuf,
     pub export_name: String,
     /// 1-based line number.
@@ -150,6 +160,7 @@ pub struct ExportUsage {
 /// A location where an export is referenced (import site in another file).
 #[derive(Debug, Clone, Serialize)]
 pub struct ReferenceLocation {
+    #[serde(serialize_with = "serde_path::serialize")]
     pub path: PathBuf,
     /// 1-based line number.
     pub line: u32,
