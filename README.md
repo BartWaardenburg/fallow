@@ -4,7 +4,7 @@
     <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/fallow-rs/fallow/main/assets/logo.svg">
     <img src="https://raw.githubusercontent.com/fallow-rs/fallow/main/assets/logo.svg" alt="fallow" width="290">
   </picture><br>
-  <strong>Dead code and duplication analyzer for JavaScript and TypeScript, built in Rust.</strong><br><br>
+  <strong>The codebase analyzer for JavaScript and TypeScript, built in Rust.</strong><br><br>
   <a href="https://github.com/fallow-rs/fallow/actions/workflows/ci.yml"><img src="https://github.com/fallow-rs/fallow/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://github.com/fallow-rs/fallow/actions/workflows/coverage.yml"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/fallow-rs/fallow/badges/coverage.json" alt="Coverage"></a>
   <a href="https://crates.io/crates/fallow-cli"><img src="https://img.shields.io/crates/v/fallow-cli.svg" alt="crates.io"></a>
@@ -15,7 +15,7 @@
 
 ---
 
-Finds unused files, exports, dependencies, and types — plus duplicated code blocks across your entire codebase. Dead code and duplication increase bundle sizes, slow CI, and make codebases harder to navigate. fallow finds both in seconds, not minutes. 3-36x faster than [knip](https://knip.dev) v5 (2-14x faster than knip v6) for dead code analysis, 20-33x faster than [jscpd](https://github.com/kucherenko/jscpd) for duplication detection, with no Node.js runtime dependency.
+Unused code, circular dependencies, code duplication, and complexity hotspots — found in seconds, not minutes. fallow analyzes your entire codebase for unused files, exports, dependencies, and types, detects circular dependencies, finds duplicated code blocks, and surfaces complexity hotspots. 3-36x faster than [knip](https://knip.dev) v5 (2-14x faster than knip v6) for unused code analysis, 20-33x faster than [jscpd](https://github.com/kucherenko/jscpd) for duplication detection, with no Node.js runtime dependency.
 
 ```bash
 npx fallow check    # Dead code analysis
@@ -54,6 +54,8 @@ cargo install fallow-cli     # Or via cargo
 - **Unresolved imports** — import specifiers that cannot be resolved
 - **Unlisted dependencies** — imported packages missing from `package.json`
 - **Duplicate exports** — same symbol exported from multiple modules
+- **Circular dependencies** — import cycles detected via Tarjan's SCC algorithm
+- **Type-only dependencies** — production deps only used via `import type` (could be devDependencies)
 
 ## Code duplication
 
@@ -136,7 +138,7 @@ node bench-dupes.mjs                 # Run duplication benchmarks (fallow vs jsc
 | Speed vs knip v5 | **3-36x faster** | Baseline |
 | Speed vs knip v6 | **2-14x faster** | Baseline |
 | Memory usage | **3-15x less** | Baseline |
-| Dead code detection | 11 issue types | Comparable |
+| Dead code detection | 12 issue types | Comparable |
 | Duplication detection | Built-in | Not included |
 | Framework plugins | 84 (31 with config parsing) | 140+ (runtime config loading) |
 | Runtime dependency | None (standalone binary) | Node.js |
@@ -226,6 +228,7 @@ Supports `--changed-since main` for PR-only analysis, `--baseline` for failing o
 - **Dynamic import resolution** — partial resolution of template literals, `import.meta.glob`, and `require.context`
 - **Non-JS file support** — Vue/Svelte SFC (`<script>` block extraction), Astro (frontmatter), MDX (import/export statements), CSS/SCSS (`@import`, `@use`, `@forward`, `@apply`/`@tailwind` as Tailwind dependency usage), CSS Modules (`.module.css`/`.module.scss` class name tracking)
 - **Production mode** — `--production` excludes test/story/dev files, only considers start/build scripts, and reports type-only dependencies that could be devDependencies
+- **Circular dependency detection** — finds import cycles using Tarjan's SCC algorithm; configurable via `"circular-dependencies"` rule. Unique feature not available in knip.
 
 ## Inline suppression comments
 

@@ -1,12 +1,12 @@
 ---
 name: fallow
-description: Rust-native dead code analyzer for JavaScript/TypeScript projects. 3-36x faster than knip v5, 2-14x faster than knip v6.
+description: Rust-native codebase analyzer for JavaScript/TypeScript projects. Finds unused code, circular dependencies, code duplication, and complexity hotspots. 3-36x faster than knip v5.
 agent-usage: This CLI is frequently invoked by AI coding agents (Claude Code, Cursor, Copilot, etc.) for codebase hygiene tasks.
 ---
 
 # Fallow CLI -- Agent Integration Guide
 
-Fallow detects unused files, exports, dependencies, types, enum members, class members, unresolved imports, unlisted dependencies, and duplicate exports in JS/TS projects.
+Fallow is a codebase analyzer for JS/TS projects. It detects unused files, exports, dependencies, types, enum members, class members, unresolved imports, unlisted dependencies, duplicate exports, circular dependencies, code duplication, and complexity hotspots.
 
 ## Rules for AI agents
 
@@ -68,6 +68,11 @@ fallow check --format json --quiet --changed-since main
 - `--production` -- exclude test/story/dev files, only start/build scripts, report type-only dependencies
 - `--workspace <name>` -- scope output to a single workspace package (monorepo support)
 - `--ci` -- CI mode: equivalent to `--format sarif --fail-on-issues --quiet`
+- `--sarif-file <PATH>` -- write SARIF output to a file (in addition to the primary `--format` output)
+- `--include-dupes` -- cross-reference dead code with duplication findings
+- `--trace <FILE:EXPORT>` -- trace export usage chain
+- `--trace-file <PATH>` -- show all edges for a file
+- `--trace-dependency <PACKAGE>` -- show where a dependency is used
 - Issue type filters: `--unused-files`, `--unused-exports`, `--unused-deps`, `--unused-types`, `--unused-enum-members`, `--unused-class-members`, `--unresolved-imports`, `--unlisted-deps`, `--duplicate-exports`, `--circular-deps`
 
 ### `dupes`
@@ -86,6 +91,8 @@ fallow dupes --format json --quiet --threshold 5
 - `--min-lines <N>` -- minimum line count for a clone (default: 5)
 - `--threshold <PCT>` -- fail if duplication exceeds this percentage (0 = no limit)
 - `--skip-local` -- only report cross-directory duplicates
+- `--cross-language` -- strip TypeScript type annotations for `.ts` ↔ `.js` matching
+- `--trace <FILE:LINE>` -- trace all clones at a specific source location
 - `--baseline <path>` / `--save-baseline <path>` -- incremental CI adoption
 
 ### `fix`
@@ -104,13 +111,18 @@ fallow fix --yes --format json --quiet       # apply changes (--yes required in 
 
 ### `list`
 
-List discovered files, entry points, or detected frameworks.
+List discovered files, entry points, or detected plugins.
 
 ```bash
 fallow list --files --format json --quiet
 fallow list --entry-points --format json --quiet
-fallow list --frameworks --format json --quiet
+fallow list --plugins --format json --quiet
 ```
+
+**Flags:**
+- `--files` -- list all discovered source files
+- `--entry-points` -- list all detected entry points
+- `--plugins` -- list all active framework plugins
 
 ### `init`
 
@@ -148,6 +160,14 @@ Print the JSON Schema for fallow configuration files. Pipe to a file for IDE int
 
 ```bash
 fallow config-schema > schema.json
+```
+
+### `plugin-schema`
+
+Print the JSON Schema for external plugin files. Pipe to a file for IDE validation of custom plugins.
+
+```bash
+fallow plugin-schema > plugin-schema.json
 ```
 
 ## Output structure
@@ -210,7 +230,7 @@ fallow check --format json --quiet           # 3. verify
 
 ```bash
 fallow list --entry-points --format json --quiet
-fallow list --frameworks --format json --quiet
+fallow list --plugins --format json --quiet
 ```
 
 ### Introspect CLI capabilities at runtime
@@ -251,9 +271,11 @@ Source-level suppression for false positives:
 // fallow-ignore-next-line unused-export
 // fallow-ignore-file
 // fallow-ignore-file unused-export
+// fallow-ignore-file code-duplication
+// fallow-ignore-next-line code-duplication
 ```
 
-Issue type tokens: `unused-file`, `unused-export`, `unused-type`, `unused-dependency`, `unused-dev-dependency`, `unused-enum-member`, `unused-class-member`, `unresolved-import`, `unlisted-dependency`, `duplicate-export`, `circular-dependency`.
+Issue type tokens: `unused-file`, `unused-export`, `unused-type`, `unused-dependency`, `unused-dev-dependency`, `unused-enum-member`, `unused-class-member`, `unresolved-import`, `unlisted-dependency`, `duplicate-export`, `circular-dependency`, `code-duplication`.
 
 Unknown tokens are silently ignored (the comment has no effect). When an agent adds a suppression comment, always use the exact tokens listed above.
 
