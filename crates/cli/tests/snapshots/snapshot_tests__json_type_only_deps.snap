@@ -23,6 +23,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
       "path": "/project/package.json"
     }
   ],
+  "schema_version": "1.0.0",
   "version": "[VERSION]",
   "elapsed_ms": 10,
   "total_issues": 2

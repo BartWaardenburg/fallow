@@ -1,6 +1,5 @@
 ---
 source: crates/cli/tests/snapshot_tests.rs
-assertion_line: 102
 expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"CARGO_PKG_VERSION\")),\n\"\\\"version\\\": \\\"[VERSION]\\\"\",)"
 ---
 {
@@ -15,6 +14,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
   "unlisted_dependencies": [],
   "duplicate_exports": [],
   "type_only_dependencies": [],
+  "schema_version": "1.0.0",
   "version": "[VERSION]",
   "elapsed_ms": 0,
   "total_issues": 0

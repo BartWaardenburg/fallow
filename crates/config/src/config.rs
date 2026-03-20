@@ -752,7 +752,7 @@ impl Default for RulesConfig {
 
 impl RulesConfig {
     /// Apply a partial rules config on top. Only `Some` fields override.
-    pub fn apply_partial(&mut self, partial: &PartialRulesConfig) {
+    pub const fn apply_partial(&mut self, partial: &PartialRulesConfig) {
         if let Some(s) = partial.unused_files {
             self.unused_files = s;
         }
