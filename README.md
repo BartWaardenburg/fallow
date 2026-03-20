@@ -206,6 +206,9 @@ This reads your knip.json/knip.jsonc/.knip.json/.knip.jsonc and/or .jscpd.json (
 
 # Or run directly
 - run: npx fallow check --format sarif > results.sarif
+
+# Or run directly with CI mode
+- run: npx fallow check --ci
 ```
 
 Supports `--changed-since main` for PR-only analysis, `--baseline` for failing only on new issues, `--format json` for machine-readable output, and per-issue-type severity rules (`error`/`warn`/`off`) for incremental adoption. See the [CI guide](https://docs.fallow.tools/integrations/ci) for full workflow examples.
@@ -246,7 +249,7 @@ export const keepThisToo = 2;
 | `// fallow-ignore-file` | Suppress all issues in the file |
 | `// fallow-ignore-file unused-export` | Suppress a specific issue type for the file |
 
-Issue type tokens: `unused-file`, `unused-export`, `unused-type`, `unused-dependency`, `unused-dev-dependency`, `unused-enum-member`, `unused-class-member`, `unresolved-import`, `unlisted-dependency`, `duplicate-export`.
+Issue type tokens: `unused-file`, `unused-export`, `unused-type`, `unused-dependency`, `unused-dev-dependency`, `unused-enum-member`, `unused-class-member`, `unresolved-import`, `unlisted-dependency`, `duplicate-export`, `circular-dependency`.
 
 ## Limitations
 
@@ -276,6 +279,7 @@ Fallow auto-discovers `fallow-plugin-*.toml` files in your project root and `.fa
 - [Migrating from knip](https://docs.fallow.tools/migration/from-knip)
 - [Full plugin list](https://docs.fallow.tools/frameworks/built-in)
 - [Plugin Authoring Guide](https://github.com/fallow-rs/fallow/blob/main/docs/plugin-authoring.md)
+- [Agent Skills](https://github.com/fallow-rs/fallow-skills) — Dead code analysis skills for Claude Code, Cursor, Windsurf, and other AI agents
 
 ## Contributing
 
