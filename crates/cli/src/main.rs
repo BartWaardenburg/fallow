@@ -162,7 +162,7 @@ enum Command {
     /// Watch for changes and re-run analysis
     Watch,
 
-    /// Auto-fix issues (remove unused exports, dependencies)
+    /// Auto-fix issues (remove unused exports, dependencies, enum members)
     Fix {
         /// Dry run — show what would be changed without modifying files
         #[arg(long)]
