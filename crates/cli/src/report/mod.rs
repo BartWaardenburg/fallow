@@ -148,8 +148,12 @@ pub fn print_performance(timings: &PipelineTimings, format: &OutputFormat) {
     }
 }
 
+// Re-exported for snapshot testing via the lib target
+#[allow(unused_imports)]
 pub use compact::build_compact_lines;
+#[allow(unused_imports)]
 pub use json::build_json;
+#[allow(unused_imports)]
 pub use sarif::build_sarif;
 
 #[cfg(test)]

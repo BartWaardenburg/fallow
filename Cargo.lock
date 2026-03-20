@@ -629,6 +629,7 @@ dependencies = [
  "criterion",
  "dashmap 6.1.0",
  "fallow-config",
+ "fallow-types",
  "fixedbitset",
  "glob",
  "globset",
@@ -676,6 +677,15 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "fallow-types"
+version = "0.3.0"
+dependencies = [
+ "bincode",
+ "oxc_span",
+ "serde",
 ]
 
 [[package]]

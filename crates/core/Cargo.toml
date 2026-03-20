@@ -8,6 +8,7 @@ description = "Core analysis engine for the fallow dead code analyzer"
 
 [dependencies]
 fallow-config = { workspace = true }
+fallow-types = { workspace = true }
 
 # Parsing & analysis
 oxc_allocator = { workspace = true }
