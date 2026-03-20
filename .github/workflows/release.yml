@@ -225,12 +225,10 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
 
       - name: Ensure latest npm (for trusted publishing)
         run: npm install -g npm@latest
-
-      - name: Configure npm registry
-        run: npm config set registry https://registry.npmjs.org/
 
       - name: Download darwin-arm64 binary
         uses: actions/download-artifact@v8
@@ -303,6 +301,8 @@ jobs:
           done
 
       - name: Publish platform packages
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           FAILED=0
           for dir in ./npm/darwin-arm64 ./npm/darwin-x64 ./npm/linux-x64-gnu ./npm/linux-arm64-gnu ./npm/linux-x64-musl ./npm/linux-arm64-musl ./npm/win32-x64-msvc; do
@@ -318,6 +318,8 @@ jobs:
 
       - name: Publish fallow
         run: npm publish ./npm/fallow --access public --provenance --ignore-scripts
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   vscode-publish:
     name: Publish VS Code Extension
