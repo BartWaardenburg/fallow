@@ -1,0 +1,45 @@
+name: Cross-Architecture
+
+on:
+  pull_request:
+    paths: ['crates/**']
+  push:
+    branches: [main]
+    paths: ['crates/**']
+
+concurrency:
+  group: cross-arch-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Cross-compile check (compilation only, no test execution)
+  # Tests require the actual target OS, which is handled by ci.yml's matrix.
+  # This job verifies the codebase compiles for additional architectures
+  # beyond what ci.yml covers (e.g., aarch64 Linux for ARM servers/CI).
+  cross-compile:
+    name: Compile (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - x86_64-unknown-linux-gnu
+          - aarch64-unknown-linux-gnu
+          - x86_64-pc-windows-msvc
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: cross-${{ matrix.target }}
+
+      - name: Check compilation
+        run: cargo check --workspace --target ${{ matrix.target }}
