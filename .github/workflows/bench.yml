@@ -43,7 +43,7 @@ jobs:
       - name: Run benchmarks
         # Only run the `analysis` bench target (not `large_analysis` which
         # contains 5000+ file benchmarks that take 5+ minutes each).
-        run: cargo bench --bench analysis | tee bench-output.txt
+        run: cargo bench --bench analysis -- --output-format bencher | tee bench-output.txt
 
       - name: Store benchmark result
         uses: benchmark-action/github-action-benchmark@v1
