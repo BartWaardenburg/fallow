@@ -10,7 +10,7 @@ Code analysis should be fast enough to be invisible — part of the feedback loo
 
 ## Current State (v0.3.x)
 
-**Dead code analysis** covers 10 issue types (unused files, exports, types, dependencies, devDeps, enum members, class members, unresolved imports, unlisted deps, duplicate exports) with 47 framework plugins (20 with AST-based config parsing), 4 output formats (human, JSON, SARIF, compact), auto-fix, and a per-issue severity rules system. Production mode, inline suppression, cross-workspace resolution (npm/yarn/pnpm), and `--changed-since` for incremental CI are all shipped.
+**Dead code analysis** covers 10 issue types (unused files, exports, types, dependencies, devDeps, enum members, class members, unresolved imports, unlisted deps, duplicate exports) with 79 framework plugins (30 with AST-based config parsing), 4 output formats (human, JSON, SARIF, compact), auto-fix, and a per-issue severity rules system. Production mode, inline suppression, cross-workspace resolution (npm/yarn/pnpm), and `--changed-since` for incremental CI are all shipped.
 
 **Duplication detection** uses a suffix array with LCP for clone detection — no quadratic pairwise comparison. 4 detection modes (strict, mild, weak, semantic), clone family grouping with refactoring suggestions, baseline tracking for CI adoption, and cross-language TS↔JS matching.
 

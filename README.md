@@ -123,7 +123,7 @@ node bench-dupes.mjs          # Run duplication benchmarks
 | Speed (real-world) | **3-40x faster** | Baseline |
 | Dead code detection | 10 issue types | Comparable |
 | Duplication detection | Built-in | Not included |
-| Framework plugins | 40 (20 with config parsing) | 140+ (runtime config loading) |
+| Framework plugins | 79 (30 with config parsing) | 140+ (runtime config loading) |
 | Runtime dependency | None (standalone binary) | Node.js |
 | Config format | JSONC, JSON, TOML | JSON |
 
@@ -179,7 +179,7 @@ This reads your knip.json/knip.jsonc/.knip.json/.knip.jsonc and/or .jscpd.json (
 
 ## Framework support
 
-46 built-in plugins covering frameworks (Next.js, Nuxt, Remix, SvelteKit, Gatsby, Astro, Angular, React Router, React Native, Expo, NestJS, Docusaurus), bundlers (Vite, Webpack, Rspack, Rollup, Tsup), testing (Vitest, Jest, Playwright, Cypress, Mocha, Ava, Storybook), linting (ESLint, Biome, Stylelint, Commitlint), transpilation (TypeScript, Babel), CSS (Tailwind, PostCSS), databases (Prisma, Drizzle, Knex), monorepos (Turborepo, Nx, Changesets), CI/CD (semantic-release), deployment (Wrangler, Sentry), git hooks (husky, lint-staged, lefthook), and more (GraphQL Codegen, MSW). If your framework isn't listed, you can add a [custom preset](https://github.com/fallow-rs/fallow/wiki/Custom-Presets) in your config file.
+79 built-in plugins covering frameworks (Next.js, Nuxt, Remix, SvelteKit, Gatsby, Astro, Angular, React Router, TanStack Router, React Native, Expo, NestJS, Docusaurus, Nitro, Capacitor, Sanity, VitePress, next-intl, Relay), bundlers (Vite, Webpack, Rspack, Rsbuild, Rollup, Tsup, Tsdown, Parcel), testing (Vitest, Jest, Playwright, Cypress, Mocha, Ava, Storybook, Karma, Cucumber, WebdriverIO), linting & formatting (ESLint, Biome, Stylelint, Commitlint, Prettier, Oxlint, markdownlint, cspell, remark), transpilation & runtime (TypeScript, Babel, SWC, Bun), CSS (Tailwind, PostCSS), databases (Prisma, Drizzle, Knex), monorepos (Turborepo, Nx, Changesets, Syncpack), CI/CD (semantic-release, Commitizen), deployment (Wrangler, Sentry), git hooks (husky, lint-staged, lefthook, simple-git-hooks), and more (GraphQL Codegen, MSW, SVGO, SVGR, TypeDoc, openapi-ts, Plop, c8, nyc, nodemon, PM2, dependency-cruiser). If your framework isn't listed, you can add a [custom preset](https://github.com/fallow-rs/fallow/wiki/Custom-Presets) in your config file.
 
 ## CI integration
 
