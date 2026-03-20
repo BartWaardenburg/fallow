@@ -2,15 +2,17 @@
 
 ## What is this?
 
-Fallow finds unused files, exports, dependencies, types, enum members, class members, unresolved imports, unlisted deps, and duplicate exports in JS/TS projects. It's a Rust alternative to [knip](https://github.com/webpro-nl/knip) that is 3-40x faster depending on project size (up to 40x on small projects, 3-10x on 1,000-5,000+ file projects) by leveraging the Oxc parser ecosystem.
+Fallow finds unused files, exports, dependencies, types, enum members, class members, unresolved imports, unlisted deps, and duplicate exports in JS/TS projects. It's a Rust alternative to [knip](https://github.com/webpro-nl/knip) that is 3-36x faster than knip v5 (2-14x faster than knip v6) depending on project size by leveraging the Oxc parser ecosystem.
 
 ## Project structure
 
 ```
 crates/
   config/   — Configuration types, custom framework presets, package.json parsing, workspace discovery
-  core/     — Analysis engine: discovery, parsing, resolution, graph, plugins, caching, progress
-    extract/    — AST extraction (mod.rs types+API, visitor.rs, sfc.rs, astro.rs, mdx.rs, css.rs, parse.rs)
+  types/    — Shared type definitions (discover, extract, results, suppress, serde_path)
+  extract/  — AST extraction engine (visitor.rs, sfc.rs, astro.rs, mdx.rs, css.rs, parse.rs, cache.rs, suppress.rs)
+  graph/    — Module graph construction (graph.rs), import resolution (resolve.rs), project state (project.rs)
+  core/     — Analysis orchestration: discovery, plugins, scripts, duplicates, cross-reference, caching, progress
     analyze/    — Dead code detection (mod.rs orchestration, predicates.rs, unused_files/exports/deps/members.rs)
     plugins/    — Plugin system + tooling.rs (general tooling dependency detection)
     duplicates/ — Clone detection (families, normalize, tokenize)
@@ -26,26 +28,36 @@ editors/
 npm/
   fallow/   — npm wrapper package with optionalDependencies pattern
 tests/
-  fixtures/ — Integration test fixtures (basic-project, barrel-exports)
+  fixtures/ — Integration test fixtures
 ```
 
 ## Architecture
 
 Pipeline: Config → File Discovery → Incremental Parallel Parsing (rayon + oxc_parser, cache-aware) → Script Analysis → Module Resolution (oxc_resolver) → Graph Construction → Re-export Chain Resolution → Dead Code Detection → Reporting
 
-Key modules in fallow-core:
+Key modules in fallow-types:
+- `discover` — `DiscoveredFile`, `FileId`, `EntryPoint`, `EntryPointSource`
+- `extract` — `ModuleInfo`, `ExportInfo`, `ImportInfo`, `ReExportInfo`, `MemberInfo`, `DynamicImportInfo`, `ParseResult`
+- `results` — `AnalysisResults` and all issue types
+- `suppress` — Inline suppression comment types and issue kind definitions
+
+Key modules in fallow-extract:
+- `lib.rs` — Public API: `parse_all_files()` (parallel rayon dispatch, cache-aware), returns `ParseResult` with modules + cache hit/miss statistics
+- `visitor.rs` — Oxc AST visitor extracting imports, exports, re-exports, members, whole-object uses, dynamic import patterns
+- `sfc.rs` — Vue/Svelte SFC script extraction (HTML comment filtering, `<script src="...">` support, `lang="ts"`/`lang="tsx"` detection)
+- `astro.rs` — Astro frontmatter extraction between `---` delimiters
+- `mdx.rs` — MDX import/export extraction with multi-line brace tracking
+- `css.rs` — CSS Module class name extraction (`.module.css`/`.module.scss` → named exports)
+- `parse.rs` — File type dispatcher: routes files to the appropriate parser (JS/TS, SFC, Astro, MDX, CSS)
+- `cache.rs` — Incremental bincode cache with xxh3 hashing. Unchanged files skip AST parsing and load from cache; only changed/new files are parsed. Cache is pruned of stale entries (deleted files) on each run.
+
+Key modules in fallow-graph:
 - `project.rs` — `ProjectState` struct: owns the file registry (stable FileIds sorted by path) and workspace metadata. Foundation for cross-workspace resolution and future incremental analysis.
-- `discover.rs` — File walking + entry point detection (also workspace-aware). FileIds are assigned deterministically by path sort order (not size) for stability across runs. Hidden directory allowlist (`.storybook`, `.well-known`, `.changeset`, `.github`, `.expo`) — other dotdirs are skipped. Only root-level `build/` is ignored (not nested `test/build/` etc.).
-- `extract/` — Module split into focused submodules:
-  - `mod.rs` — Public types (`ModuleInfo`, `ExportInfo`, `ImportInfo`, etc.) and `parse_all_files()` API (parallel rayon dispatch, cache-aware). Returns `ParseResult` with modules + cache hit/miss statistics.
-  - `visitor.rs` — Oxc AST visitor extracting imports, exports, re-exports, members, whole-object uses, dynamic import patterns
-  - `sfc.rs` — Vue/Svelte SFC script extraction (HTML comment filtering, `<script src="...">` support, `lang="ts"`/`lang="tsx"` detection)
-  - `astro.rs` — Astro frontmatter extraction between `---` delimiters
-  - `mdx.rs` — MDX import/export extraction with multi-line brace tracking
-  - `css.rs` — CSS Module class name extraction (`.module.css`/`.module.scss` → named exports)
-  - `parse.rs` — File type dispatcher: routes files to the appropriate parser (JS/TS, SFC, Astro, MDX, CSS)
 - `resolve.rs` — oxc_resolver-based import resolution + glob-based dynamic import pattern resolution + DashMap-backed bare specifier cache for lock-free parallel lookups. Cross-workspace imports resolve through node_modules symlinks via canonicalize. Pnpm content-addressable store detection: `.pnpm` virtual store paths are mapped back to workspace source files for injected dependencies. React Native platform extensions (`.web`/`.ios`/`.android`/`.native`) resolved via `resolve_file` fallback. Per-file tsconfig path alias resolution (`TsconfigDiscovery::Auto`) finds the nearest tsconfig.json for each file.
 - `graph.rs` — Module graph with re-export chain propagation. `ModuleGraph::build` delegates to `populate_edges`, `populate_references`, and `mark_reachable` phase methods.
+
+Key modules in fallow-core (re-exports fallow-extract, fallow-graph for backwards compatibility):
+- `discover.rs` — File walking + entry point detection (also workspace-aware). FileIds are assigned deterministically by path sort order (not size) for stability across runs. Hidden directory allowlist (`.storybook`, `.well-known`, `.changeset`, `.github`) — other dotdirs are skipped. Only root-level `build/` is ignored (not nested `test/build/` etc.).
 - `analyze/` — Module split into focused submodules:
   - `mod.rs` — Orchestration: runs all detectors, collects `AnalysisResults`
   - `predicates.rs` — Lookup tables and helper predicates for detection logic
@@ -53,16 +65,14 @@ Key modules in fallow-core:
   - `unused_exports.rs` — Unused export/type/duplicate export detection
   - `unused_deps.rs` — Unused dependencies, unlisted dependencies, unresolved imports, type-only dependency detection
   - `unused_members.rs` — Unused enum/class member detection
-- `results.rs` — `AnalysisResults` struct and all issue types (extracted from analyze)
-- `scripts.rs` — Shell command parser for package.json scripts: extracts binary names (mapped to package names for dependency usage detection), `--config` args (entry points), and file path args; handles env wrappers, package manager runners, node runners
+- `scripts.rs` — Shell command parser for package.json scripts: extracts binary names (mapped to package names for dependency usage detection), `--config` args (entry points), and file path args; handles env wrappers, package manager runners, node runners. Shell operators (`&&`, `||`, `;`, `|`, `&`) are split correctly.
 - `suppress.rs` — Inline suppression comment parsing (`fallow-ignore-next-line`, `fallow-ignore-file`); 11 issue kinds including `code-duplication`
 - `duplicates/families.rs` — Clone family grouping (groups by shared file set) and refactoring suggestion generation (extract function/module)
 - `duplicates/normalize.rs` — Configurable token normalization with `ResolvedNormalization`: mode defaults (strict/mild/weak/semantic) merged with user-specified overrides (`ignore_identifiers`, `ignore_string_values`, `ignore_numeric_values`)
 - `duplicates/tokenize.rs` — AST-based tokenizer with optional type annotation stripping (`strip_types` flag) for cross-language clone detection between `.ts` and `.js` files
 - `cross_reference.rs` — Cross-references duplication findings with dead code analysis: identifies clone instances that are also unused (in unused files or overlapping unused exports) as high-priority combined findings
-- `plugins/` — Plugin system: `Plugin` trait, registry (47 built-in plugins, ~20 with AST-based config parsing); `config_parser.rs` provides Oxc-based helpers for extracting imports, string arrays, object keys, require() sources, and string-or-array values from JS/TS/JSON config files; `tooling.rs` contains general tooling dependency detection (`is_known_tooling_dependency`) for dev deps not tied to any single plugin
+- `plugins/` — Plugin system: `Plugin` trait, registry (84 built-in plugins, ~30 with AST-based config parsing); `config_parser.rs` provides Oxc-based helpers for extracting imports, string arrays, object keys, require() sources, and string-or-array values from JS/TS/JSON config files; `tooling.rs` contains general tooling dependency detection (`is_known_tooling_dependency`) for dev deps not tied to any single plugin
 - `trace.rs` — Debug & trace tooling: trace export usage (`trace_export`), file edges (`trace_file`), dependency usage (`trace_dependency`), clone location (`trace_clone`), and `PipelineTimings` struct for `--performance` output
-- `cache.rs` — Incremental bincode cache with xxh3 hashing. Unchanged files skip AST parsing and load from cache; only changed/new files are parsed. Cache is pruned of stale entries (deleted files) on each run. `--performance` output shows cache hit/miss stats.
 - `progress.rs` — indicatif progress bars
 - `errors.rs` — Error types
 
@@ -133,20 +143,23 @@ cd benchmarks && npm run generate:dupes && npm run bench:dupes  # vs jscpd
 25. React Native platform extensions: `.web.ts`, `.ios.ts`, `.android.ts`, `.native.ts` variants are resolved alongside standard extensions so platform-specific files are not falsely reported as unused.
 26. Decorated class member skip: class members with decorators (NestJS `@Get()`, Angular `@Input()`, TypeORM `@Column()`, etc.) are not reported as unused, since decorator-driven frameworks consume them via reflection.
 
-## Framework support (47 plugins)
+## Framework support (84 plugins)
 
-**Frameworks**: Next.js, Nuxt, Remix, SvelteKit, Gatsby, Astro, Angular, React Router, React Native, Expo, NestJS, Docusaurus
-**Bundlers**: Vite, Webpack, Rspack, Rollup, Tsup, Tsdown
-**Testing**: Vitest, Jest, Playwright, Cypress, Mocha, Ava, Storybook
-**Linting**: ESLint, Biome, Stylelint, Commitlint
-**Transpilation**: TypeScript, Babel
+**Frameworks**: Next.js, Nuxt, Remix, SvelteKit, Gatsby, Astro, Angular, React Router, TanStack Router, React Native, Expo, NestJS, Docusaurus, Nitro, VitePress, Sanity, Capacitor, next-intl, Relay, Electron, i18next
+**Bundlers**: Vite, Webpack, Rspack, Rsbuild, Rollup, Rolldown, Tsup, Tsdown, Parcel
+**Testing**: Vitest, Jest, Playwright, Cypress, Mocha, Ava, Storybook, Karma, Cucumber, WebdriverIO
+**Linting**: ESLint, Biome, Stylelint, Commitlint, Prettier, Oxlint, markdownlint, CSpell, Remark
+**Transpilation**: TypeScript, Babel, SWC
 **CSS**: Tailwind, PostCSS
-**Database**: Prisma, Drizzle, Knex
-**Monorepo**: Turborepo, Nx, Changesets
-**CI/CD**: semantic-release
+**Database**: Prisma, Drizzle, Knex, TypeORM, Kysely
+**Monorepo**: Turborepo, Nx, Changesets, Syncpack
+**CI/CD**: semantic-release, Commitizen
 **Deployment**: Wrangler (Cloudflare), Sentry
-**Git hooks**: husky, lint-staged, lefthook
-**Other**: GraphQL Codegen, MSW
+**Git hooks**: husky, lint-staged, lefthook, simple-git-hooks
+**Media & assets**: SVGO, SVGR
+**Code generation & docs**: GraphQL Codegen, TypeDoc, openapi-ts, Plop
+**Coverage**: c8, nyc
+**Other**: MSW, nodemon, PM2, dependency-cruiser, Bun
 
 - **Plugins** (`crates/core/src/plugins/`) — Single source of truth for all built-in framework support. Each plugin implements the `Plugin` trait with enablers (package.json detection), static patterns (entry points, always-used files, used exports, tooling dependencies), and optional `resolve_config()` for AST-based config parsing via Oxc.
 - **Rich config parsing** — All top 10 framework plugins have deep `resolve_config()` implementations:
@@ -298,7 +311,7 @@ unresolved-imports = "error"
 ## Key design decisions
 
 - **No TypeScript compiler dependency**: Syntactic analysis only via Oxc. This is the speed advantage.
-- **Plugin system**: Single source of truth for framework support. Rust trait-based plugins with static patterns for common cases and optional AST-based config parsing via Oxc for ~20 plugins (no JavaScript evaluation), 15 with rich config extraction (entry points, dependencies, setup files from config objects). 47 built-in plugins covering the most popular JS/TS frameworks.
+- **Plugin system**: Single source of truth for framework support. Rust trait-based plugins with static patterns for common cases and optional AST-based config parsing via Oxc for ~30 plugins (no JavaScript evaluation), many with rich config extraction (entry points, dependencies, setup files from config objects). 84 built-in plugins covering the most popular JS/TS frameworks.
 - **Flat edge storage**: Contiguous `Vec<Edge>` with range indices for cache-friendly traversal.
 - **Lock-free parallel resolution**: Bare specifier cache uses `DashMap` (sharded concurrent map) for contention-free reads under rayon work-stealing.
 - **Re-export chain resolution**: Iterative propagation through barrel files with cycle detection.

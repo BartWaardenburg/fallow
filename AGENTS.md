@@ -1,6 +1,6 @@
 ---
 name: fallow
-description: Rust-native dead code analyzer for JavaScript/TypeScript projects. 3-40x faster alternative to knip.
+description: Rust-native dead code analyzer for JavaScript/TypeScript projects. 3-36x faster than knip v5, 2-14x faster than knip v6.
 agent-usage: This CLI is frequently invoked by AI coding agents (Claude Code, Cursor, Copilot, etc.) for codebase hygiene tasks.
 ---
 

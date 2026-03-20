@@ -19,15 +19,19 @@ const buildResult = spawnSync('cargo', ['build', '--release'], { cwd: rootDir, s
 if (buildResult.status !== 0) { console.error('Build failed:', buildResult.stderr?.toString()); process.exit(1); }
 const fallowBin = join(rootDir, 'target', 'release', 'fallow');
 const knipBin = join(__dirname, 'node_modules', '.bin', 'knip');
-if (!existsSync(knipBin)) { console.error('knip not found. Run: cd benchmarks && npm install'); process.exit(1); }
+const knip6Bin = join(__dirname, 'knip6', 'node_modules', '.bin', 'knip');
+if (!existsSync(knipBin)) { console.error('knip v5 not found. Run: cd benchmarks && npm install'); process.exit(1); }
+const hasKnip6 = existsSync(knip6Bin);
+if (!hasKnip6) { console.warn('knip v6 not found. Run: cd benchmarks/knip6 && npm install knip@6'); }
 
 const fallowVersion = spawnSync(fallowBin, ['--version'], { stdio: 'pipe' }).stdout?.toString().trim();
 const knipVersion = spawnSync(knipBin, ['--version'], { stdio: 'pipe' }).stdout?.toString().trim();
+const knip6Version = hasKnip6 ? spawnSync(knip6Bin, ['--version'], { stdio: 'pipe' }).stdout?.toString().trim() : null;
 const rustVersion = spawnSync('rustc', ['--version'], { stdio: 'pipe' }).stdout?.toString().trim();
 
 console.log(`\n=== Fallow vs Knip Benchmark Suite ===\n`);
 printEnvironment();
-console.log(`Tools:\n  fallow  ${fallowVersion}\n  knip    ${knipVersion}\nConfig: ${RUNS} runs, ${WARMUP} warmup\n`);
+console.log(`Tools:\n  fallow   ${fallowVersion}\n  knip v5  ${knipVersion}${knip6Version ? `\n  knip v6  ${knip6Version}` : ''}\nConfig: ${RUNS} runs, ${WARMUP} warmup\n`);
 
 function printEnvironment() {
   const cpus = os.cpus();
@@ -104,10 +108,14 @@ function benchmarkProject(name, dir) {
   // --- Cold cache (no cache) ---
   const fArgsCold = ['check', '--quiet', '--format', 'json', '--no-cache'];
   const kArgs = ['--reporter', 'json'];
-  for (let i = 0; i < WARMUP; i++) { timeRun(fallowBin, fArgsCold, dir); timeRun(knipBin, kArgs, dir); }
+  for (let i = 0; i < WARMUP; i++) {
+    timeRun(fallowBin, fArgsCold, dir);
+    timeRun(knipBin, kArgs, dir);
+    if (hasKnip6) timeRun(knip6Bin, kArgs, dir);
+  }
 
-  const fTimesCold = [], kTimes = [];
-  let fIssues = '?', kIssues = '?', fPeakRss = 0, kPeakRss = 0;
+  const fTimesCold = [], kTimes = [], k6Times = [];
+  let fIssues = '?', kIssues = '?', k6Issues = '?', fPeakRss = 0, kPeakRss = 0, k6PeakRss = 0;
 
   for (let i = 0; i < RUNS; i++) {
     const fr = timeRunWithMemory(fallowBin, fArgsCold, dir);
@@ -116,6 +124,11 @@ function benchmarkProject(name, dir) {
     const kr = timeRunWithMemory(knipBin, kArgs, dir);
     kTimes.push(kr.elapsed);
     if (i === 0) { kIssues = parseIssueCount(kr.stdout); kPeakRss = kr.peakRssBytes; }
+    if (hasKnip6) {
+      const k6r = timeRunWithMemory(knip6Bin, kArgs, dir);
+      k6Times.push(k6r.elapsed);
+      if (i === 0) { k6Issues = parseIssueCount(k6r.stdout); k6PeakRss = k6r.peakRssBytes; }
+    }
   }
 
   // --- Warm cache ---
@@ -132,21 +145,30 @@ function benchmarkProject(name, dir) {
   clearFallowCache(dir);
 
   const fsCold = stats(fTimesCold), fsWarm = stats(fTimesWarm), ks = stats(kTimes);
-  const speedupCold = ks.median / fsCold.median;
-  const speedupWarm = ks.median / fsWarm.median;
+  const k6s = hasKnip6 ? stats(k6Times) : null;
+  const speedupColdV5 = ks.median / fsCold.median;
+  const speedupWarmV5 = ks.median / fsWarm.median;
+  const speedupColdV6 = k6s ? k6s.median / fsCold.median : null;
+  const speedupWarmV6 = k6s ? k6s.median / fsWarm.median : null;
   const cacheSpeedup = fsCold.median / fsWarm.median;
 
-  console.table([
-    { Tool: 'fallow (cold)', Min: fmt(fsCold.min), Mean: fmt(fsCold.mean), Median: fmt(fsCold.median), Max: fmt(fsCold.max), 'vs knip': `${speedupCold.toFixed(1)}x`, Memory: fmtMem(fPeakRss), Issues: fIssues },
-    { Tool: 'fallow (warm)', Min: fmt(fsWarm.min), Mean: fmt(fsWarm.mean), Median: fmt(fsWarm.median), Max: fmt(fsWarm.max), 'vs knip': `${speedupWarm.toFixed(1)}x`, Memory: '-', Issues: fIssues },
-    { Tool: 'knip',          Min: fmt(ks.min),     Mean: fmt(ks.mean),     Median: fmt(ks.median),     Max: fmt(ks.max),     'vs knip': '1.0x',                       Memory: fmtMem(kPeakRss), Issues: kIssues },
-  ]);
+  const rows = [
+    { Tool: 'fallow (cold)', Min: fmt(fsCold.min), Mean: fmt(fsCold.mean), Median: fmt(fsCold.median), Max: fmt(fsCold.max), 'vs knip v5': `${speedupColdV5.toFixed(1)}x`, ...(k6s ? { 'vs knip v6': `${speedupColdV6.toFixed(1)}x` } : {}), Memory: fmtMem(fPeakRss), Issues: fIssues },
+    { Tool: 'fallow (warm)', Min: fmt(fsWarm.min), Mean: fmt(fsWarm.mean), Median: fmt(fsWarm.median), Max: fmt(fsWarm.max), 'vs knip v5': `${speedupWarmV5.toFixed(1)}x`, ...(k6s ? { 'vs knip v6': `${speedupWarmV6.toFixed(1)}x` } : {}), Memory: '-', Issues: fIssues },
+    { Tool: 'knip v5',       Min: fmt(ks.min),     Mean: fmt(ks.mean),     Median: fmt(ks.median),     Max: fmt(ks.max),     'vs knip v5': '1.0x',                           ...(k6s ? { 'vs knip v6': '-' } : {}),                          Memory: fmtMem(kPeakRss), Issues: kIssues },
+  ];
+  if (k6s) {
+    rows.push({ Tool: 'knip v6', Min: fmt(k6s.min), Mean: fmt(k6s.mean), Median: fmt(k6s.median), Max: fmt(k6s.max), 'vs knip v5': `${(ks.median / k6s.median).toFixed(1)}x`, 'vs knip v6': '1.0x', Memory: fmtMem(k6PeakRss), Issues: k6Issues });
+  }
+  console.table(rows);
   console.log(`  Cache speedup: ${cacheSpeedup.toFixed(2)}x (warm vs cold)`);
   console.log(`  fallow cold: [${fTimesCold.map(t=>t.toFixed(0)).join(', ')}]`);
   console.log(`  fallow warm: [${fTimesWarm.map(t=>t.toFixed(0)).join(', ')}]`);
-  console.log(`  knip:        [${kTimes.map(t=>t.toFixed(0)).join(', ')}]\n`);
+  console.log(`  knip v5:     [${kTimes.map(t=>t.toFixed(0)).join(', ')}]`);
+  if (k6s) console.log(`  knip v6:     [${k6Times.map(t=>t.toFixed(0)).join(', ')}]`);
+  console.log('');
 
-  return { name, files, fallowCold: fsCold, fallowWarm: fsWarm, knip: ks, speedupCold, speedupWarm, cacheSpeedup, fIssues, kIssues, fPeakRss, kPeakRss };
+  return { name, files, fallowCold: fsCold, fallowWarm: fsWarm, knip: ks, knip6: k6s, speedupColdV5, speedupWarmV5, speedupColdV6, speedupWarmV6, cacheSpeedup, fIssues, kIssues, k6Issues, fPeakRss, kPeakRss, k6PeakRss };
 }
 
 const results = [];
@@ -176,14 +198,20 @@ if (results.length > 0) {
     Files: r.files,
     'Cold (median)': fmt(r.fallowCold.median),
     'Warm (median)': fmt(r.fallowWarm.median),
-    'Knip (median)': fmt(r.knip.median),
-    'Speedup (cold)': `${r.speedupCold.toFixed(1)}x`,
-    'Speedup (warm)': `${r.speedupWarm.toFixed(1)}x`,
+    'Knip v5 (median)': fmt(r.knip.median),
+    ...(r.knip6 ? { 'Knip v6 (median)': fmt(r.knip6.median) } : {}),
+    'vs v5 (cold)': `${r.speedupColdV5.toFixed(1)}x`,
+    ...(r.speedupColdV6 != null ? { 'vs v6 (cold)': `${r.speedupColdV6.toFixed(1)}x` } : {}),
     'Cache effect': `${r.cacheSpeedup.toFixed(2)}x`,
     'Fallow RSS': fmtMem(r.fPeakRss),
-    'Knip RSS': fmtMem(r.kPeakRss),
+    'Knip v5 RSS': fmtMem(r.kPeakRss),
+    ...(r.knip6 ? { 'Knip v6 RSS': fmtMem(r.k6PeakRss) } : {}),
   })));
-  console.log(`Average speedup (cold): ${(results.reduce((s,r) => s+r.speedupCold, 0)/results.length).toFixed(1)}x`);
-  console.log(`Average speedup (warm): ${(results.reduce((s,r) => s+r.speedupWarm, 0)/results.length).toFixed(1)}x`);
-  console.log(`Average cache effect:   ${(results.reduce((s,r) => s+r.cacheSpeedup, 0)/results.length).toFixed(2)}x\n`);
+  console.log(`Average speedup vs knip v5 (cold): ${(results.reduce((s,r) => s+r.speedupColdV5, 0)/results.length).toFixed(1)}x`);
+  console.log(`Average speedup vs knip v5 (warm): ${(results.reduce((s,r) => s+r.speedupWarmV5, 0)/results.length).toFixed(1)}x`);
+  if (hasKnip6) {
+    console.log(`Average speedup vs knip v6 (cold): ${(results.reduce((s,r) => s+(r.speedupColdV6??0), 0)/results.length).toFixed(1)}x`);
+    console.log(`Average speedup vs knip v6 (warm): ${(results.reduce((s,r) => s+(r.speedupWarmV6??0), 0)/results.length).toFixed(1)}x`);
+  }
+  console.log(`Average cache effect:              ${(results.reduce((s,r) => s+r.cacheSpeedup, 0)/results.length).toFixed(2)}x\n`);
 }

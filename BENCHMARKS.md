@@ -55,6 +55,9 @@ rustup update stable
 
 # Node.js (for comparative benchmarks)
 cd benchmarks && npm install
+
+# Optional: install knip v6 for three-way comparison
+cd benchmarks/knip6 && npm install
 ```
 
 ### Criterion Benchmarks
@@ -84,8 +87,8 @@ npm run generate:dupes     # dupes fixtures (tiny → xlarge)
 # Download real-world projects (required once)
 npm run download-fixtures  # preact, fastify, zod
 
-# Run benchmarks
-npm run bench              # fallow vs knip (all fixtures)
+# Run benchmarks (includes knip v6 if installed in benchmarks/knip6/)
+npm run bench              # fallow vs knip v5 + v6 (all fixtures)
 npm run bench:synthetic    # synthetic only
 npm run bench:real-world   # real-world only
 npm run bench:dupes        # fallow dupes vs jscpd (all fixtures)

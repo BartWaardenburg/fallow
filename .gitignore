@@ -11,6 +11,9 @@ coverage/
 # Benchmark fixtures (generated/downloaded for local benchmarking)
 benchmarks/fixtures/
 
+# Knip v6 local install for benchmarks
+benchmarks/knip6/
+
 # Incremental cache
 .fallow/
 

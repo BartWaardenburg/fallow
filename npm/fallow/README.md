@@ -6,7 +6,7 @@ Find dead code in JavaScript and TypeScript projects. Written in Rust.
 [![npm](https://img.shields.io/npm/v/fallow.svg)](https://www.npmjs.com/package/fallow)
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/fallow-rs/fallow/blob/main/LICENSE)
 
-Fallow detects unused files, exports, dependencies, types, enum members, and class members across your codebase. It is a drop-in alternative to [knip](https://knip.dev) that runs **3-40x faster** depending on project size by using the [Oxc](https://oxc.rs) parser instead of the TypeScript compiler.
+Fallow detects unused files, exports, dependencies, types, enum members, and class members across your codebase. It is a drop-in alternative to [knip](https://knip.dev) that runs **3-36x faster** than knip v5 (**2-14x faster** than knip v6) depending on project size by using the [Oxc](https://oxc.rs) parser instead of the TypeScript compiler.
 
 ## Installation
 

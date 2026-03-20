@@ -1,6 +1,6 @@
 # Fallow for VS Code
 
-Dead code and duplication analyzer for JavaScript/TypeScript projects. Powered by [fallow](https://github.com/fallow-rs/fallow), a Rust-native alternative to knip that is 3-40x faster.
+Dead code and duplication analyzer for JavaScript/TypeScript projects. Powered by [fallow](https://docs.fallow.tools), a Rust-native alternative to knip that is 3-36x faster than knip v5 (2-14x faster than knip v6).
 
 ## Features
 
@@ -23,7 +23,7 @@ code --install-extension fallow-rs.fallow-vscode
 
 ### Manual
 
-1. Install the `fallow` and `fallow-lsp` binaries (see [fallow installation](https://github.com/fallow-rs/fallow#installation))
+1. Install the `fallow` and `fallow-lsp` binaries (see [fallow installation](https://docs.fallow.tools/installation))
 2. Install the extension VSIX file: `code --install-extension fallow-vscode-*.vsix`
 
 ## Commands

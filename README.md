@@ -10,11 +10,12 @@
   <a href="https://crates.io/crates/fallow-cli"><img src="https://img.shields.io/crates/v/fallow-cli.svg" alt="crates.io"></a>
   <a href="https://www.npmjs.com/package/fallow"><img src="https://img.shields.io/npm/v/fallow.svg" alt="npm"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
+  <a href="https://docs.fallow.tools"><img src="https://img.shields.io/badge/docs-docs.fallow.tools-blue.svg" alt="Documentation"></a>
 </p>
 
 ---
 
-Finds unused files, exports, dependencies, and types — plus duplicated code blocks across your entire codebase. Dead code and duplication increase bundle sizes, slow CI, and make codebases harder to navigate. fallow finds both in seconds, not minutes. 3-40x faster than [knip](https://knip.dev) for dead code analysis, 4-75x faster than [jscpd](https://github.com/kucherenko/jscpd) for duplication detection, with no Node.js runtime dependency.
+Finds unused files, exports, dependencies, and types — plus duplicated code blocks across your entire codebase. Dead code and duplication increase bundle sizes, slow CI, and make codebases harder to navigate. fallow finds both in seconds, not minutes. 3-36x faster than [knip](https://knip.dev) v5 (2-14x faster than knip v6) for dead code analysis, 20-33x faster than [jscpd](https://github.com/kucherenko/jscpd) for duplication detection, with no Node.js runtime dependency.
 
 ```bash
 npx fallow check    # Dead code analysis
@@ -56,7 +57,7 @@ cargo install fallow-cli     # Or via cargo
 
 ## Code duplication
 
-`fallow dupes` finds copy-pasted code blocks across your entire codebase — one tool for both dead code and duplication, no separate jscpd/CPD setup needed. 4-75x faster than jscpd on real-world projects.
+`fallow dupes` finds copy-pasted code blocks across your entire codebase — one tool for both dead code and duplication, no separate jscpd/CPD setup needed. 20-33x faster than jscpd on real-world projects.
 
 ```bash
 fallow dupes                    # Default: mild mode
@@ -79,17 +80,17 @@ Clone groups sharing the same file set are grouped into **clone families** with 
 
 ## Benchmarks
 
-Measured on real-world open-source projects (median of 5 runs, 2 warmup). fallow v0.3.0 vs knip v5.x.
+Measured on real-world open-source projects (median of 5 runs, 2 warmup). Apple M5 (10 cores), macOS.
 
-| Project | Files | fallow | knip | Speedup |
-|:--------|------:|-------:|-----:|--------:|
-| [zod](https://github.com/colinhacks/zod) | 174 | **16ms** | 582ms | **35.8x** |
-| [fastify](https://github.com/fastify/fastify) | 286 | **20ms** | 804ms | **39.4x** |
-| [preact](https://github.com/preactjs/preact) | 244 | **29ms** | 771ms | **26.6x** |
-| synthetic (large) | 1,000 | **45ms** | 378ms | **8.4x** |
-| synthetic (xlarge) | 5,000 | **200ms** | — | — |
+| Project | Files | fallow | knip v5 | knip v6 | vs v5 | vs v6 |
+|:--------|------:|-------:|--------:|--------:|------:|------:|
+| [zod](https://github.com/colinhacks/zod) | 174 | **23ms** | 590ms | 308ms | **26.1x** | **13.6x** |
+| [fastify](https://github.com/fastify/fastify) | 286 | **22ms** | 804ms | 236ms | **36.2x** | **10.6x** |
+| [preact](https://github.com/preactjs/preact) | 244 | **24ms** | 799ms | — | **33.9x** | — |
+| synthetic (1,000 files) | 1,000 | **45ms** | 380ms | 196ms | **8.5x** | **4.4x** |
+| synthetic (5,000 files) | 5,000 | **201ms** | 646ms | 340ms | **3.2x** | **1.7x** |
 
-The speedup narrows on larger projects as actual analysis time dominates over startup: 25-40x on small projects, 8-10x on 1,000+ file projects. fallow stays sub-second even at 5,000 files.
+The speedup narrows on larger projects as actual analysis time dominates over startup: 26-36x on real-world projects vs knip v5 (10-14x vs v6), 3-9x on 1,000+ file projects. fallow stays sub-second even at 5,000 files.
 
 fallow uses the [Oxc](https://oxc.rs) parser for syntactic analysis and [rayon](https://github.com/rayon-rs/rayon) for parallel parsing — no TypeScript compiler, no Node.js runtime. Dead code detection is a graph problem on import/export edges; you don't need type information for that.
 
@@ -97,9 +98,9 @@ fallow uses the [Oxc](https://oxc.rs) parser for syntactic analysis and [rayon](
 
 | Project | Files | fallow | jscpd | Speedup |
 |:--------|------:|-------:|------:|--------:|
-| [zod](https://github.com/colinhacks/zod) | 174 | **45ms** | 905ms | **20.1x** |
-| [fastify](https://github.com/fastify/fastify) | 286 | **546ms** | 2.00s | **3.7x** |
-| [preact](https://github.com/preactjs/preact) | 244 | **18ms** | 1.32s | **73.8x** |
+| [zod](https://github.com/colinhacks/zod) | 174 | **49ms** | 1.01s | **20.6x** |
+| [fastify](https://github.com/fastify/fastify) | 286 | **82ms** | 2.09s | **25.5x** |
+| [preact](https://github.com/preactjs/preact) | 244 | **46ms** | 1.53s | **33.3x** |
 
 fallow dupes uses a suffix array with LCP for clone detection — no quadratic pairwise comparison.
 
@@ -120,10 +121,11 @@ node bench-dupes.mjs          # Run duplication benchmarks
 
 | | fallow | knip |
 |:--|:-------|:-----|
-| Speed (real-world) | **3-40x faster** | Baseline |
+| Speed vs knip v5 | **3-36x faster** | Baseline |
+| Speed vs knip v6 | **2-14x faster** | Baseline |
 | Dead code detection | 10 issue types | Comparable |
 | Duplication detection | Built-in | Not included |
-| Framework plugins | 79 (30 with config parsing) | 140+ (runtime config loading) |
+| Framework plugins | 84 (30 with config parsing) | 140+ (runtime config loading) |
 | Runtime dependency | None (standalone binary) | Node.js |
 | Config format | JSONC, JSON, TOML | JSON |
 
@@ -133,7 +135,7 @@ knip is a good tool with broader framework coverage. fallow covers the most popu
 
 | | fallow | jscpd |
 |:--|:-------|:------|
-| Speed (real-world) | **4-75x faster** | Baseline |
+| Speed (real-world) | **20-33x faster** | Baseline |
 | Detection modes | 4 (strict, mild, weak, semantic) | 1 (token-based) |
 | Algorithm | Suffix array with LCP | Rabin-Karp rolling hash |
 | Dead code integration | Built-in (`fallow check`) | Not included |
@@ -163,7 +165,7 @@ Create a config file in your project root, or run `fallow init`:
 }
 ```
 
-TOML is also supported (`fallow init --toml` creates `fallow.toml`). See the [full configuration reference](https://github.com/fallow-rs/fallow/wiki/Configuration) for all options, including `rules` severity levels, `duplicates` settings, `ignoreExports` rules, and custom framework presets.
+TOML is also supported (`fallow init --toml` creates `fallow.toml`). See the [full configuration reference](https://docs.fallow.tools/configuration) for all options, including `rules` severity levels, `duplicates` settings, `ignoreExports` rules, and custom framework presets.
 
 ### Migrating from knip or jscpd
 
@@ -179,7 +181,7 @@ This reads your knip.json/knip.jsonc/.knip.json/.knip.jsonc and/or .jscpd.json (
 
 ## Framework support
 
-79 built-in plugins covering frameworks (Next.js, Nuxt, Remix, SvelteKit, Gatsby, Astro, Angular, React Router, TanStack Router, React Native, Expo, NestJS, Docusaurus, Nitro, Capacitor, Sanity, VitePress, next-intl, Relay), bundlers (Vite, Webpack, Rspack, Rsbuild, Rollup, Tsup, Tsdown, Parcel), testing (Vitest, Jest, Playwright, Cypress, Mocha, Ava, Storybook, Karma, Cucumber, WebdriverIO), linting & formatting (ESLint, Biome, Stylelint, Commitlint, Prettier, Oxlint, markdownlint, cspell, remark), transpilation & runtime (TypeScript, Babel, SWC, Bun), CSS (Tailwind, PostCSS), databases (Prisma, Drizzle, Knex), monorepos (Turborepo, Nx, Changesets, Syncpack), CI/CD (semantic-release, Commitizen), deployment (Wrangler, Sentry), git hooks (husky, lint-staged, lefthook, simple-git-hooks), and more (GraphQL Codegen, MSW, SVGO, SVGR, TypeDoc, openapi-ts, Plop, c8, nyc, nodemon, PM2, dependency-cruiser). If your framework isn't listed, you can add a [custom preset](https://github.com/fallow-rs/fallow/wiki/Custom-Presets) in your config file.
+84 built-in plugins covering frameworks (Next.js, Nuxt, Remix, SvelteKit, Gatsby, Astro, Angular, React Router, TanStack Router, React Native, Expo, NestJS, Docusaurus, Nitro, Capacitor, Sanity, VitePress, next-intl, Relay, Electron, i18next), bundlers (Vite, Webpack, Rspack, Rsbuild, Rollup, Rolldown, Tsup, Tsdown, Parcel), testing (Vitest, Jest, Playwright, Cypress, Mocha, Ava, Storybook, Karma, Cucumber, WebdriverIO), linting & formatting (ESLint, Biome, Stylelint, Commitlint, Prettier, Oxlint, markdownlint, cspell, remark), transpilation & runtime (TypeScript, Babel, SWC, Bun), CSS (Tailwind, PostCSS), databases (Prisma, Drizzle, Knex, TypeORM, Kysely), monorepos (Turborepo, Nx, Changesets, Syncpack), CI/CD (semantic-release, Commitizen), deployment (Wrangler, Sentry), git hooks (husky, lint-staged, lefthook, simple-git-hooks), and more (GraphQL Codegen, MSW, SVGO, SVGR, TypeDoc, openapi-ts, Plop, c8, nyc, nodemon, PM2, dependency-cruiser). If your framework isn't listed, you can add a [custom preset](https://docs.fallow.tools/custom-presets) in your config file.
 
 ## CI integration
 
@@ -193,7 +195,7 @@ This reads your knip.json/knip.jsonc/.knip.json/.knip.jsonc and/or .jscpd.json (
 - run: npx fallow check --format sarif > results.sarif
 ```
 
-Supports `--changed-since main` for PR-only analysis, `--baseline` for failing only on new issues, `--format json` for machine-readable output, and per-issue-type severity rules (`error`/`warn`/`off`) for incremental adoption. See the [CI guide](https://github.com/fallow-rs/fallow/wiki/CI-Integration) for full workflow examples.
+Supports `--changed-since main` for PR-only analysis, `--baseline` for failing only on new issues, `--format json` for machine-readable output, and per-issue-type severity rules (`error`/`warn`/`off`) for incremental adoption. See the [CI guide](https://docs.fallow.tools/ci-integration) for full workflow examples.
 
 ## Additional features
 
@@ -235,7 +237,7 @@ Issue type tokens: `unused-file`, `unused-export`, `unused-type`, `unused-depend
 
 ## Limitations
 
-fallow uses syntactic analysis only — no type information. This is what makes it fast, but it means type-level dead code is out of scope. Svelte files skip individual export analysis (props can't be distinguished from utility exports without compiler semantics), so unused exports in `.svelte` files may go undetected. Use [inline suppression comments](#inline-suppression-comments) or [`ignore_exports`](https://github.com/fallow-rs/fallow/wiki/Configuration#ignoring-specific-exports) for any remaining edge cases.
+fallow uses syntactic analysis only — no type information. This is what makes it fast, but it means type-level dead code is out of scope. Svelte files skip individual export analysis (props can't be distinguished from utility exports without compiler semantics), so unused exports in `.svelte` files may go undetected. Use [inline suppression comments](#inline-suppression-comments) or [`ignore_exports`](https://docs.fallow.tools/configuration#ignoring-specific-exports) for any remaining edge cases.
 
 ## Custom plugins
 
@@ -257,9 +259,9 @@ Fallow auto-discovers `fallow-plugin-*.toml` files in your project root and `.fa
 
 ## Learn more
 
-- [Documentation](https://github.com/fallow-rs/fallow/wiki)
-- [Migrating from knip](https://github.com/fallow-rs/fallow/wiki/Migrating-from-Knip)
-- [Full plugin list](https://github.com/fallow-rs/fallow/wiki/Frameworks)
+- [Documentation](https://docs.fallow.tools)
+- [Migrating from knip](https://docs.fallow.tools/migrating-from-knip)
+- [Full plugin list](https://docs.fallow.tools/frameworks)
 - [Plugin Authoring Guide](docs/plugin-authoring.md)
 
 ## Contributing
