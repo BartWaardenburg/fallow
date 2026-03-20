@@ -86,20 +86,32 @@ mod tests {
 
     use fallow_core::results::{ExportUsage, ReferenceLocation};
 
+    fn test_root() -> PathBuf {
+        if cfg!(windows) {
+            PathBuf::from("C:\\project")
+        } else {
+            PathBuf::from("/project")
+        }
+    }
+
     #[test]
     fn no_lenses_for_empty_results() {
+        let root = test_root();
+        let mod_path = root.join("src/mod.ts");
         let results = AnalysisResults::default();
-        let uri = Url::from_file_path("/tmp/project/src/mod.ts").unwrap();
+        let uri = Url::from_file_path(&mod_path).unwrap();
 
-        let lenses = build_code_lenses(&results, Path::new("/tmp/project/src/mod.ts"), &uri);
+        let lenses = build_code_lenses(&results, &mod_path, &uri);
         assert!(lenses.is_empty());
     }
 
     #[test]
     fn no_lenses_for_unrelated_file() {
+        let root = test_root();
+        let mod_path = root.join("src/mod.ts");
         let mut results = AnalysisResults::default();
         results.export_usages.push(ExportUsage {
-            path: PathBuf::from("/tmp/project/src/other.ts"),
+            path: root.join("src/other.ts"),
             export_name: "foo".to_string(),
             line: 1,
             col: 0,
@@ -107,16 +119,18 @@ mod tests {
             reference_locations: vec![],
         });
 
-        let uri = Url::from_file_path("/tmp/project/src/mod.ts").unwrap();
-        let lenses = build_code_lenses(&results, Path::new("/tmp/project/src/mod.ts"), &uri);
+        let uri = Url::from_file_path(&mod_path).unwrap();
+        let lenses = build_code_lenses(&results, &mod_path, &uri);
         assert!(lenses.is_empty());
     }
 
     #[test]
     fn single_reference_uses_singular_title() {
+        let root = test_root();
+        let utils_path = root.join("src/utils.ts");
         let mut results = AnalysisResults::default();
         results.export_usages.push(ExportUsage {
-            path: PathBuf::from("/tmp/project/src/utils.ts"),
+            path: utils_path.clone(),
             export_name: "helper".to_string(),
             line: 10,
             col: 7,
@@ -124,8 +138,8 @@ mod tests {
             reference_locations: vec![],
         });
 
-        let uri = Url::from_file_path("/tmp/project/src/utils.ts").unwrap();
-        let lenses = build_code_lenses(&results, Path::new("/tmp/project/src/utils.ts"), &uri);
+        let uri = Url::from_file_path(&utils_path).unwrap();
+        let lenses = build_code_lenses(&results, &utils_path, &uri);
         assert_eq!(lenses.len(), 1);
 
         let cmd = lenses[0].command.as_ref().unwrap();
@@ -134,9 +148,11 @@ mod tests {
 
     #[test]
     fn multiple_references_uses_plural_title() {
+        let root = test_root();
+        let utils_path = root.join("src/utils.ts");
         let mut results = AnalysisResults::default();
         results.export_usages.push(ExportUsage {
-            path: PathBuf::from("/tmp/project/src/utils.ts"),
+            path: utils_path.clone(),
             export_name: "helper".to_string(),
             line: 10,
             col: 7,
@@ -144,8 +160,8 @@ mod tests {
             reference_locations: vec![],
         });
 
-        let uri = Url::from_file_path("/tmp/project/src/utils.ts").unwrap();
-        let lenses = build_code_lenses(&results, Path::new("/tmp/project/src/utils.ts"), &uri);
+        let uri = Url::from_file_path(&utils_path).unwrap();
+        let lenses = build_code_lenses(&results, &utils_path, &uri);
         assert_eq!(lenses.len(), 1);
 
         let cmd = lenses[0].command.as_ref().unwrap();
@@ -154,9 +170,11 @@ mod tests {
 
     #[test]
     fn zero_references_uses_plural_title() {
+        let root = test_root();
+        let utils_path = root.join("src/utils.ts");
         let mut results = AnalysisResults::default();
         results.export_usages.push(ExportUsage {
-            path: PathBuf::from("/tmp/project/src/utils.ts"),
+            path: utils_path.clone(),
             export_name: "unused".to_string(),
             line: 1,
             col: 0,
@@ -164,8 +182,8 @@ mod tests {
             reference_locations: vec![],
         });
 
-        let uri = Url::from_file_path("/tmp/project/src/utils.ts").unwrap();
-        let lenses = build_code_lenses(&results, Path::new("/tmp/project/src/utils.ts"), &uri);
+        let uri = Url::from_file_path(&utils_path).unwrap();
+        let lenses = build_code_lenses(&results, &utils_path, &uri);
         assert_eq!(lenses.len(), 1);
 
         let cmd = lenses[0].command.as_ref().unwrap();
@@ -174,9 +192,11 @@ mod tests {
 
     #[test]
     fn lens_position_matches_export_span() {
+        let root = test_root();
+        let utils_path = root.join("src/utils.ts");
         let mut results = AnalysisResults::default();
         results.export_usages.push(ExportUsage {
-            path: PathBuf::from("/tmp/project/src/utils.ts"),
+            path: utils_path.clone(),
             export_name: "myExport".to_string(),
             line: 15, // 1-based
             col: 4,
@@ -184,8 +204,8 @@ mod tests {
             reference_locations: vec![],
         });
 
-        let uri = Url::from_file_path("/tmp/project/src/utils.ts").unwrap();
-        let lenses = build_code_lenses(&results, Path::new("/tmp/project/src/utils.ts"), &uri);
+        let uri = Url::from_file_path(&utils_path).unwrap();
+        let lenses = build_code_lenses(&results, &utils_path, &uri);
         assert_eq!(lenses.len(), 1);
 
         // 1-based line 15 → 0-based line 14
@@ -197,9 +217,11 @@ mod tests {
 
     #[test]
     fn noop_command_when_no_reference_locations() {
+        let root = test_root();
+        let utils_path = root.join("src/utils.ts");
         let mut results = AnalysisResults::default();
         results.export_usages.push(ExportUsage {
-            path: PathBuf::from("/tmp/project/src/utils.ts"),
+            path: utils_path.clone(),
             export_name: "x".to_string(),
             line: 1,
             col: 0,
@@ -207,8 +229,8 @@ mod tests {
             reference_locations: vec![],
         });
 
-        let uri = Url::from_file_path("/tmp/project/src/utils.ts").unwrap();
-        let lenses = build_code_lenses(&results, Path::new("/tmp/project/src/utils.ts"), &uri);
+        let uri = Url::from_file_path(&utils_path).unwrap();
+        let lenses = build_code_lenses(&results, &utils_path, &uri);
         assert_eq!(lenses.len(), 1);
 
         let cmd = lenses[0].command.as_ref().unwrap();
@@ -218,29 +240,31 @@ mod tests {
 
     #[test]
     fn show_references_command_with_reference_locations() {
+        let root = test_root();
+        let utils_path = root.join("src/utils.ts");
         let mut results = AnalysisResults::default();
         results.export_usages.push(ExportUsage {
-            path: PathBuf::from("/tmp/project/src/utils.ts"),
+            path: utils_path.clone(),
             export_name: "helper".to_string(),
             line: 5,
             col: 7,
             reference_count: 2,
             reference_locations: vec![
                 ReferenceLocation {
-                    path: PathBuf::from("/tmp/project/src/app.ts"),
+                    path: root.join("src/app.ts"),
                     line: 3,
                     col: 10,
                 },
                 ReferenceLocation {
-                    path: PathBuf::from("/tmp/project/src/main.ts"),
+                    path: root.join("src/main.ts"),
                     line: 8,
                     col: 0,
                 },
             ],
         });
 
-        let uri = Url::from_file_path("/tmp/project/src/utils.ts").unwrap();
-        let lenses = build_code_lenses(&results, Path::new("/tmp/project/src/utils.ts"), &uri);
+        let uri = Url::from_file_path(&utils_path).unwrap();
+        let lenses = build_code_lenses(&results, &utils_path, &uri);
         assert_eq!(lenses.len(), 1);
 
         let cmd = lenses[0].command.as_ref().unwrap();
@@ -261,7 +285,7 @@ mod tests {
         assert_eq!(ref_locs.len(), 2);
 
         // First reference: app.ts line 3 → 0-based 2
-        let app_uri = Url::from_file_path("/tmp/project/src/app.ts").unwrap();
+        let app_uri = Url::from_file_path(root.join("src/app.ts")).unwrap();
         assert_eq!(ref_locs[0]["uri"], app_uri.as_str());
         assert_eq!(ref_locs[0]["range"]["start"]["line"], 2);
         assert_eq!(ref_locs[0]["range"]["start"]["character"], 10);
@@ -269,8 +293,9 @@ mod tests {
 
     #[test]
     fn multiple_exports_produce_multiple_lenses() {
+        let root = test_root();
         let mut results = AnalysisResults::default();
-        let path = PathBuf::from("/tmp/project/src/utils.ts");
+        let path = root.join("src/utils.ts");
         results.export_usages.push(ExportUsage {
             path: path.clone(),
             export_name: "foo".to_string(),
@@ -312,9 +337,11 @@ mod tests {
 
     #[test]
     fn line_zero_saturates_correctly() {
+        let root = test_root();
+        let edge_path = root.join("src/edge.ts");
         let mut results = AnalysisResults::default();
         results.export_usages.push(ExportUsage {
-            path: PathBuf::from("/tmp/project/src/edge.ts"),
+            path: edge_path.clone(),
             export_name: "x".to_string(),
             line: 0, // edge case: 0 saturates to 0
             col: 0,
@@ -322,8 +349,8 @@ mod tests {
             reference_locations: vec![],
         });
 
-        let uri = Url::from_file_path("/tmp/project/src/edge.ts").unwrap();
-        let lenses = build_code_lenses(&results, Path::new("/tmp/project/src/edge.ts"), &uri);
+        let uri = Url::from_file_path(&edge_path).unwrap();
+        let lenses = build_code_lenses(&results, &edge_path, &uri);
         assert_eq!(lenses.len(), 1);
         assert_eq!(lenses[0].range.start.line, 0);
     }

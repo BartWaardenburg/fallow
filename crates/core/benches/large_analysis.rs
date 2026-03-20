@@ -17,8 +17,7 @@ fn bench_full_pipeline_5000(c: &mut Criterion) {
 }
 
 fn bench_full_pipeline_1000_warm(c: &mut Criterion) {
-    let (temp_dir, config) =
-        helpers::create_synthetic_project_with_cache("1000-warm", 1000, false);
+    let (temp_dir, config) = helpers::create_synthetic_project_with_cache("1000-warm", 1000, false);
 
     // Populate the cache
     let _ = fallow_core::analyze(&config);
@@ -33,8 +32,7 @@ fn bench_full_pipeline_1000_warm(c: &mut Criterion) {
 }
 
 fn bench_full_pipeline_5000_warm(c: &mut Criterion) {
-    let (temp_dir, config) =
-        helpers::create_synthetic_project_with_cache("5000-warm", 5000, false);
+    let (temp_dir, config) = helpers::create_synthetic_project_with_cache("5000-warm", 5000, false);
 
     // Populate the cache
     let _ = fallow_core::analyze(&config);

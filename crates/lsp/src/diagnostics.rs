@@ -311,6 +311,14 @@ mod tests {
         UnusedDependency, UnusedExport, UnusedFile, UnusedMember,
     };
 
+    fn test_root() -> PathBuf {
+        if cfg!(windows) {
+            PathBuf::from("C:\\project")
+        } else {
+            PathBuf::from("/project")
+        }
+    }
+
     fn empty_duplication() -> DuplicationReport {
         DuplicationReport {
             clone_groups: vec![],
@@ -333,17 +341,18 @@ mod tests {
     fn empty_results_produce_no_diagnostics() {
         let results = AnalysisResults::default();
         let duplication = empty_duplication();
-        let root = Path::new("/tmp/project");
+        let root = test_root();
 
-        let diags = build_diagnostics(&results, &duplication, root);
+        let diags = build_diagnostics(&results, &duplication, &root);
         assert!(diags.is_empty());
     }
 
     #[test]
     fn unused_export_produces_hint_diagnostic() {
+        let root = test_root();
         let mut results = AnalysisResults::default();
         results.unused_exports.push(UnusedExport {
-            path: PathBuf::from("/tmp/project/src/utils.ts"),
+            path: root.join("src/utils.ts"),
             export_name: "helper".to_string(),
             is_type_only: false,
             line: 5,
@@ -353,9 +362,9 @@ mod tests {
         });
 
         let duplication = empty_duplication();
-        let diags = build_diagnostics(&results, &duplication, Path::new("/tmp/project"));
+        let diags = build_diagnostics(&results, &duplication, &root);
 
-        let uri = Url::from_file_path("/tmp/project/src/utils.ts").unwrap();
+        let uri = Url::from_file_path(root.join("src/utils.ts")).unwrap();
         let file_diags = diags.get(&uri).expect("should have diagnostics for file");
         assert_eq!(file_diags.len(), 1);
 
@@ -377,9 +386,10 @@ mod tests {
 
     #[test]
     fn unused_type_produces_hint_diagnostic() {
+        let root = test_root();
         let mut results = AnalysisResults::default();
         results.unused_types.push(UnusedExport {
-            path: PathBuf::from("/tmp/project/src/types.ts"),
+            path: root.join("src/types.ts"),
             export_name: "MyType".to_string(),
             is_type_only: true,
             line: 10,
@@ -389,9 +399,9 @@ mod tests {
         });
 
         let duplication = empty_duplication();
-        let diags = build_diagnostics(&results, &duplication, Path::new("/tmp/project"));
+        let diags = build_diagnostics(&results, &duplication, &root);
 
-        let uri = Url::from_file_path("/tmp/project/src/types.ts").unwrap();
+        let uri = Url::from_file_path(root.join("src/types.ts")).unwrap();
         let file_diags = diags.get(&uri).unwrap();
         assert_eq!(file_diags.len(), 1);
 
@@ -406,15 +416,16 @@ mod tests {
 
     #[test]
     fn unused_file_produces_warning_at_zero_range() {
+        let root = test_root();
         let mut results = AnalysisResults::default();
         results.unused_files.push(UnusedFile {
-            path: PathBuf::from("/tmp/project/src/dead.ts"),
+            path: root.join("src/dead.ts"),
         });
 
         let duplication = empty_duplication();
-        let diags = build_diagnostics(&results, &duplication, Path::new("/tmp/project"));
+        let diags = build_diagnostics(&results, &duplication, &root);
 
-        let uri = Url::from_file_path("/tmp/project/src/dead.ts").unwrap();
+        let uri = Url::from_file_path(root.join("src/dead.ts")).unwrap();
         let file_diags = diags.get(&uri).unwrap();
         assert_eq!(file_diags.len(), 1);
 
@@ -430,18 +441,19 @@ mod tests {
 
     #[test]
     fn unresolved_import_produces_error_diagnostic() {
+        let root = test_root();
         let mut results = AnalysisResults::default();
         results.unresolved_imports.push(UnresolvedImport {
-            path: PathBuf::from("/tmp/project/src/app.ts"),
+            path: root.join("src/app.ts"),
             specifier: "./missing-module".to_string(),
             line: 3,
             col: 20,
         });
 
         let duplication = empty_duplication();
-        let diags = build_diagnostics(&results, &duplication, Path::new("/tmp/project"));
+        let diags = build_diagnostics(&results, &duplication, &root);
 
-        let uri = Url::from_file_path("/tmp/project/src/app.ts").unwrap();
+        let uri = Url::from_file_path(root.join("src/app.ts")).unwrap();
         let file_diags = diags.get(&uri).unwrap();
         assert_eq!(file_diags.len(), 1);
 
@@ -454,17 +466,18 @@ mod tests {
 
     #[test]
     fn unused_dependency_produces_warning_at_package_json() {
+        let root = test_root();
         let mut results = AnalysisResults::default();
         results.unused_dependencies.push(UnusedDependency {
             package_name: "lodash".to_string(),
             location: DependencyLocation::Dependencies,
-            path: PathBuf::from("/tmp/project/package.json"),
+            path: root.join("package.json"),
         });
 
         let duplication = empty_duplication();
-        let diags = build_diagnostics(&results, &duplication, Path::new("/tmp/project"));
+        let diags = build_diagnostics(&results, &duplication, &root);
 
-        let uri = Url::from_file_path("/tmp/project/package.json").unwrap();
+        let uri = Url::from_file_path(root.join("package.json")).unwrap();
         let file_diags = diags.get(&uri).unwrap();
         assert_eq!(file_diags.len(), 1);
 
@@ -476,17 +489,18 @@ mod tests {
 
     #[test]
     fn unused_dev_dependency_produces_warning() {
+        let root = test_root();
         let mut results = AnalysisResults::default();
         results.unused_dev_dependencies.push(UnusedDependency {
             package_name: "prettier".to_string(),
             location: DependencyLocation::DevDependencies,
-            path: PathBuf::from("/tmp/project/package.json"),
+            path: root.join("package.json"),
         });
 
         let duplication = empty_duplication();
-        let diags = build_diagnostics(&results, &duplication, Path::new("/tmp/project"));
+        let diags = build_diagnostics(&results, &duplication, &root);
 
-        let uri = Url::from_file_path("/tmp/project/package.json").unwrap();
+        let uri = Url::from_file_path(root.join("package.json")).unwrap();
         let file_diags = diags.get(&uri).unwrap();
         assert_eq!(file_diags.len(), 1);
 
@@ -497,16 +511,17 @@ mod tests {
 
     #[test]
     fn unlisted_dependency_uses_root_package_json() {
+        let root = test_root();
         let mut results = AnalysisResults::default();
         results.unlisted_dependencies.push(UnlistedDependency {
             package_name: "chalk".to_string(),
-            imported_from: vec![PathBuf::from("/tmp/project/src/cli.ts")],
+            imported_from: vec![root.join("src/cli.ts")],
         });
 
         let duplication = empty_duplication();
-        let diags = build_diagnostics(&results, &duplication, Path::new("/tmp/project"));
+        let diags = build_diagnostics(&results, &duplication, &root);
 
-        let uri = Url::from_file_path("/tmp/project/package.json").unwrap();
+        let uri = Url::from_file_path(root.join("package.json")).unwrap();
         let file_diags = diags.get(&uri).unwrap();
         assert_eq!(file_diags.len(), 1);
 
@@ -518,9 +533,10 @@ mod tests {
 
     #[test]
     fn unused_enum_member_produces_hint() {
+        let root = test_root();
         let mut results = AnalysisResults::default();
         results.unused_enum_members.push(UnusedMember {
-            path: PathBuf::from("/tmp/project/src/enums.ts"),
+            path: root.join("src/enums.ts"),
             parent_name: "Color".to_string(),
             member_name: "Blue".to_string(),
             kind: MemberKind::EnumMember,
@@ -529,9 +545,9 @@ mod tests {
         });
 
         let duplication = empty_duplication();
-        let diags = build_diagnostics(&results, &duplication, Path::new("/tmp/project"));
+        let diags = build_diagnostics(&results, &duplication, &root);
 
-        let uri = Url::from_file_path("/tmp/project/src/enums.ts").unwrap();
+        let uri = Url::from_file_path(root.join("src/enums.ts")).unwrap();
         let file_diags = diags.get(&uri).unwrap();
         assert_eq!(file_diags.len(), 1);
 
@@ -549,9 +565,10 @@ mod tests {
 
     #[test]
     fn unused_class_member_produces_hint() {
+        let root = test_root();
         let mut results = AnalysisResults::default();
         results.unused_class_members.push(UnusedMember {
-            path: PathBuf::from("/tmp/project/src/service.ts"),
+            path: root.join("src/service.ts"),
             parent_name: "UserService".to_string(),
             member_name: "reset".to_string(),
             kind: MemberKind::ClassMethod,
@@ -560,9 +577,9 @@ mod tests {
         });
 
         let duplication = empty_duplication();
-        let diags = build_diagnostics(&results, &duplication, Path::new("/tmp/project"));
+        let diags = build_diagnostics(&results, &duplication, &root);
 
-        let uri = Url::from_file_path("/tmp/project/src/service.ts").unwrap();
+        let uri = Url::from_file_path(root.join("src/service.ts")).unwrap();
         let file_diags = diags.get(&uri).unwrap();
         assert_eq!(file_diags.len(), 1);
 
@@ -577,44 +594,46 @@ mod tests {
 
     #[test]
     fn duplicate_export_produces_warning_with_related_files() {
+        let root = test_root();
+        let utils_path = root.join("src/utils.ts");
+        let helpers_path = root.join("src/helpers.ts");
+
         let mut results = AnalysisResults::default();
         results.duplicate_exports.push(DuplicateExport {
             export_name: "formatDate".to_string(),
-            locations: vec![
-                PathBuf::from("/tmp/project/src/utils.ts"),
-                PathBuf::from("/tmp/project/src/helpers.ts"),
-            ],
+            locations: vec![utils_path.clone(), helpers_path.clone()],
         });
 
         let duplication = empty_duplication();
-        let diags = build_diagnostics(&results, &duplication, Path::new("/tmp/project"));
+        let diags = build_diagnostics(&results, &duplication, &root);
 
         // Both files should have a diagnostic
-        let uri_utils = Url::from_file_path("/tmp/project/src/utils.ts").unwrap();
-        let uri_helpers = Url::from_file_path("/tmp/project/src/helpers.ts").unwrap();
+        let uri_utils = Url::from_file_path(&utils_path).unwrap();
+        let uri_helpers = Url::from_file_path(&helpers_path).unwrap();
 
         let utils_diags = diags.get(&uri_utils).unwrap();
         assert_eq!(utils_diags.len(), 1);
         let d = &utils_diags[0];
         assert_eq!(d.severity, Some(DiagnosticSeverity::WARNING));
         assert!(d.message.contains("formatDate"));
-        assert!(d.message.contains("/tmp/project/src/helpers.ts"));
+        assert!(d.message.contains(&helpers_path.display().to_string()));
         assert_eq!(d.range, ZERO_RANGE);
 
         let helpers_diags = diags.get(&uri_helpers).unwrap();
         assert_eq!(helpers_diags.len(), 1);
         let dh = &helpers_diags[0];
-        assert!(dh.message.contains("/tmp/project/src/utils.ts"));
+        assert!(dh.message.contains(&utils_path.display().to_string()));
     }
 
     #[test]
     fn duplication_diagnostic_has_related_information() {
+        let root = test_root();
         let results = AnalysisResults::default();
         let duplication = DuplicationReport {
             clone_groups: vec![CloneGroup {
                 instances: vec![
                     CloneInstance {
-                        file: PathBuf::from("/tmp/project/src/a.ts"),
+                        file: root.join("src/a.ts"),
                         start_line: 10,
                         end_line: 15,
                         start_col: 0,
@@ -622,7 +641,7 @@ mod tests {
                         fragment: "duplicated code".to_string(),
                     },
                     CloneInstance {
-                        file: PathBuf::from("/tmp/project/src/b.ts"),
+                        file: root.join("src/b.ts"),
                         start_line: 20,
                         end_line: 25,
                         start_col: 4,
@@ -647,10 +666,10 @@ mod tests {
             },
         };
 
-        let diags = build_diagnostics(&results, &duplication, Path::new("/tmp/project"));
+        let diags = build_diagnostics(&results, &duplication, &root);
 
         // File a.ts should have a diagnostic with related info pointing to b.ts
-        let uri_a = Url::from_file_path("/tmp/project/src/a.ts").unwrap();
+        let uri_a = Url::from_file_path(root.join("src/a.ts")).unwrap();
         let diags_a = diags.get(&uri_a).unwrap();
         assert_eq!(diags_a.len(), 1);
 
@@ -667,14 +686,14 @@ mod tests {
         let related = d.related_information.as_ref().unwrap();
         assert_eq!(related.len(), 1);
         assert_eq!(related[0].message, "Also duplicated here");
-        let related_uri = Url::from_file_path("/tmp/project/src/b.ts").unwrap();
+        let related_uri = Url::from_file_path(root.join("src/b.ts")).unwrap();
         assert_eq!(related[0].location.uri, related_uri);
         // b.ts start_line = 20 (1-based) → 19 (0-based)
         assert_eq!(related[0].location.range.start.line, 19);
         assert_eq!(related[0].location.range.start.character, 4);
 
         // File b.ts should have related info pointing to a.ts
-        let uri_b = Url::from_file_path("/tmp/project/src/b.ts").unwrap();
+        let uri_b = Url::from_file_path(root.join("src/b.ts")).unwrap();
         let diags_b = diags.get(&uri_b).unwrap();
         assert_eq!(diags_b.len(), 1);
         let related_b = diags_b[0].related_information.as_ref().unwrap();
@@ -684,8 +703,9 @@ mod tests {
 
     #[test]
     fn multiple_issues_same_file_aggregate() {
+        let root = test_root();
         let mut results = AnalysisResults::default();
-        let path = PathBuf::from("/tmp/project/src/mod.ts");
+        let path = root.join("src/mod.ts");
         results.unused_exports.push(UnusedExport {
             path: path.clone(),
             export_name: "foo".to_string(),
@@ -712,7 +732,7 @@ mod tests {
         });
 
         let duplication = empty_duplication();
-        let diags = build_diagnostics(&results, &duplication, Path::new("/tmp/project"));
+        let diags = build_diagnostics(&results, &duplication, &root);
 
         let uri = Url::from_file_path(&path).unwrap();
         let file_diags = diags.get(&uri).unwrap();
@@ -721,12 +741,13 @@ mod tests {
 
     #[test]
     fn all_diagnostics_have_fallow_source() {
+        let root = test_root();
         let mut results = AnalysisResults::default();
         results.unused_files.push(UnusedFile {
-            path: PathBuf::from("/tmp/project/src/a.ts"),
+            path: root.join("src/a.ts"),
         });
         results.unused_exports.push(UnusedExport {
-            path: PathBuf::from("/tmp/project/src/b.ts"),
+            path: root.join("src/b.ts"),
             export_name: "x".to_string(),
             is_type_only: false,
             line: 1,
@@ -735,14 +756,14 @@ mod tests {
             is_re_export: false,
         });
         results.unresolved_imports.push(UnresolvedImport {
-            path: PathBuf::from("/tmp/project/src/c.ts"),
+            path: root.join("src/c.ts"),
             specifier: "./nope".to_string(),
             line: 1,
             col: 0,
         });
 
         let duplication = empty_duplication();
-        let diags = build_diagnostics(&results, &duplication, Path::new("/tmp/project"));
+        let diags = build_diagnostics(&results, &duplication, &root);
 
         for (_, file_diags) in &diags {
             for d in file_diags {
@@ -753,10 +774,11 @@ mod tests {
 
     #[test]
     fn line_conversion_saturates_at_zero() {
+        let root = test_root();
         // Line 0 in results (unusual) should become 0 in LSP, not underflow
         let mut results = AnalysisResults::default();
         results.unused_exports.push(UnusedExport {
-            path: PathBuf::from("/tmp/project/src/edge.ts"),
+            path: root.join("src/edge.ts"),
             export_name: "x".to_string(),
             is_type_only: false,
             line: 0,
@@ -766,9 +788,9 @@ mod tests {
         });
 
         let duplication = empty_duplication();
-        let diags = build_diagnostics(&results, &duplication, Path::new("/tmp/project"));
+        let diags = build_diagnostics(&results, &duplication, &root);
 
-        let uri = Url::from_file_path("/tmp/project/src/edge.ts").unwrap();
+        let uri = Url::from_file_path(root.join("src/edge.ts")).unwrap();
         let d = &diags.get(&uri).unwrap()[0];
         assert_eq!(d.range.start.line, 0);
     }

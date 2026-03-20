@@ -423,9 +423,17 @@ mod tests {
 
     use fallow_core::duplicates::CloneInstance;
 
-    fn instance(file: &str, start: usize, end: usize, fragment: &str) -> CloneInstance {
+    fn test_root() -> PathBuf {
+        if cfg!(windows) {
+            PathBuf::from("C:\\project")
+        } else {
+            PathBuf::from("/project")
+        }
+    }
+
+    fn instance(file: &Path, start: usize, end: usize, fragment: &str) -> CloneInstance {
         CloneInstance {
-            file: PathBuf::from(file),
+            file: file.to_path_buf(),
             start_line: start,
             end_line: end,
             start_col: 0,
@@ -459,9 +467,11 @@ mod tests {
 
     #[test]
     fn no_actions_when_no_clone_groups() {
-        let uri = Url::from_file_path("/tmp/test.ts").unwrap();
+        let root = test_root();
+        let test_path = root.join("test.ts");
+        let uri = Url::from_file_path(&test_path).unwrap();
         let actions = build_extract_duplicate_actions(
-            Path::new("/tmp/test.ts"),
+            &test_path,
             &uri,
             &Range {
                 start: Position {
@@ -481,11 +491,14 @@ mod tests {
 
     #[test]
     fn no_actions_when_cursor_outside_clone() {
-        let uri = Url::from_file_path("/tmp/test.ts").unwrap();
+        let root = test_root();
+        let test_path = root.join("test.ts");
+        let other_path = root.join("other.ts");
+        let uri = Url::from_file_path(&test_path).unwrap();
         let groups = vec![group(
             vec![
-                instance("/tmp/test.ts", 10, 20, "const x = 1;"),
-                instance("/tmp/other.ts", 10, 20, "const x = 1;"),
+                instance(&test_path, 10, 20, "const x = 1;"),
+                instance(&other_path, 10, 20, "const x = 1;"),
             ],
             11,
         )];
@@ -493,7 +506,7 @@ mod tests {
 
         // Cursor at line 0-5 (0-based), clone is at lines 9-19 (0-based)
         let actions = build_extract_duplicate_actions(
-            Path::new("/tmp/test.ts"),
+            &test_path,
             &uri,
             &Range {
                 start: Position {
@@ -513,12 +526,15 @@ mod tests {
 
     #[test]
     fn generates_action_when_cursor_overlaps_clone() {
-        let uri = Url::from_file_path("/tmp/test.ts").unwrap();
+        let root = test_root();
+        let test_path = root.join("test.ts");
+        let other_path = root.join("other.ts");
+        let uri = Url::from_file_path(&test_path).unwrap();
         let fragment = "const x = 1;\nconst y = 2;\nreturn x + y;";
         let groups = vec![group(
             vec![
-                instance("/tmp/test.ts", 10, 12, fragment),
-                instance("/tmp/other.ts", 5, 7, fragment),
+                instance(&test_path, 10, 12, fragment),
+                instance(&other_path, 5, 7, fragment),
             ],
             3,
         )];
@@ -526,7 +542,7 @@ mod tests {
 
         // Cursor at line 10 (0-based = 1-based line 11, inside clone at 1-based 10-12)
         let actions = build_extract_duplicate_actions(
-            Path::new("/tmp/test.ts"),
+            &test_path,
             &uri,
             &Range {
                 start: Position {
@@ -558,19 +574,22 @@ mod tests {
 
     #[test]
     fn action_edits_are_correct_structure() {
-        let uri = Url::from_file_path("/tmp/test.ts").unwrap();
+        let root = test_root();
+        let test_path = root.join("test.ts");
+        let other_path = root.join("other.ts");
+        let uri = Url::from_file_path(&test_path).unwrap();
         let fragment = "const x = 1;\nconst y = 2;";
         let groups = vec![group(
             vec![
-                instance("/tmp/test.ts", 10, 11, fragment),
-                instance("/tmp/other.ts", 5, 6, fragment),
+                instance(&test_path, 10, 11, fragment),
+                instance(&other_path, 5, 6, fragment),
             ],
             2,
         )];
         let file_lines: Vec<&str> = (0..30).map(|_| "code here").collect();
 
         let actions = build_extract_duplicate_actions(
-            Path::new("/tmp/test.ts"),
+            &test_path,
             &uri,
             &Range {
                 start: Position {
@@ -607,19 +626,21 @@ mod tests {
 
     #[test]
     fn multiple_instances_same_file_get_replaced() {
-        let uri = Url::from_file_path("/tmp/test.ts").unwrap();
+        let root = test_root();
+        let test_path = root.join("test.ts");
+        let uri = Url::from_file_path(&test_path).unwrap();
         let fragment = "doStuff();";
         let groups = vec![group(
             vec![
-                instance("/tmp/test.ts", 5, 5, fragment),
-                instance("/tmp/test.ts", 15, 15, fragment),
+                instance(&test_path, 5, 5, fragment),
+                instance(&test_path, 15, 15, fragment),
             ],
             1,
         )];
         let file_lines: Vec<&str> = (0..30).map(|_| "line content").collect();
 
         let actions = build_extract_duplicate_actions(
-            Path::new("/tmp/test.ts"),
+            &test_path,
             &uri,
             &Range {
                 start: Position {
@@ -657,19 +678,22 @@ mod tests {
 
     #[test]
     fn clone_at_line_1_combines_insert_with_replacement() {
-        let uri = Url::from_file_path("/tmp/test.ts").unwrap();
+        let root = test_root();
+        let test_path = root.join("test.ts");
+        let other_path = root.join("other.ts");
+        let uri = Url::from_file_path(&test_path).unwrap();
         let fragment = "const a = 1;";
         let groups = vec![group(
             vec![
-                instance("/tmp/test.ts", 1, 1, fragment),
-                instance("/tmp/other.ts", 1, 1, fragment),
+                instance(&test_path, 1, 1, fragment),
+                instance(&other_path, 1, 1, fragment),
             ],
             1,
         )];
         let file_lines = vec!["const a = 1;", "const b = 2;"];
 
         let actions = build_extract_duplicate_actions(
-            Path::new("/tmp/test.ts"),
+            &test_path,
             &uri,
             &Range {
                 start: Position {
@@ -705,19 +729,22 @@ mod tests {
 
     #[test]
     fn multiple_overlapping_groups_get_numbered_names() {
-        let uri = Url::from_file_path("/tmp/test.ts").unwrap();
+        let root = test_root();
+        let test_path = root.join("test.ts");
+        let other_path = root.join("other.ts");
+        let uri = Url::from_file_path(&test_path).unwrap();
         let groups = vec![
             group(
                 vec![
-                    instance("/tmp/test.ts", 5, 8, "block1();"),
-                    instance("/tmp/other.ts", 5, 8, "block1();"),
+                    instance(&test_path, 5, 8, "block1();"),
+                    instance(&other_path, 5, 8, "block1();"),
                 ],
                 4,
             ),
             group(
                 vec![
-                    instance("/tmp/test.ts", 6, 7, "block2();"),
-                    instance("/tmp/other.ts", 10, 11, "block2();"),
+                    instance(&test_path, 6, 7, "block2();"),
+                    instance(&other_path, 10, 11, "block2();"),
                 ],
                 2,
             ),
@@ -726,7 +753,7 @@ mod tests {
 
         // Cursor overlaps both groups
         let actions = build_extract_duplicate_actions(
-            Path::new("/tmp/test.ts"),
+            &test_path,
             &uri,
             &Range {
                 start: Position {
@@ -760,12 +787,15 @@ mod tests {
 
     #[test]
     fn indentation_is_preserved_in_replacement() {
-        let uri = Url::from_file_path("/tmp/test.ts").unwrap();
+        let root = test_root();
+        let test_path = root.join("test.ts");
+        let other_path = root.join("other.ts");
+        let uri = Url::from_file_path(&test_path).unwrap();
         let fragment = "return 42;";
         let groups = vec![group(
             vec![
-                instance("/tmp/test.ts", 5, 5, fragment),
-                instance("/tmp/other.ts", 5, 5, fragment),
+                instance(&test_path, 5, 5, fragment),
+                instance(&other_path, 5, 5, fragment),
             ],
             1,
         )];
@@ -779,7 +809,7 @@ mod tests {
         ];
 
         let actions = build_extract_duplicate_actions(
-            Path::new("/tmp/test.ts"),
+            &test_path,
             &uri,
             &Range {
                 start: Position {
@@ -1013,7 +1043,9 @@ mod tests {
 
     #[test]
     fn apply_extract_action_produces_valid_output() {
-        let uri = Url::from_file_path("/tmp/test.ts").unwrap();
+        let root = test_root();
+        let test_path = root.join("test.ts");
+        let uri = Url::from_file_path(&test_path).unwrap();
         let source = "\
 function a() {
     const x = 1;
@@ -1030,15 +1062,15 @@ function b() {
         let fragment = "    const x = 1;\n    const y = 2;\n    return x + y;";
         let groups = vec![group(
             vec![
-                instance("/tmp/test.ts", 2, 4, fragment),
-                instance("/tmp/test.ts", 8, 10, fragment),
+                instance(&test_path, 2, 4, fragment),
+                instance(&test_path, 8, 10, fragment),
             ],
             3,
         )];
         let file_lines: Vec<&str> = source.lines().collect();
 
         let actions = build_extract_duplicate_actions(
-            Path::new("/tmp/test.ts"),
+            &test_path,
             &uri,
             &Range {
                 start: Position {
@@ -1206,7 +1238,9 @@ function b() {
 
     #[test]
     fn realistic_partial_duplicate_scenario() {
-        let uri = Url::from_file_path("/tmp/utils.ts").unwrap();
+        let root = test_root();
+        let utils_path = root.join("utils.ts");
+        let uri = Url::from_file_path(&utils_path).unwrap();
         let source = "\
 import { db } from './db';
 
@@ -1234,8 +1268,8 @@ export function fetchProducts() {
 
         let groups = vec![group(
             vec![
-                instance("/tmp/utils.ts", 5, 6, fragment_a),
-                instance("/tmp/utils.ts", 16, 17, fragment_b),
+                instance(&utils_path, 5, 6, fragment_a),
+                instance(&utils_path, 16, 17, fragment_b),
             ],
             2,
         )];
@@ -1244,7 +1278,7 @@ export function fetchProducts() {
 
         // Cursor on line 5 (0-based = 1-based line 6, inside first duplicate)
         let actions = build_extract_duplicate_actions(
-            Path::new("/tmp/utils.ts"),
+            &utils_path,
             &uri,
             &Range {
                 start: Position {
