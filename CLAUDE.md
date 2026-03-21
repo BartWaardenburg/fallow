@@ -1,4 +1,4 @@
-# Fallow - Rust-native dead code analyzer for JavaScript/TypeScript
+# Fallow - Rust-native codebase analyzer for JavaScript/TypeScript
 
 ## What is this?
 
@@ -121,8 +121,8 @@ cargo run -- watch              # Watch mode
 cargo run -- fix --dry-run      # Auto-fix preview
 
 # Benchmarks (see BENCHMARKS.md for methodology)
-cargo bench --bench analysis                           # All Criterion benchmarks
-cargo bench --bench analysis -- large_scale_benches/   # 1000+ and 5000+ file benchmarks only
+cargo bench --bench analysis                           # Standard benchmarks
+cargo bench --bench large_analysis                     # 1000+ and 5000+ file benchmarks only
 cd benchmarks && npm run generate && npm run bench     # Comparative benchmarks vs knip
 cd benchmarks && npm run generate:dupes && npm run bench:dupes  # vs jscpd
 cd benchmarks && npm run generate:circular && npm run bench:circular  # vs madge/dpdm

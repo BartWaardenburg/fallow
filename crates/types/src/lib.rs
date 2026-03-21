@@ -1,4 +1,4 @@
-//! Shared types for the fallow dead code analyzer.
+//! Shared types for the fallow codebase analyzer.
 //!
 //! This crate contains type definitions used across multiple fallow crates
 //! (core, CLI, LSP). It has no analysis logic — only data structures.

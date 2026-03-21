@@ -4,11 +4,14 @@ Find unused code, circular dependencies, and code duplication in JavaScript/Type
 
 ## Features
 
-- **Real-time diagnostics** via the fallow LSP server: unused files, exports, types, dependencies, enum/class members, unresolved imports, unlisted deps, and duplicate exports
+- **Real-time diagnostics** via the fallow LSP server: unused files, exports, types, dependencies, enum/class members, unresolved imports, unlisted deps, duplicate exports, circular dependencies, and code duplication
 - **Quick-fix code actions**: remove unused exports, delete unused files
+- **Refactor code actions**: extract duplicate code into a shared function
+- **Code Lens**: reference counts above each export declaration with click-to-navigate (opens Peek References panel)
+- **Hover information**: export usage status, unused status, and duplicate block locations
 - **Tree views**: browse unused code by issue type and duplicates by clone family in the sidebar
 - **Status bar**: see total issue count and duplication percentage at a glance
-- **Auto-fix**: remove unused exports and dependencies with one command
+- **Auto-fix**: remove unused exports, dependencies, and enum members with one command
 - **Auto-download**: the extension downloads the `fallow-lsp` binary automatically
 
 ## Installation
@@ -30,7 +33,7 @@ code --install-extension fallow-rs.fallow-vscode
 
 | Command | Description |
 |---------|-------------|
-| `Fallow: Run Analysis` | Run full dead code + duplication analysis and update tree views |
+| `Fallow: Run Analysis` | Run full codebase analysis and update tree views |
 | `Fallow: Auto-Fix Unused Exports & Dependencies` | Remove unused exports and dependencies |
 | `Fallow: Preview Fixes (Dry Run)` | Show what fixes would be applied without changing files |
 | `Fallow: Restart Language Server` | Restart the fallow-lsp process |

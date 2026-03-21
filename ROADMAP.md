@@ -10,7 +10,7 @@ Code analysis should be fast enough to be invisible — part of the feedback loo
 
 ## Current State
 
-**Dead code analysis** covers 12 issue types (unused files, exports, types, dependencies, devDeps, enum members, class members, unresolved imports, unlisted deps, duplicate exports, circular dependencies, type-only dependencies) with 84 framework plugins (31 with AST-based config parsing), 5 output formats (human, JSON, SARIF, compact, markdown), auto-fix, and a per-issue severity rules system. Production mode, inline suppression, cross-workspace resolution (npm/yarn/pnpm workspaces and TypeScript project references), and `--changed-since` for incremental CI are all shipped.
+**Unused code analysis** covers 12 issue types (unused files, exports, types, dependencies, devDeps, enum members, class members, unresolved imports, unlisted deps, duplicate exports, circular dependencies, type-only dependencies) with 84 framework plugins (31 with AST-based config parsing), 5 output formats (human, JSON, SARIF, compact, markdown), auto-fix, and a per-issue severity rules system. Production mode, inline suppression, cross-workspace resolution (npm/yarn/pnpm workspaces and TypeScript project references), and `--changed-since` for incremental CI are all shipped.
 
 **Duplication detection** uses a suffix array with LCP for clone detection — no quadratic pairwise comparison. 4 detection modes (strict, mild, weak, semantic), clone family grouping with refactoring suggestions, baseline tracking for CI adoption, and cross-language TS↔JS matching.
 
@@ -45,7 +45,7 @@ See the [README](README.md) for full feature details, benchmarks, and configurat
 
 Fallow exists in a small but active space. Here's how it fits:
 
-- **Knip** adopted the Oxc parser in v6.0, making it 2-4x faster than Knip v5. Fallow remains 3-10x faster than Knip 6.0 due to native Rust compilation and rayon-based parallelism — the parser is only one part of the pipeline, and JavaScript overhead in module resolution, graph construction, and analysis still dominates Knip's runtime.
+- **Knip** adopted the Oxc parser in v6.0, making it 2-4x faster than Knip v5. Fallow remains 2-14x faster than Knip 6.0 due to native Rust compilation and rayon-based parallelism — the parser is only one part of the pipeline, and JavaScript overhead in module resolution, graph construction, and analysis still dominates Knip's runtime.
 - **Biome** has module graph infrastructure and a `noUnusedImports` lint rule, but `noUnusedExports` (cross-file analysis) is not on their published roadmap. If they ship it, Biome becomes the main competitive pressure. Their advantage is bundled formatting/linting; Fallow's advantage is deeper detection (12 issue types, duplication, framework plugins).
 - **rev-dep** (Go-based) performs unused export detection but lacks a plugin system. Its author has stated that framework-specific config parsing is "not feasible in Go" — this is Fallow's core differentiation.
 - **AI coding tools** (Cursor, Copilot, Claude Code) are complementary demand drivers, not replacements. They generate code but don't track cross-file usage graphs. AI-assisted development increases dead code accumulation, making analysis tools more important, not less.
@@ -71,7 +71,7 @@ Fallow exists in a small but active space. Here's how it fits:
 
 These are ideas, not commitments. They ship as 1.x releases based on user demand.
 
-- **More auto-fix targets** — delete unused files (`--allow-remove-files`), remove unused enum/class members, post-fix formatting integration. Auto-fix is the highest-leverage feature for adoption — users want one-command cleanup.
+- **More auto-fix targets** — delete unused files (`--allow-remove-files`), remove unused class members, post-fix formatting integration. Auto-fix is the highest-leverage feature for adoption — users want one-command cleanup. (Enum member removal is already shipped.)
 - **JSDoc/TSDoc tag support** — `@public` (never report as unused), `@internal` (only report if unused within project). Common request from library authors.
 - **Fine-grained incremental analysis** — patch the graph in place, track export-level dependencies. Cache-aware parsing already covers the main bottleneck; this would additionally skip file I/O for unchanged files.
 - ~~**Markdown reporter** — formatted output for PR comments. Enables `fallow check --format markdown | gh pr comment` workflows without custom scripting.~~ **Done** — shipped as `--format markdown`.
@@ -96,7 +96,7 @@ These are not gated on any release — they happen continuously:
 ## Try It
 
 ```bash
-npx fallow check    # Dead code — zero config, sub-second
+npx fallow check    # Unused code — zero config, sub-second
 npx fallow dupes    # Duplication — find copy-paste clones
 ```
 

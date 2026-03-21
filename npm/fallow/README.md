@@ -6,7 +6,7 @@ The codebase analyzer for JavaScript and TypeScript, built in Rust.
 [![npm](https://img.shields.io/npm/v/fallow.svg)](https://www.npmjs.com/package/fallow)
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/fallow-rs/fallow/blob/main/LICENSE)
 
-Unused code, circular dependencies, code duplication, and complexity hotspots. Found in seconds, not minutes. fallow analyzes your codebase for unused files, exports, dependencies, and types, detects circular dependencies, and finds duplicated code blocks. **3-36x faster** than [knip](https://knip.dev) v5 (**2-14x faster** than knip v6), **20-33x faster** than [jscpd](https://github.com/kucherenko/jscpd) for duplication detection, with no Node.js runtime dependency.
+Unused code, circular dependencies, and code duplication. Found in seconds, not minutes. fallow analyzes your codebase for unused files, exports, dependencies, and types, detects circular dependencies, and finds duplicated code blocks. **3-36x faster** than [knip](https://knip.dev) v5 (**2-14x faster** than knip v6), **20-33x faster** than [jscpd](https://github.com/kucherenko/jscpd) for duplication detection, with no Node.js runtime dependency.
 
 ## Installation
 
@@ -17,10 +17,10 @@ npm install -g fallow
 ## Usage
 
 ```bash
-fallow check                     # Dead code analysis -- zero config, sub-second
+fallow check                     # Unused code analysis -- zero config, sub-second
 fallow dupes                     # Duplication detection -- find copy-paste clones
 fallow dupes --mode semantic     # Catch clones with renamed variables
-fallow fix --dry-run             # Preview auto-removal of dead exports and deps
+fallow fix --dry-run             # Preview auto-removal of unused exports and deps
 ```
 
 ## What it finds

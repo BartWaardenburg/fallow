@@ -15,7 +15,7 @@ pub fn run_init(root: &std::path::Path, use_toml: bool) -> ExitCode {
 
     if use_toml {
         let config_path = root.join("fallow.toml");
-        let default_config = r#"# fallow.toml - Dead code analysis configuration
+        let default_config = r#"# fallow.toml - Codebase analysis configuration
 # See https://docs.fallow.tools for documentation
 
 # Additional entry points (beyond auto-detected ones)

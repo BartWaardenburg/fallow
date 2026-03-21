@@ -1,4 +1,4 @@
-//! Parsing and extraction engine for the fallow dead code analyzer.
+//! Parsing and extraction engine for the fallow codebase analyzer.
 //!
 //! This crate handles all file parsing: JS/TS via Oxc, Vue/Svelte SFC extraction,
 //! Astro frontmatter, MDX import/export extraction, CSS Module class name extraction,

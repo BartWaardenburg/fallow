@@ -1,4 +1,4 @@
-//! Plugin system for framework-aware dead code analysis.
+//! Plugin system for framework-aware codebase analysis.
 //!
 //! Unlike knip's JavaScript plugin system that evaluates config files at runtime,
 //! fallow's plugin system uses Oxc's parser to extract configuration values from

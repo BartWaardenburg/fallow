@@ -150,7 +150,7 @@ const ISSUE_TYPE_FLAGS: &[(&str, &str)] = &[
 #[tool_router]
 impl FallowMcp {
     #[tool(
-        description = "Analyze a JavaScript/TypeScript project for dead code. Detects unused files, exports, types, dependencies, enum/class members, unresolved imports, unlisted dependencies, and duplicate exports. Returns structured JSON with all issues found, grouped by issue type.",
+        description = "Analyze a JavaScript/TypeScript project for unused code, circular dependencies, and more. Detects unused files, exports, types, dependencies, enum/class members, unresolved imports, unlisted dependencies, duplicate exports, and circular dependencies. Returns structured JSON with all issues found, grouped by issue type.",
         annotations(read_only_hint = true, open_world_hint = true)
     )]
     async fn analyze(&self, params: Parameters<AnalyzeParams>) -> Result<CallToolResult, McpError> {
@@ -362,10 +362,10 @@ impl ServerHandler for FallowMcp {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(
                 Implementation::new("fallow-mcp", env!("CARGO_PKG_VERSION"))
-                    .with_description("Dead code analysis for JavaScript/TypeScript projects"),
+                    .with_description("Codebase analysis for JavaScript/TypeScript projects"),
             )
             .with_instructions(
-                "Fallow MCP server — dead code analysis for JavaScript/TypeScript projects. \
+                "Fallow MCP server — codebase analysis for JavaScript/TypeScript projects. \
                  Tools: analyze (full analysis), check_changed (incremental/PR analysis), \
                  find_dupes (code duplication), fix_preview/fix_apply (auto-fix), \
                  project_info (plugins, files, entry points).",

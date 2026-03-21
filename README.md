@@ -15,7 +15,7 @@
 
 ---
 
-Unused code, circular dependencies, code duplication, and complexity hotspots. Found in seconds, not minutes. fallow analyzes your entire codebase for unused files, exports, dependencies, and types, detects circular dependencies, finds duplicated code blocks, and surfaces complexity hotspots. 3-36x faster than [knip](https://knip.dev) v5 (2-14x faster than knip v6) for unused code analysis, 20-33x faster than [jscpd](https://github.com/kucherenko/jscpd) for duplication detection, with no Node.js runtime dependency.
+Unused code, circular dependencies, and code duplication. Found in seconds, not minutes. fallow analyzes your entire codebase for unused files, exports, dependencies, and types, detects circular dependencies, and finds duplicated code blocks. 3-36x faster than [knip](https://knip.dev) v5 (2-14x faster than knip v6) for unused code analysis, 20-33x faster than [jscpd](https://github.com/kucherenko/jscpd) for duplication detection, with no Node.js runtime dependency.
 
 ```bash
 npx fallow check    # Unused code analysis
@@ -74,7 +74,7 @@ fallow dupes --trace src/utils.ts:42  # Show all clones of code at this location
 | Mode | What it catches |
 |:-----|:----------------|
 | **strict** | Exact token-for-token clones |
-| **mild** | Default — normalizes syntax variations |
+| **mild** | Default — equivalent to strict with AST-based tokenization (whitespace/comments already absent) |
 | **weak** | Clones with different string literal values |
 | **semantic** | Clones with renamed variables and different literals |
 
@@ -220,7 +220,7 @@ Supports `--changed-since main` for PR-only analysis, `--baseline` for failing o
 - **Rules system** — per-issue-type severity (`error`/`warn`/`off`) for incremental CI adoption
 - **Inline suppression** — `// fallow-ignore-next-line` and `// fallow-ignore-file` comments to suppress individual findings
 - **Watch mode** — `fallow watch` re-analyzes on file changes
-- **Auto-fix** — `fallow fix` removes unused exports and dependencies (`--dry-run` to preview)
+- **Auto-fix** — `fallow fix` removes unused exports, dependencies, and enum members (`--dry-run` to preview)
 - **VS Code extension** — tree views for unused code and duplicates, status bar, auto-download of the LSP binary, one-click fixes ([`editors/vscode`](https://github.com/fallow-rs/fallow/tree/main/editors/vscode))
 - **LSP server** — real-time diagnostics, hover information, "remove unused export" code actions, and Code Lens with clickable reference counts above exports (opens Peek References panel)
 - **Workspace support** — npm, yarn, and pnpm workspaces (including `pnpm-workspace.yaml`, content-addressable store detection, and injected dependencies) with `exports` field subpath resolution. TypeScript project references (`tsconfig.json` `references`) are also discovered as workspaces
@@ -260,21 +260,23 @@ fallow uses syntactic analysis only — no type information. This is what makes 
 
 ## Custom plugins
 
-Need support for an internal framework? Create a `fallow-plugin-<name>.toml` file:
+Need support for an internal framework? Create a `fallow-plugin-<name>.jsonc` file:
 
-```toml
-name = "my-framework"
-enablers = ["my-framework"]
-entry_points = ["src/routes/**/*.{ts,tsx}"]
-always_used = ["src/setup.ts"]
-tooling_dependencies = ["my-framework-cli"]
-
-[[used_exports]]
-pattern = "src/routes/**/*.{ts,tsx}"
-exports = ["default", "loader", "action"]
+```jsonc
+{
+  "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/plugin-schema.json",
+  "name": "my-framework",
+  "enablers": ["my-framework"],
+  "entryPoints": ["src/routes/**/*.{ts,tsx}"],
+  "alwaysUsed": ["src/setup.ts"],
+  "toolingDependencies": ["my-framework-cli"],
+  "usedExports": [
+    { "pattern": "src/routes/**/*.{ts,tsx}", "exports": ["default", "loader", "action"] }
+  ]
+}
 ```
 
-Fallow auto-discovers `fallow-plugin-*.toml` files in your project root and `.fallow/plugins/` directory. See the [Plugin Authoring Guide](https://github.com/fallow-rs/fallow/blob/main/docs/plugin-authoring.md) for the full format and examples.
+Fallow auto-discovers `fallow-plugin-*.{jsonc,json,toml}` files in your project root and `.fallow/plugins/` directory. See the [Plugin Authoring Guide](https://github.com/fallow-rs/fallow/blob/main/docs/plugin-authoring.md) for the full format and examples.
 
 ## Learn more
 
@@ -282,7 +284,7 @@ Fallow auto-discovers `fallow-plugin-*.toml` files in your project root and `.fa
 - [Migrating from knip](https://docs.fallow.tools/migration/from-knip)
 - [Full plugin list](https://docs.fallow.tools/frameworks/built-in)
 - [Plugin Authoring Guide](https://github.com/fallow-rs/fallow/blob/main/docs/plugin-authoring.md)
-- [Agent Skills](https://github.com/fallow-rs/fallow-skills) — Dead code analysis skills for Claude Code, Cursor, Windsurf, and other AI agents
+- [Agent Skills](https://github.com/fallow-rs/fallow-skills) — Codebase analysis skills for Claude Code, Cursor, Windsurf, and other AI agents
 
 ## Contributing
 

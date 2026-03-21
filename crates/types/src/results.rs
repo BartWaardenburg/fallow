@@ -1,4 +1,4 @@
-//! Analysis result types for all dead code issue categories.
+//! Analysis result types for all issue categories.
 
 use std::path::PathBuf;
 

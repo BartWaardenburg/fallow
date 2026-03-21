@@ -172,7 +172,7 @@
       "fallow": [
         {
           "id": "fallow.deadCode",
-          "name": "Dead Code"
+          "name": "Unused Code"
         },
         {
           "id": "fallow.duplicates",
