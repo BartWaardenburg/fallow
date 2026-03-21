@@ -850,6 +850,14 @@ fn workspace_project_discovers_workspace_packages() {
         let _ =
             std::os::unix::fs::symlink(root.join("packages/utils"), nm.join("@workspace/utils"));
     }
+    #[cfg(windows)]
+    {
+        let _ = std::os::windows::fs::symlink_dir(root.join("packages/shared"), nm.join("shared"));
+        let _ = std::os::windows::fs::symlink_dir(
+            root.join("packages/utils"),
+            nm.join("@workspace/utils"),
+        );
+    }
 
     let config = create_config(root.clone());
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
