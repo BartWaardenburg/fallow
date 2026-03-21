@@ -10,13 +10,31 @@
     "url": "https://github.com/fallow-rs/fallow",
     "directory": "editors/vscode"
   },
+  "icon": "icon.png",
   "homepage": "https://docs.fallow.tools",
   "bugs": {
     "url": "https://github.com/fallow-rs/fallow/issues"
   },
+  "qna": "https://github.com/fallow-rs/fallow/issues",
+  "galleryBanner": {
+    "color": "#2d2d2d",
+    "theme": "dark"
+  },
+  "badges": [
+    {
+      "url": "https://img.shields.io/visual-studio-marketplace/v/fallow-rs.fallow-vscode",
+      "href": "https://marketplace.visualstudio.com/items?itemName=fallow-rs.fallow-vscode",
+      "description": "VS Code Marketplace Version"
+    },
+    {
+      "url": "https://img.shields.io/crates/v/fallow-cli",
+      "href": "https://crates.io/crates/fallow-cli",
+      "description": "crates.io Version"
+    }
+  ],
   "categories": [
     "Linters",
-    "Programming Languages"
+    "Other"
   ],
   "keywords": [
     "dead-code",
@@ -25,7 +43,10 @@
     "dependencies",
     "duplication",
     "typescript",
-    "javascript"
+    "javascript",
+    "knip",
+    "monorepo",
+    "circular-dependencies"
   ],
   "engines": {
     "vscode": "^1.85.0"
@@ -56,6 +77,10 @@
       {
         "command": "fallow.showOutput",
         "title": "Fallow: Show Output Channel"
+      },
+      {
+        "command": "fallow.noop",
+        "title": "Fallow: No-op (internal)"
       }
     ],
     "configuration": {
@@ -106,9 +131,8 @@
         "fallow.duplication.threshold": {
           "type": "number",
           "default": 5,
-          "minimum": 0,
-          "maximum": 100,
-          "description": "Duplication threshold percentage."
+          "minimum": 1,
+          "description": "Minimum number of lines for a code block to be reported as a duplicate."
         },
         "fallow.duplication.mode": {
           "type": "string",
@@ -140,7 +164,7 @@
         {
           "id": "fallow",
           "title": "Fallow",
-          "icon": "$(search)"
+          "icon": "assets/icon-sidebar.svg"
         }
       ]
     },
