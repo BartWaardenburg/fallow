@@ -95,7 +95,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Analyze project for unused code, circular dependencies, and code duplication [default]
+    /// Analyze project for unused code, circular dependencies, and code duplication \[default\]
     Check {
         /// CI mode: equivalent to --format sarif --fail-on-issues --quiet
         #[arg(long)]
