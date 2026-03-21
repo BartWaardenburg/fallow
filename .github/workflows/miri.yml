@@ -50,6 +50,8 @@ jobs:
       - name: fallow-graph
         run: cargo +nightly miri test -p fallow-graph -- --skip proptests
 
-      # AST extraction and parser tests — skip cache module (file I/O)
+      # AST extraction — skip cache (file I/O) and full parser integration tests
+      # (Oxc parser under Miri is ~1000x slower; unit tests + SFC/suppress cover
+      # our own data structures which is what Miri is valuable for)
       - name: fallow-extract
-        run: cargo +nightly miri test -p fallow-extract -- --skip cache
+        run: cargo +nightly miri test -p fallow-extract -- --skip cache --skip tests::js_ts --skip tests::css --skip tests::mdx --skip tests::astro
