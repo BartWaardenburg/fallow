@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -e
+
+echo "=== Pre-push CI check ==="
+
+# Quick checks first (fail fast)
+echo "→ cargo fmt"
+cargo fmt --all -- --check
+
+echo "→ cargo clippy"
+cargo clippy --workspace -- -D warnings
+
+echo "→ cargo test"
+cargo test --workspace
+
+echo "→ cargo doc (rustdoc warnings)"
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items 2>&1 | tail -1
+
+echo "=== All checks passed ==="
