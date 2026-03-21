@@ -286,7 +286,7 @@ fn load_json_or_jsonc(path: &Path) -> Result<serde_json::Value, String> {
     serde_json::from_str(&stripped).map_err(|e| format!("failed to parse {}: {e}", path.display()))
 }
 
-/// Extract a string-or-array field as a Vec<String>.
+/// Extract a string-or-array field as a `Vec<String>`.
 fn string_or_array(value: &serde_json::Value) -> Vec<String> {
     match value {
         serde_json::Value::String(s) => vec![s.clone()],

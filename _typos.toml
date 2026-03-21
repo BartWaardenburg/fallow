@@ -1,0 +1,21 @@
+[files]
+extend-exclude = [
+    "editors/vscode/dist/",
+    "*.js.map",
+    "tests/fixtures/",
+    "reference/",
+    "benchmarks/",
+]
+
+[default.extend-identifiers]
+ue = "ue"
+ba = "ba"
+caf = "caf"
+fpr = "fpr"
+
+[default.extend-words]
+ba = "ba"
+Informations = "Informations"
+Pn = "Pn"
+ot = "ot"
+Ot = "Ot"

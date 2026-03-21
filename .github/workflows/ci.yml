@@ -88,11 +88,11 @@ jobs:
       - uses: EmbarkStudios/cargo-deny-action@v2
 
   msrv:
-    name: MSRV (1.85)
+    name: MSRV (1.92)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.85
+      - uses: dtolnay/rust-toolchain@1.92.0
       - uses: Swatinem/rust-cache@v2
         with:
           key: msrv

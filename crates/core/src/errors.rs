@@ -22,7 +22,7 @@ pub(crate) enum FallowErrorKind {
 
 /// Errors that can occur during analysis.
 ///
-/// Wraps a [`FallowErrorKind`] with optional diagnostic metadata:
+/// Wraps a `FallowErrorKind` with optional diagnostic metadata:
 /// an error code, actionable help text, and additional context.
 #[derive(Debug)]
 pub struct FallowError {

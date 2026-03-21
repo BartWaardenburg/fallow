@@ -121,10 +121,10 @@ fn resolve_binary() -> String {
     // Check for sibling binary next to the current executable (npm install scenario)
     if let Ok(exe) = std::env::current_exe() {
         let sibling = exe.with_file_name("fallow");
-        if sibling.is_file() {
-            if let Some(path) = sibling.to_str() {
-                return path.to_string();
-            }
+        if sibling.is_file()
+            && let Some(path) = sibling.to_str()
+        {
+            return path.to_string();
         }
     }
 
