@@ -18,7 +18,7 @@
 Unused code, circular dependencies, code duplication, and complexity hotspots. Found in seconds, not minutes. fallow analyzes your entire codebase for unused files, exports, dependencies, and types, detects circular dependencies, finds duplicated code blocks, and surfaces complexity hotspots. 3-36x faster than [knip](https://knip.dev) v5 (2-14x faster than knip v6) for unused code analysis, 20-33x faster than [jscpd](https://github.com/kucherenko/jscpd) for duplication detection, with no Node.js runtime dependency.
 
 ```bash
-npx fallow check    # Dead code analysis
+npx fallow check    # Unused code analysis
 npx fallow dupes    # Duplication detection
 ```
 
@@ -29,7 +29,7 @@ npx fallow dupes    # Duplication detection
 ## Quick start
 
 ```bash
-npx fallow check                     # Dead code — zero config, sub-second
+npx fallow check                     # Unused code — zero config, sub-second
 npx fallow dupes                     # Duplication — find copy-paste clones
 npx fallow dupes --mode semantic     # Catch clones with renamed variables
 npx fallow fix --dry-run             # Preview auto-removal of dead exports and deps
@@ -221,7 +221,7 @@ Supports `--changed-since main` for PR-only analysis, `--baseline` for failing o
 - **Inline suppression** — `// fallow-ignore-next-line` and `// fallow-ignore-file` comments to suppress individual findings
 - **Watch mode** — `fallow watch` re-analyzes on file changes
 - **Auto-fix** — `fallow fix` removes unused exports and dependencies (`--dry-run` to preview)
-- **VS Code extension** — tree views for dead code and duplicates, status bar, auto-download of the LSP binary, one-click fixes ([`editors/vscode`](https://github.com/fallow-rs/fallow/tree/main/editors/vscode))
+- **VS Code extension** — tree views for unused code and duplicates, status bar, auto-download of the LSP binary, one-click fixes ([`editors/vscode`](https://github.com/fallow-rs/fallow/tree/main/editors/vscode))
 - **LSP server** — real-time diagnostics, hover information, "remove unused export" code actions, and Code Lens with clickable reference counts above exports (opens Peek References panel)
 - **Workspace support** — npm, yarn, and pnpm workspaces (including `pnpm-workspace.yaml`, content-addressable store detection, and injected dependencies) with `exports` field subpath resolution. TypeScript project references (`tsconfig.json` `references`) are also discovered as workspaces
 - **Script binary analysis** — parses `package.json` scripts to detect CLI tool usage, reducing false positives in unused dependency detection

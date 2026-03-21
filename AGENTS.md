@@ -49,7 +49,7 @@ Set `FALLOW_FORMAT=json` and `FALLOW_QUIET=1` in your agent environment to avoid
 
 ### `check` (default)
 
-Run dead code analysis.
+Run codebase analysis.
 
 ```bash
 fallow check --format json --quiet
@@ -180,7 +180,7 @@ JSON output includes `version`, `elapsed_ms`, and `total_issues` metadata alongs
 
 ## Common agent workflows
 
-### Audit a project for all dead code
+### Audit a project for all unused code
 
 ```bash
 fallow check --format json --quiet
@@ -192,7 +192,7 @@ fallow check --format json --quiet
 fallow check --format json --quiet --unused-exports
 ```
 
-### Check if a PR introduces dead code
+### Check if a PR introduces unused code
 
 ```bash
 fallow check --format json --quiet --changed-since main --fail-on-issues

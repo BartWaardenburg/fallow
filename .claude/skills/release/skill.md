@@ -84,7 +84,7 @@ Write a high-quality changelog for the GitHub release. This is separate from `CH
 - Breaking changes (if any)
 - Infrastructure / CI
 
-**Write for the audience** — developers evaluating fallow as a dead code analyzer for JS/TS projects. Explain what matters, not just what changed.
+**Write for the audience** — developers evaluating fallow as a codebase analyzer for JS/TS projects. Explain what matters, not just what changed.
 
 **Be honest about tradeoffs.** If something is experimental or has known limitations, say so.
 

@@ -1,12 +1,12 @@
 # Fallow for VS Code
 
-Dead code and duplication analyzer for JavaScript/TypeScript projects. Powered by [fallow](https://docs.fallow.tools), a Rust-native alternative to knip that is 3-36x faster than knip v5 (2-14x faster than knip v6).
+Find unused code, circular dependencies, and code duplication in JavaScript/TypeScript projects. Powered by [fallow](https://docs.fallow.tools), a Rust-native alternative to knip that is 3-36x faster than knip v5 (2-14x faster than knip v6).
 
 ## Features
 
 - **Real-time diagnostics** via the fallow LSP server: unused files, exports, types, dependencies, enum/class members, unresolved imports, unlisted deps, and duplicate exports
 - **Quick-fix code actions**: remove unused exports, delete unused files
-- **Tree views**: browse dead code by issue type and duplicates by clone family in the sidebar
+- **Tree views**: browse unused code by issue type and duplicates by clone family in the sidebar
 - **Status bar**: see total issue count and duplication percentage at a glance
 - **Auto-fix**: remove unused exports and dependencies with one command
 - **Auto-download**: the extension downloads the `fallow-lsp` binary automatically
