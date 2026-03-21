@@ -872,7 +872,8 @@ fn regex_pattern_to_suffix(pattern: &str) -> Option<String> {
     None
 }
 
-#[cfg(test)]
+// Visitor tests invoke Oxc parser which is ~1000x slower under Miri.
+#[cfg(all(test, not(miri)))]
 mod tests {
     use super::*;
     use crate::parse::parse_source_to_module;

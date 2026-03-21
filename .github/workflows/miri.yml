@@ -17,12 +17,16 @@ on:
       - 'crates/types/**'
       - '.github/workflows/miri.yml'
 
+permissions: {}
+
 concurrency:
   group: miri-${{ github.ref }}
   cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
+  # Pin nightly to avoid breakage from Miri regressions (Oxc does the same)
+  MIRI_TOOLCHAIN: nightly-2026-03-20
 
 jobs:
   miri:
@@ -33,9 +37,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@nightly
-        with:
-          components: miri
+      - name: Install Miri toolchain
+        run: |
+          rustup toolchain install "$MIRI_TOOLCHAIN" --component miri
+          cargo +"$MIRI_TOOLCHAIN" miri setup
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -43,16 +48,15 @@ jobs:
 
       # Pure data structure tests — no file I/O, all tests run
       - name: fallow-types
-        run: cargo +nightly miri test -p fallow-types
+        run: cargo +"$MIRI_TOOLCHAIN" miri test -p fallow-types --lib --tests
 
       # Graph construction and resolution tests — skip proptest (file I/O for
       # persisted failures is unsupported under Miri)
       - name: fallow-graph
-        run: cargo +nightly miri test -p fallow-graph -- --skip proptests
+        run: cargo +"$MIRI_TOOLCHAIN" miri test -p fallow-graph --lib --tests -- --skip proptests
 
-      # AST extraction — only run suppress and unit tests. Skip cache (file I/O)
-      # and all parser integration tests (js_ts, sfc, css, mdx, astro) because
-      # Oxc parser under Miri is ~1000x slower than native, exceeding timeouts.
-      # Miri's value here is checking our own data structures, not Oxc internals.
+      # AST extraction — parser-heavy tests are gated with #[cfg(not(miri))]
+      # in source (visitor.rs, lib.rs). Only suppress, sfc, css unit tests run.
+      # Cache tests skipped (file I/O unsupported under Miri).
       - name: fallow-extract
-        run: cargo +nightly miri test -p fallow-extract -- --skip cache --skip tests
+        run: cargo +"$MIRI_TOOLCHAIN" miri test -p fallow-extract --lib --tests -- --skip cache

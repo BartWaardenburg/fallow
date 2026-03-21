@@ -145,5 +145,7 @@ pub fn parse_from_content(file_id: FileId, path: &Path, content: &str) -> Module
     parse_source_to_module(file_id, path, content, content_hash)
 }
 
-#[cfg(test)]
+// Parser integration tests invoke Oxc under Miri which is ~1000x slower.
+// Unit tests in individual modules (visitor, suppress, sfc, css, etc.) still run.
+#[cfg(all(test, not(miri)))]
 mod tests;
