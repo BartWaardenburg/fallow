@@ -43,7 +43,7 @@ code --install-extension fallow-rs.fallow-vscode
 | `fallow.lspPath` | `""` | Path to the `fallow-lsp` binary. Leave empty for auto-detection. |
 | `fallow.autoDownload` | `true` | Automatically download the binary if not found. |
 | `fallow.issueTypes` | all enabled | Toggle individual issue types on/off. |
-| `fallow.duplication.threshold` | `5` | Duplication threshold percentage. |
+| `fallow.duplication.threshold` | `5` | Minimum number of lines for a code block to be reported as a duplicate. |
 | `fallow.duplication.mode` | `"mild"` | Detection mode: `strict`, `mild`, `weak`, or `semantic`. |
 | `fallow.production` | `false` | Production mode: exclude test/dev files, only production scripts. |
 | `fallow.trace.server` | `"off"` | LSP trace level: `off`, `messages`, or `verbose`. |
