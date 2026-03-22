@@ -635,8 +635,10 @@ pub fn discover_plugin_entry_points(
 
     // Match plugin entry patterns against files using a single GlobSet
     // for O(files) matching instead of O(patterns × files).
+    // Track which plugin name corresponds to each glob index.
     let mut builder = globset::GlobSetBuilder::new();
-    for pattern in plugin_result
+    let mut glob_plugin_names: Vec<&str> = Vec::new();
+    for (pattern, pname) in plugin_result
         .entry_patterns
         .iter()
         .chain(plugin_result.discovered_always_used.iter())
@@ -644,25 +646,27 @@ pub fn discover_plugin_entry_points(
     {
         if let Ok(glob) = globset::Glob::new(pattern) {
             builder.add(glob);
+            glob_plugin_names.push(pname);
         }
     }
     if let Ok(glob_set) = builder.build()
         && !glob_set.is_empty()
     {
         for (idx, rel) in relative_paths.iter().enumerate() {
-            if glob_set.is_match(rel) {
+            let matches = glob_set.matches(rel);
+            if !matches.is_empty() {
+                // Use the plugin name from the first matching pattern
+                let name = glob_plugin_names[matches[0]].to_string();
                 entries.push(EntryPoint {
                     path: files[idx].path.clone(),
-                    source: EntryPointSource::Plugin {
-                        name: "plugin".to_string(),
-                    },
+                    source: EntryPointSource::Plugin { name },
                 });
             }
         }
     }
 
     // Add setup files (absolute paths from plugin config parsing)
-    for setup_file in &plugin_result.setup_files {
+    for (setup_file, pname) in &plugin_result.setup_files {
         let resolved = if setup_file.is_absolute() {
             setup_file.clone()
         } else {
@@ -672,7 +676,7 @@ pub fn discover_plugin_entry_points(
             entries.push(EntryPoint {
                 path: resolved,
                 source: EntryPointSource::Plugin {
-                    name: "plugin-setup".to_string(),
+                    name: pname.clone(),
                 },
             });
         } else {
@@ -683,7 +687,7 @@ pub fn discover_plugin_entry_points(
                     entries.push(EntryPoint {
                         path: with_ext,
                         source: EntryPointSource::Plugin {
-                            name: "plugin-setup".to_string(),
+                            name: pname.clone(),
                         },
                     });
                     break;
@@ -696,6 +700,260 @@ pub fn discover_plugin_entry_points(
     entries.sort_by(|a, b| a.path.cmp(&b.path));
     entries.dedup_by(|a, b| a.path == b.path);
     entries
+}
+
+/// Discover entry points from infrastructure config files (Dockerfile, Procfile, fly.toml).
+///
+/// These files reference source files as entry points for processes that run outside
+/// the main JS/TS build pipeline (workers, migrations, cron jobs, etc.).
+pub fn discover_infrastructure_entry_points(root: &Path) -> Vec<EntryPoint> {
+    let _span = tracing::info_span!("discover_infrastructure_entry_points").entered();
+    let mut file_refs: Vec<String> = Vec::new();
+
+    // Search for Dockerfiles in root and common subdirectories
+    let search_dirs: Vec<PathBuf> = std::iter::once(root.to_path_buf())
+        .chain(
+            ["config", "docker", "deploy", ".docker"]
+                .iter()
+                .map(|d| root.join(d)),
+        )
+        .filter(|d| d.is_dir())
+        .collect();
+
+    for dir in &search_dirs {
+        for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy();
+            if is_dockerfile(&name_str)
+                && let Ok(content) = std::fs::read_to_string(entry.path())
+            {
+                file_refs.extend(extract_dockerfile_file_refs(&content));
+            }
+        }
+    }
+
+    // Procfile (Heroku, Foreman, etc.)
+    if let Ok(content) = std::fs::read_to_string(root.join("Procfile")) {
+        file_refs.extend(extract_procfile_file_refs(&content));
+    }
+
+    // fly.toml and fly.*.toml (Fly.io — projects often have fly.worker.toml, etc.)
+    for entry in std::fs::read_dir(root).into_iter().flatten().flatten() {
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy();
+        if (name_str == "fly.toml" || (name_str.starts_with("fly.") && name_str.ends_with(".toml")))
+            && let Ok(content) = std::fs::read_to_string(entry.path())
+        {
+            file_refs.extend(extract_fly_toml_file_refs(&content));
+        }
+    }
+
+    if file_refs.is_empty() {
+        return Vec::new();
+    }
+
+    // Resolve file references against project root
+    let canonical_root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    let mut entries: Vec<EntryPoint> = file_refs
+        .iter()
+        .filter_map(|file_ref| {
+            resolve_entry_path(
+                root,
+                file_ref,
+                &canonical_root,
+                EntryPointSource::InfrastructureConfig,
+            )
+        })
+        .collect();
+
+    entries.sort_by(|a, b| a.path.cmp(&b.path));
+    entries.dedup_by(|a, b| a.path == b.path);
+
+    if !entries.is_empty() {
+        tracing::info!(
+            count = entries.len(),
+            "infrastructure entry points discovered"
+        );
+    }
+
+    entries
+}
+
+/// Check if a filename is a Dockerfile.
+fn is_dockerfile(name: &str) -> bool {
+    name == "Dockerfile"
+        || (name.starts_with("Dockerfile.") && !name.ends_with(".dockerignore"))
+        || name.ends_with(".Dockerfile")
+}
+
+/// Extract file path references from Dockerfile RUN/CMD/ENTRYPOINT instructions.
+///
+/// Handles both shell form (`CMD node file.js`) and exec form (`CMD ["node", "file.js"]`).
+/// Multi-line commands with `\` continuation are joined.
+fn extract_dockerfile_file_refs(content: &str) -> Vec<String> {
+    let mut refs = Vec::new();
+    let lines: Vec<&str> = content.lines().collect();
+    let mut i = 0;
+
+    while i < lines.len() {
+        let line = lines[i].trim();
+
+        // Skip comments and empty lines
+        if line.is_empty() || line.starts_with('#') {
+            i += 1;
+            continue;
+        }
+
+        // Check for RUN, CMD, ENTRYPOINT instructions
+        let Some(instruction_end) = strip_dockerfile_instruction(line) else {
+            i += 1;
+            continue;
+        };
+
+        // Handle multi-line continuation with `\`
+        let mut full_cmd = instruction_end.to_string();
+        while full_cmd.ends_with('\\') {
+            full_cmd.truncate(full_cmd.len() - 1);
+            i += 1;
+            if i >= lines.len() {
+                break;
+            }
+            full_cmd.push(' ');
+            full_cmd.push_str(lines[i].trim());
+        }
+
+        // Handle exec form: ["node", "file.js", "--flag"]
+        let cmd_str = full_cmd.trim();
+        let command = if cmd_str.starts_with('[') {
+            parse_exec_form(cmd_str)
+        } else {
+            cmd_str.to_string()
+        };
+
+        refs.extend(extract_script_file_refs(&command));
+        // Also extract file paths from flag values (e.g., --alias:name=./path.ts)
+        refs.extend(extract_flag_value_file_refs(&command));
+        i += 1;
+    }
+
+    refs
+}
+
+/// Extract file path references from flag values like `--alias:name=./path.ts`.
+///
+/// Build tools (esbuild, webpack, etc.) use flag values that reference source files.
+/// This extracts paths from `--key=value` patterns where the value looks like a source file.
+fn extract_flag_value_file_refs(command: &str) -> Vec<String> {
+    let mut refs = Vec::new();
+    for token in command.split_whitespace() {
+        if !token.starts_with('-') {
+            continue;
+        }
+        // Extract value after `=` in flags like --alias:name=./path.ts
+        if let Some((_key, value)) = token.split_once('=')
+            && looks_like_script_file(value)
+        {
+            refs.push(value.to_string());
+        }
+    }
+    refs
+}
+
+/// Strip a Dockerfile instruction keyword (RUN, CMD, ENTRYPOINT) and return the rest.
+fn strip_dockerfile_instruction(line: &str) -> Option<&str> {
+    for keyword in &["RUN ", "CMD ", "ENTRYPOINT "] {
+        if line.len() >= keyword.len() && line[..keyword.len()].eq_ignore_ascii_case(keyword) {
+            return Some(&line[keyword.len()..]);
+        }
+    }
+    None
+}
+
+/// Parse Docker/TOML exec form `["cmd", "arg1", "arg2"]` into a shell-like command string.
+///
+/// Handles commas inside quoted strings correctly.
+fn parse_exec_form(s: &str) -> String {
+    let inner = s.trim().trim_start_matches('[').trim_end_matches(']');
+    let mut parts = Vec::new();
+    let mut in_quotes = false;
+    let mut current = String::new();
+    for ch in inner.chars() {
+        match ch {
+            '"' | '\'' => in_quotes = !in_quotes,
+            ',' if !in_quotes => {
+                let t = current.trim().to_string();
+                if !t.is_empty() {
+                    parts.push(t);
+                }
+                current.clear();
+            }
+            _ => current.push(ch),
+        }
+    }
+    let t = current.trim().to_string();
+    if !t.is_empty() {
+        parts.push(t);
+    }
+    parts.join(" ")
+}
+
+/// Extract file path references from a Procfile.
+///
+/// Format: `process_type: command`
+fn extract_procfile_file_refs(content: &str) -> Vec<String> {
+    let mut refs = Vec::new();
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        // Procfile format: `type: command`
+        if let Some((_process_type, command)) = line.split_once(':') {
+            refs.extend(extract_script_file_refs(command.trim()));
+        }
+    }
+    refs
+}
+
+/// Extract file path references from fly.toml.
+///
+/// Parses `release_command`, `cmd` at any level, and all keys under `[processes]`.
+fn extract_fly_toml_file_refs(content: &str) -> Vec<String> {
+    let mut refs = Vec::new();
+    let mut in_processes_section = false;
+
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+
+        // Track TOML sections
+        if line.starts_with('[') {
+            in_processes_section =
+                line.trim_start_matches('[').trim_end_matches(']').trim() == "processes";
+            continue;
+        }
+
+        // Match key = "value" or key = 'value' patterns
+        if let Some((key, value)) = line.split_once('=') {
+            let key = key.trim();
+            let value = value.trim().trim_matches('"').trim_matches('\'');
+
+            // Global keys: release_command, cmd
+            // Section keys: all keys under [processes]
+            if matches!(key, "release_command" | "cmd") || in_processes_section {
+                let command = if value.starts_with('[') {
+                    parse_exec_form(value)
+                } else {
+                    value.to_string()
+                };
+                refs.extend(extract_script_file_refs(&command));
+            }
+        }
+    }
+
+    refs
 }
 
 /// Pre-compile a set of glob patterns for efficient matching against many paths.
@@ -805,6 +1063,191 @@ mod tests {
         // Bare names without path separator should not match
         assert!(!looks_like_script_file("webpack.js"));
         assert!(!looks_like_script_file("build"));
+    }
+
+    // is_dockerfile tests
+    #[test]
+    fn dockerfile_detection() {
+        assert!(is_dockerfile("Dockerfile"));
+        assert!(is_dockerfile("Dockerfile.worker"));
+        assert!(is_dockerfile("Dockerfile.dev"));
+        assert!(is_dockerfile("app.Dockerfile"));
+        assert!(!is_dockerfile("Dockerfile.dockerignore"));
+        assert!(!is_dockerfile("README.md"));
+        assert!(!is_dockerfile("docker-compose.yml"));
+    }
+
+    // extract_dockerfile_file_refs tests
+    #[test]
+    fn dockerfile_run_node() {
+        let refs = extract_dockerfile_file_refs("RUN node scripts/db-migrate.mjs");
+        assert_eq!(refs, vec!["scripts/db-migrate.mjs"]);
+    }
+
+    #[test]
+    fn dockerfile_cmd_shell_form() {
+        let refs = extract_dockerfile_file_refs("CMD node dist/server.js");
+        assert_eq!(refs, vec!["dist/server.js"]);
+    }
+
+    #[test]
+    fn dockerfile_cmd_exec_form() {
+        let refs = extract_dockerfile_file_refs(r#"CMD ["node", "scripts/server.js"]"#);
+        assert_eq!(refs, vec!["scripts/server.js"]);
+    }
+
+    #[test]
+    fn dockerfile_entrypoint_exec_form() {
+        let refs = extract_dockerfile_file_refs(r#"ENTRYPOINT ["node", "src/index.ts"]"#);
+        assert_eq!(refs, vec!["src/index.ts"]);
+    }
+
+    #[test]
+    fn dockerfile_run_esbuild() {
+        let refs = extract_dockerfile_file_refs(
+            "RUN npx esbuild src/server/jobs/worker.ts --outfile=dist-worker/worker.mjs --bundle",
+        );
+        // Extracts both the entry point and the outfile from flag values
+        assert_eq!(
+            refs,
+            vec!["src/server/jobs/worker.ts", "dist-worker/worker.mjs"]
+        );
+    }
+
+    #[test]
+    fn dockerfile_multiline_run() {
+        let refs =
+            extract_dockerfile_file_refs("RUN node \\\n  scripts/db-migrate.mjs \\\n  --verbose");
+        assert_eq!(refs, vec!["scripts/db-migrate.mjs"]);
+    }
+
+    #[test]
+    fn dockerfile_skips_comments_and_other_instructions() {
+        let content =
+            "FROM node:20\n# This is a comment\nCOPY . .\nRUN node scripts/seed.ts\nEXPOSE 3000";
+        let refs = extract_dockerfile_file_refs(content);
+        assert_eq!(refs, vec!["scripts/seed.ts"]);
+    }
+
+    #[test]
+    fn dockerfile_case_insensitive() {
+        let refs = extract_dockerfile_file_refs("run node scripts/migrate.ts");
+        assert_eq!(refs, vec!["scripts/migrate.ts"]);
+    }
+
+    #[test]
+    fn dockerfile_run_tsx_runner() {
+        let refs = extract_dockerfile_file_refs("RUN tsx src/worker.ts");
+        assert_eq!(refs, vec!["src/worker.ts"]);
+    }
+
+    #[test]
+    fn dockerfile_no_file_refs() {
+        let content = "FROM node:20\nRUN npm install\nRUN npm run build\nCMD [\"npm\", \"start\"]";
+        let refs = extract_dockerfile_file_refs(content);
+        assert!(refs.is_empty());
+    }
+
+    // extract_procfile_file_refs tests
+    #[test]
+    fn procfile_basic() {
+        let refs = extract_procfile_file_refs("web: node server.js\nworker: node worker.js");
+        assert_eq!(refs, vec!["server.js", "worker.js"]);
+    }
+
+    #[test]
+    fn procfile_with_comments() {
+        let refs = extract_procfile_file_refs("# comment\nweb: node src/index.ts");
+        assert_eq!(refs, vec!["src/index.ts"]);
+    }
+
+    #[test]
+    fn procfile_empty() {
+        let refs = extract_procfile_file_refs("");
+        assert!(refs.is_empty());
+    }
+
+    // extract_fly_toml_file_refs tests
+    #[test]
+    fn fly_toml_release_command() {
+        let refs = extract_fly_toml_file_refs(r#"release_command = "node scripts/db-migrate.mjs""#);
+        assert_eq!(refs, vec!["scripts/db-migrate.mjs"]);
+    }
+
+    #[test]
+    fn fly_toml_process_commands() {
+        let content = "[processes]\nweb = \"node dist/server.js\"\nworker = \"node src/worker.ts\"";
+        let refs = extract_fly_toml_file_refs(content);
+        assert_eq!(refs, vec!["dist/server.js", "src/worker.ts"]);
+    }
+
+    #[test]
+    fn fly_toml_cmd() {
+        let refs = extract_fly_toml_file_refs(r#"cmd = "node src/index.js""#);
+        assert_eq!(refs, vec!["src/index.js"]);
+    }
+
+    #[test]
+    fn fly_toml_ignores_non_process_keys() {
+        let refs = extract_fly_toml_file_refs(r#"app = "my-app""#);
+        assert!(refs.is_empty());
+    }
+
+    #[test]
+    fn fly_toml_comments_and_sections() {
+        let content = "# deploy config\n[deploy]\nrelease_command = \"node scripts/migrate.mjs\"";
+        let refs = extract_fly_toml_file_refs(content);
+        assert_eq!(refs, vec!["scripts/migrate.mjs"]);
+    }
+
+    // parse_exec_form tests
+    #[test]
+    fn exec_form_basic() {
+        assert_eq!(
+            parse_exec_form(r#"["node", "server.js"]"#),
+            "node server.js"
+        );
+    }
+
+    #[test]
+    fn exec_form_with_flags() {
+        assert_eq!(
+            parse_exec_form(r#"["node", "--max-old-space-size=4096", "server.js"]"#),
+            "node --max-old-space-size=4096 server.js"
+        );
+    }
+
+    #[test]
+    fn exec_form_with_commas_in_args() {
+        // Commas inside quoted strings should not split the argument
+        assert_eq!(
+            parse_exec_form(r#"["node", "--require=a,b", "server.js"]"#),
+            "node --require=a,b server.js"
+        );
+    }
+
+    #[test]
+    fn fly_toml_arbitrary_process_name() {
+        // Any key under [processes] should be detected, not just hardcoded names
+        let content = "[processes]\nmigrations = \"node scripts/migrate.mjs\"";
+        let refs = extract_fly_toml_file_refs(content);
+        assert_eq!(refs, vec!["scripts/migrate.mjs"]);
+    }
+
+    #[test]
+    fn fly_toml_exec_form_array() {
+        let content = r#"cmd = ["node", "src/index.js"]"#;
+        let refs = extract_fly_toml_file_refs(content);
+        assert_eq!(refs, vec!["src/index.js"]);
+    }
+
+    #[test]
+    fn fly_toml_section_switching() {
+        // Keys after a non-processes section should not be treated as processes
+        let content =
+            "[processes]\nworker = \"node src/worker.ts\"\n[env]\nNODE_ENV = \"production\"";
+        let refs = extract_fly_toml_file_refs(content);
+        assert_eq!(refs, vec!["src/worker.ts"]);
     }
 
     // is_allowed_hidden_dir tests

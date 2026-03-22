@@ -57,4 +57,6 @@ pub enum EntryPointSource {
     DefaultIndex,
     /// Manually configured in fallow config.
     ManualEntry,
+    /// Discovered from infrastructure config files (Dockerfile, Procfile, fly.toml).
+    InfrastructureConfig,
 }

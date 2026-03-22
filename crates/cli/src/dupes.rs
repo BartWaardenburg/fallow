@@ -3,7 +3,8 @@ use std::time::Instant;
 
 use fallow_config::OutputFormat;
 
-use crate::baseline::{DuplicationBaselineData, filter_new_clone_groups};
+use crate::baseline::{DuplicationBaselineData, filter_new_clone_groups, recompute_stats};
+use crate::check::get_changed_files;
 use crate::report;
 use crate::{emit_error, load_config};
 
@@ -32,6 +33,7 @@ pub struct DupesOptions<'a> {
     pub save_baseline_path: Option<&'a std::path::Path>,
     pub production: bool,
     pub trace: Option<&'a str>,
+    pub changed_since: Option<&'a str>,
 }
 
 pub fn run_dupes(opts: &DupesOptions<'_>) -> ExitCode {
@@ -150,6 +152,20 @@ pub fn run_dupes(opts: &DupesOptions<'_>) -> ExitCode {
                 );
             }
         }
+    }
+
+    // Filter to only changed files if requested
+    if let Some(git_ref) = opts.changed_since
+        && let Some(changed) = get_changed_files(opts.root, git_ref)
+    {
+        // Keep clone groups where at least one instance is in a changed file
+        report
+            .clone_groups
+            .retain(|g| g.instances.iter().any(|i| changed.contains(&i.file)));
+        // Rebuild families and recompute stats from filtered groups
+        report.clone_families =
+            fallow_core::duplicates::families::group_into_families(&report.clone_groups);
+        report.stats = recompute_stats(&report);
     }
 
     let elapsed = start.elapsed();

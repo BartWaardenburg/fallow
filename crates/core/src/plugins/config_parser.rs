@@ -117,6 +117,111 @@ pub fn extract_config_string_or_array(
     .unwrap_or_default()
 }
 
+/// Extract string values from a property path, also searching inside array elements.
+///
+/// Navigates `array_path` to find an array expression, then for each object in the
+/// array, navigates `inner_path` to extract string values. Useful for configs like
+/// Vitest projects where values are nested in array elements:
+/// - `test.projects[*].test.setupFiles`
+pub fn extract_config_array_nested_string_or_array(
+    source: &str,
+    path: &Path,
+    array_path: &[&str],
+    inner_path: &[&str],
+) -> Vec<String> {
+    extract_from_source(source, path, |program| {
+        let obj = find_config_object(program)?;
+        let array_expr = get_nested_expression(obj, array_path)?;
+        let Expression::ArrayExpression(arr) = array_expr else {
+            return None;
+        };
+        let mut results = Vec::new();
+        for element in &arr.elements {
+            if let Some(Expression::ObjectExpression(element_obj)) = element.as_expression()
+                && let Some(values) = get_nested_string_or_array(element_obj, inner_path)
+            {
+                results.extend(values);
+            }
+        }
+        if results.is_empty() {
+            None
+        } else {
+            Some(results)
+        }
+    })
+    .unwrap_or_default()
+}
+
+/// Extract string values from a property path, searching inside all values of an object.
+///
+/// Navigates `object_path` to find an object expression, then for each property value
+/// (regardless of key name), navigates `inner_path` to extract string values. Useful for
+/// configs with dynamic keys like `angular.json`:
+/// - `projects.*.architect.build.options.styles`
+pub fn extract_config_object_nested_string_or_array(
+    source: &str,
+    path: &Path,
+    object_path: &[&str],
+    inner_path: &[&str],
+) -> Vec<String> {
+    extract_from_source(source, path, |program| {
+        let obj = find_config_object(program)?;
+        let obj_expr = get_nested_expression(obj, object_path)?;
+        let Expression::ObjectExpression(target_obj) = obj_expr else {
+            return None;
+        };
+        let mut results = Vec::new();
+        for prop in &target_obj.properties {
+            if let ObjectPropertyKind::ObjectProperty(p) = prop
+                && let Expression::ObjectExpression(value_obj) = &p.value
+                && let Some(values) = get_nested_string_or_array(value_obj, inner_path)
+            {
+                results.extend(values);
+            }
+        }
+        if results.is_empty() {
+            None
+        } else {
+            Some(results)
+        }
+    })
+    .unwrap_or_default()
+}
+
+/// Extract string values from a property path, searching inside all values of an object.
+///
+/// Like [`extract_config_object_nested_string_or_array`] but returns a single optional string
+/// per object value (useful for fields like `architect.build.options.main`).
+pub fn extract_config_object_nested_strings(
+    source: &str,
+    path: &Path,
+    object_path: &[&str],
+    inner_path: &[&str],
+) -> Vec<String> {
+    extract_from_source(source, path, |program| {
+        let obj = find_config_object(program)?;
+        let obj_expr = get_nested_expression(obj, object_path)?;
+        let Expression::ObjectExpression(target_obj) = obj_expr else {
+            return None;
+        };
+        let mut results = Vec::new();
+        for prop in &target_obj.properties {
+            if let ObjectPropertyKind::ObjectProperty(p) = prop
+                && let Expression::ObjectExpression(value_obj) = &p.value
+                && let Some(value) = get_nested_string_from_object(value_obj, inner_path)
+            {
+                results.push(value);
+            }
+        }
+        if results.is_empty() {
+            None
+        } else {
+            Some(results)
+        }
+    })
+    .unwrap_or_default()
+}
+
 /// Extract `require('...')` call argument strings from a property's value.
 ///
 /// Handles direct require calls and arrays containing require calls or tuples:
@@ -134,6 +239,11 @@ pub fn extract_config_require_strings(source: &str, path: &Path, key: &str) -> V
 // ── Internal helpers ──────────────────────────────────────────────
 
 /// Parse source and run an extraction function on the AST.
+///
+/// JSON files (`.json`, `.jsonc`) are parsed as JavaScript expressions wrapped in
+/// parentheses to produce an AST compatible with `find_config_object`. The native
+/// JSON source type in Oxc produces a different AST structure that our helpers
+/// don't handle.
 fn extract_from_source<T>(
     source: &str,
     path: &Path,
@@ -141,6 +251,18 @@ fn extract_from_source<T>(
 ) -> Option<T> {
     let source_type = SourceType::from_path(path).unwrap_or_default();
     let alloc = Allocator::default();
+
+    // For JSON files, wrap in parens and parse as JS so the AST matches
+    // what find_config_object expects (ExpressionStatement → ObjectExpression).
+    let is_json = path
+        .extension()
+        .is_some_and(|ext| ext == "json" || ext == "jsonc");
+    if is_json {
+        let wrapped = format!("({source})");
+        let parsed = Parser::new(&alloc, &wrapped, SourceType::mjs()).parse();
+        return extractor(&parsed.program);
+    }
+
     let parsed = Parser::new(&alloc, source, source_type).parse();
     extractor(&parsed.program)
 }
@@ -441,6 +563,25 @@ fn get_nested_object_keys(obj: &ObjectExpression, path: &[&str]) -> Option<Vec<S
     }
     if let Expression::ObjectExpression(nested) = &prop.value {
         get_nested_object_keys(nested, &path[1..])
+    } else {
+        None
+    }
+}
+
+/// Navigate a nested property path and return the raw expression at the end.
+fn get_nested_expression<'a>(
+    obj: &'a ObjectExpression<'a>,
+    path: &[&str],
+) -> Option<&'a Expression<'a>> {
+    if path.is_empty() {
+        return None;
+    }
+    let prop = find_property(obj, path[0])?;
+    if path.len() == 1 {
+        return Some(&prop.value);
+    }
+    if let Expression::ObjectExpression(nested) = &prop.value {
+        get_nested_expression(nested, &path[1..])
     } else {
         None
     }

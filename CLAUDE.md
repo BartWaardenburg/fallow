@@ -174,6 +174,7 @@ Comprehensive clippy and compiler lint configuration inspired by the Oxc ecosyst
 30. Unused import binding detection via `oxc_semantic`: imports where the binding is never read in the importing file (e.g., `import { foo } from './utils'` with `foo` never referenced) are detected via scope-aware symbol analysis. These dead imports don't count as references to the exported symbol, improving unused-export detection precision. Also detects unused namespace imports and unused default imports.
 31. `optionalDependencies` detection: packages listed in `optionalDependencies` are tracked for unused detection (separate from `dependencies`/`devDependencies`). The `unused-optional-dependencies` rule defaults to `error` and is suppressed in production mode.
 32. TypeScript function overload deduplication: `export function foo(): void; export function foo(x: string): string; export function foo(x?: string) {}` is treated as a single export (the implementation), not 3 separate exports. Overload signatures are deduplicated during extraction.
+33. Infrastructure entry point detection: Dockerfiles (`Dockerfile`, `Dockerfile.*`, `*.Dockerfile`), Procfiles, and `fly.toml` are scanned for source file references. `RUN node`, `CMD`, `ENTRYPOINT`, esbuild invocations, `release_command`, and process definitions are parsed to discover entry points for worker processes, migration scripts, and other infrastructure-defined processes. Searches root and common subdirectories (`config/`, `docker/`, `deploy/`).
 
 ## Framework support (84 plugins)
 
@@ -195,7 +196,7 @@ Comprehensive clippy and compiler lint configuration inspired by the Oxc ecosyst
 **Other**: MSW, nodemon, PM2, dependency-cruiser
 
 - **Plugins** (`crates/core/src/plugins/`) — Single source of truth for all built-in framework support. Each plugin implements the `Plugin` trait with enablers (package.json detection), static patterns (entry points, always-used files, used exports, tooling dependencies), and optional `resolve_config()` for AST-based config parsing via Oxc.
-- **Rich config parsing** — All top 11 framework plugins have deep `resolve_config()` implementations:
+- **Rich config parsing** — All top 12 framework plugins have deep `resolve_config()` implementations:
   - **ESLint**: Legacy plugin/extends/parser short-name resolution, flat config plugin keys, JSON config
   - **Vite**: rollupOptions.input, lib.entry, optimizeDeps include/exclude, ssr.external/noExternal
   - **Jest**: preset, setupFiles, globalSetup/Teardown, testMatch, transform, reporters, testEnvironment, watchPlugins, resolver, snapshotSerializers, testRunner, runner, JSON config
@@ -207,13 +208,14 @@ Comprehensive clippy and compiler lint configuration inspired by the Oxc ecosyst
   - **Rollup**: input entries, external deps
   - **PostCSS**: plugins (object keys, require() calls, string arrays)
   - **Nuxt**: modules, css, plugins, extends, postcss plugins from `nuxt.config.ts`; path aliases (`~`, `~~`, `#shared`)
+  - **Drizzle**: schema field (string/array/glob/directory → entry points for table/relation/enum exports), out directory, import dependencies
 - **Plugin trait extensions** — `path_aliases()` for framework-specific alias resolution (e.g., Nuxt `~/`, Next.js `@/`); `virtual_module_prefixes()` for framework virtual modules (e.g., Docusaurus `@theme/`, `@docusaurus/`); `TsconfigDiscovery::Auto` for per-file tsconfig path alias resolution across monorepo packages.
 - **External plugins** (`crates/config/src/external_plugin.rs`) — Standalone plugin definitions (JSONC, JSON, TOML) or inline via the `framework` config field. Discovered from: `plugins` config field, `.fallow/plugins/` directory, and `fallow-plugin-*.{jsonc,json,toml}` files in project root. Supports entry points, always-used files, used exports, config patterns, tooling dependencies, and rich `detection` logic (`dependency`, `fileExists`, `all`/`any` combinators). Inline `framework` definitions use the same `ExternalPluginDef` schema and are merged into the plugin pipeline. All formats use camelCase field names. `$schema` field supported for IDE autocomplete in JSONC/JSON. See `docs/plugin-authoring.md` for the full format.
 
 ## CLI features
 
 - `check` — analyze with --format (human/json/sarif/compact/markdown), --changed-since, --baseline, --save-baseline, --fail-on-issues, --include-dupes (cross-reference with duplication), issue type filters (--unused-files, --unused-exports, etc.), --trace FILE:EXPORT (trace export usage), --trace-file PATH (trace file edges), --trace-dependency PACKAGE (trace dependency usage)
-- `dupes` — find code duplication with clone families, refactoring suggestions, --baseline/--save-baseline, --mode (strict/mild/weak/semantic), --min-tokens, --min-lines, --threshold, --skip-local, --cross-language, --trace FILE:LINE (trace all clones at a specific location)
+- `dupes` — find code duplication with clone families, refactoring suggestions, --changed-since, --baseline/--save-baseline, --mode (strict/mild/weak/semantic), --min-tokens, --min-lines, --threshold, --skip-local, --cross-language, --trace FILE:LINE (trace all clones at a specific location)
 - `watch` — file watcher with debounced re-analysis
 - `fix` — auto-remove unused exports, enum members, and deps (--dry-run, --yes/--force for non-TTY confirmation, --format json for structured output)
 - `init` — create .fallowrc.json (default) or fallow.toml (`--toml`), includes `$schema` for IDE autocomplete

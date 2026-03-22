@@ -72,41 +72,53 @@ impl Plugin for VitestPlugin {
         }
 
         // test.include → additional entry patterns
-        let includes =
+        let mut includes =
             config_parser::extract_config_string_array(source, config_path, &["test", "include"]);
+        // Also check test.projects[*].test.include (Vitest projects/workspaces)
+        includes.extend(config_parser::extract_config_array_nested_string_or_array(
+            source,
+            config_path,
+            &["test", "projects"],
+            &["test", "include"],
+        ));
         result.entry_patterns.extend(includes);
 
-        // test.setupFiles → setup files
-        let setup_files = config_parser::extract_config_string_array(
+        // test.setupFiles → setup files (string or array)
+        let mut setup_files = config_parser::extract_config_string_or_array(
             source,
             config_path,
             &["test", "setupFiles"],
         );
+        // Also check test.projects[*].test.setupFiles (Vitest projects/workspaces)
+        setup_files.extend(config_parser::extract_config_array_nested_string_or_array(
+            source,
+            config_path,
+            &["test", "projects"],
+            &["test", "setupFiles"],
+        ));
         for f in &setup_files {
             result
                 .setup_files
                 .push(root.join(f.trim_start_matches("./")));
         }
 
-        // test.globalSetup → setup files
-        let global_setup = config_parser::extract_config_string_array(
+        // test.globalSetup → setup files (string or array)
+        let mut global_setup = config_parser::extract_config_string_or_array(
             source,
             config_path,
             &["test", "globalSetup"],
         );
+        // Also check test.projects[*].test.globalSetup
+        global_setup.extend(config_parser::extract_config_array_nested_string_or_array(
+            source,
+            config_path,
+            &["test", "projects"],
+            &["test", "globalSetup"],
+        ));
         for f in &global_setup {
             result
                 .setup_files
                 .push(root.join(f.trim_start_matches("./")));
-        }
-        // globalSetup can also be a single string
-        if global_setup.is_empty()
-            && let Some(gs) =
-                config_parser::extract_config_string(source, config_path, &["test", "globalSetup"])
-        {
-            result
-                .setup_files
-                .push(root.join(gs.trim_start_matches("./")));
         }
 
         // test.environment → if custom, it's a referenced dependency

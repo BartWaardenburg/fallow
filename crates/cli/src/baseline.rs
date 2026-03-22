@@ -1,4 +1,4 @@
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::Path;
 
 use fallow_core::duplicates::DuplicationReport;
@@ -203,21 +203,29 @@ pub fn filter_new_clone_groups(
     report
 }
 
-/// Recompute duplication statistics after baseline filtering.
-fn recompute_stats(report: &DuplicationReport) -> fallow_core::duplicates::DuplicationStats {
+/// Recompute duplication statistics after filtering (baseline or `--changed-since`).
+///
+/// Uses per-file line deduplication (matching `compute_stats` in `detect.rs`)
+/// so overlapping clone instances don't inflate the duplicated line count.
+pub fn recompute_stats(report: &DuplicationReport) -> fallow_core::duplicates::DuplicationStats {
     let mut files_with_clones: FxHashSet<&Path> = FxHashSet::default();
-    let mut duplicated_lines = 0usize;
+    let mut file_dup_lines: FxHashMap<&Path, FxHashSet<usize>> = FxHashMap::default();
     let mut duplicated_tokens = 0usize;
     let mut clone_instances = 0usize;
 
     for group in &report.clone_groups {
         for instance in &group.instances {
             files_with_clones.insert(&instance.file);
-            duplicated_lines += instance.end_line.saturating_sub(instance.start_line) + 1;
+            clone_instances += 1;
+            let lines = file_dup_lines.entry(&instance.file).or_default();
+            for line in instance.start_line..=instance.end_line {
+                lines.insert(line);
+            }
         }
         duplicated_tokens += group.token_count * group.instances.len();
-        clone_instances += group.instances.len();
     }
+
+    let duplicated_lines: usize = file_dup_lines.values().map(FxHashSet::len).sum();
 
     fallow_core::duplicates::DuplicationStats {
         total_files: report.stats.total_files,

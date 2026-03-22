@@ -315,7 +315,7 @@ fn resolve_workspace_filter(
 // ── Changed files ────────────────────────────────────────────────
 
 /// Get files changed since a git ref.
-fn get_changed_files(
+pub fn get_changed_files(
     root: &std::path::Path,
     git_ref: &str,
 ) -> Option<rustc_hash::FxHashSet<std::path::PathBuf>> {
@@ -505,6 +505,22 @@ pub fn run_check(opts: &CheckOptions<'_>) -> ExitCode {
         results
             .unresolved_imports
             .retain(|i| changed.contains(&i.path));
+
+        // Unlisted deps: keep only if any importing file is changed
+        results
+            .unlisted_dependencies
+            .retain(|d| d.imported_from.iter().any(|p| changed.contains(p)));
+
+        // Duplicate exports: filter locations to changed files, drop groups with < 2
+        for dup in &mut results.duplicate_exports {
+            dup.locations.retain(|p| changed.contains(p));
+        }
+        results.duplicate_exports.retain(|d| d.locations.len() >= 2);
+
+        // Circular deps: keep cycles where at least one file is changed
+        results
+            .circular_dependencies
+            .retain(|c| c.files.iter().any(|f| changed.contains(f)));
     }
 
     // Apply rules: remove issues with Severity::Off (respects per-file overrides)

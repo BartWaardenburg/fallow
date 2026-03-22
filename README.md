@@ -68,6 +68,7 @@ fallow dupes                    # Default: mild mode
 fallow dupes --mode semantic    # Catch clones with renamed variables
 fallow dupes --skip-local       # Only cross-directory duplicates
 fallow dupes --threshold 5      # Fail CI if duplication exceeds 5%
+fallow dupes --changed-since main  # Only duplication in changed files
 fallow dupes --save-baseline    # Save current duplication as baseline
 fallow dupes --baseline         # Fail only on new duplication vs baseline
 fallow dupes --trace src/utils.ts:42  # Show all clones of code at this location

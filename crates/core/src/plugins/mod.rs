@@ -306,20 +306,20 @@ pub struct PluginRegistry {
 /// Aggregated results from all active plugins for a project.
 #[derive(Debug, Default)]
 pub struct AggregatedPluginResult {
-    /// All entry point patterns from active plugins.
-    pub entry_patterns: Vec<String>,
+    /// All entry point patterns from active plugins: (pattern, plugin_name).
+    pub entry_patterns: Vec<(String, String)>,
     /// All config file patterns from active plugins.
     pub config_patterns: Vec<String>,
-    /// All always-used file patterns from active plugins.
-    pub always_used: Vec<String>,
+    /// All always-used file patterns from active plugins: (pattern, plugin_name).
+    pub always_used: Vec<(String, String)>,
     /// All used export rules from active plugins.
     pub used_exports: Vec<(String, Vec<String>)>,
     /// Dependencies referenced in config files (should not be flagged unused).
     pub referenced_dependencies: Vec<String>,
-    /// Additional always-used files discovered from config parsing.
-    pub discovered_always_used: Vec<String>,
-    /// Setup files discovered from config parsing.
-    pub setup_files: Vec<PathBuf>,
+    /// Additional always-used files discovered from config parsing: (pattern, plugin_name).
+    pub discovered_always_used: Vec<(String, String)>,
+    /// Setup files discovered from config parsing: (path, plugin_name).
+    pub setup_files: Vec<(PathBuf, String)>,
     /// Tooling dependencies (should not be flagged as unused devDeps).
     pub tooling_dependencies: Vec<String>,
     /// Package names discovered as used in package.json scripts (binary invocations).
@@ -482,14 +482,17 @@ impl PluginRegistry {
         for plugin in &active {
             result.active_plugins.push(plugin.name().to_string());
 
+            let pname = plugin.name().to_string();
             for pat in plugin.entry_patterns() {
-                result.entry_patterns.push((*pat).to_string());
+                result
+                    .entry_patterns
+                    .push(((*pat).to_string(), pname.clone()));
             }
             for pat in plugin.config_patterns() {
                 result.config_patterns.push((*pat).to_string());
             }
             for pat in plugin.always_used() {
-                result.always_used.push((*pat).to_string());
+                result.always_used.push(((*pat).to_string(), pname.clone()));
             }
             for (file_pat, exports) in plugin.used_exports() {
                 result.used_exports.push((
@@ -527,12 +530,20 @@ impl PluginRegistry {
             };
             if is_active {
                 result.active_plugins.push(ext.name.clone());
-                result.entry_patterns.extend(ext.entry_points.clone());
+                result.entry_patterns.extend(
+                    ext.entry_points
+                        .iter()
+                        .map(|p| (p.clone(), ext.name.clone())),
+                );
                 // Track config patterns for introspection (not used for AST parsing —
                 // external plugins cannot do resolve_config())
                 result.config_patterns.extend(ext.config_patterns.clone());
-                result.always_used.extend(ext.config_patterns.clone());
-                result.always_used.extend(ext.always_used.clone());
+                result.always_used.extend(
+                    ext.config_patterns
+                        .iter()
+                        .chain(ext.always_used.iter())
+                        .map(|p| (p.clone(), ext.name.clone())),
+                );
                 result
                     .tooling_dependencies
                     .extend(ext.tooling_dependencies.clone());
@@ -587,14 +598,28 @@ impl PluginRegistry {
                                     deps = plugin_result.referenced_dependencies.len(),
                                     "resolved config"
                                 );
-                                result.entry_patterns.extend(plugin_result.entry_patterns);
+                                let pname = plugin.name().to_string();
+                                result.entry_patterns.extend(
+                                    plugin_result
+                                        .entry_patterns
+                                        .into_iter()
+                                        .map(|p| (p, pname.clone())),
+                                );
                                 result
                                     .referenced_dependencies
                                     .extend(plugin_result.referenced_dependencies);
-                                result
-                                    .discovered_always_used
-                                    .extend(plugin_result.always_used_files);
-                                result.setup_files.extend(plugin_result.setup_files);
+                                result.discovered_always_used.extend(
+                                    plugin_result
+                                        .always_used_files
+                                        .into_iter()
+                                        .map(|p| (p, pname.clone())),
+                                );
+                                result.setup_files.extend(
+                                    plugin_result
+                                        .setup_files
+                                        .into_iter()
+                                        .map(|p| (p, pname.clone())),
+                                );
                             }
                         }
                     }
@@ -626,19 +651,33 @@ impl PluginRegistry {
                         let fake_path = root.join(format!("{key}.config.json"));
                         let plugin_result = plugin.resolve_config(&fake_path, &config_json, root);
                         if !plugin_result.is_empty() {
+                            let pname = plugin.name().to_string();
                             tracing::debug!(
-                                plugin = plugin.name(),
+                                plugin = pname.as_str(),
                                 key = key,
                                 "resolved inline package.json config"
                             );
-                            result.entry_patterns.extend(plugin_result.entry_patterns);
+                            result.entry_patterns.extend(
+                                plugin_result
+                                    .entry_patterns
+                                    .into_iter()
+                                    .map(|p| (p, pname.clone())),
+                            );
                             result
                                 .referenced_dependencies
                                 .extend(plugin_result.referenced_dependencies);
-                            result
-                                .discovered_always_used
-                                .extend(plugin_result.always_used_files);
-                            result.setup_files.extend(plugin_result.setup_files);
+                            result.discovered_always_used.extend(
+                                plugin_result
+                                    .always_used_files
+                                    .into_iter()
+                                    .map(|p| (p, pname.clone())),
+                            );
+                            result.setup_files.extend(
+                                plugin_result
+                                    .setup_files
+                                    .into_iter()
+                                    .map(|p| (p, pname.clone())),
+                            );
                         }
                     }
                 }
@@ -691,14 +730,17 @@ impl PluginRegistry {
         for plugin in &active {
             result.active_plugins.push(plugin.name().to_string());
 
+            let pname = plugin.name().to_string();
             for pat in plugin.entry_patterns() {
-                result.entry_patterns.push((*pat).to_string());
+                result
+                    .entry_patterns
+                    .push(((*pat).to_string(), pname.clone()));
             }
             for pat in plugin.config_patterns() {
                 result.config_patterns.push((*pat).to_string());
             }
             for pat in plugin.always_used() {
-                result.always_used.push((*pat).to_string());
+                result.always_used.push(((*pat).to_string(), pname.clone()));
             }
             for (file_pat, exports) in plugin.used_exports() {
                 result.used_exports.push((
@@ -733,21 +775,35 @@ impl PluginRegistry {
                     {
                         let plugin_result = plugin.resolve_config(abs_path, &source, root);
                         if !plugin_result.is_empty() {
+                            let pname = plugin.name().to_string();
                             tracing::debug!(
-                                plugin = plugin.name(),
+                                plugin = pname.as_str(),
                                 config = rel_path.as_str(),
                                 entries = plugin_result.entry_patterns.len(),
                                 deps = plugin_result.referenced_dependencies.len(),
                                 "resolved config"
                             );
-                            result.entry_patterns.extend(plugin_result.entry_patterns);
+                            result.entry_patterns.extend(
+                                plugin_result
+                                    .entry_patterns
+                                    .into_iter()
+                                    .map(|p| (p, pname.clone())),
+                            );
                             result
                                 .referenced_dependencies
                                 .extend(plugin_result.referenced_dependencies);
-                            result
-                                .discovered_always_used
-                                .extend(plugin_result.always_used_files);
-                            result.setup_files.extend(plugin_result.setup_files);
+                            result.discovered_always_used.extend(
+                                plugin_result
+                                    .always_used_files
+                                    .into_iter()
+                                    .map(|p| (p, pname.clone())),
+                            );
+                            result.setup_files.extend(
+                                plugin_result
+                                    .setup_files
+                                    .into_iter()
+                                    .map(|p| (p, pname.clone())),
+                            );
                         }
                     }
                 }
@@ -929,7 +985,7 @@ mod tests {
             result
                 .entry_patterns
                 .iter()
-                .any(|p| p.contains("app/**/page")),
+                .any(|(p, _)| p.contains("app/**/page")),
             "nextjs plugin should add app/**/page entry pattern"
         );
     }
@@ -944,7 +1000,7 @@ mod tests {
             !result
                 .entry_patterns
                 .iter()
-                .any(|p| p.contains("app/**/page")),
+                .any(|(p, _)| p.contains("app/**/page")),
             "nextjs patterns should not appear when plugin is inactive"
         );
     }
@@ -993,7 +1049,8 @@ mod tests {
         assert!(
             result
                 .entry_patterns
-                .contains(&"src/routes/**/*.ts".to_string())
+                .iter()
+                .any(|(p, _)| p == "src/routes/**/*.ts")
         );
         assert!(
             result
@@ -1022,7 +1079,8 @@ mod tests {
         assert!(
             !result
                 .entry_patterns
-                .contains(&"src/routes/**/*.ts".to_string())
+                .iter()
+                .any(|(p, _)| p == "src/routes/**/*.ts")
         );
     }
 

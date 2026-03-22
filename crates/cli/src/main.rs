@@ -620,6 +620,7 @@ fn main() -> ExitCode {
             save_baseline_path: cli.save_baseline.as_deref(),
             production: cli.production,
             trace: trace.as_deref(),
+            changed_since: cli.changed_since.as_deref(),
         }),
         Command::Schema => unreachable!("handled above"),
         Command::Migrate {

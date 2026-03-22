@@ -72,6 +72,7 @@ pub fn find_unused_dependencies(
         .filter(|dep| !script_used.contains(dep.as_str()))
         .filter(|dep| !is_implicit_dependency(dep))
         .filter(|dep| !plugin_referenced.contains(dep.as_str()))
+        .filter(|dep| !plugin_tooling.contains(dep.as_str()))
         .filter(|dep| !ignore_deps.contains(dep.as_str()))
         .filter(|dep| !workspace_names.contains(dep.as_str()))
         .map(|dep| UnusedDependency {

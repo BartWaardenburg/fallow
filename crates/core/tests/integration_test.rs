@@ -1932,6 +1932,68 @@ fn external_plugin_entry_points_discovered() {
 }
 
 #[test]
+fn plugin_entry_points_carry_correct_plugin_name() {
+    let root = fixture_path("external-plugins");
+    let config = FallowConfig {
+        schema: None,
+        extends: vec![],
+        entry: vec![],
+        ignore_patterns: vec![],
+        framework: vec![],
+        workspaces: None,
+        ignore_dependencies: vec![],
+        ignore_exports: vec![],
+        duplicates: fallow_config::DuplicatesConfig::default(),
+        rules: RulesConfig::default(),
+        production: false,
+        plugins: vec![],
+        overrides: vec![],
+    }
+    .resolve(root.clone(), OutputFormat::Human, 4, true);
+
+    let files = fallow_core::discover::discover_files(&config);
+
+    // Run plugins to get aggregated result
+    let pkg = fallow_config::PackageJson::load(&root.join("package.json")).unwrap();
+    let file_paths: Vec<PathBuf> = files.iter().map(|f| f.path.clone()).collect();
+    let registry = fallow_core::plugins::PluginRegistry::new(
+        fallow_config::discover_external_plugins(&root, &[]),
+    );
+    let plugin_result = registry.run(&pkg, &root, &file_paths);
+
+    let entries =
+        fallow_core::discover::discover_plugin_entry_points(&plugin_result, &config, &files);
+
+    // External plugin "my-framework" should attribute entry points with its name
+    let home_entry = entries
+        .iter()
+        .find(|ep| ep.path.ends_with("home.ts"))
+        .expect("home.ts should be discovered as an entry point");
+    assert!(
+        matches!(
+            &home_entry.source,
+            fallow_types::discover::EntryPointSource::Plugin { name } if name == "my-framework"
+        ),
+        "home.ts should be attributed to 'my-framework' plugin, got: {:?}",
+        home_entry.source
+    );
+
+    // setup.ts is always-used via the external plugin
+    let setup_entry = entries
+        .iter()
+        .find(|ep| ep.path.ends_with("setup.ts"))
+        .expect("setup.ts should be discovered as an entry point");
+    assert!(
+        matches!(
+            &setup_entry.source,
+            fallow_types::discover::EntryPointSource::Plugin { name } if name == "my-framework"
+        ),
+        "setup.ts should be attributed to 'my-framework' plugin, got: {:?}",
+        setup_entry.source
+    );
+}
+
+#[test]
 fn external_plugin_used_exports_respected() {
     let root = fixture_path("external-plugins");
     let config = FallowConfig {
@@ -2471,5 +2533,58 @@ fn tsconfig_references_analysis_detects_unused() {
     assert!(
         !unused_file_names.contains(&"index.ts".to_string()),
         "index.ts should not be unused: {unused_file_names:?}"
+    );
+}
+
+#[test]
+fn path_aliases_mixed_exports_no_false_positive_unused_files() {
+    let root = fixture_path("path-aliases-mixed-exports");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_file_names: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|f| f.path.file_name().unwrap().to_string_lossy().to_string())
+        .collect();
+
+    // types.ts and helpers.ts have SOME used exports (imported via @/ path alias)
+    // — they should NOT be in unused_files even though they also have unused exports
+    assert!(
+        !unused_file_names.contains(&"types.ts".to_string()),
+        "types.ts has used exports and should not be an unused file: {unused_file_names:?}"
+    );
+    assert!(
+        !unused_file_names.contains(&"helpers.ts".to_string()),
+        "helpers.ts has used exports and should not be an unused file: {unused_file_names:?}"
+    );
+
+    // orphan.ts is truly unused — no file imports it
+    assert!(
+        unused_file_names.contains(&"orphan.ts".to_string()),
+        "orphan.ts should be detected as unused file: {unused_file_names:?}"
+    );
+
+    // Verify unused exports are correctly detected on reachable files
+    let unused_export_names: Vec<&str> = results
+        .unused_exports
+        .iter()
+        .map(|e| e.export_name.as_str())
+        .collect();
+    assert!(
+        unused_export_names.contains(&"unusedExport"),
+        "unusedExport should be detected: {unused_export_names:?}"
+    );
+    assert!(
+        unused_export_names.contains(&"unusedHelper"),
+        "unusedHelper should be detected: {unused_export_names:?}"
+    );
+    assert!(
+        !unused_export_names.contains(&"usedExport"),
+        "usedExport should NOT be in unused exports: {unused_export_names:?}"
+    );
+    assert!(
+        !unused_export_names.contains(&"usedHelper"),
+        "usedHelper should NOT be in unused exports: {unused_export_names:?}"
     );
 }

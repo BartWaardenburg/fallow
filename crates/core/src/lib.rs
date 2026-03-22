@@ -144,7 +144,9 @@ fn analyze_full(
 
         // Add config files from scripts as entry points (resolved later)
         for config_file in &script_analysis.config_files {
-            plugin_result.entry_patterns.push(config_file.clone());
+            plugin_result
+                .entry_patterns
+                .push((config_file.clone(), "scripts".to_string()));
         }
     }
     // Also analyze workspace package.json scripts
@@ -171,7 +173,7 @@ fn analyze_full(
             for config_file in &ws_analysis.config_files {
                 plugin_result
                     .entry_patterns
-                    .push(format!("{ws_prefix}/{config_file}"));
+                    .push((format!("{ws_prefix}/{config_file}"), "scripts".to_string()));
             }
         }
     }
@@ -211,6 +213,8 @@ fn analyze_full(
     }
     let plugin_entries = discover::discover_plugin_entry_points(&plugin_result, config, files);
     entry_points.extend(plugin_entries);
+    let infra_entries = discover::discover_infrastructure_entry_points(&config.root);
+    entry_points.extend(infra_entries);
     let entry_points_ms = t.elapsed().as_secs_f64() * 1000.0;
 
     // Stage 4: Resolve imports to file IDs
@@ -376,16 +380,20 @@ fn run_plugins(
                 .unwrap_or(&ws.root)
                 .to_string_lossy();
 
-            for pat in &ws_result.entry_patterns {
-                result.entry_patterns.push(format!("{ws_prefix}/{pat}"));
+            for (pat, pname) in &ws_result.entry_patterns {
+                result
+                    .entry_patterns
+                    .push((format!("{ws_prefix}/{pat}"), pname.clone()));
             }
-            for pat in &ws_result.always_used {
-                result.always_used.push(format!("{ws_prefix}/{pat}"));
+            for (pat, pname) in &ws_result.always_used {
+                result
+                    .always_used
+                    .push((format!("{ws_prefix}/{pat}"), pname.clone()));
             }
-            for pat in &ws_result.discovered_always_used {
+            for (pat, pname) in &ws_result.discovered_always_used {
                 result
                     .discovered_always_used
-                    .push(format!("{ws_prefix}/{pat}"));
+                    .push((format!("{ws_prefix}/{pat}"), pname.clone()));
             }
             for (file_pat, exports) in &ws_result.used_exports {
                 result

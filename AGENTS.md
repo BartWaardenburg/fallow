@@ -83,6 +83,7 @@ Find code duplication / clones across the project.
 fallow dupes --format json --quiet
 fallow dupes --format json --quiet --mode semantic
 fallow dupes --format json --quiet --threshold 5
+fallow dupes --format json --quiet --changed-since main
 ```
 
 **Flags:**
@@ -92,6 +93,7 @@ fallow dupes --format json --quiet --threshold 5
 - `--threshold <PCT>` -- fail if duplication exceeds this percentage (0 = no limit)
 - `--skip-local` -- only report cross-directory duplicates
 - `--cross-language` -- strip TypeScript type annotations for `.ts` ↔ `.js` matching
+- `--changed-since <ref>` -- only report duplication in files changed since a git ref
 - `--trace <FILE:LINE>` -- trace all clones at a specific source location
 - `--baseline <path>` / `--save-baseline <path>` -- incremental CI adoption
 
