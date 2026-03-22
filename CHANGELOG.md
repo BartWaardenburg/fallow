@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-03-22
+
 ### Added
 - Unused import binding detection via `oxc_semantic`: imports where the bound name is never read in the importing file no longer count as references to the exported symbol, improving unused-export detection precision
 - Namespace destructuring detection: `const { foo, bar } = ns` after `import * as ns` (and dynamic import / require namespaces) now correctly tracks accessed members for narrowing
@@ -175,7 +177,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[Unreleased]: https://github.com/fallow-rs/fallow/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/fallow-rs/fallow/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/fallow-rs/fallow/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/fallow-rs/fallow/compare/v1.0.4...v1.1.0
 [1.0.4]: https://github.com/fallow-rs/fallow/compare/v1.0.3...v1.0.4
 [1.0.3]: https://github.com/fallow-rs/fallow/compare/v1.0.2...v1.0.3
