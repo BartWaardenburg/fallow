@@ -86,23 +86,27 @@ Measured on real-world open-source projects (median of 5 runs, 2 warmup). Apple 
 
 | Project | Files | fallow | knip v5 | knip v6 | vs v5 | vs v6 |
 |:--------|------:|-------:|--------:|--------:|------:|------:|
-| [zod](https://github.com/colinhacks/zod) | 174 | **23ms** | 590ms | 308ms | **26.1x** | **13.6x** |
-| [fastify](https://github.com/fastify/fastify) | 286 | **22ms** | 804ms | 236ms | **36.2x** | **10.6x** |
-| [preact](https://github.com/preactjs/preact) | 244 | **24ms** | 799ms | —* | **33.9x** | — |
-| synthetic (1,000 files) | 1,000 | **45ms** | 380ms | 196ms | **8.5x** | **4.4x** |
-| synthetic (5,000 files) | 5,000 | **201ms** | 646ms | 340ms | **3.2x** | **1.7x** |
+| [zod](https://github.com/colinhacks/zod) | 174 | **19ms** | 639ms | 334ms | **34x** | **18x** |
+| [preact](https://github.com/preactjs/preact) | 244 | **20ms** | 819ms | —* | **41x** | — |
+| [fastify](https://github.com/fastify/fastify) | 286 | **24ms** | 1.13s | 289ms | **46x** | **12x** |
+| [vue/core](https://github.com/vuejs/core) | 522 | **63ms** | 702ms | 299ms | **11x** | **5x** |
+| [TanStack/query](https://github.com/TanStack/query) | 901 | **148ms** | 2.75s | 1.41s | **19x** | **10x** |
+| [svelte](https://github.com/sveltejs/svelte) | 3,337 | **325ms** | 1.93s | 860ms | **6x** | **3x** |
+| [next.js](https://github.com/vercel/next.js) | 20,416 | **1.48s** | —† | —† | — | — |
 
-\* knip v6 excluded for preact due to a v6 regression on this project.
+\* knip v6 excluded for preact due to a v6 regression.
+† knip errors out on next.js (exits without producing valid results). fallow is the only tool that completes.
 
-The speedup narrows on larger projects as actual analysis time dominates over startup: 26-36x on real-world projects vs knip v5 (10-14x vs v6), 3-9x on 1,000+ file projects. fallow stays sub-second even at 5,000 files.
+6-46x faster than knip v5, 3-18x faster than knip v6 on projects where both tools complete. On the largest monorepos (20k+ files), knip errors out while fallow completes in under 2 seconds.
 
-Memory usage is equally striking — fallow uses 10-15x less memory than knip v5 and 3-8x less than knip v6:
+Memory usage is equally striking — fallow uses 4-11x less memory than knip v5 and 3-6x less than knip v6:
 
 | Project | fallow | knip v5 | knip v6 |
 |:--------|-------:|--------:|--------:|
-| zod (174 files) | **20 MB** | 248 MB | 160 MB |
-| fastify (286 files) | **27 MB** | 288 MB | 111 MB |
-| synthetic (5,000 files) | **61 MB** | 279 MB | 179 MB |
+| zod (174 files) | **21 MB** | 250 MB | 161 MB |
+| fastify (286 files) | **27 MB** | 289 MB | 107 MB |
+| TanStack/query (901 files) | **59 MB** | 673 MB | 354 MB |
+| svelte (3,337 files) | **67 MB** | 460 MB | 243 MB |
 
 fallow uses the [Oxc](https://oxc.rs) parser for syntactic analysis, [oxc_semantic](https://docs.rs/oxc_semantic) for scope-aware binding analysis, and [rayon](https://github.com/rayon-rs/rayon) for parallel parsing — no TypeScript compiler, no Node.js runtime. Dead code detection is a graph problem on import/export edges; you don't need type information for that.
 
@@ -110,11 +114,14 @@ fallow uses the [Oxc](https://oxc.rs) parser for syntactic analysis, [oxc_semant
 
 | Project | Files | fallow | jscpd | Speedup |
 |:--------|------:|-------:|------:|--------:|
-| [zod](https://github.com/colinhacks/zod) | 174 | **49ms** | 1.01s | **20.6x** |
-| [fastify](https://github.com/fastify/fastify) | 286 | **82ms** | 2.09s | **25.5x** |
-| [preact](https://github.com/preactjs/preact) | 244 | **46ms** | 1.53s | **33.3x** |
+| [zod](https://github.com/colinhacks/zod) | 174 | **46ms** | 909ms | **20x** |
+| [preact](https://github.com/preactjs/preact) | 244 | **44ms** | 1.33s | **30x** |
+| [fastify](https://github.com/fastify/fastify) | 286 | **84ms** | 2.83s | **34x** |
+| [vue/core](https://github.com/vuejs/core) | 522 | **120ms** | 3.13s | **26x** |
+| [svelte](https://github.com/sveltejs/svelte) | 3,337 | **400ms** | 3.63s | **9x** |
+| [next.js](https://github.com/vercel/next.js) | 20,416 | **3.16s** | 24.64s | **8x** |
 
-fallow dupes uses a suffix array with LCP for clone detection — no quadratic pairwise comparison.
+8-34x faster across all project sizes. fallow dupes uses a suffix array with LCP for clone detection — no quadratic pairwise comparison.
 
 <details>
 <summary>Reproduce these benchmarks</summary>
@@ -124,9 +131,10 @@ cd benchmarks
 npm install                          # knip v5, jscpd, tinybench
 cd knip6 && npm install && cd ..     # knip v6 (optional, for three-way comparison)
 npm run generate                     # Generate synthetic fixtures
-node download-fixtures.mjs           # Clone real-world projects
+node download-fixtures.mjs           # Clone real-world projects (8 projects)
 node bench.mjs                       # Run dead code benchmarks (fallow vs knip v5 + v6)
 node bench-dupes.mjs                 # Run duplication benchmarks (fallow vs jscpd)
+node bench-circular.mjs              # Run circular dep benchmarks (fallow vs madge + dpdm)
 ```
 
 </details>
@@ -135,9 +143,9 @@ node bench-dupes.mjs                 # Run duplication benchmarks (fallow vs jsc
 
 | | fallow | knip |
 |:--|:-------|:-----|
-| Speed vs knip v5 | **3-36x faster** | Baseline |
-| Speed vs knip v6 | **2-14x faster** | Baseline |
-| Memory usage | **3-15x less** | Baseline |
+| Speed vs knip v5 | **6-46x faster** | Baseline |
+| Speed vs knip v6 | **3-18x faster** | Baseline |
+| Memory usage | **3-11x less** | Baseline |
 | Dead code detection | 12 issue types | Comparable |
 | Duplication detection | Built-in | Not included |
 | Framework plugins | 84 (31 with config parsing) | 140+ (runtime config loading) |
