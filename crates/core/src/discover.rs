@@ -413,7 +413,9 @@ fn discover_nested_package_entries(
     canonical_root: &Path,
 ) {
     // Walk common monorepo patterns to find nested package.json files
-    let search_dirs = ["packages", "apps", "libs", "modules", "plugins"];
+    let search_dirs = [
+        "packages", "apps", "libs", "modules", "plugins", "services", "tools", "utils",
+    ];
     for dir_name in &search_dirs {
         let search_dir = root.join(dir_name);
         if !search_dir.is_dir() {

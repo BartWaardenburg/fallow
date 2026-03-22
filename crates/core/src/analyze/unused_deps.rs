@@ -156,6 +156,7 @@ pub fn find_unused_dependencies(
                 &workspace_names,
                 is_used_in_workspace,
             ) || is_implicit_dependency(&dep)
+                || plugin_tooling.contains(dep.as_str())
             {
                 continue;
             }

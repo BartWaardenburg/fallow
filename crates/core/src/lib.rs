@@ -361,6 +361,7 @@ fn run_plugins(
             let ws_result = registry.run_workspace_fast(
                 &ws_pkg,
                 &ws.root,
+                &config.root,
                 &precompiled_matchers,
                 &relative_files,
             );
@@ -380,25 +381,37 @@ fn run_plugins(
                 .unwrap_or(&ws.root)
                 .to_string_lossy();
 
+            // Prefix helper: workspace-relative patterns need the workspace prefix
+            // to be matchable from the monorepo root. But patterns that are already
+            // project-root-relative (e.g., from angular.json which uses absolute paths
+            // like "apps/client/src/styles.css") should not be double-prefixed.
+            let prefix_if_needed = |pat: &str| -> String {
+                if pat.starts_with(ws_prefix.as_ref()) || pat.starts_with('/') {
+                    pat.to_string()
+                } else {
+                    format!("{ws_prefix}/{pat}")
+                }
+            };
+
             for (pat, pname) in &ws_result.entry_patterns {
                 result
                     .entry_patterns
-                    .push((format!("{ws_prefix}/{pat}"), pname.clone()));
+                    .push((prefix_if_needed(pat), pname.clone()));
             }
             for (pat, pname) in &ws_result.always_used {
                 result
                     .always_used
-                    .push((format!("{ws_prefix}/{pat}"), pname.clone()));
+                    .push((prefix_if_needed(pat), pname.clone()));
             }
             for (pat, pname) in &ws_result.discovered_always_used {
                 result
                     .discovered_always_used
-                    .push((format!("{ws_prefix}/{pat}"), pname.clone()));
+                    .push((prefix_if_needed(pat), pname.clone()));
             }
             for (file_pat, exports) in &ws_result.used_exports {
                 result
                     .used_exports
-                    .push((format!("{ws_prefix}/{file_pat}"), exports.clone()));
+                    .push((prefix_if_needed(file_pat), exports.clone()));
             }
             // Merge active plugin names (deduplicated)
             for plugin_name in &ws_result.active_plugins {

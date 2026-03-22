@@ -26,6 +26,11 @@ const ALWAYS_USED: &[&str] = &[
     "vitest.config.{ts,js,mts,mjs}",
     "vitest.setup.{ts,js}",
     "vitest.workspace.{ts,js}",
+    // Common setupFiles conventions used by CRA, Vitest, and community projects.
+    // These are often referenced via imported/spread base configs that static
+    // analysis can't follow, so we mark them as always-used when Vitest is active.
+    "**/src/setupTests.{ts,tsx,js,jsx}",
+    "**/src/test-setup.{ts,tsx,js,jsx}",
 ];
 
 const TOOLING_DEPENDENCIES: &[&str] = &[
@@ -36,6 +41,20 @@ const TOOLING_DEPENDENCIES: &[&str] = &[
     "@vitest/browser",
 ];
 
+/// Vitest config filenames for file-based activation.
+/// In monorepos, `vitest` may only be in some workspaces, but shared vite configs
+/// embed vitest test configuration. Activate when these files exist.
+const VITEST_CONFIG_FILES: &[&str] = &[
+    "vitest.config.ts",
+    "vitest.config.js",
+    "vitest.config.mts",
+    "vitest.config.mjs",
+    "vite.config.ts",
+    "vite.config.js",
+    "vite.config.mts",
+    "vite.config.mjs",
+];
+
 impl Plugin for VitestPlugin {
     fn name(&self) -> &'static str {
         "vitest"
@@ -43,6 +62,17 @@ impl Plugin for VitestPlugin {
 
     fn enablers(&self) -> &'static [&'static str] {
         ENABLERS
+    }
+
+    /// Activate when `vitest` is in deps OR when a vitest/vite config file exists.
+    /// Vitest often embeds its config in `vite.config.{ts,js}` via `defineConfig({ test: {...} })`,
+    /// so the presence of a vite config in a workspace implies vitest may be used there.
+    fn is_enabled_with_deps(&self, deps: &[String], root: &Path) -> bool {
+        let enablers = self.enablers();
+        if enablers.iter().any(|e| deps.iter().any(|d| d == e)) {
+            return true;
+        }
+        VITEST_CONFIG_FILES.iter().any(|f| root.join(f).exists())
     }
 
     fn entry_patterns(&self) -> &'static [&'static str] {

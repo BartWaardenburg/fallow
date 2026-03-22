@@ -116,15 +116,18 @@ impl Plugin for AngularPlugin {
         }
 
         // angular.json: projects.*.architect.build.options.main → entry patterns
-        let mains = config_parser::extract_config_object_nested_strings(
-            source,
-            config_path,
-            &["projects"],
-            &["architect", "build", "options", "main"],
-        );
-        for main in &mains {
-            let path = main.trim_start_matches("./");
-            result.entry_patterns.push(path.to_string());
+        // Also check "browser" — newer Angular CLI uses "browser" instead of "main"
+        for field in &["main", "browser"] {
+            let mains = config_parser::extract_config_object_nested_strings(
+                source,
+                config_path,
+                &["projects"],
+                &["architect", "build", "options", field],
+            );
+            for main in &mains {
+                let path = main.trim_start_matches("./");
+                result.entry_patterns.push(path.to_string());
+            }
         }
 
         // angular.json: projects.*.architect.build.options.polyfills → entry patterns

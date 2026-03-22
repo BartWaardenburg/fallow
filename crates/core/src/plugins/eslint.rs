@@ -47,6 +47,23 @@ const TOOLING_DEPENDENCIES: &[&str] = &[
 
 const ESLINT_CONFIG_EXPORTS: &[&str] = &["default"];
 
+/// ESLint config filenames to check for file-based activation.
+/// In monorepos, `eslint` is typically only in the root package.json, but
+/// workspace packages still have their own ESLint config files.
+const ESLINT_CONFIG_FILES: &[&str] = &[
+    "eslint.config.js",
+    "eslint.config.mjs",
+    "eslint.config.cjs",
+    "eslint.config.ts",
+    "eslint.config.mts",
+    "eslint.config.cts",
+    ".eslintrc.js",
+    ".eslintrc.cjs",
+    ".eslintrc.json",
+    ".eslintrc.yml",
+    ".eslintrc.yaml",
+];
+
 impl Plugin for EslintPlugin {
     fn name(&self) -> &'static str {
         "eslint"
@@ -54,6 +71,19 @@ impl Plugin for EslintPlugin {
 
     fn enablers(&self) -> &'static [&'static str] {
         ENABLERS
+    }
+
+    /// Activate when `eslint` is in deps OR when an ESLint config file exists.
+    /// In monorepos, `eslint` is usually only in the root package.json, but
+    /// workspace packages have their own config files and ESLint-related devDeps.
+    fn is_enabled_with_deps(&self, deps: &[String], root: &Path) -> bool {
+        // Standard enabler check
+        let enablers = self.enablers();
+        if enablers.iter().any(|e| deps.iter().any(|d| d == e)) {
+            return true;
+        }
+        // File-based activation: check for ESLint config files in the workspace root
+        ESLINT_CONFIG_FILES.iter().any(|f| root.join(f).exists())
     }
 
     fn config_patterns(&self) -> &'static [&'static str] {

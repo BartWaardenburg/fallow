@@ -584,10 +584,16 @@ impl PluginRegistry {
             .collect();
 
         if !config_matchers.is_empty() {
+            // Track which plugins already found config files (to avoid double-parsing)
+            let mut resolved_plugins: FxHashSet<&str> = FxHashSet::default();
+
             for (plugin, matchers) in &config_matchers {
                 for (abs_path, rel_path) in &relative_files {
                     if matchers.iter().any(|m| m.is_match(rel_path.as_str())) {
-                        // Found a config file — parse it
+                        // Found a config file — parse it.
+                        // Mark as resolved regardless of result to prevent Phase 3b
+                        // from re-parsing a JSON config for the same plugin.
+                        resolved_plugins.insert(plugin.name());
                         if let Ok(source) = std::fs::read_to_string(abs_path) {
                             let plugin_result = plugin.resolve_config(abs_path, &source, root);
                             if !plugin_result.is_empty() {
@@ -622,6 +628,100 @@ impl PluginRegistry {
                                 );
                             }
                         }
+                    }
+                }
+            }
+
+            // Phase 3b: Filesystem fallback for JSON config files.
+            // JSON files (angular.json, project.json) are not in the discovered file set
+            // because fallow only discovers JS/TS/CSS/Vue/etc. files. For plugins with
+            // JSON config patterns that weren't matched above, try reading directly from
+            // the filesystem.
+            //
+            // Collect candidate JSON config files to parse (path, plugin_name).
+            let mut json_configs: Vec<(PathBuf, &dyn Plugin)> = Vec::new();
+            for (plugin, _) in &config_matchers {
+                if resolved_plugins.contains(plugin.name()) {
+                    continue;
+                }
+                for pat in plugin.config_patterns() {
+                    let has_glob = pat.contains("**") || pat.contains('*') || pat.contains('?');
+                    if !has_glob {
+                        // Simple pattern (e.g., "angular.json") — check at root
+                        let abs_path = root.join(pat);
+                        if abs_path.is_file() {
+                            json_configs.push((abs_path, *plugin));
+                        }
+                    } else {
+                        // Glob pattern (e.g., "**/project.json") — check directories
+                        // that contain discovered source files
+                        let filename = std::path::Path::new(pat)
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or(pat);
+                        let matcher = globset::Glob::new(pat).ok().map(|g| g.compile_matcher());
+                        if let Some(matcher) = matcher {
+                            let mut checked_dirs: FxHashSet<&Path> = FxHashSet::default();
+                            checked_dirs.insert(root);
+                            for (abs_path, _) in &relative_files {
+                                if let Some(parent) = abs_path.parent() {
+                                    checked_dirs.insert(parent);
+                                }
+                            }
+                            for dir in checked_dirs {
+                                let candidate = dir.join(filename);
+                                if candidate.is_file() {
+                                    let rel = candidate
+                                        .strip_prefix(root)
+                                        .map(|p| p.to_string_lossy())
+                                        .unwrap_or_default();
+                                    if matcher.is_match(rel.as_ref()) {
+                                        json_configs.push((candidate, *plugin));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            // Parse discovered JSON config files
+            for (abs_path, plugin) in &json_configs {
+                if let Ok(source) = std::fs::read_to_string(abs_path) {
+                    let plugin_result = plugin.resolve_config(abs_path, &source, root);
+                    if !plugin_result.is_empty() {
+                        let rel = abs_path
+                            .strip_prefix(root)
+                            .map(|p| p.to_string_lossy())
+                            .unwrap_or_default();
+                        tracing::debug!(
+                            plugin = plugin.name(),
+                            config = %rel,
+                            entries = plugin_result.entry_patterns.len(),
+                            deps = plugin_result.referenced_dependencies.len(),
+                            "resolved config (filesystem fallback)"
+                        );
+                        let pname = plugin.name().to_string();
+                        result.entry_patterns.extend(
+                            plugin_result
+                                .entry_patterns
+                                .into_iter()
+                                .map(|p| (p, pname.clone())),
+                        );
+                        result
+                            .referenced_dependencies
+                            .extend(plugin_result.referenced_dependencies);
+                        result.discovered_always_used.extend(
+                            plugin_result
+                                .always_used_files
+                                .into_iter()
+                                .map(|p| (p, pname.clone())),
+                        );
+                        result.setup_files.extend(
+                            plugin_result
+                                .setup_files
+                                .into_iter()
+                                .map(|p| (p, pname.clone())),
+                        );
                     }
                 }
             }
@@ -697,6 +797,7 @@ impl PluginRegistry {
         &self,
         pkg: &PackageJson,
         root: &Path,
+        project_root: &Path,
         precompiled_config_matchers: &[(&dyn Plugin, Vec<globset::GlobMatcher>)],
         relative_files: &[(&PathBuf, String)],
     ) -> AggregatedPluginResult {
@@ -767,12 +868,16 @@ impl PluginRegistry {
             .filter(|(p, _)| active_names.contains(p.name()))
             .collect();
 
+        let mut resolved_ws_plugins: FxHashSet<&str> = FxHashSet::default();
         if !workspace_matchers.is_empty() {
-            for (plugin, matchers) in workspace_matchers {
+            for (plugin, matchers) in &workspace_matchers {
                 for (abs_path, rel_path) in relative_files {
                     if matchers.iter().any(|m| m.is_match(rel_path.as_str()))
                         && let Ok(source) = std::fs::read_to_string(abs_path)
                     {
+                        // Mark resolved regardless of result to prevent Phase 3b
+                        // from re-parsing a JSON config for the same plugin.
+                        resolved_ws_plugins.insert(plugin.name());
                         let plugin_result = plugin.resolve_config(abs_path, &source, root);
                         if !plugin_result.is_empty() {
                             let pname = plugin.name().to_string();
@@ -806,6 +911,109 @@ impl PluginRegistry {
                             );
                         }
                     }
+                }
+            }
+        }
+
+        // Phase 3b: Filesystem fallback for JSON config files at the project root.
+        // Config files like angular.json live at the monorepo root, but Angular is
+        // only active in workspace packages. Check the project root for unresolved
+        // config patterns.
+        let mut ws_json_configs: Vec<(PathBuf, &dyn Plugin)> = Vec::new();
+        let mut ws_seen_paths: FxHashSet<PathBuf> = FxHashSet::default();
+        for plugin in &active {
+            if resolved_ws_plugins.contains(plugin.name()) || plugin.config_patterns().is_empty() {
+                continue;
+            }
+            for pat in plugin.config_patterns() {
+                let has_glob = pat.contains("**") || pat.contains('*') || pat.contains('?');
+                if !has_glob {
+                    // Check both workspace root and project root (deduplicate when equal)
+                    let check_roots: Vec<&Path> = if root == project_root {
+                        vec![root]
+                    } else {
+                        vec![root, project_root]
+                    };
+                    for check_root in check_roots {
+                        let abs_path = check_root.join(pat);
+                        if abs_path.is_file() && ws_seen_paths.insert(abs_path.clone()) {
+                            ws_json_configs.push((abs_path, *plugin));
+                            break; // Found it — don't check other roots for this pattern
+                        }
+                    }
+                } else {
+                    // Glob pattern (e.g., "**/project.json") — check directories
+                    // that contain discovered source files
+                    let filename = std::path::Path::new(pat)
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or(pat);
+                    let matcher = globset::Glob::new(pat).ok().map(|g| g.compile_matcher());
+                    if let Some(matcher) = matcher {
+                        let mut checked_dirs: FxHashSet<&Path> = FxHashSet::default();
+                        checked_dirs.insert(root);
+                        if root != project_root {
+                            checked_dirs.insert(project_root);
+                        }
+                        for (abs_path, _) in relative_files {
+                            if let Some(parent) = abs_path.parent() {
+                                checked_dirs.insert(parent);
+                            }
+                        }
+                        for dir in checked_dirs {
+                            let candidate = dir.join(filename);
+                            if candidate.is_file() && ws_seen_paths.insert(candidate.clone()) {
+                                let rel = candidate
+                                    .strip_prefix(project_root)
+                                    .map(|p| p.to_string_lossy())
+                                    .unwrap_or_default();
+                                if matcher.is_match(rel.as_ref()) {
+                                    ws_json_configs.push((candidate, *plugin));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // Parse discovered JSON config files
+        for (abs_path, plugin) in &ws_json_configs {
+            if let Ok(source) = std::fs::read_to_string(abs_path) {
+                let plugin_result = plugin.resolve_config(abs_path, &source, root);
+                if !plugin_result.is_empty() {
+                    let rel = abs_path
+                        .strip_prefix(project_root)
+                        .map(|p| p.to_string_lossy())
+                        .unwrap_or_default();
+                    tracing::debug!(
+                        plugin = plugin.name(),
+                        config = %rel,
+                        entries = plugin_result.entry_patterns.len(),
+                        deps = plugin_result.referenced_dependencies.len(),
+                        "resolved config (workspace filesystem fallback)"
+                    );
+                    let pname = plugin.name().to_string();
+                    result.entry_patterns.extend(
+                        plugin_result
+                            .entry_patterns
+                            .into_iter()
+                            .map(|p| (p, pname.clone())),
+                    );
+                    result
+                        .referenced_dependencies
+                        .extend(plugin_result.referenced_dependencies);
+                    result.discovered_always_used.extend(
+                        plugin_result
+                            .always_used_files
+                            .into_iter()
+                            .map(|p| (p, pname.clone())),
+                    );
+                    result.setup_files.extend(
+                        plugin_result
+                            .setup_files
+                            .into_iter()
+                            .map(|p| (p, pname.clone())),
+                    );
                 }
             }
         }

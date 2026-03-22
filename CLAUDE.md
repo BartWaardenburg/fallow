@@ -78,7 +78,7 @@ Key modules in fallow-core (re-exports fallow-extract, fallow-graph for backward
 - `duplicates/normalize.rs` — Configurable token normalization with `ResolvedNormalization`: mode defaults (strict/mild/weak/semantic) merged with user-specified overrides (`ignore_identifiers`, `ignore_string_values`, `ignore_numeric_values`)
 - `duplicates/tokenize.rs` — AST-based tokenizer with optional type annotation stripping (`strip_types` flag) for cross-language clone detection between `.ts` and `.js` files
 - `cross_reference.rs` — Cross-references duplication findings with dead code analysis: identifies clone instances that are also unused (in unused files or overlapping unused exports) as high-priority combined findings
-- `plugins/` — Plugin system: `Plugin` trait, registry (84 built-in plugins, ~31 with AST-based config parsing); `config_parser.rs` provides Oxc-based helpers for extracting imports, string arrays, object keys, require() sources, and string-or-array values from JS/TS/JSON config files; `tooling.rs` contains general tooling dependency detection (`is_known_tooling_dependency`) for dev deps not tied to any single plugin
+- `plugins/` — Plugin system: `Plugin` trait, registry (84 built-in plugins, ~33 with AST-based config parsing); `config_parser.rs` provides Oxc-based helpers for extracting imports, string arrays, object keys, require() sources, and string-or-array values from JS/TS/JSON config files; `tooling.rs` contains general tooling dependency detection (`is_known_tooling_dependency`) for dev deps not tied to any single plugin
 - `trace.rs` — Debug & trace tooling: trace export usage (`trace_export`), file edges (`trace_file`), dependency usage (`trace_dependency`), clone location (`trace_clone`), and `PipelineTimings` struct for `--performance` output
 - `progress.rs` — indicatif progress bars
 - `errors.rs` — Error types
@@ -196,7 +196,7 @@ Comprehensive clippy and compiler lint configuration inspired by the Oxc ecosyst
 **Other**: MSW, nodemon, PM2, dependency-cruiser
 
 - **Plugins** (`crates/core/src/plugins/`) — Single source of truth for all built-in framework support. Each plugin implements the `Plugin` trait with enablers (package.json detection), static patterns (entry points, always-used files, used exports, tooling dependencies), and optional `resolve_config()` for AST-based config parsing via Oxc.
-- **Rich config parsing** — All top 12 framework plugins have deep `resolve_config()` implementations:
+- **Rich config parsing** — 14 framework plugins have deep `resolve_config()` implementations:
   - **ESLint**: Legacy plugin/extends/parser short-name resolution, flat config plugin keys, JSON config
   - **Vite**: rollupOptions.input, lib.entry, optimizeDeps include/exclude, ssr.external/noExternal
   - **Jest**: preset, setupFiles, globalSetup/Teardown, testMatch, transform, reporters, testEnvironment, watchPlugins, resolver, snapshotSerializers, testRunner, runner, JSON config
@@ -209,6 +209,8 @@ Comprehensive clippy and compiler lint configuration inspired by the Oxc ecosyst
   - **PostCSS**: plugins (object keys, require() calls, string arrays)
   - **Nuxt**: modules, css, plugins, extends, postcss plugins from `nuxt.config.ts`; path aliases (`~`, `~~`, `#shared`)
   - **Drizzle**: schema field (string/array/glob/directory → entry points for table/relation/enum exports), out directory, import dependencies
+  - **Angular**: `angular.json` projects.*.architect.build.options.{styles, scripts, main, browser, polyfills} → entry points; peer dependency awareness (rxjs, @angular/common, etc.)
+  - **Nx**: `project.json` targets.*.executor → referenced dependencies (package name extraction from "pkg:executor" format); targets.*.options.{main, tsConfig} → entry points and always-used files
 - **Plugin trait extensions** — `path_aliases()` for framework-specific alias resolution (e.g., Nuxt `~/`, Next.js `@/`); `virtual_module_prefixes()` for framework virtual modules (e.g., Docusaurus `@theme/`, `@docusaurus/`); `TsconfigDiscovery::Auto` for per-file tsconfig path alias resolution across monorepo packages.
 - **External plugins** (`crates/config/src/external_plugin.rs`) — Standalone plugin definitions (JSONC, JSON, TOML) or inline via the `framework` config field. Discovered from: `plugins` config field, `.fallow/plugins/` directory, and `fallow-plugin-*.{jsonc,json,toml}` files in project root. Supports entry points, always-used files, used exports, config patterns, tooling dependencies, and rich `detection` logic (`dependency`, `fileExists`, `all`/`any` combinators). Inline `framework` definitions use the same `ExternalPluginDef` schema and are merged into the plugin pipeline. All formats use camelCase field names. `$schema` field supported for IDE autocomplete in JSONC/JSON. See `docs/plugin-authoring.md` for the full format.
 
@@ -346,7 +348,7 @@ unresolved-imports = "error"
 ## Key design decisions
 
 - **No TypeScript compiler dependency**: Syntactic analysis via Oxc parser + scope-aware binding analysis via `oxc_semantic`. No type resolution, no tsc. This is the speed advantage.
-- **Plugin system**: Single source of truth for framework support. Rust trait-based plugins with static patterns for common cases and optional AST-based config parsing via Oxc for ~31 plugins (no JavaScript evaluation), many with rich config extraction (entry points, dependencies, setup files from config objects). 84 built-in plugins covering the most popular JS/TS frameworks.
+- **Plugin system**: Single source of truth for framework support. Rust trait-based plugins with static patterns for common cases and optional AST-based config parsing via Oxc for ~33 plugins (no JavaScript evaluation), many with rich config extraction (entry points, dependencies, setup files from config objects). 84 built-in plugins covering the most popular JS/TS frameworks.
 - **Flat edge storage**: Contiguous `Vec<Edge>` with range indices for cache-friendly traversal.
 - **Lock-free parallel resolution**: Bare specifier cache uses `DashMap` (sharded concurrent map) for contention-free reads under rayon work-stealing.
 - **Re-export chain resolution**: Iterative propagation through barrel files with cycle detection.
