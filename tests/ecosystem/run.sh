@@ -70,18 +70,18 @@ mkdir -p "$ECOSYSTEM_DIR"
 # Use "-" for install_cmd to skip npm install.
 
 PROJECTS=(
-    "vercel/next.js            canary   .  -"
-    "vitejs/vite               main     .  pnpm install --frozen-lockfile --ignore-scripts"
-    "vuejs/core                main     .  pnpm install --frozen-lockfile --ignore-scripts"
-    "sveltejs/svelte           main     .  pnpm install --frozen-lockfile --ignore-scripts"
-    "remix-run/remix           main     .  pnpm install --frozen-lockfile --ignore-scripts"
-    "trpc/trpc                 main     .  pnpm install --frozen-lockfile --ignore-scripts"
-    "t3-oss/create-t3-app      main     .  pnpm install --frozen-lockfile --ignore-scripts"
-    "TanStack/query            main     .  pnpm install --frozen-lockfile --ignore-scripts"
-    "jestjs/jest               main     .  yarn install --frozen-lockfile --ignore-scripts"
-    "storybookjs/storybook     next     .  -"
+    "vercel/next.js            canary   .  pnpm install --no-frozen-lockfile --ignore-scripts 2>/dev/null || true"
+    "vitejs/vite               main     .  pnpm install --no-frozen-lockfile --ignore-scripts"
+    "vuejs/core                main     .  pnpm install --no-frozen-lockfile --ignore-scripts"
+    "sveltejs/svelte           main     .  pnpm install --no-frozen-lockfile --ignore-scripts"
+    "remix-run/remix           main     .  pnpm install --no-frozen-lockfile --ignore-scripts"
+    "trpc/trpc                 main     .  pnpm install --no-frozen-lockfile --ignore-scripts"
+    "t3-oss/create-t3-app      main     .  pnpm install --no-frozen-lockfile --ignore-scripts"
+    "TanStack/query            main     .  pnpm install --no-frozen-lockfile --ignore-scripts"
+    "jestjs/jest               main     .  yarn install"
+    "storybookjs/storybook     next     .  pnpm install --no-frozen-lockfile --ignore-scripts 2>/dev/null || true"
     "tailwindlabs/tailwindcss  main     .  npm install --ignore-scripts 2>/dev/null || true"
-    "prisma/prisma             main     .  pnpm install --frozen-lockfile --ignore-scripts"
+    "prisma/prisma             main     .  pnpm install --no-frozen-lockfile --ignore-scripts 2>/dev/null || true"
 )
 
 # ---------------------------------------------------------------------------
@@ -126,14 +126,14 @@ run_fallow() {
 
     # Run fallow with a timeout (5 minutes per project)
     if command -v timeout &>/dev/null; then
-        timeout 300 "$FALLOW_BIN" check --format json "$project_dir" \
+        timeout 300 "$FALLOW_BIN" check --format json --root "$project_dir" \
             > "$output_file" 2>&1 || exit_code=$?
     elif command -v gtimeout &>/dev/null; then
-        gtimeout 300 "$FALLOW_BIN" check --format json "$project_dir" \
+        gtimeout 300 "$FALLOW_BIN" check --format json --root "$project_dir" \
             > "$output_file" 2>&1 || exit_code=$?
     else
         # No timeout command available, run without timeout
-        "$FALLOW_BIN" check --format json "$project_dir" \
+        "$FALLOW_BIN" check --format json --root "$project_dir" \
             > "$output_file" 2>&1 || exit_code=$?
     fi
 
