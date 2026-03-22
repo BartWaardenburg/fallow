@@ -26,6 +26,7 @@ oxc_ast = "0.120"
 oxc_ast_visit = "0.120"
 oxc_parser = "0.120"
 oxc_resolver = "11"
+oxc_semantic = "0.120"
 oxc_span = "0.120"
 oxc_syntax = "0.120"
 

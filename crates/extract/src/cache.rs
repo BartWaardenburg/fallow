@@ -15,7 +15,7 @@ use oxc_span::Span;
 use crate::{ExportName, MemberAccess, MemberKind};
 
 /// Cache version — bump when the cache format changes.
-const CACHE_VERSION: u32 = 11;
+const CACHE_VERSION: u32 = 12;
 
 /// Maximum cache file size to deserialize (256 MB).
 const MAX_CACHE_SIZE: usize = 256 * 1024 * 1024;
@@ -56,6 +56,8 @@ pub struct CachedModule {
     pub dynamic_import_patterns: Vec<CachedDynamicImportPattern>,
     /// Whether this module uses CJS exports.
     pub has_cjs_exports: bool,
+    /// Local names of import bindings that are never referenced in this file.
+    pub unused_import_bindings: Vec<String>,
     /// Inline suppression directives.
     pub suppressions: Vec<CachedSuppression>,
     /// Pre-computed line-start byte offsets for O(log N) byte-to-line/col conversion.
@@ -420,6 +422,7 @@ pub fn cached_to_module(
         has_cjs_exports: cached.has_cjs_exports,
         content_hash: cached.content_hash,
         suppressions,
+        unused_import_bindings: cached.unused_import_bindings.clone(),
         line_offsets: cached.line_offsets.clone(),
     }
 }
@@ -530,6 +533,7 @@ pub fn module_to_cached(
             })
             .collect(),
         has_cjs_exports: module.has_cjs_exports,
+        unused_import_bindings: module.unused_import_bindings.clone(),
         suppressions: module
             .suppressions
             .iter()
@@ -577,6 +581,7 @@ mod tests {
             whole_object_uses: vec![],
             dynamic_import_patterns: vec![],
             has_cjs_exports: false,
+            unused_import_bindings: vec![],
             suppressions: vec![],
             line_offsets: vec![],
         };
@@ -602,6 +607,7 @@ mod tests {
             whole_object_uses: vec![],
             dynamic_import_patterns: vec![],
             has_cjs_exports: false,
+            unused_import_bindings: vec![],
             suppressions: vec![],
             line_offsets: vec![],
         };
@@ -631,6 +637,7 @@ mod tests {
             whole_object_uses: vec![],
             dynamic_import_patterns: vec![],
             has_cjs_exports: false,
+            unused_import_bindings: vec![],
             suppressions: vec![],
             line_offsets: vec![],
         };
@@ -647,6 +654,7 @@ mod tests {
             whole_object_uses: vec![],
             dynamic_import_patterns: vec![],
             has_cjs_exports: false,
+            unused_import_bindings: vec![],
             suppressions: vec![],
             line_offsets: vec![],
         };
@@ -676,6 +684,7 @@ mod tests {
             whole_object_uses: vec![],
             dynamic_import_patterns: vec![],
             has_cjs_exports: false,
+            unused_import_bindings: vec![],
             content_hash: 123,
             suppressions: vec![],
             line_offsets: vec![],
@@ -714,6 +723,7 @@ mod tests {
             whole_object_uses: vec![],
             dynamic_import_patterns: vec![],
             has_cjs_exports: false,
+            unused_import_bindings: vec![],
             content_hash: 456,
             suppressions: vec![],
             line_offsets: vec![],
@@ -767,6 +777,7 @@ mod tests {
             whole_object_uses: vec![],
             dynamic_import_patterns: vec![],
             has_cjs_exports: false,
+            unused_import_bindings: vec![],
             content_hash: 789,
             suppressions: vec![],
             line_offsets: vec![],
@@ -811,6 +822,7 @@ mod tests {
             whole_object_uses: vec![],
             dynamic_import_patterns: vec![],
             has_cjs_exports: false,
+            unused_import_bindings: vec![],
             content_hash: 0,
             suppressions: vec![],
             line_offsets: vec![],
@@ -854,6 +866,7 @@ mod tests {
             has_cjs_exports: true,
             content_hash: 0,
             suppressions: vec![],
+            unused_import_bindings: vec![],
             line_offsets: vec![],
         };
 
@@ -912,6 +925,7 @@ mod tests {
             whole_object_uses: vec![],
             dynamic_import_patterns: vec![],
             has_cjs_exports: false,
+            unused_import_bindings: vec![],
             content_hash: 0,
             suppressions: vec![],
             line_offsets: vec![],
@@ -964,6 +978,7 @@ mod tests {
             whole_object_uses: vec![],
             dynamic_import_patterns: vec![],
             has_cjs_exports: false,
+            unused_import_bindings: vec![],
             suppressions: vec![],
             line_offsets: vec![],
         };
@@ -996,6 +1011,7 @@ mod tests {
             whole_object_uses: vec![],
             dynamic_import_patterns: vec![],
             has_cjs_exports: false,
+            unused_import_bindings: vec![],
             suppressions: vec![],
             line_offsets: vec![],
         };
@@ -1042,6 +1058,7 @@ mod tests {
             whole_object_uses: vec![],
             dynamic_import_patterns: vec![],
             has_cjs_exports: false,
+            unused_import_bindings: vec![],
             content_hash: 0,
             suppressions: vec![],
             line_offsets: vec![],
@@ -1071,6 +1088,7 @@ mod tests {
             whole_object_uses: vec![],
             dynamic_import_patterns: vec![],
             has_cjs_exports: false,
+            unused_import_bindings: vec![],
             suppressions: vec![],
             line_offsets: vec![],
         };
@@ -1111,6 +1129,7 @@ mod tests {
             whole_object_uses: vec![],
             dynamic_import_patterns: vec![],
             has_cjs_exports: false,
+            unused_import_bindings: vec![],
             suppressions: vec![],
             line_offsets: vec![],
         };
@@ -1157,6 +1176,7 @@ mod tests {
             whole_object_uses: vec![],
             dynamic_import_patterns: vec![],
             has_cjs_exports: false,
+            unused_import_bindings: vec![],
             suppressions: vec![],
             line_offsets: vec![],
         };
@@ -1183,6 +1203,7 @@ mod tests {
             whole_object_uses: vec![],
             dynamic_import_patterns: vec![],
             has_cjs_exports: false,
+            unused_import_bindings: vec![],
             suppressions: vec![],
             line_offsets: vec![],
         };
@@ -1209,6 +1230,7 @@ mod tests {
             whole_object_uses: vec![],
             dynamic_import_patterns: vec![],
             has_cjs_exports: false,
+            unused_import_bindings: vec![],
             suppressions: vec![],
             line_offsets: vec![],
         };
@@ -1237,6 +1259,7 @@ mod tests {
             whole_object_uses: vec![],
             dynamic_import_patterns: vec![],
             has_cjs_exports: false,
+            unused_import_bindings: vec![],
             suppressions: vec![],
             line_offsets: vec![],
         };
@@ -1265,6 +1288,7 @@ mod tests {
             whole_object_uses: vec![],
             dynamic_import_patterns: vec![],
             has_cjs_exports: false,
+            unused_import_bindings: vec![],
             suppressions: vec![],
             line_offsets: vec![],
         };
@@ -1301,6 +1325,7 @@ mod tests {
             whole_object_uses: vec![],
             dynamic_import_patterns: vec![],
             has_cjs_exports: false,
+            unused_import_bindings: vec![],
             content_hash: 42,
             suppressions: vec![],
             line_offsets: vec![],
@@ -1325,6 +1350,7 @@ mod tests {
             whole_object_uses: vec![],
             dynamic_import_patterns: vec![],
             has_cjs_exports: false,
+            unused_import_bindings: vec![],
             content_hash: 0,
             suppressions: vec![],
             line_offsets: vec![0, 15, 30, 45],

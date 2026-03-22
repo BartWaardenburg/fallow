@@ -487,6 +487,7 @@ fn cache_roundtrip() {
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
         has_cjs_exports: false,
+        unused_import_bindings: vec![],
         suppressions: vec![],
         line_offsets: vec![],
     };
@@ -2311,6 +2312,7 @@ fn incremental_cache_prune_stale_entries() {
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
         has_cjs_exports: false,
+        unused_import_bindings: vec![],
         suppressions: vec![],
         line_offsets: vec![],
     };

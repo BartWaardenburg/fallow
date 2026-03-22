@@ -536,3 +536,187 @@ fn dynamic_import_no_duplicate_entries() {
     let info = parse_source("async function f() { const mod = await import('./service'); }");
     assert_eq!(info.dynamic_imports.len(), 1);
 }
+
+// -- Namespace destructuring detection --
+
+#[test]
+fn namespace_destructuring_generates_member_accesses() {
+    let info = parse_source("import * as utils from './utils';\nconst { foo, bar } = utils;");
+    assert_eq!(info.imports.len(), 1);
+    assert_eq!(info.imports[0].imported_name, ImportedName::Namespace);
+    let has_foo = info
+        .member_accesses
+        .iter()
+        .any(|a| a.object == "utils" && a.member == "foo");
+    let has_bar = info
+        .member_accesses
+        .iter()
+        .any(|a| a.object == "utils" && a.member == "bar");
+    assert!(
+        has_foo,
+        "Should capture destructured 'foo' as member access"
+    );
+    assert!(
+        has_bar,
+        "Should capture destructured 'bar' as member access"
+    );
+}
+
+#[test]
+fn namespace_destructuring_with_rest_marks_whole_object() {
+    let info = parse_source("import * as utils from './utils';\nconst { foo, ...rest } = utils;");
+    assert!(
+        info.whole_object_uses.contains(&"utils".to_string()),
+        "Rest pattern should mark namespace as whole-object use"
+    );
+}
+
+#[test]
+fn namespace_destructuring_from_dynamic_import() {
+    let info = parse_source(
+        "async function f() {\n  const mod = await import('./mod');\n  const { a, b } = mod;\n}",
+    );
+    let has_a = info
+        .member_accesses
+        .iter()
+        .any(|a| a.object == "mod" && a.member == "a");
+    let has_b = info
+        .member_accesses
+        .iter()
+        .any(|a| a.object == "mod" && a.member == "b");
+    assert!(
+        has_a,
+        "Should capture destructured 'a' from dynamic import namespace"
+    );
+    assert!(
+        has_b,
+        "Should capture destructured 'b' from dynamic import namespace"
+    );
+}
+
+#[test]
+fn namespace_destructuring_from_require() {
+    let info = parse_source("const mod = require('./mod');\nconst { x, y } = mod;");
+    let has_x = info
+        .member_accesses
+        .iter()
+        .any(|a| a.object == "mod" && a.member == "x");
+    let has_y = info
+        .member_accesses
+        .iter()
+        .any(|a| a.object == "mod" && a.member == "y");
+    assert!(
+        has_x,
+        "Should capture destructured 'x' from require namespace"
+    );
+    assert!(
+        has_y,
+        "Should capture destructured 'y' from require namespace"
+    );
+}
+
+#[test]
+fn non_namespace_destructuring_not_captured() {
+    let info =
+        parse_source("import { foo } from './utils';\nconst obj = { a: 1 };\nconst { a } = obj;");
+    // 'obj' is not a namespace import, so destructuring should not add member_accesses for it
+    let has_obj_a = info
+        .member_accesses
+        .iter()
+        .any(|a| a.object == "obj" && a.member == "a");
+    assert!(
+        !has_obj_a,
+        "Should not capture destructuring of non-namespace variables"
+    );
+}
+
+// -- Unused import binding detection (oxc_semantic) --
+
+#[test]
+fn unused_import_binding_detected() {
+    let info = parse_source("import { foo } from './utils';");
+    assert!(
+        info.unused_import_bindings.contains(&"foo".to_string()),
+        "Import 'foo' is never used and should be in unused_import_bindings"
+    );
+}
+
+#[test]
+fn used_import_binding_not_in_unused() {
+    let info = parse_source("import { foo } from './utils';\nconsole.log(foo);");
+    assert!(
+        !info.unused_import_bindings.contains(&"foo".to_string()),
+        "Import 'foo' is used and should NOT be in unused_import_bindings"
+    );
+}
+
+#[test]
+fn unused_namespace_import_detected() {
+    let info = parse_source("import * as utils from './utils';");
+    assert!(
+        info.unused_import_bindings.contains(&"utils".to_string()),
+        "Namespace import 'utils' is never used and should be in unused_import_bindings"
+    );
+}
+
+#[test]
+fn used_namespace_import_not_in_unused() {
+    let info = parse_source("import * as utils from './utils';\nutils.foo();");
+    assert!(
+        !info.unused_import_bindings.contains(&"utils".to_string()),
+        "Namespace import 'utils' is used and should NOT be in unused_import_bindings"
+    );
+}
+
+#[test]
+fn reexported_import_not_in_unused() {
+    let info = parse_source("import { foo } from './utils';\nexport { foo };");
+    assert!(
+        !info.unused_import_bindings.contains(&"foo".to_string()),
+        "Import 'foo' is re-exported and should NOT be in unused_import_bindings"
+    );
+}
+
+#[test]
+fn type_only_import_used_as_type_not_in_unused() {
+    let info = parse_source("import type { Foo } from './types';\nconst x: Foo = {} as any;");
+    assert!(
+        !info.unused_import_bindings.contains(&"Foo".to_string()),
+        "Type import 'Foo' is used as a type annotation and should NOT be in unused_import_bindings"
+    );
+}
+
+#[test]
+fn value_import_used_only_as_type_not_in_unused() {
+    // A value import (not `import type`) used only in a type annotation position
+    // should NOT be in unused_import_bindings — oxc_semantic counts type-position
+    // references as real references, which is correct since `import { Foo }` (without
+    // the `type` keyword) may be needed at runtime depending on transpiler settings.
+    let info = parse_source("import { Foo } from './types';\nconst x: Foo = {} as any;");
+    assert!(
+        !info.unused_import_bindings.contains(&"Foo".to_string()),
+        "Value import 'Foo' used as type annotation should NOT be in unused_import_bindings"
+    );
+}
+
+#[test]
+fn side_effect_import_not_in_unused() {
+    let info = parse_source("import './side-effect';");
+    assert!(
+        info.unused_import_bindings.is_empty(),
+        "Side-effect imports have no binding and should not appear in unused_import_bindings"
+    );
+}
+
+#[test]
+fn mixed_used_and_unused_imports() {
+    let info = parse_source("import { used, unused } from './utils';\nconsole.log(used);");
+    assert!(
+        !info.unused_import_bindings.contains(&"used".to_string()),
+        "'used' is referenced"
+    );
+    assert!(
+        info.unused_import_bindings.contains(&"unused".to_string()),
+        "'unused' is not referenced"
+    );
+}

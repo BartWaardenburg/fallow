@@ -33,7 +33,7 @@ tests/
 
 ## Architecture
 
-Pipeline: Config → File Discovery → Incremental Parallel Parsing (rayon + oxc_parser, cache-aware) → Script Analysis → Module Resolution (oxc_resolver) → Graph Construction → Re-export Chain Resolution → Dead Code Detection → Reporting
+Pipeline: Config → File Discovery → Incremental Parallel Parsing (rayon + oxc_parser + oxc_semantic, cache-aware) → Script Analysis → Module Resolution (oxc_resolver) → Graph Construction → Re-export Chain Resolution → Dead Code Detection → Reporting
 
 Key modules in fallow-types:
 - `discover` — `DiscoveredFile`, `FileId`, `EntryPoint`, `EntryPointSource`
@@ -43,12 +43,12 @@ Key modules in fallow-types:
 
 Key modules in fallow-extract:
 - `lib.rs` — Public API: `parse_all_files()` (parallel rayon dispatch, cache-aware), returns `ParseResult` with modules + cache hit/miss statistics
-- `visitor.rs` — Oxc AST visitor extracting imports, exports, re-exports, members, whole-object uses, dynamic import patterns
+- `visitor.rs` — Oxc AST visitor extracting imports, exports, re-exports, members, whole-object uses, dynamic import patterns, namespace destructuring (`const { a, b } = ns` → member accesses)
 - `sfc.rs` — Vue/Svelte SFC script extraction (HTML comment filtering, `<script src="...">` support, `lang="ts"`/`lang="tsx"` detection)
 - `astro.rs` — Astro frontmatter extraction between `---` delimiters
 - `mdx.rs` — MDX import/export extraction with multi-line brace tracking
 - `css.rs` — CSS Module class name extraction (`.module.css`/`.module.scss` → named exports)
-- `parse.rs` — File type dispatcher: routes files to the appropriate parser (JS/TS, SFC, Astro, MDX, CSS)
+- `parse.rs` — File type dispatcher: routes files to the appropriate parser (JS/TS, SFC, Astro, MDX, CSS). Runs `oxc_semantic` after parsing to detect unused import bindings (imports where the binding is never read in the file).
 - `cache.rs` — Incremental bincode cache with xxh3 hashing. Unchanged files skip AST parsing and load from cache; only changed/new files are parsed. Cache is pruned of stale entries (deleted files) on each run.
 - `tests/` — Integration tests split by parser type: `js_ts.rs`, `sfc.rs`, `astro.rs`, `mdx.rs`, `css.rs`
 
@@ -170,6 +170,8 @@ Comprehensive clippy and compiler lint configuration inspired by the Oxc ecosyst
 26. Decorated class member skip: class members with decorators (NestJS `@Get()`, Angular `@Input()`, TypeORM `@Column()`, etc.) are not reported as unused, since decorator-driven frameworks consume them via reflection.
 27. Circular dependency detection: Tarjan's SCC algorithm detects import cycles in the module graph. Configurable via `circular-dependencies` rule.
 28. TypeScript project references: workspace discovery from `tsconfig.json` `references` field. Referenced directories are discovered as workspaces (additive with npm/pnpm workspaces), supporting TypeScript composite projects. `oxc_resolver`'s `TsconfigDiscovery::Auto` resolves path aliases through referenced project tsconfigs.
+29. Namespace member detection: `import * as ns from './x'` tracks `ns.foo`, `ns.bar` member accesses to narrow which exports are actually used. Also detects namespace destructuring patterns (`const { foo, bar } = ns`) and rest patterns (`const { foo, ...rest } = ns` → conservative whole-object use). Works with static imports, dynamic imports (`const mod = await import(...)`), and require (`const mod = require(...)`).
+30. Unused import binding detection via `oxc_semantic`: imports where the binding is never read in the importing file (e.g., `import { foo } from './utils'` with `foo` never referenced) are detected via scope-aware symbol analysis. These dead imports don't count as references to the exported symbol, improving unused-export detection precision. Also detects unused namespace imports and unused default imports.
 
 ## Framework support (84 plugins)
 
@@ -339,7 +341,7 @@ unresolved-imports = "error"
 
 ## Key design decisions
 
-- **No TypeScript compiler dependency**: Syntactic analysis only via Oxc. This is the speed advantage.
+- **No TypeScript compiler dependency**: Syntactic analysis via Oxc parser + scope-aware binding analysis via `oxc_semantic`. No type resolution, no tsc. This is the speed advantage.
 - **Plugin system**: Single source of truth for framework support. Rust trait-based plugins with static patterns for common cases and optional AST-based config parsing via Oxc for ~31 plugins (no JavaScript evaluation), many with rich config extraction (entry points, dependencies, setup files from config objects). 84 built-in plugins covering the most popular JS/TS frameworks.
 - **Flat edge storage**: Contiguous `Vec<Edge>` with range indices for cache-friendly traversal.
 - **Lock-free parallel resolution**: Bare specifier cache uses `DashMap` (sharded concurrent map) for contention-free reads under rayon work-stealing.

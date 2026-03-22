@@ -84,6 +84,10 @@ pub(crate) struct ModuleInfoExtractor {
     handled_require_spans: Vec<Span>,
     /// Spans of `import()` expressions already handled via variable declarator detection.
     handled_import_spans: Vec<Span>,
+    /// Local names of namespace imports and namespace-like bindings
+    /// (e.g., `import * as ns`, `const mod = require(...)`, `const mod = await import(...)`).
+    /// Used to detect destructuring patterns like `const { a, b } = ns`.
+    namespace_binding_names: Vec<String>,
 }
 
 impl ModuleInfoExtractor {
@@ -100,6 +104,7 @@ impl ModuleInfoExtractor {
             has_cjs_exports: false,
             handled_require_spans: Vec::new(),
             handled_import_spans: Vec::new(),
+            namespace_binding_names: Vec::new(),
         }
     }
 
@@ -123,6 +128,7 @@ impl ModuleInfoExtractor {
             has_cjs_exports: self.has_cjs_exports,
             content_hash,
             suppressions,
+            unused_import_bindings: Vec::new(),
             line_offsets: Vec::new(),
         }
     }
@@ -297,10 +303,12 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                         });
                     }
                     ImportDeclarationSpecifier::ImportNamespaceSpecifier(s) => {
+                        let local = s.local.name.to_string();
+                        self.namespace_binding_names.push(local.clone());
                         self.imports.push(ImportInfo {
                             source: source.clone(),
                             imported_name: ImportedName::Namespace,
-                            local_name: s.local.name.to_string(),
+                            local_name: local,
                             is_type_only,
                             span: s.span,
                         });
@@ -495,15 +503,51 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                     }
                     BindingPattern::BindingIdentifier(id) => {
                         // `const mod = require('./x')` → Namespace with local_name for narrowing
+                        let local = id.name.to_string();
+                        self.namespace_binding_names.push(local.clone());
                         self.require_calls.push(RequireCallInfo {
                             source,
                             span: call.span,
                             destructured_names: Vec::new(),
-                            local_name: Some(id.name.to_string()),
+                            local_name: Some(local),
                         });
                         self.handled_require_spans.push(call.span);
                     }
                     _ => {}
+                }
+                continue;
+            }
+
+            // Detect namespace destructuring: `const { a, b } = ns` where `ns`
+            // is a namespace import, dynamic import namespace, or require namespace.
+            // Generates member accesses so the graph can narrow which exports are used.
+            //
+            // Limitation: `namespace_binding_names` is scope-unaware. A local variable
+            // that shadows an import with the same name (e.g., `const ns = {...}` inside
+            // a function after `import * as ns`) would also match. This is consistent
+            // with the existing `member_accesses` approach which is also flat/unscoped.
+            // The effect is a false negative (unused export not reported), not a false
+            // positive, so it errs on the side of safety.
+            if let Expression::Identifier(ident) = init
+                && self
+                    .namespace_binding_names
+                    .iter()
+                    .any(|n| n == ident.name.as_str())
+            {
+                if let BindingPattern::ObjectPattern(obj_pat) = &declarator.id {
+                    if obj_pat.rest.is_some() {
+                        // Rest element captures remaining properties — mark as whole-object use
+                        self.whole_object_uses.push(ident.name.to_string());
+                    } else {
+                        for prop in &obj_pat.properties {
+                            if let Some(name) = prop.key.static_name() {
+                                self.member_accesses.push(MemberAccess {
+                                    object: ident.name.to_string(),
+                                    member: name.to_string(),
+                                });
+                            }
+                        }
+                    }
                 }
                 continue;
             }
@@ -560,11 +604,13 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 }
                 BindingPattern::BindingIdentifier(id) => {
                     // `const mod = await import('./x')` → Namespace with local_name for narrowing
+                    let local = id.name.to_string();
+                    self.namespace_binding_names.push(local.clone());
                     self.dynamic_imports.push(DynamicImportInfo {
                         source,
                         span: import_expr.span,
                         destructured_names: Vec::new(),
-                        local_name: Some(id.name.to_string()),
+                        local_name: Some(local),
                     });
                     self.handled_import_spans.push(import_expr.span);
                 }

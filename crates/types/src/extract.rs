@@ -33,6 +33,11 @@ pub struct ModuleInfo {
     pub content_hash: u64,
     /// Inline suppression directives parsed from comments.
     pub suppressions: Vec<Suppression>,
+    /// Local names of import bindings that are never referenced in this file.
+    /// Populated via `oxc_semantic` scope analysis. Used at graph-build time
+    /// to skip adding references for imports whose binding is never read,
+    /// improving unused-export detection precision.
+    pub unused_import_bindings: Vec<String>,
     /// Pre-computed byte offsets where each line starts, for O(log N) byte-to-line/col conversion.
     /// Entry `i` is the byte offset of the start of line `i` (0-indexed).
     /// Example: for "abc\ndef\n", `line_offsets` = \[0, 4\].
@@ -205,7 +210,7 @@ const _: () = assert!(std::mem::size_of::<ImportedName>() == 24);
 const _: () = assert!(std::mem::size_of::<MemberAccess>() == 48);
 // `ModuleInfo` is the per-file extraction result — stored in a Vec during parallel parsing.
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 256);
+const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 280);
 
 /// A re-export declaration.
 #[derive(Debug, Clone)]

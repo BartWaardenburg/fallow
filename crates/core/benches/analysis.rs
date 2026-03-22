@@ -240,6 +240,7 @@ fn bench_resolve_re_export_chains(c: &mut Criterion) {
         member_accesses: vec![],
         whole_object_uses: vec![],
         has_cjs_exports: false,
+        unused_import_bindings: vec![],
     });
 
     // --- Barrel files ---
@@ -310,6 +311,7 @@ fn bench_resolve_re_export_chains(c: &mut Criterion) {
             member_accesses: vec![],
             whole_object_uses: vec![],
             has_cjs_exports: false,
+            unused_import_bindings: vec![],
         });
     }
 
@@ -354,6 +356,7 @@ fn bench_resolve_re_export_chains(c: &mut Criterion) {
             member_accesses: vec![],
             whole_object_uses: vec![],
             has_cjs_exports: false,
+            unused_import_bindings: vec![],
         });
     }
 
@@ -543,6 +546,7 @@ fn bench_cache_round_trip(c: &mut Criterion) {
         has_cjs_exports: false,
         content_hash: 0xDEAD_BEEF_CAFE_1234,
         suppressions: vec![],
+        unused_import_bindings: vec![],
         line_offsets: vec![0],
     };
 

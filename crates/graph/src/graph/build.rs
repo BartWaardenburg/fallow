@@ -287,6 +287,21 @@ impl ModuleGraph {
                     ImportedName::SideEffect => ReferenceKind::SideEffectImport,
                 };
 
+                // Skip references for import bindings that are never used in the
+                // importing file. oxc_semantic detected that the binding has zero
+                // references after the import statement — the export should not
+                // count as "referenced" just because a dead import exists.
+                if !sym_local_name.is_empty()
+                    && !matches!(sym_imported_name, ImportedName::SideEffect)
+                    && let Some(source_mod) = module_by_id.get(&source_id)
+                    && source_mod
+                        .unused_import_bindings
+                        .iter()
+                        .any(|n| n == &sym_local_name)
+                {
+                    continue;
+                }
+
                 let target_module = &mut self.modules[target_idx];
 
                 // Match to specific export
@@ -321,6 +336,11 @@ impl ModuleGraph {
                         })
                         .unwrap_or_default();
 
+                    // Check if the namespace is consumed as a whole object
+                    // (Object.values, for..in, spread, destructuring with rest, etc.)
+                    let is_whole_object = source_mod
+                        .is_some_and(|m| m.whole_object_uses.iter().any(|n| n == local_name));
+
                     // Check if the namespace variable is re-exported (export { ns } or export default ns)
                     // from a NON-entry-point file. If the importing file IS an entry point,
                     // the re-export is for external consumption and doesn't prove internal usage.
@@ -333,11 +353,13 @@ impl ModuleGraph {
                     // For entry point files with no member accesses, the namespace
                     // is purely re-exported for external use — don't mark all exports
                     // as used internally. The `export *` path handles individual tracking.
-                    let is_entry_with_no_access =
-                        accessed_members.is_empty() && entry_point_ids.contains(&source_id);
+                    let is_entry_with_no_access = accessed_members.is_empty()
+                        && !is_whole_object
+                        && entry_point_ids.contains(&source_id);
 
-                    if !is_entry_with_no_access
-                        && (accessed_members.is_empty() || is_re_exported_from_non_entry)
+                    if is_whole_object
+                        || (!is_entry_with_no_access
+                            && (accessed_members.is_empty() || is_re_exported_from_non_entry))
                     {
                         // Can't narrow — mark all exports as referenced (conservative)
                         for export in &mut self.modules[target_idx].exports {

@@ -104,7 +104,7 @@ Memory usage is equally striking — fallow uses 10-15x less memory than knip v5
 | fastify (286 files) | **27 MB** | 288 MB | 111 MB |
 | synthetic (5,000 files) | **61 MB** | 279 MB | 179 MB |
 
-fallow uses the [Oxc](https://oxc.rs) parser for syntactic analysis and [rayon](https://github.com/rayon-rs/rayon) for parallel parsing — no TypeScript compiler, no Node.js runtime. Dead code detection is a graph problem on import/export edges; you don't need type information for that.
+fallow uses the [Oxc](https://oxc.rs) parser for syntactic analysis, [oxc_semantic](https://docs.rs/oxc_semantic) for scope-aware binding analysis, and [rayon](https://github.com/rayon-rs/rayon) for parallel parsing — no TypeScript compiler, no Node.js runtime. Dead code detection is a graph problem on import/export edges; you don't need type information for that.
 
 ### Duplication detection: fallow dupes vs jscpd
 

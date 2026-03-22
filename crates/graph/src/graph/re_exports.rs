@@ -257,6 +257,7 @@ mod tests {
                 member_accesses: vec![],
                 whole_object_uses: vec![],
                 has_cjs_exports: false,
+                unused_import_bindings: vec![],
             },
             // barrel re-exports "foo" from source
             ResolvedModule {
@@ -284,6 +285,7 @@ mod tests {
                 member_accesses: vec![],
                 whole_object_uses: vec![],
                 has_cjs_exports: false,
+                unused_import_bindings: vec![],
             },
             // source has the actual export
             ResolvedModule {
@@ -303,6 +305,7 @@ mod tests {
                 member_accesses: vec![],
                 whole_object_uses: vec![],
                 has_cjs_exports: false,
+                unused_import_bindings: vec![],
             },
         ];
 
@@ -367,6 +370,7 @@ mod tests {
                 member_accesses: vec![],
                 whole_object_uses: vec![],
                 has_cjs_exports: false,
+                unused_import_bindings: vec![],
             },
             ResolvedModule {
                 file_id: FileId(1),
@@ -387,6 +391,7 @@ mod tests {
                 member_accesses: vec![],
                 whole_object_uses: vec![],
                 has_cjs_exports: false,
+                unused_import_bindings: vec![],
             },
             ResolvedModule {
                 file_id: FileId(2),
@@ -405,6 +410,7 @@ mod tests {
                 member_accesses: vec![],
                 whole_object_uses: vec![],
                 has_cjs_exports: false,
+                unused_import_bindings: vec![],
             },
         ];
 
@@ -481,6 +487,7 @@ mod tests {
                 member_accesses: vec![],
                 whole_object_uses: vec![],
                 has_cjs_exports: false,
+                unused_import_bindings: vec![],
             },
             ResolvedModule {
                 file_id: FileId(1),
@@ -512,6 +519,7 @@ mod tests {
                 member_accesses: vec![],
                 whole_object_uses: vec![],
                 has_cjs_exports: false,
+                unused_import_bindings: vec![],
             },
             ResolvedModule {
                 file_id: FileId(2),
@@ -539,6 +547,7 @@ mod tests {
                 member_accesses: vec![],
                 whole_object_uses: vec![],
                 has_cjs_exports: false,
+                unused_import_bindings: vec![],
             },
         ];
 
@@ -609,6 +618,7 @@ mod tests {
                 member_accesses: vec![],
                 whole_object_uses: vec![],
                 has_cjs_exports: false,
+                unused_import_bindings: vec![],
             },
             ResolvedModule {
                 file_id: FileId(1),
@@ -640,6 +650,7 @@ mod tests {
                 member_accesses: vec![],
                 whole_object_uses: vec![],
                 has_cjs_exports: false,
+                unused_import_bindings: vec![],
             },
             ResolvedModule {
                 file_id: FileId(2),
@@ -667,6 +678,7 @@ mod tests {
                 member_accesses: vec![],
                 whole_object_uses: vec![],
                 has_cjs_exports: false,
+                unused_import_bindings: vec![],
             },
         ];
 
@@ -743,6 +755,7 @@ mod tests {
                 member_accesses: vec![],
                 whole_object_uses: vec![],
                 has_cjs_exports: false,
+                unused_import_bindings: vec![],
             },
             ResolvedModule {
                 file_id: FileId(1),
@@ -763,6 +776,7 @@ mod tests {
                 member_accesses: vec![],
                 whole_object_uses: vec![],
                 has_cjs_exports: false,
+                unused_import_bindings: vec![],
             },
             ResolvedModule {
                 file_id: FileId(2),
@@ -781,6 +795,7 @@ mod tests {
                 member_accesses: vec![],
                 whole_object_uses: vec![],
                 has_cjs_exports: false,
+                unused_import_bindings: vec![],
             },
         ];
 
@@ -860,6 +875,7 @@ mod tests {
                 member_accesses: vec![],
                 whole_object_uses: vec![],
                 has_cjs_exports: false,
+                unused_import_bindings: vec![],
             },
             ResolvedModule {
                 file_id: FileId(1),
@@ -880,6 +896,7 @@ mod tests {
                 member_accesses: vec![],
                 whole_object_uses: vec![],
                 has_cjs_exports: false,
+                unused_import_bindings: vec![],
             },
             ResolvedModule {
                 file_id: FileId(2),
@@ -900,6 +917,7 @@ mod tests {
                 member_accesses: vec![],
                 whole_object_uses: vec![],
                 has_cjs_exports: false,
+                unused_import_bindings: vec![],
             },
             ResolvedModule {
                 file_id: FileId(3),
@@ -918,6 +936,7 @@ mod tests {
                 member_accesses: vec![],
                 whole_object_uses: vec![],
                 has_cjs_exports: false,
+                unused_import_bindings: vec![],
             },
         ];
 

@@ -491,6 +491,7 @@ mod tests {
                 member_accesses: vec![],
                 whole_object_uses: vec![],
                 has_cjs_exports: false,
+                unused_import_bindings: vec![],
             },
             ResolvedModule {
                 file_id: FileId(1),
@@ -518,6 +519,7 @@ mod tests {
                 member_accesses: vec![],
                 whole_object_uses: vec![],
                 has_cjs_exports: false,
+                unused_import_bindings: vec![],
             },
             ResolvedModule {
                 file_id: FileId(2),
@@ -536,6 +538,7 @@ mod tests {
                 member_accesses: vec![],
                 whole_object_uses: vec![],
                 has_cjs_exports: false,
+                unused_import_bindings: vec![],
             },
         ];
 
@@ -667,6 +670,7 @@ mod tests {
             member_accesses: vec![],
             whole_object_uses: vec![],
             has_cjs_exports: false,
+            unused_import_bindings: vec![],
         }];
 
         let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
@@ -700,6 +704,7 @@ mod tests {
             member_accesses: vec![],
             whole_object_uses: vec![],
             has_cjs_exports: false,
+            unused_import_bindings: vec![],
         }];
 
         let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);

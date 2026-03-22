@@ -237,6 +237,7 @@ mod tests {
                 member_accesses: vec![],
                 whole_object_uses: vec![],
                 has_cjs_exports: false,
+                unused_import_bindings: vec![],
             })
             .collect();
 
@@ -384,6 +385,7 @@ mod tests {
             }],
             whole_object_uses: vec![],
             has_cjs_exports: false,
+            unused_import_bindings: vec![],
         }];
 
         let (enum_members, _) = find_unused_members(
@@ -433,6 +435,7 @@ mod tests {
             member_accesses: vec![],
             whole_object_uses: vec!["Status".to_string()],
             has_cjs_exports: false,
+            unused_import_bindings: vec![],
         }];
 
         let (enum_members, class_members) = find_unused_members(
@@ -554,6 +557,7 @@ mod tests {
             }],
             whole_object_uses: vec![],
             has_cjs_exports: false,
+            unused_import_bindings: vec![],
         }];
 
         let (_, class_members) = find_unused_members(

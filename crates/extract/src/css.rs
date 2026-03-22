@@ -221,6 +221,7 @@ pub(crate) fn parse_css_to_module(
         has_cjs_exports: false,
         content_hash,
         suppressions,
+        unused_import_bindings: Vec::new(),
         line_offsets: fallow_types::extract::compute_line_offsets(source),
     }
 }

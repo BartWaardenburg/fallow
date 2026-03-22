@@ -95,6 +95,8 @@ pub struct ResolvedModule {
     pub whole_object_uses: Vec<String>,
     /// Whether this module uses `CommonJS` exports.
     pub has_cjs_exports: bool,
+    /// Local names of import bindings that are never referenced in this file.
+    pub unused_import_bindings: Vec<String>,
 }
 
 /// Resolve all imports across all modules in parallel.
@@ -355,6 +357,7 @@ pub fn resolve_all_imports(
                 member_accesses: module.member_accesses.clone(),
                 whole_object_uses: module.whole_object_uses.clone(),
                 has_cjs_exports: module.has_cjs_exports,
+                unused_import_bindings: module.unused_import_bindings.clone(),
             })
         })
         .collect()
