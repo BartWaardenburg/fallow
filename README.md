@@ -49,6 +49,7 @@ cargo install fallow-cli     # Or via cargo
 - **Unused types** — type aliases and interfaces never referenced
 - **Unused dependencies** — packages in `dependencies` never imported or used as script binaries
 - **Unused devDependencies** — packages in `devDependencies` never imported or used as script binaries
+- **Unused optionalDependencies** — packages in `optionalDependencies` never imported or used as script binaries
 - **Unused enum members** — enum values never referenced
 - **Unused class members** — class methods and properties never referenced
 - **Unresolved imports** — import specifiers that cannot be resolved
@@ -56,6 +57,7 @@ cargo install fallow-cli     # Or via cargo
 - **Duplicate exports** — same symbol exported from multiple modules
 - **Circular dependencies** — import cycles detected via Tarjan's SCC algorithm
 - **Type-only dependencies** — production deps only used via `import type` (could be devDependencies)
+- **Function overload deduplication** — multiple overload signatures for the same function are deduplicated to avoid false positives
 
 ## Code duplication
 

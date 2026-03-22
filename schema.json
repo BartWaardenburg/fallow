@@ -88,6 +88,7 @@
         "unused-types": "error",
         "unused-dependencies": "error",
         "unused-dev-dependencies": "error",
+        "unused-optional-dependencies": "error",
         "unused-enum-members": "error",
         "unused-class-members": "error",
         "unresolved-imports": "error",
@@ -463,6 +464,10 @@
           "$ref": "#/$defs/Severity",
           "default": "error"
         },
+        "unused-optional-dependencies": {
+          "$ref": "#/$defs/Severity",
+          "default": "error"
+        },
         "unused-enum-members": {
           "$ref": "#/$defs/Severity",
           "default": "error"
@@ -575,6 +580,16 @@
           ]
         },
         "unused-dev-dependencies": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unused-optional-dependencies": {
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"

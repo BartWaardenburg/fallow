@@ -39,12 +39,12 @@
     "detect-libc": "^2.0.0"
   },
   "optionalDependencies": {
-    "@fallow-cli/darwin-arm64": "1.2.0",
-    "@fallow-cli/darwin-x64": "1.2.0",
-    "@fallow-cli/linux-x64-gnu": "1.2.0",
-    "@fallow-cli/linux-arm64-gnu": "1.2.0",
-    "@fallow-cli/linux-x64-musl": "1.2.0",
-    "@fallow-cli/linux-arm64-musl": "1.2.0",
-    "@fallow-cli/win32-x64-msvc": "1.2.0"
+    "@fallow-cli/darwin-arm64": "1.3.0",
+    "@fallow-cli/darwin-x64": "1.3.0",
+    "@fallow-cli/linux-x64-gnu": "1.3.0",
+    "@fallow-cli/linux-arm64-gnu": "1.3.0",
+    "@fallow-cli/linux-x64-musl": "1.3.0",
+    "@fallow-cli/linux-arm64-musl": "1.3.0",
+    "@fallow-cli/win32-x64-msvc": "1.3.0"
   }
 }

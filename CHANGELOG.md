@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-03-22
+
+### Added
+- Unused optionalDependencies detection: packages in `optionalDependencies` never imported or used as script binaries are now reported
+- Function overload deduplication: multiple overload signatures for the same function name are deduplicated to avoid false positive unused-export reports
+
+### Changed
+- Workspace discovery performance: canonicalize optimization reduces syscall overhead during workspace resolution
+- Re-export chain performance: `matches_str` optimization for faster re-export chain propagation
+
+### Fixed
+- Ecosystem test script: `--root` flag and install commands corrected for cross-project validation
+
 ## [1.2.0] - 2026-03-22
 
 ### Added
@@ -177,7 +190,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[Unreleased]: https://github.com/fallow-rs/fallow/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/fallow-rs/fallow/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/fallow-rs/fallow/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/fallow-rs/fallow/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/fallow-rs/fallow/compare/v1.0.4...v1.1.0
 [1.0.4]: https://github.com/fallow-rs/fallow/compare/v1.0.3...v1.0.4
