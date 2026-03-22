@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1774198594053,
+  "lastUpdate": 1774204664877,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Benchmarks": [
@@ -1151,6 +1151,102 @@ window.BENCHMARK_DATA = {
             "name": "dupe_detect_2x5000_identical",
             "value": 2583007,
             "range": "± 31021",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "e77bf1449e6dd9d4b1ae81f1f1da8d461f506c77",
+          "message": "test: add optionalDependencies integration test and snapshot coverage",
+          "timestamp": "2026-03-22T19:33:53+01:00",
+          "tree_id": "988af83b41a1b6ff0e13d65d67f1a9210910cbba",
+          "url": "https://github.com/fallow-rs/fallow/commit/e77bf1449e6dd9d4b1ae81f1f1da8d461f506c77"
+        },
+        "date": 1774204664382,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "parse_single_file",
+            "value": 33636,
+            "range": "± 842",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "full_pipeline_10_files",
+            "value": 895947,
+            "range": "± 17580",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "full_pipeline_100_files",
+            "value": 1997106,
+            "range": "± 27833",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "full_pipeline_1000_files",
+            "value": 12346281,
+            "range": "± 340146",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "resolve_re_export_chains",
+            "value": 96610,
+            "range": "± 1133",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cache_round_trip",
+            "value": 2853,
+            "range": "± 20",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dupe_detect_2x500_identical",
+            "value": 162481,
+            "range": "± 829",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dupe_detect_2x2000_identical",
+            "value": 733975,
+            "range": "± 3330",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dupe_detect_10x500_identical",
+            "value": 1526969,
+            "range": "± 24412",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dupe_detect_50x200_diverse",
+            "value": 468350,
+            "range": "± 15047",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dupe_detect_100x200_mixed",
+            "value": 3485392,
+            "range": "± 31405",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dupe_detect_2x5000_identical",
+            "value": 2034593,
+            "range": "± 12756",
             "unit": "ns/iter"
           }
         ]
