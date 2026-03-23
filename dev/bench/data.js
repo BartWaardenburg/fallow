@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1774221550905,
+  "lastUpdate": 1774257758282,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Benchmarks": [
@@ -1343,6 +1343,102 @@ window.BENCHMARK_DATA = {
             "name": "dupe_detect_2x5000_identical",
             "value": 2875973,
             "range": "± 7276",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "09a5da5de787845af5e061fb7a8117c2bbddd6fe",
+          "message": "fix: fix conformance workflow JSON corruption and update CI action versions\n\n- Remove incorrect `2>&1 >&2` redirect in conformance run.sh that leaked\n  Python's stderr (human summary) into stdout, corrupting the JSON report\n- Redirect npm install stdout to /dev/null to prevent it contaminating output\n- Add JSON validation in conformance workflow before parsing report\n- Improve error handling: show stderr + raw report content on failure\n- Update action versions to fix Node.js 20 deprecation warnings:\n  checkout v4->v6, setup-node v4->v6, upload-artifact v4->v7, cache v4->v5",
+          "timestamp": "2026-03-23T10:18:43+01:00",
+          "tree_id": "a8c96a56a67f41c97956a9444e7d4b08e605e7a2",
+          "url": "https://github.com/fallow-rs/fallow/commit/09a5da5de787845af5e061fb7a8117c2bbddd6fe"
+        },
+        "date": 1774257757869,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "parse_single_file",
+            "value": 40298,
+            "range": "± 401",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "full_pipeline_10_files",
+            "value": 1188528,
+            "range": "± 8829",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "full_pipeline_100_files",
+            "value": 2815230,
+            "range": "± 34487",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "full_pipeline_1000_files",
+            "value": 17909293,
+            "range": "± 121232",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "resolve_re_export_chains",
+            "value": 101937,
+            "range": "± 3982",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cache_round_trip",
+            "value": 1980,
+            "range": "± 9",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dupe_detect_2x500_identical",
+            "value": 226884,
+            "range": "± 4515",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dupe_detect_2x2000_identical",
+            "value": 1015316,
+            "range": "± 9109",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dupe_detect_10x500_identical",
+            "value": 1787795,
+            "range": "± 26285",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dupe_detect_50x200_diverse",
+            "value": 548575,
+            "range": "± 11394",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dupe_detect_100x200_mixed",
+            "value": 4441250,
+            "range": "± 30945",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dupe_detect_2x5000_identical",
+            "value": 2819656,
+            "range": "± 7635",
             "unit": "ns/iter"
           }
         ]
