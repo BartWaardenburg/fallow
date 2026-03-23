@@ -2,6 +2,6 @@ src/**
 node_modules/**
 .vscode/**
 tsconfig.json
-esbuild.mjs
+rolldown.config.mjs
 **/*.map
 .gitignore

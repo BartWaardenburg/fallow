@@ -114,18 +114,42 @@
           },
           "description": "Toggle individual issue types on or off. Uses kebab-case names matching fallow's rules config.",
           "properties": {
-            "unused-files": { "type": "boolean" },
-            "unused-exports": { "type": "boolean" },
-            "unused-types": { "type": "boolean" },
-            "unused-dependencies": { "type": "boolean" },
-            "unused-dev-dependencies": { "type": "boolean" },
-            "unused-enum-members": { "type": "boolean" },
-            "unused-class-members": { "type": "boolean" },
-            "unresolved-imports": { "type": "boolean" },
-            "unlisted-dependencies": { "type": "boolean" },
-            "duplicate-exports": { "type": "boolean" },
-            "type-only-dependencies": { "type": "boolean" },
-            "circular-dependencies": { "type": "boolean" }
+            "unused-files": {
+              "type": "boolean"
+            },
+            "unused-exports": {
+              "type": "boolean"
+            },
+            "unused-types": {
+              "type": "boolean"
+            },
+            "unused-dependencies": {
+              "type": "boolean"
+            },
+            "unused-dev-dependencies": {
+              "type": "boolean"
+            },
+            "unused-enum-members": {
+              "type": "boolean"
+            },
+            "unused-class-members": {
+              "type": "boolean"
+            },
+            "unresolved-imports": {
+              "type": "boolean"
+            },
+            "unlisted-dependencies": {
+              "type": "boolean"
+            },
+            "duplicate-exports": {
+              "type": "boolean"
+            },
+            "type-only-dependencies": {
+              "type": "boolean"
+            },
+            "circular-dependencies": {
+              "type": "boolean"
+            }
           }
         },
         "fallow.duplication.threshold": {
@@ -137,7 +161,12 @@
         "fallow.duplication.mode": {
           "type": "string",
           "default": "mild",
-          "enum": ["strict", "mild", "weak", "semantic"],
+          "enum": [
+            "strict",
+            "mild",
+            "weak",
+            "semantic"
+          ],
           "description": "Duplication detection mode.",
           "enumDescriptions": [
             "Exact token matching",
@@ -154,7 +183,11 @@
         "fallow.trace.server": {
           "type": "string",
           "default": "off",
-          "enum": ["off", "messages", "verbose"],
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
           "description": "Trace level for the LSP server communication."
         }
       }
@@ -191,11 +224,12 @@
     }
   },
   "scripts": {
-    "build": "node esbuild.mjs",
-    "watch": "node esbuild.mjs --watch",
+    "build": "rolldown -c",
+    "watch": "rolldown -c --watch",
     "lint": "tsc --noEmit",
     "package": "vsce package --no-dependencies",
-    "publish": "vsce publish --no-dependencies"
+    "publish": "vsce publish --no-dependencies",
+    "publish:ovsx": "ovsx publish --no-dependencies"
   },
   "dependencies": {
     "vscode-languageclient": "^9.0.1"
@@ -204,7 +238,8 @@
     "@types/node": "^20.11.0",
     "@types/vscode": "^1.85.0",
     "@vscode/vsce": "^3.0.0",
-    "esbuild": "^0.24.0",
+    "rolldown": "^1.0.0-rc.10",
+    "ovsx": "^0.10.9",
     "typescript": "^5.7.0"
   }
 }
