@@ -23,9 +23,15 @@ fn relative_uri(path: &Path, root: &Path) -> String {
     normalize_uri(&relative_path(path, root).display().to_string())
 }
 
-/// Normalize a path string to use forward slashes for cross-platform compatibility.
+/// Normalize a path string to a valid URI: forward slashes and percent-encoded brackets.
+///
+/// Brackets (`[`, `]`) are not valid in URI path segments per RFC 3986 and cause
+/// SARIF validation warnings (e.g., Next.js dynamic routes like `[slug]`).
 pub fn normalize_uri(path_str: &str) -> String {
-    path_str.replace('\\', "/")
+    path_str
+        .replace('\\', "/")
+        .replace('[', "%5B")
+        .replace(']', "%5D")
 }
 
 /// Severity level for human-readable output.
@@ -245,6 +251,22 @@ mod tests {
         let path = root.join("src").join("utils.ts");
         let uri = relative_uri(&path, &root);
         assert_eq!(uri, "src/utils.ts");
+    }
+
+    #[test]
+    fn relative_uri_encodes_brackets() {
+        let root = PathBuf::from("/project");
+        let path = root.join("src/app/[...slug]/page.tsx");
+        let uri = relative_uri(&path, &root);
+        assert_eq!(uri, "src/app/%5B...slug%5D/page.tsx");
+    }
+
+    #[test]
+    fn relative_uri_encodes_nested_dynamic_routes() {
+        let root = PathBuf::from("/project");
+        let path = root.join("src/app/[slug]/[id]/page.tsx");
+        let uri = relative_uri(&path, &root);
+        assert_eq!(uri, "src/app/%5Bslug%5D/%5Bid%5D/page.tsx");
     }
 
     #[test]

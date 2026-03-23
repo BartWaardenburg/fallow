@@ -252,7 +252,7 @@ runs:
         echo "Installed fallow $(fallow --version 2>/dev/null || echo 'unknown version')"
 
     - name: Cache analysis results
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: ${{ inputs.root }}/.fallow
         key: fallow-cache-${{ runner.os }}-${{ hashFiles(format('{0}/**/package.json', inputs.root)) }}
@@ -428,11 +428,31 @@ runs:
         esac
         jq -r -f "$JQ_FILE" fallow-results.json >> "$GITHUB_STEP_SUMMARY"
 
+    - name: Check Code Scanning availability
+      id: ghas-check
+      if: >-
+        inputs.command != 'fix' &&
+        inputs.format == 'sarif' &&
+        steps.analyze.outputs.sarif != '' &&
+        always()
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        GH_REPO: ${{ github.repository }}
+      run: |
+        if gh api "repos/${GH_REPO}/code-scanning/alerts?per_page=1" > /dev/null 2>&1; then
+          echo "available=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "available=false" >> "$GITHUB_OUTPUT"
+          echo "::warning::SARIF upload skipped — Code Scanning (GitHub Advanced Security) is not enabled on this repository. To enable: Settings → Code security → Code scanning. The job summary and JSON output are still available. To suppress this warning, use format: json instead of sarif."
+        fi
+
     - name: Upload SARIF
       if: >-
         inputs.command != 'fix' &&
         inputs.format == 'sarif' &&
         steps.analyze.outputs.sarif != '' &&
+        steps.ghas-check.outputs.available == 'true' &&
         always()
       uses: github/codeql-action/upload-sarif@v4
       with:
