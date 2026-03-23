@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1774276087869,
+  "lastUpdate": 1774279871196,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
@@ -168,6 +168,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/ef25d6dfb0a344ee4565ea6a5aedbaffbd82cadd"
         },
         "date": 1774276087224,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 83.6,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "1f2adb8064b1b657ffd231563492e89533f86291",
+          "message": "docs: add demo screencast and GIF",
+          "timestamp": "2026-03-23T16:21:13+01:00",
+          "tree_id": "76f77b82099a4d203a3211bf07cd049099c68d27",
+          "url": "https://github.com/fallow-rs/fallow/commit/1f2adb8064b1b657ffd231563492e89533f86291"
+        },
+        "date": 1774279870232,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
