@@ -60,7 +60,6 @@ These are ideas, not commitments. They ship as 1.x releases based on user demand
 - **Fine-grained incremental analysis** — patch the graph in place, track export-level dependencies. Cache-aware parsing already covers the main bottleneck; this would additionally skip file I/O for unchanged files.
 - **Class member instance tracking** — `instance.method()` and `this.property` should count as usage of class member declarations. Currently class member detection has a high false-positive rate on projects with instance-level access patterns.
 - **Custom export conditions / unbuilt workspace fallback** — when resolving cross-workspace imports and `build`/`dist` directories don't exist, fall back to `src/` resolution. Many monorepos (TanStack/query, etc.) use custom conditions.
-- **Package.json `imports` field (`#` subpath imports)** — resolve `#compiler`, `#client` etc. imports defined in package.json `imports` field.
 - **VS Code extension screenshots** — visual demos for the Marketplace listing (diagnostics, tree views, Code Lens, code actions).
 - **Security framing for unused dependencies** — flag unused deps with known CVEs, integrate with `npm audit` data.
 - **Historical trend tracking** — store baselines over time, generate trend reports.

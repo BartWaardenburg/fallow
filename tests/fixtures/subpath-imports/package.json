@@ -1,0 +1,8 @@
+{
+  "name": "subpath-imports",
+  "main": "src/index.ts",
+  "imports": {
+    "#utils": "./src/utils/index.ts",
+    "#components/*": "./src/components/*"
+  }
+}
