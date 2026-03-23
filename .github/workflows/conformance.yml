@@ -7,7 +7,8 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
+  deployments: write
 
 env:
   CARGO_TERM_COLOR: always
@@ -56,8 +57,37 @@ jobs:
           echo "fallow_only=${FALLOW_ONLY}" >> "$GITHUB_OUTPUT"
           echo "knip_only=${KNIP_ONLY}" >> "$GITHUB_OUTPUT"
           echo "agreement_pct=${AGREEMENT_PCT}" >> "$GITHUB_OUTPUT"
+
+          # Write custom JSON for benchmark-action tracking
+          python3 -c "
+          import json
+          data = [
+            {'name': 'Agreement Rate', 'unit': '%', 'value': float('${AGREEMENT_PCT:-0}')},
+            {'name': 'Agreed Issues', 'unit': 'issues', 'value': int('${AGREED:-0}')},
+            {'name': 'Fallow Total', 'unit': 'issues', 'value': int('${FALLOW_TOTAL:-0}')},
+            {'name': 'Knip Total', 'unit': 'issues', 'value': int('${KNIP_TOTAL:-0}')}
+          ]
+          print(json.dumps(data, indent=2))
+          " > conformance-bench.json
         # Never fail -- this is informational
         continue-on-error: true
+
+      - name: Store conformance metrics
+        if: always() && steps.conformance.outcome != 'skipped'
+        uses: benchmark-action/github-action-benchmark@v1
+        continue-on-error: true
+        with:
+          name: Fallow Conformance
+          tool: 'customBiggerIsBetter'
+          output-file-path: conformance-bench.json
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          auto-push: true
+          comment-on-alert: true
+          alert-threshold: '95%'
+          fail-on-alert: false
+          save-data-file: true
+          gh-pages-branch: gh-pages
+          benchmark-data-dir-path: dev/conformance
 
       - name: Post step summary
         if: always()

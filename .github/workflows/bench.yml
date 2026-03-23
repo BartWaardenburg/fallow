@@ -67,3 +67,29 @@ jobs:
           save-data-file: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
           gh-pages-branch: gh-pages
           benchmark-data-dir-path: dev/bench
+
+      - name: Deploy dashboard
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          # Save the dashboard page before switching branches
+          cp .github/pages/index.html /tmp/dashboard-index.html
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # Fetch latest gh-pages (benchmark-action may have just pushed)
+          git fetch origin gh-pages
+
+          # Use worktree to avoid losing the main checkout
+          git worktree add /tmp/gh-pages origin/gh-pages
+          cd /tmp/gh-pages
+
+          cp /tmp/dashboard-index.html index.html
+          git add index.html
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: update dashboard index.html"
+            git push origin HEAD:gh-pages
+          fi
+
+          cd "$GITHUB_WORKSPACE"
+          git worktree remove /tmp/gh-pages

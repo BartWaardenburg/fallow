@@ -22,6 +22,11 @@ concurrency:
   group: allocs-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: write
+  pull-requests: write
+  deployments: write
+
 env:
   CARGO_TERM_COLOR: always
 
@@ -42,6 +47,7 @@ jobs:
         run: cargo bench --bench allocations 2>&1 | tee alloc-output.txt
 
       - name: Parse and check allocations
+        id: parse
         run: |
           total_bytes=$(grep '^alloc_total_bytes:' alloc-output.txt | awk '{print $2}')
           total_blocks=$(grep '^alloc_total_blocks:' alloc-output.txt | awk '{print $2}')
@@ -56,6 +62,18 @@ jobs:
           echo "| Total allocations | $total_blocks |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Peak memory (bytes) | $max_bytes |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Peak allocations | $max_blocks |" >> "$GITHUB_STEP_SUMMARY"
+
+          # Write custom JSON for benchmark-action tracking
+          python3 -c "
+          import json
+          data = [
+            {'name': 'Total Bytes Allocated', 'unit': 'bytes', 'value': int('${total_bytes:-0}')},
+            {'name': 'Total Allocations', 'unit': 'allocations', 'value': int('${total_blocks:-0}')},
+            {'name': 'Peak Memory', 'unit': 'bytes', 'value': int('${max_bytes:-0}')},
+            {'name': 'Peak Allocations', 'unit': 'allocations', 'value': int('${max_blocks:-0}')}
+          ]
+          print(json.dumps(data, indent=2))
+          " > alloc-bench.json
 
           if [ ! -f alloc-baseline.json ]; then
             echo "" >> "$GITHUB_STEP_SUMMARY"
@@ -91,3 +109,21 @@ jobs:
             echo "::error::Allocation regression detected. Run 'scripts/alloc-check.sh --save' to update baseline."
             exit 1
           fi
+
+      - name: Store allocation metrics
+        if: always() && steps.parse.outcome != 'skipped'
+        uses: benchmark-action/github-action-benchmark@v1
+        continue-on-error: ${{ github.event_name == 'pull_request' }}
+        with:
+          name: Fallow Allocations
+          tool: 'customSmallerIsBetter'
+          output-file-path: alloc-bench.json
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          auto-push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          comment-on-alert: true
+          comment-always: ${{ github.event_name == 'pull_request' }}
+          alert-threshold: '110%'
+          fail-on-alert: false
+          save-data-file: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          gh-pages-branch: gh-pages
+          benchmark-data-dir-path: dev/allocs

@@ -10,6 +10,7 @@ concurrency:
 
 permissions:
   contents: write
+  deployments: write
 
 env:
   CARGO_TERM_COLOR: always
@@ -54,17 +55,43 @@ jobs:
           fi
           echo "BADGE_COLOR=$color" >> "$GITHUB_ENV"
 
+      - name: Write coverage metrics
+        run: |
+          python3 -c "
+          import json
+          data = [{'name': 'Code Coverage', 'unit': '%', 'value': float('${COVERAGE:-0}')}]
+          print(json.dumps(data, indent=2))
+          " > coverage-bench.json
+
+      - name: Store coverage metrics
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          name: Fallow Coverage
+          tool: 'customBiggerIsBetter'
+          output-file-path: coverage-bench.json
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          auto-push: true
+          alert-threshold: '95%'
+          fail-on-alert: false
+          save-data-file: true
+          gh-pages-branch: gh-pages
+          benchmark-data-dir-path: dev/coverage
+
       - name: Update coverage badge
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git stash --include-untracked
           git fetch origin badges
-          git checkout badges
+          git worktree add /tmp/badges --detach origin/badges
+          cd /tmp/badges
+          git checkout -B badges origin/badges
 
           echo "{\"schemaVersion\":1,\"label\":\"coverage\",\"message\":\"${COVERAGE}%\",\"color\":\"${BADGE_COLOR}\"}" > coverage.json
 
           git add coverage.json
           git diff --cached --quiet || git commit -m "chore: update coverage badge to ${COVERAGE}%"
           git push origin badges
+
+          cd "$GITHUB_WORKSPACE"
+          git worktree remove /tmp/badges
