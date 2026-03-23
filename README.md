@@ -23,7 +23,7 @@ npx fallow dupes    # Duplication detection
 ```
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/fallow-rs/fallow/main/assets/screenshots/fallow-check-output.png" alt="Example fallow check output" width="820">
+  <img src="https://raw.githubusercontent.com/fallow-rs/fallow/main/assets/screenshots/fallow-demo.gif" alt="Example fallow check output" width="820">
 </p>
 
 ## Quick start
