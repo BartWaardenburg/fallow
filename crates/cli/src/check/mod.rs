@@ -60,6 +60,7 @@ impl IssueFilters {
             results.unused_dependencies.clear();
             results.unused_dev_dependencies.clear();
             results.unused_optional_dependencies.clear();
+            results.type_only_dependencies.clear();
         }
         if !self.unused_enum_members {
             results.unused_enum_members.clear();

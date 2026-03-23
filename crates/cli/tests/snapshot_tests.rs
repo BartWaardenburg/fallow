@@ -76,6 +76,10 @@ fn sample_results(root: &Path) -> AnalysisResults {
         location: DependencyLocation::OptionalDependencies,
         path: root.join("package.json"),
     });
+    r.type_only_dependencies.push(TypeOnlyDependency {
+        package_name: "zod".to_string(),
+        path: root.join("package.json"),
+    });
     r.circular_dependencies.push(CircularDependency {
         files: vec![root.join("src/a.ts"), root.join("src/b.ts")],
         length: 2,

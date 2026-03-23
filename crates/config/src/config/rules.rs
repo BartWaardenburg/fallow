@@ -17,6 +17,13 @@ pub enum Severity {
     Off,
 }
 
+impl Severity {
+    /// Default value for fields that should default to `Warn` instead of `Error`.
+    const fn default_warn() -> Self {
+        Self::Warn
+    }
+}
+
 impl std::fmt::Display for Severity {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -73,6 +80,8 @@ pub struct RulesConfig {
     pub unlisted_dependencies: Severity,
     #[serde(default)]
     pub duplicate_exports: Severity,
+    #[serde(default = "Severity::default_warn")]
+    pub type_only_dependencies: Severity,
     #[serde(default)]
     pub circular_dependencies: Severity,
 }
@@ -91,6 +100,7 @@ impl Default for RulesConfig {
             unresolved_imports: Severity::Error,
             unlisted_dependencies: Severity::Error,
             duplicate_exports: Severity::Error,
+            type_only_dependencies: Severity::Warn,
             circular_dependencies: Severity::Error,
         }
     }
@@ -132,6 +142,9 @@ impl RulesConfig {
         if let Some(s) = partial.duplicate_exports {
             self.duplicate_exports = s;
         }
+        if let Some(s) = partial.type_only_dependencies {
+            self.type_only_dependencies = s;
+        }
         if let Some(s) = partial.circular_dependencies {
             self.circular_dependencies = s;
         }
@@ -165,6 +178,8 @@ pub struct PartialRulesConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duplicate_exports: Option<Severity>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub type_only_dependencies: Option<Severity>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub circular_dependencies: Option<Severity>,
 }
 
@@ -173,7 +188,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn rules_default_all_error() {
+    fn rules_default_all_error_except_type_only() {
         let rules = RulesConfig::default();
         assert_eq!(rules.unused_files, Severity::Error);
         assert_eq!(rules.unused_exports, Severity::Error);
@@ -185,6 +200,8 @@ mod tests {
         assert_eq!(rules.unresolved_imports, Severity::Error);
         assert_eq!(rules.unlisted_dependencies, Severity::Error);
         assert_eq!(rules.duplicate_exports, Severity::Error);
+        assert_eq!(rules.type_only_dependencies, Severity::Warn);
+        assert_eq!(rules.circular_dependencies, Severity::Error);
     }
 
     #[test]

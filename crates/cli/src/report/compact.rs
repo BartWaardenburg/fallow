@@ -82,6 +82,9 @@ pub fn build_compact_lines(results: &AnalysisResults, root: &Path) -> Vec<String
     for dup in &results.duplicate_exports {
         lines.push(format!("duplicate-export:{}", dup.export_name));
     }
+    for dep in &results.type_only_dependencies {
+        lines.push(format!("type-only-dep:{}", dep.package_name));
+    }
     for cycle in &results.circular_dependencies {
         let chain: Vec<String> = cycle.files.iter().map(|p| rel(p)).collect();
         let mut display_chain = chain.clone();
@@ -187,6 +190,10 @@ mod tests {
         r.duplicate_exports.push(DuplicateExport {
             export_name: "Config".to_string(),
             locations: vec![root.join("src/config.ts"), root.join("src/types.ts")],
+        });
+        r.type_only_dependencies.push(TypeOnlyDependency {
+            package_name: "zod".to_string(),
+            path: root.join("package.json"),
         });
 
         r
@@ -364,10 +371,10 @@ mod tests {
         let results = sample_results(&root);
         let lines = build_compact_lines(&results, &root);
 
-        // 10 issue types, one of each
-        assert_eq!(lines.len(), 10);
+        // 11 issue types, one of each
+        assert_eq!(lines.len(), 11);
 
-        // Verify ordering: unused_files first, duplicate_exports last
+        // Verify ordering matches output order
         assert!(lines[0].starts_with("unused-file:"));
         assert!(lines[1].starts_with("unused-export:"));
         assert!(lines[2].starts_with("unused-type:"));
@@ -378,6 +385,7 @@ mod tests {
         assert!(lines[7].starts_with("unresolved-import:"));
         assert!(lines[8].starts_with("unlisted-dep:"));
         assert!(lines[9].starts_with("duplicate-export:"));
+        assert!(lines[10].starts_with("type-only-dep:"));
     }
 
     #[test]

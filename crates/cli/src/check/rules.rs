@@ -68,6 +68,9 @@ pub fn apply_rules(results: &mut fallow_core::results::AnalysisResults, config: 
     if rules.duplicate_exports == Severity::Off {
         results.duplicate_exports.clear();
     }
+    if rules.type_only_dependencies == Severity::Off {
+        results.type_only_dependencies.clear();
+    }
     if rules.circular_dependencies == Severity::Off {
         results.circular_dependencies.clear();
     }
@@ -130,6 +133,8 @@ pub fn has_error_severity_issues(
         || (rules.unlisted_dependencies == Severity::Error
             && !results.unlisted_dependencies.is_empty())
         || (rules.duplicate_exports == Severity::Error && !results.duplicate_exports.is_empty())
+        || (rules.type_only_dependencies == Severity::Error
+            && !results.type_only_dependencies.is_empty())
         || (rules.circular_dependencies == Severity::Error
             && !results.circular_dependencies.is_empty())
 }
@@ -168,6 +173,9 @@ pub fn promote_warns_to_errors(rules: &mut RulesConfig) {
     }
     if rules.duplicate_exports == Severity::Warn {
         rules.duplicate_exports = Severity::Error;
+    }
+    if rules.type_only_dependencies == Severity::Warn {
+        rules.type_only_dependencies = Severity::Error;
     }
     if rules.circular_dependencies == Severity::Warn {
         rules.circular_dependencies = Severity::Error;
@@ -326,6 +334,7 @@ mod tests {
             unresolved_imports: Severity::Off,
             unlisted_dependencies: Severity::Off,
             duplicate_exports: Severity::Off,
+            type_only_dependencies: Severity::Off,
             circular_dependencies: Severity::Off,
         };
         let config = config_with_rules(rules);
@@ -423,6 +432,7 @@ mod tests {
             unresolved_imports: Severity::Warn,
             unlisted_dependencies: Severity::Warn,
             duplicate_exports: Severity::Warn,
+            type_only_dependencies: Severity::Warn,
             circular_dependencies: Severity::Warn,
         };
         assert!(!has_error_severity_issues(&results, &rules, None));
@@ -446,6 +456,7 @@ mod tests {
             unresolved_imports: Severity::Warn,
             unlisted_dependencies: Severity::Warn,
             duplicate_exports: Severity::Warn,
+            type_only_dependencies: Severity::Warn,
             circular_dependencies: Severity::Warn,
         };
         // Only unused_files present, but set to Warn — should not trigger

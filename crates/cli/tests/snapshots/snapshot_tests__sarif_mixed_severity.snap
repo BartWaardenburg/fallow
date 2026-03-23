@@ -68,6 +68,15 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
               }
             },
             {
+              "id": "fallow/type-only-dependency",
+              "shortDescription": {
+                "text": "Production dependency only used via type-only imports"
+              },
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
               "id": "fallow/unused-enum-member",
               "shortDescription": {
                 "text": "Enum member is never referenced"
@@ -218,6 +227,22 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
           "level": "warning",
           "message": {
             "text": "Package 'fsevents' is in optionalDependencies but never imported"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "package.json"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "fallow/type-only-dependency",
+          "level": "warning",
+          "message": {
+            "text": "Package 'zod' is only imported via type-only imports (consider moving to devDependencies)"
           },
           "locations": [
             {

@@ -68,6 +68,15 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
               }
             },
             {
+              "id": "fallow/type-only-dependency",
+              "shortDescription": {
+                "text": "Production dependency only used via type-only imports"
+              },
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
               "id": "fallow/unused-enum-member",
               "shortDescription": {
                 "text": "Enum member is never referenced"

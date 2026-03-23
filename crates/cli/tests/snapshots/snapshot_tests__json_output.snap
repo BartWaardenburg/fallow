@@ -6,7 +6,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
   "schema_version": 1,
   "version": "[VERSION]",
   "elapsed_ms": 42,
-  "total_issues": 12,
+  "total_issues": 13,
   "unused_files": [
     {
       "path": "/project/src/dead.ts"
@@ -100,7 +100,12 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
       ]
     }
   ],
-  "type_only_dependencies": [],
+  "type_only_dependencies": [
+    {
+      "package_name": "zod",
+      "path": "/project/package.json"
+    }
+  ],
   "circular_dependencies": [
     {
       "files": [

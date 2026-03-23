@@ -189,6 +189,20 @@ pub fn build_sarif(
         },
     );
 
+    push_sarif_results(&mut sarif_results, &results.type_only_dependencies, |dep| {
+        SarifFields {
+            rule_id: "fallow/type-only-dependency",
+            level: severity_to_sarif_level(rules.type_only_dependencies),
+            message: format!(
+                "Package '{}' is only imported via type-only imports (consider moving to devDependencies)",
+                dep.package_name
+            ),
+            uri: relative_uri(&dep.path, root),
+            region: None,
+            properties: None,
+        }
+    });
+
     let sarif_member = |member: &UnusedMember,
                         rule_id: &'static str,
                         level: &'static str,
@@ -327,6 +341,11 @@ pub fn build_sarif(
                             "id": "fallow/unused-optional-dependency",
                             "shortDescription": { "text": "Optional dependency listed but never imported" },
                             "defaultConfiguration": { "level": severity_to_sarif_level(rules.unused_optional_dependencies) }
+                        },
+                        {
+                            "id": "fallow/type-only-dependency",
+                            "shortDescription": { "text": "Production dependency only used via type-only imports" },
+                            "defaultConfiguration": { "level": severity_to_sarif_level(rules.type_only_dependencies) }
                         },
                         {
                             "id": "fallow/unused-enum-member",
@@ -504,6 +523,10 @@ mod tests {
             export_name: "Config".to_string(),
             locations: vec![root.join("src/config.ts"), root.join("src/types.ts")],
         });
+        r.type_only_dependencies.push(TypeOnlyDependency {
+            package_name: "zod".to_string(),
+            path: root.join("package.json"),
+        });
         r.circular_dependencies.push(CircularDependency {
             files: vec![root.join("src/a.ts"), root.join("src/b.ts")],
             length: 2,
@@ -550,7 +573,7 @@ mod tests {
         let rules = sarif["runs"][0]["tool"]["driver"]["rules"]
             .as_array()
             .expect("rules should be an array");
-        assert_eq!(rules.len(), 12);
+        assert_eq!(rules.len(), 13);
 
         let rule_ids: Vec<&str> = rules.iter().map(|r| r["id"].as_str().unwrap()).collect();
         assert!(rule_ids.contains(&"fallow/unused-file"));
@@ -559,6 +582,7 @@ mod tests {
         assert!(rule_ids.contains(&"fallow/unused-dependency"));
         assert!(rule_ids.contains(&"fallow/unused-dev-dependency"));
         assert!(rule_ids.contains(&"fallow/unused-optional-dependency"));
+        assert!(rule_ids.contains(&"fallow/type-only-dependency"));
         assert!(rule_ids.contains(&"fallow/unused-enum-member"));
         assert!(rule_ids.contains(&"fallow/unused-class-member"));
         assert!(rule_ids.contains(&"fallow/unresolved-import"));
@@ -718,8 +742,8 @@ mod tests {
         let sarif = build_sarif(&results, &root, &RulesConfig::default());
 
         let entries = sarif["runs"][0]["results"].as_array().unwrap();
-        // 11 issues but duplicate_exports has 2 locations => 12 SARIF results
-        assert_eq!(entries.len(), 12);
+        // 12 issues but duplicate_exports has 2 locations => 13 SARIF results
+        assert_eq!(entries.len(), 13);
 
         let rule_ids: Vec<&str> = entries
             .iter()
@@ -730,6 +754,7 @@ mod tests {
         assert!(rule_ids.contains(&"fallow/unused-type"));
         assert!(rule_ids.contains(&"fallow/unused-dependency"));
         assert!(rule_ids.contains(&"fallow/unused-dev-dependency"));
+        assert!(rule_ids.contains(&"fallow/type-only-dependency"));
         assert!(rule_ids.contains(&"fallow/unused-enum-member"));
         assert!(rule_ids.contains(&"fallow/unused-class-member"));
         assert!(rule_ids.contains(&"fallow/unresolved-import"));

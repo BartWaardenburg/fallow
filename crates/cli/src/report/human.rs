@@ -4,7 +4,7 @@ use std::time::Duration;
 use colored::Colorize;
 use fallow_config::{OutputFormat, RulesConfig};
 use fallow_core::duplicates::DuplicationReport;
-use fallow_core::results::{AnalysisResults, UnusedDependency, UnusedExport, UnusedMember};
+use fallow_core::results::{AnalysisResults, UnusedExport, UnusedMember};
 use fallow_core::trace::{CloneTrace, DependencyTrace, ExportTrace, FileTrace, PipelineTimings};
 
 use super::{Level, relative_path, severity_to_level};
@@ -42,12 +42,12 @@ pub(super) fn print_human(
         )
     };
 
-    let format_dep = |dep: &UnusedDependency| -> String {
-        let pkg_label = relative_path(&dep.path, root).display().to_string();
+    let format_dep = |name: &str, pkg_path: &Path| -> String {
+        let pkg_label = relative_path(pkg_path, root).display().to_string();
         if pkg_label == "package.json" {
-            format!("{}", dep.package_name.bold())
+            format!("{}", name.bold())
         } else {
-            format!("{} ({})", dep.package_name.bold(), pkg_label.dimmed())
+            format!("{} ({})", name.bold(), pkg_label.dimmed())
         }
     };
 
@@ -80,21 +80,21 @@ pub(super) fn print_human(
         &results.unused_dependencies,
         "Unused dependencies",
         severity_to_level(rules.unused_dependencies),
-        |dep| vec![format!("  {}", format_dep(dep))],
+        |dep| vec![format!("  {}", format_dep(&dep.package_name, &dep.path))],
     );
 
     print_human_section(
         &results.unused_dev_dependencies,
         "Unused devDependencies",
         severity_to_level(rules.unused_dev_dependencies),
-        |dep| vec![format!("  {}", format_dep(dep))],
+        |dep| vec![format!("  {}", format_dep(&dep.package_name, &dep.path))],
     );
 
     print_human_section(
         &results.unused_optional_dependencies,
         "Unused optionalDependencies",
         severity_to_level(rules.unused_optional_dependencies),
-        |dep| vec![format!("  {}", format_dep(dep))],
+        |dep| vec![format!("  {}", format_dep(&dep.package_name, &dep.path))],
     );
 
     print_human_grouped_section(
@@ -149,25 +149,12 @@ pub(super) fn print_human(
         },
     );
 
-    if !results.type_only_dependencies.is_empty() {
-        print_human_section(
-            &results.type_only_dependencies,
-            "Type-only dependencies (consider moving to devDependencies)",
-            Level::Warn,
-            |dep| {
-                let pkg_label = relative_path(&dep.path, root).display().to_string();
-                if pkg_label == "package.json" {
-                    vec![format!("  {}", dep.package_name.bold())]
-                } else {
-                    vec![format!(
-                        "  {} ({})",
-                        dep.package_name.bold(),
-                        pkg_label.dimmed()
-                    )]
-                }
-            },
-        );
-    }
+    print_human_section(
+        &results.type_only_dependencies,
+        "Type-only dependencies (consider moving to devDependencies)",
+        severity_to_level(rules.type_only_dependencies),
+        |dep| vec![format!("  {}", format_dep(&dep.package_name, &dep.path))],
+    );
 
     print_human_section(
         &results.circular_dependencies,
