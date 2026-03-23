@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1774292285648,
+  "lastUpdate": 1774292526756,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
@@ -255,6 +255,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/c54237920bcc158308fd04a4f2e6b4144b22892f"
         },
         "date": 1774292285103,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 83.6,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "d61097c7c1194ca2ef9a35f2480481a8da2bfd2a",
+          "message": "docs: update demo GIF with Victor Mono rendering",
+          "timestamp": "2026-03-23T20:00:19+01:00",
+          "tree_id": "ed81d0796cde7e0bea5cbcd989239120452b39c4",
+          "url": "https://github.com/fallow-rs/fallow/commit/d61097c7c1194ca2ef9a35f2480481a8da2bfd2a"
+        },
+        "date": 1774292526261,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
