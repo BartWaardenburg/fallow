@@ -106,64 +106,84 @@ runs:
 
         # --- Check command summary ---
         cat > "$FALLOW_TMP/summary-check.jq" << 'JQEOF'
-        def table_row(name; key):
+        def table_row(icon; name; key):
           (.[key] | length) as $n |
-          if $n > 0 then "| \(name) | \($n) |" else empty end;
+          if $n > 0 then "| \(icon) | \(name) | \($n) |" else empty end;
 
-        def detail_section(name; key; fmt):
+        def section(icon; name; key; header; fmt):
           (.[key] | length) as $n |
           if $n > 0 then
-            "**\(name) (\($n))**\n" +
+            "\n<details><summary>\(icon) \(name) (\($n))</summary>\n\n" +
+            header +
             ([.[key][:25][] | fmt] | join("\n")) +
-            (if $n > 25 then "\n- *... and \($n - 25) more*" else "" end) +
-            "\n"
+            (if $n > 25 then "\n\n> \($n - 25) more \u2014 run `fallow check` locally for the full list" else "" end) +
+            "\n\n</details>\n"
           else "" end;
 
         if .total_issues == 0 then
-          "## Fallow — Unused Code Analysis\n\nNo unused code found.\n\n*Analyzed in \(.elapsed_ms)ms*"
+          "# Fallow Dead Code Analysis\n\n" +
+          "> [!NOTE]\n> **No issues found** \u00b7 \(.elapsed_ms)ms\n\n" +
+          "All exports are used, all dependencies are declared, and no dead code was detected."
         else
-          "## Fallow — Unused Code Analysis\n\nFound **\(.total_issues) issues** in \(.elapsed_ms)ms\n\n" +
-          "| Category | Issues |\n|----------|--------|\n" +
+          "# Fallow Dead Code Analysis\n\n" +
+          "> [!WARNING]\n> **\(.total_issues) issues** found \u00b7 \(.elapsed_ms)ms\n\n" +
+          "| | Category | Count |\n|---|----------|------:|\n" +
           ([
-            table_row("Unused files"; "unused_files"),
-            table_row("Unused exports"; "unused_exports"),
-            table_row("Unused types"; "unused_types"),
-            table_row("Unused dependencies"; "unused_dependencies"),
-            table_row("Unused devDependencies"; "unused_dev_dependencies"),
-            table_row("Unused enum members"; "unused_enum_members"),
-            table_row("Unused class members"; "unused_class_members"),
-            table_row("Unresolved imports"; "unresolved_imports"),
-            table_row("Unlisted dependencies"; "unlisted_dependencies"),
-            table_row("Duplicate exports"; "duplicate_exports"),
-            table_row("Circular dependencies"; "circular_dependencies"),
-            table_row("Type-only dependencies"; "type_only_dependencies")
+            table_row("\ud83d\udcc4"; "Unused files"; "unused_files"),
+            table_row("\ud83d\udce4"; "Unused exports"; "unused_exports"),
+            table_row("\ud83d\udd37"; "Unused types"; "unused_types"),
+            table_row("\ud83d\udce6"; "Unused dependencies"; "unused_dependencies"),
+            table_row("\ud83d\udee0\ufe0f"; "Unused devDependencies"; "unused_dev_dependencies"),
+            table_row("\ud83d\udce6"; "Unused optionalDependencies"; "unused_optional_dependencies"),
+            table_row("\ud83c\udff7\ufe0f"; "Unused enum members"; "unused_enum_members"),
+            table_row("\ud83c\udfdb\ufe0f"; "Unused class members"; "unused_class_members"),
+            table_row("\u2753"; "Unresolved imports"; "unresolved_imports"),
+            table_row("\ud83d\udccb"; "Unlisted dependencies"; "unlisted_dependencies"),
+            table_row("\ud83d\udd00"; "Duplicate exports"; "duplicate_exports"),
+            table_row("\ud83d\udd04"; "Circular dependencies"; "circular_dependencies"),
+            table_row("\ud83d\udcdd"; "Type-only dependencies"; "type_only_dependencies")
           ] | join("\n")) +
-          "\n\n<details>\n<summary>View details</summary>\n\n" +
-          detail_section("Unused files"; "unused_files";
-            "- `\(.path)`") +
-          detail_section("Unused exports"; "unused_exports";
-            "- `\(.path):\(.line)` — `\(.export_name)`") +
-          detail_section("Unused types"; "unused_types";
-            "- `\(.path):\(.line)` — `\(.export_name)`") +
-          detail_section("Unused dependencies"; "unused_dependencies";
-            "- `\(.package_name)`") +
-          detail_section("Unused devDependencies"; "unused_dev_dependencies";
-            "- `\(.package_name)`") +
-          detail_section("Unused enum members"; "unused_enum_members";
-            "- `\(.path):\(.line)` — `\(.parent_name).\(.member_name)`") +
-          detail_section("Unused class members"; "unused_class_members";
-            "- `\(.path):\(.line)` — `\(.parent_name).\(.member_name)`") +
-          detail_section("Unresolved imports"; "unresolved_imports";
-            "- `\(.path):\(.line)` — `\(.specifier)`") +
-          detail_section("Unlisted dependencies"; "unlisted_dependencies";
-            "- `\(.package_name)`\(if (.imported_from | length) > 0 then " (used in \(.imported_from[:3] | join(", ")))" else "" end)") +
-          detail_section("Duplicate exports"; "duplicate_exports";
-            "- `\(.export_name)` in \(.locations[:5] | join(", "))\(if (.locations | length) > 5 then " *(+\((.locations | length) - 5) more)*" else "" end)") +
-          detail_section("Circular dependencies"; "circular_dependencies";
-            "- \(.files | join(" → ")) (\(.length) files)") +
-          detail_section("Type-only dependencies"; "type_only_dependencies";
-            "- `\(.package_name)` (move to devDependencies)") +
-          "\n\n</details>"
+          "\n\n---\n" +
+          section("\ud83d\udcc4"; "Unused files"; "unused_files";
+            "Files not reachable from any entry point.\n\n| File |\n|------|\n";
+            "| `\(.path)` |") +
+          section("\ud83d\udce4"; "Unused exports"; "unused_exports";
+            "Exported symbols with no known consumers.\n\n| File | Line | Export |\n|------|-----:|--------|\n";
+            "| `\(.path)` | \(.line) | `\(.export_name)`\(if .is_re_export then " *(re-export)*" else "" end) |") +
+          section("\ud83d\udd37"; "Unused types"; "unused_types";
+            "Type exports with no known consumers.\n\n| File | Line | Type |\n|------|-----:|------|\n";
+            "| `\(.path)` | \(.line) | `\(.export_name)` |") +
+          section("\ud83d\udce6"; "Unused dependencies"; "unused_dependencies";
+            "Listed in `dependencies` but never imported.\n\n| Package |\n|---------|\n";
+            "| `\(.package_name)` |") +
+          section("\ud83d\udee0\ufe0f"; "Unused devDependencies"; "unused_dev_dependencies";
+            "Listed in `devDependencies` but never referenced.\n\n| Package |\n|---------|\n";
+            "| `\(.package_name)` |") +
+          section("\ud83d\udce6"; "Unused optionalDependencies"; "unused_optional_dependencies";
+            "Listed in `optionalDependencies` but never imported.\n\n| Package |\n|---------|\n";
+            "| `\(.package_name)` |") +
+          section("\ud83c\udff7\ufe0f"; "Unused enum members"; "unused_enum_members";
+            "| File | Line | Enum | Member |\n|------|-----:|------|--------|\n";
+            "| `\(.path)` | \(.line) | `\(.parent_name)` | `\(.member_name)` |") +
+          section("\ud83c\udfdb\ufe0f"; "Unused class members"; "unused_class_members";
+            "| File | Line | Class | Member |\n|------|-----:|-------|--------|\n";
+            "| `\(.path)` | \(.line) | `\(.parent_name)` | `\(.member_name)` |") +
+          section("\u2753"; "Unresolved imports"; "unresolved_imports";
+            "Imports that could not be resolved. Check for missing packages or broken paths.\n\n| File | Line | Import |\n|------|-----:|--------|\n";
+            "| `\(.path)` | \(.line) | `\(.specifier)` |") +
+          section("\ud83d\udccb"; "Unlisted dependencies"; "unlisted_dependencies";
+            "Imported but not declared in `package.json`.\n\n| Package | Used in |\n|---------|--------|\n";
+            "| `\(.package_name)` | \(if (.imported_from | length) > 0 then (.imported_from[:3] | map("`\(.)`") | join(", ")) + (if (.imported_from | length) > 3 then " *+\((.imported_from | length) - 3) more*" else "" end) else "" end) |") +
+          section("\ud83d\udd00"; "Duplicate exports"; "duplicate_exports";
+            "Same name exported from multiple modules.\n\n| Export | Locations |\n|--------|-----------|\n";
+            "| `\(.export_name)` | \(.locations[:3] | map("`\(.)`") | join(", "))\(if (.locations | length) > 3 then " *+\((.locations | length) - 3) more*" else "" end) |") +
+          section("\ud83d\udd04"; "Circular dependencies"; "circular_dependencies";
+            "Import cycles degrade tree-shaking and can cause runtime issues.\n\n| Cycle | Length |\n|-------|-------:|\n";
+            "| \(.files | join(" \u2192 ")) | \(.length) |") +
+          section("\ud83d\udcdd"; "Type-only dependencies"; "type_only_dependencies";
+            "Production deps only used via `import type` \u2014 consider moving to `devDependencies`.\n\n| Package |\n|---------|\n";
+            "| `\(.package_name)` |") +
+          "\n\n> [!TIP]\n> Run `fallow fix --dry-run` to preview safe auto-fixes for unused exports, enum members, and dependencies.\n> Add `// fallow-ignore-next-line` above a line to suppress a specific finding."
         end
         JQEOF
 
