@@ -23,6 +23,7 @@ pub fn run_list(opts: &ListOptions<'_>) -> ExitCode {
         true,
         opts.threads,
         opts.production,
+        true, // list command doesn't need progress bars
     ) {
         Ok(c) => c,
         Err(code) => return code,

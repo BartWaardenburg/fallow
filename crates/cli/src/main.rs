@@ -335,6 +335,7 @@ fn load_config(
     no_cache: bool,
     threads: usize,
     production: bool,
+    quiet: bool,
 ) -> Result<fallow_config::ResolvedConfig, ExitCode> {
     let user_config = if let Some(path) = config_path {
         // Explicit --config: propagate errors
@@ -360,7 +361,7 @@ fn load_config(
             if production {
                 config.production = true;
             }
-            config.resolve(root.to_path_buf(), output, threads, no_cache)
+            config.resolve(root.to_path_buf(), output, threads, no_cache, quiet)
         }
         None => FallowConfig {
             schema: None,
@@ -377,7 +378,7 @@ fn load_config(
             plugins: vec![],
             overrides: vec![],
         }
-        .resolve(root.to_path_buf(), output, threads, no_cache),
+        .resolve(root.to_path_buf(), output, threads, no_cache, quiet),
     })
 }
 
@@ -413,10 +414,14 @@ fn main() -> ExitCode {
 
     let output: fallow_config::OutputFormat = format.into();
 
-    // Set up tracing — watch mode uses WARN level to suppress per-run INFO noise
+    // Set up tracing — use WARN level when progress spinners will be active (TTY + not quiet)
+    // to prevent tracing INFO lines from corrupting spinner output on stderr.
+    // In non-TTY (piped/CI), keep INFO level since there are no spinners to conflict with.
+    // Watch mode always uses WARN since spinners replace the per-run INFO noise.
     let is_watch = matches!(cli.command, Some(Command::Watch { .. }));
     if !quiet {
-        let default_level = if is_watch {
+        let stderr_is_tty = std::io::IsTerminal::is_terminal(&std::io::stderr());
+        let default_level = if is_watch || stderr_is_tty {
             tracing::Level::WARN
         } else {
             tracing::Level::INFO

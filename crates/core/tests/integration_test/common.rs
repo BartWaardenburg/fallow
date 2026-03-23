@@ -29,7 +29,7 @@ pub fn create_config(root: PathBuf) -> fallow_config::ResolvedConfig {
         plugins: vec![],
         overrides: vec![],
     }
-    .resolve(root, OutputFormat::Human, 4, true)
+    .resolve(root, OutputFormat::Human, 4, true, true)
 }
 
 pub fn create_config_with_cache(
@@ -51,7 +51,7 @@ pub fn create_config_with_cache(
         plugins: vec![],
         overrides: vec![],
     }
-    .resolve(root, OutputFormat::Human, 4, false); // no_cache = false to enable caching
+    .resolve(root, OutputFormat::Human, 4, false, true); // no_cache = false to enable caching
     config.cache_dir = cache_dir;
     config
 }

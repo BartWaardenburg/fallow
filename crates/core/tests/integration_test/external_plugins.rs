@@ -19,7 +19,7 @@ fn external_plugin_config(root: &std::path::Path) -> fallow_config::ResolvedConf
         plugins: vec![],
         overrides: vec![],
     }
-    .resolve(root.to_path_buf(), OutputFormat::Human, 4, true)
+    .resolve(root.to_path_buf(), OutputFormat::Human, 4, true, true)
 }
 
 #[test]

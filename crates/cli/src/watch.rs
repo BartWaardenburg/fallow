@@ -91,6 +91,7 @@ pub fn run_watch(opts: &WatchOptions<'_>) -> ExitCode {
         opts.no_cache,
         opts.threads,
         opts.production,
+        opts.quiet,
     ) {
         Ok(c) => c,
         Err(code) => return code,
@@ -155,6 +156,7 @@ pub fn run_watch(opts: &WatchOptions<'_>) -> ExitCode {
                     opts.no_cache,
                     opts.threads,
                     opts.production,
+                    opts.quiet,
                 ) else {
                     eprintln!("Warning: failed to reload config, using previous configuration");
                     continue;

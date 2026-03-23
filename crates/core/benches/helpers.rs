@@ -22,7 +22,7 @@ pub fn make_config(root: PathBuf, no_cache: bool) -> fallow_config::ResolvedConf
         plugins: vec![],
         overrides: vec![],
     }
-    .resolve(root, OutputFormat::Human, 4, no_cache)
+    .resolve(root, OutputFormat::Human, 4, no_cache, true)
 }
 
 /// Generate a synthetic project with `file_count` source files.

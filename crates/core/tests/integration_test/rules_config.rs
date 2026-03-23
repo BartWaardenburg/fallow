@@ -91,7 +91,7 @@ fn ignore_exports_wildcard() {
         plugins: vec![],
         overrides: vec![],
     }
-    .resolve(root, OutputFormat::Human, 4, true);
+    .resolve(root, OutputFormat::Human, 4, true, true);
 
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
 
@@ -132,7 +132,7 @@ fn ignore_exports_specific() {
         plugins: vec![],
         overrides: vec![],
     }
-    .resolve(root, OutputFormat::Human, 4, true);
+    .resolve(root, OutputFormat::Human, 4, true, true);
 
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
 
@@ -172,7 +172,7 @@ fn ignore_dependencies_config() {
         plugins: vec![],
         overrides: vec![],
     }
-    .resolve(root, OutputFormat::Human, 4, true);
+    .resolve(root, OutputFormat::Human, 4, true, true);
 
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
 

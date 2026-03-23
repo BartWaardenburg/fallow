@@ -131,6 +131,7 @@ pub fn run_check(opts: &CheckOptions<'_>) -> ExitCode {
         opts.no_cache,
         opts.threads,
         opts.production,
+        opts.quiet,
     ) {
         Ok(c) => c,
         Err(code) => return code,

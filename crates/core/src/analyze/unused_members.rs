@@ -265,6 +265,7 @@ mod tests {
             fallow_config::OutputFormat::Human,
             1,
             true,
+            true,
         )
     }
 

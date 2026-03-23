@@ -96,6 +96,19 @@ fn analyze_full(
     let _span = tracing::info_span!("fallow_analyze").entered();
     let pipeline_start = Instant::now();
 
+    // Progress bars: enabled when not quiet, stderr is a terminal, and output is human-readable.
+    // Structured formats (JSON, SARIF) suppress spinners even on TTY — users piping structured
+    // output don't expect progress noise on stderr.
+    let show_progress = !config.quiet
+        && std::io::IsTerminal::is_terminal(&std::io::stderr())
+        && matches!(
+            config.output,
+            fallow_config::OutputFormat::Human
+                | fallow_config::OutputFormat::Compact
+                | fallow_config::OutputFormat::Markdown
+        );
+    let progress = progress::AnalysisProgress::new(show_progress);
+
     // Warn if node_modules is missing — resolution will be severely degraded
     if !config.root.join("node_modules").is_dir() {
         tracing::warn!(
@@ -113,8 +126,10 @@ fn analyze_full(
 
     // Stage 1: Discover all source files
     let t = Instant::now();
+    let pb = progress.stage_spinner("Discovering files...");
     let discovered_files = discover::discover_files(config);
     let discover_ms = t.elapsed().as_secs_f64() * 1000.0;
+    pb.finish_and_clear();
 
     // Build ProjectState: owns the file registry with stable FileIds and workspace metadata.
     // This is the foundation for cross-workspace resolution and future incremental analysis.
@@ -124,8 +139,10 @@ fn analyze_full(
 
     // Stage 1.5: Run plugin system — parse config files, discover dynamic entries
     let t = Instant::now();
+    let pb = progress.stage_spinner("Detecting plugins...");
     let mut plugin_result = run_plugins(config, files, workspaces);
     let plugins_ms = t.elapsed().as_secs_f64() * 1000.0;
+    pb.finish_and_clear();
 
     // Stage 1.6: Analyze package.json scripts for binary usage and config file refs
     let t = Instant::now();
@@ -181,6 +198,7 @@ fn analyze_full(
 
     // Stage 2: Parse all files in parallel and extract imports/exports
     let t = Instant::now();
+    let pb = progress.stage_spinner(&format!("Parsing {} files...", files.len()));
     let mut cache_store = if config.no_cache {
         None
     } else {
@@ -192,6 +210,7 @@ fn analyze_full(
     let cache_hits = parse_result.cache_hits;
     let cache_misses = parse_result.cache_misses;
     let parse_ms = t.elapsed().as_secs_f64() * 1000.0;
+    pb.finish_and_clear();
 
     // Update cache with freshly parsed modules and refresh stale mtime/size entries.
     let t = Instant::now();
@@ -219,6 +238,7 @@ fn analyze_full(
 
     // Stage 4: Resolve imports to file IDs
     let t = Instant::now();
+    let pb = progress.stage_spinner("Resolving imports...");
     let resolved = resolve::resolve_all_imports(
         &modules,
         files,
@@ -228,14 +248,18 @@ fn analyze_full(
         &config.root,
     );
     let resolve_ms = t.elapsed().as_secs_f64() * 1000.0;
+    pb.finish_and_clear();
 
     // Stage 5: Build module graph
     let t = Instant::now();
+    let pb = progress.stage_spinner("Building module graph...");
     let graph = graph::ModuleGraph::build(&resolved, &entry_points, files);
     let graph_ms = t.elapsed().as_secs_f64() * 1000.0;
+    pb.finish_and_clear();
 
     // Stage 6: Analyze for dead code (with plugin context and workspace info)
     let t = Instant::now();
+    let pb = progress.stage_spinner("Analyzing...");
     let result = analyze::find_dead_code_full(
         &graph,
         config,
@@ -246,6 +270,8 @@ fn analyze_full(
         collect_usages,
     );
     let analyze_ms = t.elapsed().as_secs_f64() * 1000.0;
+    pb.finish_and_clear();
+    progress.finish();
 
     let total_ms = pipeline_start.elapsed().as_secs_f64() * 1000.0;
 
@@ -457,6 +483,7 @@ pub(crate) fn default_config(root: &Path) -> ResolvedConfig {
             fallow_config::OutputFormat::Human,
             num_cpus(),
             false,
+            true, // quiet: LSP/programmatic callers don't need progress bars
         ),
         None => fallow_config::FallowConfig {
             schema: None,
@@ -478,6 +505,7 @@ pub(crate) fn default_config(root: &Path) -> ResolvedConfig {
             fallow_config::OutputFormat::Human,
             num_cpus(),
             false,
+            true,
         ),
     }
 }

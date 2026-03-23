@@ -291,7 +291,13 @@ ignoreDependencies = ["autoprefixer", "postcss"]
             plugins: vec![],
             overrides: vec![],
         };
-        let resolved = config.resolve(PathBuf::from("/tmp/test"), OutputFormat::Human, 4, true);
+        let resolved = config.resolve(
+            PathBuf::from("/tmp/test"),
+            OutputFormat::Human,
+            4,
+            true,
+            true,
+        );
 
         // Default ignores should be compiled
         assert!(resolved.ignore_patterns.is_match("node_modules/foo/bar.ts"));
@@ -320,7 +326,13 @@ ignoreDependencies = ["autoprefixer", "postcss"]
             plugins: vec![],
             overrides: vec![],
         };
-        let resolved = config.resolve(PathBuf::from("/tmp/test"), OutputFormat::Json, 4, false);
+        let resolved = config.resolve(
+            PathBuf::from("/tmp/test"),
+            OutputFormat::Json,
+            4,
+            false,
+            true,
+        );
 
         assert!(resolved.ignore_patterns.is_match("src/foo.generated.ts"));
         assert_eq!(resolved.entry_patterns, vec!["src/**/*.ts"]);
@@ -345,7 +357,13 @@ ignoreDependencies = ["autoprefixer", "postcss"]
             plugins: vec![],
             overrides: vec![],
         };
-        let resolved = config.resolve(PathBuf::from("/tmp/project"), OutputFormat::Human, 4, true);
+        let resolved = config.resolve(
+            PathBuf::from("/tmp/project"),
+            OutputFormat::Human,
+            4,
+            true,
+            true,
+        );
         assert_eq!(resolved.cache_dir, PathBuf::from("/tmp/project/.fallow"));
         assert!(resolved.no_cache);
     }

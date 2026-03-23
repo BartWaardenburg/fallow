@@ -54,6 +54,8 @@ pub struct ResolvedConfig {
     pub rules: RulesConfig,
     /// Whether production mode is active.
     pub production: bool,
+    /// Suppress progress output and non-essential stderr messages.
+    pub quiet: bool,
     /// External plugin definitions (from plugin files + inline framework definitions).
     pub external_plugins: Vec<ExternalPluginDef>,
     /// Per-file rule overrides with pre-compiled glob matchers.
@@ -69,6 +71,7 @@ impl FallowConfig {
         output: OutputFormat,
         threads: usize,
         no_cache: bool,
+        quiet: bool,
     ) -> ResolvedConfig {
         let mut ignore_builder = GlobSetBuilder::new();
         for pattern in &self.ignore_patterns {
@@ -156,6 +159,7 @@ impl FallowConfig {
             duplicates: self.duplicates,
             rules,
             production,
+            quiet,
             external_plugins,
             overrides,
         }
@@ -228,7 +232,13 @@ mod tests {
             plugins: vec![],
             overrides: vec![],
         };
-        let resolved = config.resolve(PathBuf::from("/project"), OutputFormat::Human, 1, true);
+        let resolved = config.resolve(
+            PathBuf::from("/project"),
+            OutputFormat::Human,
+            1,
+            true,
+            true,
+        );
         let rules = resolved.resolve_rules_for_path(Path::new("/project/src/foo.ts"));
         assert_eq!(rules.unused_files, Severity::Error);
     }
@@ -256,7 +266,13 @@ mod tests {
                 },
             }],
         };
-        let resolved = config.resolve(PathBuf::from("/project"), OutputFormat::Human, 1, true);
+        let resolved = config.resolve(
+            PathBuf::from("/project"),
+            OutputFormat::Human,
+            1,
+            true,
+            true,
+        );
 
         // Test file matches override
         let test_rules = resolved.resolve_rules_for_path(Path::new("/project/src/utils.test.ts"));
@@ -300,7 +316,13 @@ mod tests {
                 },
             ],
         };
-        let resolved = config.resolve(PathBuf::from("/project"), OutputFormat::Human, 1, true);
+        let resolved = config.resolve(
+            PathBuf::from("/project"),
+            OutputFormat::Human,
+            1,
+            true,
+            true,
+        );
 
         // First override matches *.ts, second matches *.test.ts; second wins
         let rules = resolved.resolve_rules_for_path(Path::new("/project/foo.test.ts"));
