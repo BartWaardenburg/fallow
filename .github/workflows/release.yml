@@ -357,6 +357,11 @@ jobs:
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
 
+      - name: Publish to Open VSX (Cursor, VSCodium)
+        run: cd editors/vscode && npx ovsx publish --no-dependencies
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+
       - name: Upload VSIX artifact
         uses: actions/upload-artifact@v7
         with:
