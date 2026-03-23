@@ -139,7 +139,7 @@ pub(super) fn print_human(
             let locations: Vec<String> = dup
                 .locations
                 .iter()
-                .map(|p| relative_path(p, root).display().to_string())
+                .map(|loc| relative_path(&loc.path, root).display().to_string())
                 .collect();
             vec![format!(
                 "  {}  {}",
@@ -266,6 +266,120 @@ fn print_grouped_by_file<'a, T>(
             last_file = file_str;
         }
         println!("    {}", format_detail(item));
+    }
+}
+
+// ── Health / complexity human output ──────────────────────────────
+
+pub(super) fn print_health_human(
+    report: &crate::health_types::HealthReport,
+    root: &Path,
+    elapsed: Duration,
+    quiet: bool,
+) {
+    if !quiet {
+        eprintln!();
+    }
+
+    if report.findings.is_empty() {
+        if !quiet {
+            eprintln!(
+                "{}",
+                format!(
+                    "\u{2713} No functions exceed complexity thresholds ({:.2}s)",
+                    elapsed.as_secs_f64()
+                )
+                .green()
+                .bold()
+            );
+            eprintln!(
+                "{}",
+                format!(
+                    "  {} functions analyzed (max cyclomatic: {}, max cognitive: {})",
+                    report.summary.functions_analyzed,
+                    report.summary.max_cyclomatic_threshold,
+                    report.summary.max_cognitive_threshold,
+                )
+                .dimmed()
+            );
+        }
+        return;
+    }
+
+    println!(
+        "{} {}",
+        "\u{25cf}".red(),
+        format!("High complexity functions ({})", report.findings.len())
+            .red()
+            .bold()
+    );
+
+    let mut last_file = String::new();
+    for finding in &report.findings {
+        let file_str = relative_path(&finding.path, root).display().to_string();
+        if file_str != last_file {
+            println!("  {}", file_str.dimmed());
+            last_file = file_str;
+        }
+
+        let cyc_str = format!("cyclomatic: {}", finding.cyclomatic);
+        let cog_str = format!("cognitive: {}", finding.cognitive);
+
+        let cyc_colored = if finding.cyclomatic > report.summary.max_cyclomatic_threshold {
+            cyc_str.red().bold().to_string()
+        } else {
+            cyc_str.dimmed().to_string()
+        };
+        let cog_colored = if finding.cognitive > report.summary.max_cognitive_threshold {
+            cog_str.red().bold().to_string()
+        } else {
+            cog_str.dimmed().to_string()
+        };
+
+        println!(
+            "    {} {}  {}  {}  {}",
+            format!(":{}", finding.line).dimmed(),
+            finding.name.bold(),
+            cyc_colored,
+            cog_colored,
+            format!("{} lines", finding.line_count).dimmed(),
+        );
+    }
+    println!();
+
+    if !quiet {
+        let s = &report.summary;
+        eprintln!(
+            "{}",
+            format!(
+                "\u{2717} {} function{} exceed{} thresholds (cyclomatic > {}, cognitive > {})",
+                s.functions_above_threshold,
+                if s.functions_above_threshold == 1 {
+                    ""
+                } else {
+                    "s"
+                },
+                if s.functions_above_threshold == 1 {
+                    "s"
+                } else {
+                    ""
+                },
+                s.max_cyclomatic_threshold,
+                s.max_cognitive_threshold,
+            )
+            .red()
+            .bold()
+        );
+        eprintln!(
+            "{}",
+            format!(
+                "  {} functions analyzed across {} files ({:.2}s)",
+                s.functions_analyzed,
+                s.files_analyzed,
+                elapsed.as_secs_f64()
+            )
+            .dimmed()
+        );
     }
 }
 

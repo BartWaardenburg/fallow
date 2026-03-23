@@ -168,9 +168,20 @@ pub struct UnlistedDependency {
 pub struct DuplicateExport {
     /// The duplicated export name.
     pub export_name: String,
-    /// Files that export this name.
-    #[serde(serialize_with = "serde_path::serialize_vec")]
-    pub locations: Vec<PathBuf>,
+    /// Locations where this export name appears.
+    pub locations: Vec<DuplicateLocation>,
+}
+
+/// A location where a duplicate export appears.
+#[derive(Debug, Clone, Serialize)]
+pub struct DuplicateLocation {
+    /// File containing the duplicate export.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub path: PathBuf,
+    /// 1-based line number.
+    pub line: u32,
+    /// 0-based byte column offset.
+    pub col: u32,
 }
 
 /// A production dependency that is only used via type-only imports.
@@ -326,7 +337,18 @@ mod tests {
         });
         results.duplicate_exports.push(DuplicateExport {
             export_name: "dup".to_string(),
-            locations: vec![PathBuf::from("h.ts"), PathBuf::from("i.ts")],
+            locations: vec![
+                DuplicateLocation {
+                    path: PathBuf::from("h.ts"),
+                    line: 15,
+                    col: 0,
+                },
+                DuplicateLocation {
+                    path: PathBuf::from("i.ts"),
+                    line: 30,
+                    col: 0,
+                },
+            ],
         });
         results.circular_dependencies.push(CircularDependency {
             files: vec![PathBuf::from("a.ts"), PathBuf::from("b.ts")],

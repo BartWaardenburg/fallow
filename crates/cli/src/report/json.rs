@@ -29,7 +29,7 @@ pub(super) fn print_json(results: &AnalysisResults, root: &Path, elapsed: Durati
 /// Bump this when the structure of the JSON output changes in a
 /// backwards-incompatible way (removing/renaming fields, changing types).
 /// Adding new fields is always backwards-compatible and does not require a bump.
-const SCHEMA_VERSION: u32 = 1;
+const SCHEMA_VERSION: u32 = 2;
 
 /// Build the JSON output value for analysis results.
 ///
@@ -94,6 +94,53 @@ fn strip_root_prefix(value: &mut serde_json::Value, prefix: &str) {
             }
         }
         _ => {}
+    }
+}
+
+pub(super) fn print_health_json(
+    report: &crate::health_types::HealthReport,
+    root: &Path,
+    elapsed: Duration,
+) -> ExitCode {
+    let report_value = match serde_json::to_value(report) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("Error: failed to serialize health report: {e}");
+            return ExitCode::from(2);
+        }
+    };
+
+    let mut map = serde_json::Map::new();
+    map.insert(
+        "schema_version".to_string(),
+        serde_json::json!(SCHEMA_VERSION),
+    );
+    map.insert(
+        "version".to_string(),
+        serde_json::json!(env!("CARGO_PKG_VERSION")),
+    );
+    map.insert(
+        "elapsed_ms".to_string(),
+        serde_json::json!(elapsed.as_millis()),
+    );
+    if let serde_json::Value::Object(report_map) = report_value {
+        for (key, value) in report_map {
+            map.insert(key, value);
+        }
+    }
+    let mut output = serde_json::Value::Object(map);
+    let root_prefix = format!("{}/", root.display());
+    strip_root_prefix(&mut output, &root_prefix);
+
+    match serde_json::to_string_pretty(&output) {
+        Ok(json) => {
+            println!("{json}");
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("Error: failed to serialize JSON output: {e}");
+            ExitCode::from(2)
+        }
     }
 }
 
@@ -221,7 +268,18 @@ mod tests {
         });
         r.duplicate_exports.push(DuplicateExport {
             export_name: "Config".to_string(),
-            locations: vec![root.join("src/config.ts"), root.join("src/types.ts")],
+            locations: vec![
+                DuplicateLocation {
+                    path: root.join("src/config.ts"),
+                    line: 15,
+                    col: 0,
+                },
+                DuplicateLocation {
+                    path: root.join("src/types.ts"),
+                    line: 30,
+                    col: 0,
+                },
+            ],
         });
         r.circular_dependencies.push(CircularDependency {
             files: vec![root.join("src/a.ts"), root.join("src/b.ts")],
@@ -238,7 +296,7 @@ mod tests {
         let elapsed = Duration::from_millis(123);
         let output = build_json(&results, &root, elapsed).expect("should serialize");
 
-        assert_eq!(output["schema_version"], 1);
+        assert_eq!(output["schema_version"], 2);
         assert!(output["version"].is_string());
         assert_eq!(output["elapsed_ms"], 123);
         assert_eq!(output["total_issues"], 0);

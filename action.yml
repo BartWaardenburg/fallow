@@ -176,7 +176,7 @@ runs:
             "| `\(.package_name)` | \(if (.imported_from | length) > 0 then (.imported_from[:3] | map("`\(.)`") | join(", ")) + (if (.imported_from | length) > 3 then " *+\((.imported_from | length) - 3) more*" else "" end) else "" end) |") +
           section("Duplicate exports"; "duplicate_exports";
             "Same name exported from multiple modules.\n\n| Export | Locations |\n|--------|-----------|\n";
-            "| `\(.export_name)` | \(.locations[:3] | map("`\(.)`") | join(", "))\(if (.locations | length) > 3 then " *+\((.locations | length) - 3) more*" else "" end) |") +
+            "| `\(.export_name)` | \(.locations[:3] | map("`\(.path):\(.line)`") | join(", "))\(if (.locations | length) > 3 then " *+\((.locations | length) - 3) more*" else "" end) |") +
           section("Circular dependencies"; "circular_dependencies";
             "Import cycles degrade tree-shaking and can cause runtime issues.\n\n| Cycle | Length |\n|-------|-------:|\n";
             "| \(.files | join(" \u2192 ")) | \(.length) |") +

@@ -253,8 +253,16 @@ mod tests {
         r.duplicate_exports.push(DuplicateExport {
             export_name: "helper".into(),
             locations: vec![
-                PathBuf::from("/project/src/h.ts"),
-                PathBuf::from("/project/src/i.ts"),
+                DuplicateLocation {
+                    path: PathBuf::from("/project/src/h.ts"),
+                    line: 15,
+                    col: 0,
+                },
+                DuplicateLocation {
+                    path: PathBuf::from("/project/src/i.ts"),
+                    line: 30,
+                    col: 0,
+                },
             ],
         });
         r
@@ -272,6 +280,7 @@ mod tests {
             ignore_dependencies: vec![],
             ignore_exports: vec![],
             duplicates: fallow_config::DuplicatesConfig::default(),
+            health: fallow_config::HealthConfig::default(),
             rules,
             production: false,
             plugins: vec![],

@@ -105,6 +105,32 @@ pub fn print_duplication_report(
     }
 }
 
+// ── Health / complexity report ─────────────────────────────────────
+
+/// Print health (complexity) analysis results in the configured format.
+pub fn print_health_report(
+    report: &crate::health_types::HealthReport,
+    config: &ResolvedConfig,
+    elapsed: Duration,
+    quiet: bool,
+    output: &OutputFormat,
+) -> ExitCode {
+    match output {
+        OutputFormat::Human => {
+            human::print_health_human(report, &config.root, elapsed, quiet);
+            ExitCode::SUCCESS
+        }
+        OutputFormat::Compact => {
+            compact::print_health_compact(report, &config.root);
+            ExitCode::SUCCESS
+        }
+        // JSON, SARIF, and Markdown all use JSON output
+        OutputFormat::Json | OutputFormat::Sarif | OutputFormat::Markdown => {
+            json::print_health_json(report, &config.root, elapsed)
+        }
+    }
+}
+
 /// Print cross-reference findings (duplicated code that is also dead code).
 ///
 /// Only emits output in human format to avoid corrupting structured JSON/SARIF output.

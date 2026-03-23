@@ -46,7 +46,7 @@ pub fn filter_to_workspace(
 
     // Duplicate exports: filter locations to workspace, drop groups with < 2
     for dup in &mut results.duplicate_exports {
-        dup.locations.retain(|p| p.starts_with(ws_root));
+        dup.locations.retain(|loc| loc.path.starts_with(ws_root));
     }
     results.duplicate_exports.retain(|d| d.locations.len() >= 2);
 
@@ -127,7 +127,8 @@ pub(super) fn filter_changed_files(
 
     // Duplicate exports: filter locations to changed files, drop groups with < 2
     for dup in &mut results.duplicate_exports {
-        dup.locations.retain(|p| changed_files.contains(p));
+        dup.locations
+            .retain(|loc| changed_files.contains(&loc.path));
     }
     results.duplicate_exports.retain(|d| d.locations.len() >= 2);
 
@@ -261,15 +262,31 @@ mod tests {
         results.duplicate_exports.push(DuplicateExport {
             export_name: "helper".into(),
             locations: vec![
-                PathBuf::from("/project/packages/ui/src/a.ts"),
-                PathBuf::from("/project/packages/api/src/b.ts"),
+                DuplicateLocation {
+                    path: PathBuf::from("/project/packages/ui/src/a.ts"),
+                    line: 15,
+                    col: 0,
+                },
+                DuplicateLocation {
+                    path: PathBuf::from("/project/packages/api/src/b.ts"),
+                    line: 30,
+                    col: 0,
+                },
             ],
         });
         results.duplicate_exports.push(DuplicateExport {
             export_name: "utils".into(),
             locations: vec![
-                PathBuf::from("/project/packages/ui/src/c.ts"),
-                PathBuf::from("/project/packages/ui/src/d.ts"),
+                DuplicateLocation {
+                    path: PathBuf::from("/project/packages/ui/src/c.ts"),
+                    line: 15,
+                    col: 0,
+                },
+                DuplicateLocation {
+                    path: PathBuf::from("/project/packages/ui/src/d.ts"),
+                    line: 30,
+                    col: 0,
+                },
             ],
         });
 

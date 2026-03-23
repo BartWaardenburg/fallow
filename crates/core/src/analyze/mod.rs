@@ -184,7 +184,8 @@ pub fn find_dead_code_full(
     }
 
     if config.rules.duplicate_exports != Severity::Off {
-        results.duplicate_exports = find_duplicate_exports(graph, config, &suppressions_by_file);
+        results.duplicate_exports =
+            find_duplicate_exports(graph, config, &suppressions_by_file, &line_offsets_by_file);
     }
 
     // In production mode, detect dependencies that are only used via type-only imports

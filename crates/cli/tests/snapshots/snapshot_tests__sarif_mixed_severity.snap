@@ -341,6 +341,10 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
               "physicalLocation": {
                 "artifactLocation": {
                   "uri": "src/config.ts"
+                },
+                "region": {
+                  "startLine": 15,
+                  "startColumn": 1
                 }
               }
             }
@@ -357,6 +361,10 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
               "physicalLocation": {
                 "artifactLocation": {
                   "uri": "src/types.ts"
+                },
+                "region": {
+                  "startLine": 30,
+                  "startColumn": 1
                 }
               }
             }

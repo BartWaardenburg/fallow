@@ -69,7 +69,18 @@ fn sample_results(root: &Path) -> AnalysisResults {
     });
     r.duplicate_exports.push(DuplicateExport {
         export_name: "Config".to_string(),
-        locations: vec![root.join("src/config.ts"), root.join("src/types.ts")],
+        locations: vec![
+            DuplicateLocation {
+                path: root.join("src/config.ts"),
+                line: 15,
+                col: 0,
+            },
+            DuplicateLocation {
+                path: root.join("src/types.ts"),
+                line: 30,
+                col: 0,
+            },
+        ],
     });
     r.unused_optional_dependencies.push(UnusedDependency {
         package_name: "fsevents".to_string(),
@@ -356,7 +367,18 @@ fn compact_duplicate_exports_only_snapshot() {
     let mut results = AnalysisResults::default();
     results.duplicate_exports.push(DuplicateExport {
         export_name: "Config".to_string(),
-        locations: vec![root.join("src/config.ts"), root.join("src/types.ts")],
+        locations: vec![
+            DuplicateLocation {
+                path: root.join("src/config.ts"),
+                line: 15,
+                col: 0,
+            },
+            DuplicateLocation {
+                path: root.join("src/types.ts"),
+                line: 30,
+                col: 0,
+            },
+        ],
     });
     let lines = build_compact_lines(&results, &root);
     insta::assert_snapshot!("compact_duplicate_exports_only", lines.join("\n"));
@@ -637,7 +659,18 @@ fn json_duplicate_exports_only_snapshot() {
     let mut results = AnalysisResults::default();
     results.duplicate_exports.push(DuplicateExport {
         export_name: "Config".to_string(),
-        locations: vec![root.join("src/config.ts"), root.join("src/types.ts")],
+        locations: vec![
+            DuplicateLocation {
+                path: root.join("src/config.ts"),
+                line: 15,
+                col: 0,
+            },
+            DuplicateLocation {
+                path: root.join("src/types.ts"),
+                line: 30,
+                col: 0,
+            },
+        ],
     });
     let value = build_json(&results, &root, Duration::ZERO).expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
@@ -792,7 +825,18 @@ fn sarif_duplicate_exports_only_snapshot() {
     let mut results = AnalysisResults::default();
     results.duplicate_exports.push(DuplicateExport {
         export_name: "Config".to_string(),
-        locations: vec![root.join("src/config.ts"), root.join("src/types.ts")],
+        locations: vec![
+            DuplicateLocation {
+                path: root.join("src/config.ts"),
+                line: 15,
+                col: 0,
+            },
+            DuplicateLocation {
+                path: root.join("src/types.ts"),
+                line: 30,
+                col: 0,
+            },
+        ],
     });
     let sarif = build_sarif(&results, &root, &RulesConfig::default());
     let json_str = serde_json::to_string_pretty(&sarif).expect("should serialize");

@@ -214,19 +214,30 @@ pub fn build_diagnostics(
 
     // Duplicate exports: WARNING on each file that has the duplicate
     for dup in &results.duplicate_exports {
-        for location in &dup.locations {
-            if let Ok(uri) = Url::from_file_path(location) {
+        for loc in &dup.locations {
+            if let Ok(uri) = Url::from_file_path(&loc.path) {
                 let other_files: Vec<String> = dup
                     .locations
                     .iter()
-                    .filter(|l| *l != location)
-                    .map(|l| l.display().to_string())
+                    .filter(|l| l.path != loc.path)
+                    .map(|l| l.path.display().to_string())
                     .collect();
+                let line = loc.line.saturating_sub(1);
+                let range = Range {
+                    start: Position {
+                        line,
+                        character: loc.col,
+                    },
+                    end: Position {
+                        line,
+                        character: loc.col,
+                    },
+                };
                 diagnostics_by_file
                     .entry(uri)
                     .or_default()
                     .push(Diagnostic {
-                        range: ZERO_RANGE,
+                        range,
                         severity: Some(DiagnosticSeverity::WARNING),
                         source: Some("fallow".to_string()),
                         code: Some(NumberOrString::String("duplicate-export".to_string())),
@@ -352,8 +363,8 @@ mod tests {
     use fallow_core::duplicates::{CloneGroup, CloneInstance, DuplicationStats};
     use fallow_core::extract::MemberKind;
     use fallow_core::results::{
-        DependencyLocation, DuplicateExport, UnlistedDependency, UnresolvedImport,
-        UnusedDependency, UnusedExport, UnusedFile, UnusedMember,
+        DependencyLocation, DuplicateExport, DuplicateLocation, UnlistedDependency,
+        UnresolvedImport, UnusedDependency, UnusedExport, UnusedFile, UnusedMember,
     };
 
     fn test_root() -> PathBuf {
@@ -646,7 +657,18 @@ mod tests {
         let mut results = AnalysisResults::default();
         results.duplicate_exports.push(DuplicateExport {
             export_name: "formatDate".to_string(),
-            locations: vec![utils_path.clone(), helpers_path.clone()],
+            locations: vec![
+                DuplicateLocation {
+                    path: utils_path.clone(),
+                    line: 15,
+                    col: 0,
+                },
+                DuplicateLocation {
+                    path: helpers_path.clone(),
+                    line: 30,
+                    col: 0,
+                },
+            ],
         });
 
         let duplication = empty_duplication();
@@ -662,7 +684,9 @@ mod tests {
         assert_eq!(d.severity, Some(DiagnosticSeverity::WARNING));
         assert!(d.message.contains("formatDate"));
         assert!(d.message.contains(&helpers_path.display().to_string()));
-        assert_eq!(d.range, ZERO_RANGE);
+        // line 15 (1-based) → 14 (0-based)
+        assert_eq!(d.range.start.line, 14);
+        assert_eq!(d.range.start.character, 0);
 
         let helpers_diags = diags.get(&uri_helpers).unwrap();
         assert_eq!(helpers_diags.len(), 1);

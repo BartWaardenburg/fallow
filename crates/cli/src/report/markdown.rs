@@ -133,7 +133,7 @@ pub fn build_markdown(results: &AnalysisResults, root: &Path) -> String {
             let locations: Vec<String> = dup
                 .locations
                 .iter()
-                .map(|p| format!("`{}`", rel(p)))
+                .map(|loc| format!("`{}`", rel(&loc.path)))
                 .collect();
             vec![format!(
                 "- `{}` in {}",
@@ -420,7 +420,18 @@ mod tests {
         });
         r.duplicate_exports.push(DuplicateExport {
             export_name: "Config".to_string(),
-            locations: vec![root.join("src/config.ts"), root.join("src/types.ts")],
+            locations: vec![
+                DuplicateLocation {
+                    path: root.join("src/config.ts"),
+                    line: 15,
+                    col: 0,
+                },
+                DuplicateLocation {
+                    path: root.join("src/types.ts"),
+                    line: 30,
+                    col: 0,
+                },
+            ],
         });
         r.type_only_dependencies.push(TypeOnlyDependency {
             package_name: "zod".to_string(),

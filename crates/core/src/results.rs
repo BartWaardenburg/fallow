@@ -1,8 +1,8 @@
 // Re-export all result types from fallow-types
 pub use fallow_types::results::{
-    AnalysisResults, CircularDependency, DependencyLocation, DuplicateExport, ExportUsage,
-    ReferenceLocation, TypeOnlyDependency, UnlistedDependency, UnresolvedImport, UnusedDependency,
-    UnusedExport, UnusedFile, UnusedMember,
+    AnalysisResults, CircularDependency, DependencyLocation, DuplicateExport, DuplicateLocation,
+    ExportUsage, ReferenceLocation, TypeOnlyDependency, UnlistedDependency, UnresolvedImport,
+    UnusedDependency, UnusedExport, UnusedFile, UnusedMember,
 };
 
 #[cfg(test)]
@@ -107,7 +107,18 @@ mod tests {
         });
         results.duplicate_exports.push(DuplicateExport {
             export_name: "dup".to_string(),
-            locations: vec![PathBuf::from("h.ts"), PathBuf::from("i.ts")],
+            locations: vec![
+                DuplicateLocation {
+                    path: PathBuf::from("h.ts"),
+                    line: 15,
+                    col: 0,
+                },
+                DuplicateLocation {
+                    path: PathBuf::from("i.ts"),
+                    line: 30,
+                    col: 0,
+                },
+            ],
         });
 
         assert_eq!(results.total_issues(), 10);

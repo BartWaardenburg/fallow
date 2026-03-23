@@ -270,13 +270,13 @@ pub fn build_sarif(
 
     // Duplicate exports: one result per location (SARIF 2.1.0 section 3.27.12)
     for dup in &results.duplicate_exports {
-        for loc_path in &dup.locations {
+        for loc in &dup.locations {
             sarif_results.push(sarif_result(
                 "fallow/duplicate-export",
                 severity_to_sarif_level(rules.duplicate_exports),
                 &format!("Export '{}' appears in multiple modules", dup.export_name),
-                &relative_uri(loc_path, root),
-                None,
+                &relative_uri(&loc.path, root),
+                Some((loc.line, loc.col + 1)),
             ));
         }
     }
@@ -521,7 +521,18 @@ mod tests {
         });
         r.duplicate_exports.push(DuplicateExport {
             export_name: "Config".to_string(),
-            locations: vec![root.join("src/config.ts"), root.join("src/types.ts")],
+            locations: vec![
+                DuplicateLocation {
+                    path: root.join("src/config.ts"),
+                    line: 15,
+                    col: 0,
+                },
+                DuplicateLocation {
+                    path: root.join("src/types.ts"),
+                    line: 30,
+                    col: 0,
+                },
+            ],
         });
         r.type_only_dependencies.push(TypeOnlyDependency {
             package_name: "zod".to_string(),
@@ -716,7 +727,18 @@ mod tests {
         let mut results = AnalysisResults::default();
         results.duplicate_exports.push(DuplicateExport {
             export_name: "Config".to_string(),
-            locations: vec![root.join("src/a.ts"), root.join("src/b.ts")],
+            locations: vec![
+                DuplicateLocation {
+                    path: root.join("src/a.ts"),
+                    line: 15,
+                    col: 0,
+                },
+                DuplicateLocation {
+                    path: root.join("src/b.ts"),
+                    line: 30,
+                    col: 0,
+                },
+            ],
         });
 
         let sarif = build_sarif(&results, &root, &RulesConfig::default());
