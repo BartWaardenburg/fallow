@@ -42,7 +42,7 @@ jobs:
           node-version: '22'
 
       - name: Cache cloned repos
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: /tmp/fallow-ecosystem
           key: ecosystem-repos-${{ github.run_id }}
@@ -60,7 +60,7 @@ jobs:
 
       - name: Upload results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ecosystem-results
           path: /tmp/fallow-ecosystem/results/

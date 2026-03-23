@@ -115,7 +115,7 @@ cd "${PROJECT_DIR}"
 # Ensure node_modules exists for knip to analyze
 if [[ ! -d "node_modules" ]]; then
     echo "  Installing node_modules for knip..." >&2
-    npm install --ignore-scripts --no-audit --no-fund 2>/dev/null || true
+    npm install --ignore-scripts --no-audit --no-fund >/dev/null 2>/dev/null || true
 fi
 
 npx --yes knip --reporter json > "${KNIP_OUT}" 2>/dev/null || KNIP_EXIT=$?
@@ -179,7 +179,7 @@ if r['details']['knip_only']:
     for d in r['details']['knip_only']:
         name_part = f\" ({d['name']})\" if d['name'] else ''
         print(f\"    [{d['type']}] {d['file']}{name_part}\", file=sys.stderr)
-" 2>&1 >&2
+"
 
 # Print JSON report to stdout
 echo "${REPORT}"
