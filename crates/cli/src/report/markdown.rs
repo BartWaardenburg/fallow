@@ -67,16 +67,7 @@ pub fn build_markdown(results: &AnalysisResults, root: &Path) -> String {
         &mut out,
         &results.unused_dependencies,
         "Unused dependencies",
-        |dep| {
-            let name = escape_backticks(&dep.package_name);
-            let pkg_label = relative_path(&dep.path, root).display().to_string();
-            if pkg_label == "package.json" {
-                vec![format!("- `{name}`")]
-            } else {
-                let label = escape_backticks(&pkg_label);
-                vec![format!("- `{name}` ({label})")]
-            }
-        },
+        |dep| format_dependency(&dep.package_name, &dep.path, root),
     );
 
     // ── Unused devDependencies ──
@@ -84,16 +75,7 @@ pub fn build_markdown(results: &AnalysisResults, root: &Path) -> String {
         &mut out,
         &results.unused_dev_dependencies,
         "Unused devDependencies",
-        |dep| {
-            let name = escape_backticks(&dep.package_name);
-            let pkg_label = relative_path(&dep.path, root).display().to_string();
-            if pkg_label == "package.json" {
-                vec![format!("- `{name}`")]
-            } else {
-                let label = escape_backticks(&pkg_label);
-                vec![format!("- `{name}` ({label})")]
-            }
-        },
+        |dep| format_dependency(&dep.package_name, &dep.path, root),
     );
 
     // ── Unused optionalDependencies ──
@@ -101,16 +83,7 @@ pub fn build_markdown(results: &AnalysisResults, root: &Path) -> String {
         &mut out,
         &results.unused_optional_dependencies,
         "Unused optionalDependencies",
-        |dep| {
-            let name = escape_backticks(&dep.package_name);
-            let pkg_label = relative_path(&dep.path, root).display().to_string();
-            if pkg_label == "package.json" {
-                vec![format!("- `{name}`")]
-            } else {
-                let label = escape_backticks(&pkg_label);
-                vec![format!("- `{name}` ({label})")]
-            }
-        },
+        |dep| format_dependency(&dep.package_name, &dep.path, root),
     );
 
     // ── Unused enum members ──
@@ -175,16 +148,7 @@ pub fn build_markdown(results: &AnalysisResults, root: &Path) -> String {
         &mut out,
         &results.type_only_dependencies,
         "Type-only dependencies (consider moving to devDependencies)",
-        |dep| {
-            let name = escape_backticks(&dep.package_name);
-            let pkg_label = relative_path(&dep.path, root).display().to_string();
-            if pkg_label == "package.json" {
-                vec![format!("- `{name}`")]
-            } else {
-                let label = escape_backticks(&pkg_label);
-                vec![format!("- `{name}` ({label})")]
-            }
-        },
+        |dep| format_dependency(&dep.package_name, &dep.path, root),
     );
 
     // ── Circular dependencies ──
@@ -224,6 +188,17 @@ fn format_member(m: &UnusedMember) -> String {
         escape_backticks(&m.parent_name),
         escape_backticks(&m.member_name)
     )
+}
+
+fn format_dependency(dep_name: &str, pkg_path: &Path, root: &Path) -> Vec<String> {
+    let name = escape_backticks(dep_name);
+    let pkg_label = relative_path(pkg_path, root).display().to_string();
+    if pkg_label == "package.json" {
+        vec![format!("- `{name}`")]
+    } else {
+        let label = escape_backticks(&pkg_label);
+        vec![format!("- `{name}` ({label})")]
+    }
 }
 
 /// Emit a markdown section with a header and per-item lines. Skipped if empty.

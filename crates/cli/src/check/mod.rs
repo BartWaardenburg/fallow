@@ -124,6 +124,7 @@ pub struct CheckOptions<'a> {
 pub fn run_check(opts: &CheckOptions<'_>) -> ExitCode {
     let start = Instant::now();
 
+    // Config loading
     let config = match load_config(
         opts.root,
         opts.config_path,
@@ -137,7 +138,7 @@ pub fn run_check(opts: &CheckOptions<'_>) -> ExitCode {
         Err(code) => return code,
     };
 
-    // Validate --workspace early (before analysis) to fail fast
+    // Workspace filter resolution
     let ws_root = if let Some(ws_name) = opts.workspace {
         match filtering::resolve_workspace_filter(opts.root, ws_name, &opts.output) {
             Ok(root) => Some(root),
@@ -147,12 +148,12 @@ pub fn run_check(opts: &CheckOptions<'_>) -> ExitCode {
         None
     };
 
-    // Get changed files if --changed-since is set (already validated)
+    // Changed-files resolution
     let changed_files: Option<rustc_hash::FxHashSet<std::path::PathBuf>> = opts
         .changed_since
         .and_then(|git_ref| filtering::get_changed_files(opts.root, git_ref));
 
-    // Use analyze_with_trace when any trace option is active (retains graph + timings)
+    // Core analysis
     let use_trace = opts.trace_opts.any_active();
     let (mut results, trace_graph, trace_timings) = if use_trace {
         match fallow_core::analyze_with_trace(&config) {
@@ -175,142 +176,53 @@ pub fn run_check(opts: &CheckOptions<'_>) -> ExitCode {
     };
     let elapsed = start.elapsed();
 
-    // Print performance timings first — they should always appear, even combined with --trace*
+    // Performance output
     if let Some(ref timings) = trace_timings
         && opts.trace_opts.performance
     {
         report::print_performance(timings, &config.output);
     }
 
-    // Handle trace output (trace is a diagnostic mode — early return after output)
-    if let Some(ref graph) = trace_graph {
-        if let Some(ref trace_spec) = opts.trace_opts.trace_export {
-            let Some((file_path, export_name)) = trace_spec.rsplit_once(':') else {
-                return emit_error(
-                    "--trace requires FILE:EXPORT_NAME format (e.g., src/utils.ts:foo)",
-                    2,
-                    &opts.output,
-                );
-            };
-            match fallow_core::trace::trace_export(graph, &config.root, file_path, export_name) {
-                Some(trace) => {
-                    report::print_export_trace(&trace, &config.output);
-                    return ExitCode::SUCCESS;
-                }
-                None => {
-                    return emit_error(
-                        &format!("export '{export_name}' not found in '{file_path}'"),
-                        2,
-                        &opts.output,
-                    );
-                }
-            }
-        }
-
-        if let Some(ref file_path) = opts.trace_opts.trace_file {
-            match fallow_core::trace::trace_file(graph, &config.root, file_path) {
-                Some(trace) => {
-                    report::print_file_trace(&trace, &config.output);
-                    return ExitCode::SUCCESS;
-                }
-                None => {
-                    return emit_error(
-                        &format!("file '{file_path}' not found in module graph"),
-                        2,
-                        &opts.output,
-                    );
-                }
-            }
-        }
-
-        if let Some(ref pkg_name) = opts.trace_opts.trace_dependency {
-            let trace = fallow_core::trace::trace_dependency(graph, &config.root, pkg_name);
-            report::print_dependency_trace(&trace, &config.output);
-            return ExitCode::SUCCESS;
-        }
+    // Trace early-return
+    if let Some(ref graph) = trace_graph
+        && let Some(code) =
+            output::handle_trace_output(graph, opts.trace_opts, &config.root, &config.output)
+    {
+        return code;
     }
 
-    // Scope to workspace package if requested (full graph is built, only output is filtered)
+    // Workspace scoping
     if let Some(ref ws_root) = ws_root {
         filtering::filter_to_workspace(&mut results, ws_root);
     }
 
-    // Filter to only changed files if requested
-    if let Some(changed) = &changed_files {
-        results.unused_files.retain(|f| changed.contains(&f.path));
-        results.unused_exports.retain(|e| changed.contains(&e.path));
-        results.unused_types.retain(|e| changed.contains(&e.path));
-        results
-            .unused_enum_members
-            .retain(|m| changed.contains(&m.path));
-        results
-            .unused_class_members
-            .retain(|m| changed.contains(&m.path));
-        results
-            .unresolved_imports
-            .retain(|i| changed.contains(&i.path));
-
-        // Unlisted deps: keep only if any importing file is changed
-        results
-            .unlisted_dependencies
-            .retain(|d| d.imported_from.iter().any(|p| changed.contains(p)));
-
-        // Duplicate exports: filter locations to changed files, drop groups with < 2
-        for dup in &mut results.duplicate_exports {
-            dup.locations.retain(|p| changed.contains(p));
-        }
-        results.duplicate_exports.retain(|d| d.locations.len() >= 2);
-
-        // Circular deps: keep cycles where at least one file is changed
-        results
-            .circular_dependencies
-            .retain(|c| c.files.iter().any(|f| changed.contains(f)));
+    // Changed-file filtering
+    if let Some(ref changed) = changed_files {
+        filtering::filter_changed_files(&mut results, changed);
     }
 
-    // Apply rules: remove issues with Severity::Off (respects per-file overrides)
+    // Rules application
     rules::apply_rules(&mut results, &config);
 
-    // Snapshot results for cross-reference AFTER rules/workspace/changed-files filtering
-    // but BEFORE CLI issue-type filters (--unused-files etc.), so combined findings
-    // respect the user's severity config but aren't limited by per-invocation filters.
+    // Pre-filter snapshot for cross-reference
     let unfiltered_results = if opts.include_dupes && config.duplicates.enabled {
         Some(results.clone())
     } else {
         None
     };
 
-    // Apply issue type filters (CLI --unused-files etc.)
+    // CLI issue-type filters
     opts.filters.apply(&mut results);
 
-    // Save baseline if requested
-    if let Some(baseline_path) = opts.save_baseline {
-        let baseline_data = BaselineData::from_results(&results);
-        if let Ok(json) = serde_json::to_string_pretty(&baseline_data) {
-            if let Err(e) = std::fs::write(baseline_path, json) {
-                eprintln!("Failed to save baseline: {e}");
-            } else if !opts.quiet {
-                eprintln!("Baseline saved to {}", baseline_path.display());
-            }
-        }
-    }
+    // Baseline handling
+    handle_baseline(&mut results, opts.save_baseline, opts.baseline, opts.quiet);
 
-    // Compare against baseline if provided
-    if let Some(baseline_path) = opts.baseline
-        && let Ok(content) = std::fs::read_to_string(baseline_path)
-        && let Ok(baseline_data) = serde_json::from_str::<BaselineData>(&content)
-    {
-        results = filter_new_issues(results, &baseline_data);
-        if !opts.quiet {
-            eprintln!("Comparing against baseline: {}", baseline_path.display());
-        }
-    }
-
-    // Write SARIF to file if requested (independent of --format)
+    // SARIF file write
     if let Some(sarif_path) = opts.sarif_file {
         output::write_sarif_file(&results, &config, sarif_path, opts.quiet);
     }
 
-    // When --fail-on-issues is set, promote all Warn to Error for this run
+    // Effective rules + report + cross-reference + exit code
     let effective_rules = if opts.fail_on_issues {
         let mut r = config.rules.clone();
         rules::promote_warns_to_errors(&mut r);
@@ -324,9 +236,6 @@ pub fn run_check(opts: &CheckOptions<'_>) -> ExitCode {
         return report_code;
     }
 
-    // Cross-reference with duplication analysis if --include-dupes is set.
-    // Uses unfiltered results so combined findings reflect all dead code,
-    // not just the CLI-filtered subset.
     if let Some(ref unfiltered) = unfiltered_results {
         output::run_cross_reference(&config, unfiltered, opts.quiet);
     }
@@ -335,6 +244,39 @@ pub fn run_check(opts: &CheckOptions<'_>) -> ExitCode {
         ExitCode::from(1)
     } else {
         ExitCode::SUCCESS
+    }
+}
+
+// ── Baseline helpers ────────────────────────────────────────────
+
+/// Save baseline and/or compare against an existing baseline.
+fn handle_baseline(
+    results: &mut fallow_core::results::AnalysisResults,
+    save_path: Option<&std::path::Path>,
+    load_path: Option<&std::path::Path>,
+    quiet: bool,
+) {
+    // Save baseline if requested
+    if let Some(baseline_path) = save_path {
+        let baseline_data = BaselineData::from_results(results);
+        if let Ok(json) = serde_json::to_string_pretty(&baseline_data) {
+            if let Err(e) = std::fs::write(baseline_path, json) {
+                eprintln!("Failed to save baseline: {e}");
+            } else if !quiet {
+                eprintln!("Baseline saved to {}", baseline_path.display());
+            }
+        }
+    }
+
+    // Compare against baseline if provided
+    if let Some(baseline_path) = load_path
+        && let Ok(content) = std::fs::read_to_string(baseline_path)
+        && let Ok(baseline_data) = serde_json::from_str::<BaselineData>(&content)
+    {
+        *results = filter_new_issues(std::mem::take(results), &baseline_data);
+        if !quiet {
+            eprintln!("Comparing against baseline: {}", baseline_path.display());
+        }
     }
 }
 

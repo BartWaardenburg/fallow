@@ -382,43 +382,43 @@ fn load_config(
     })
 }
 
-// ── Main ─────────────────────────────────────────────────────────
+// ── Format resolution ─────────────────────────────────────────────
 
-fn main() -> ExitCode {
-    let cli = Cli::parse();
+struct FormatConfig {
+    output: fallow_config::OutputFormat,
+    quiet: bool,
+    cli_format_was_explicit: bool,
+}
 
-    // Handle schema commands before tracing setup (no side effects)
-    if matches!(cli.command, Some(Command::Schema)) {
-        return schema::run_schema();
-    }
-    if matches!(cli.command, Some(Command::ConfigSchema)) {
-        return init::run_config_schema();
-    }
-    if matches!(cli.command, Some(Command::PluginSchema)) {
-        return init::run_plugin_schema();
-    }
-
+fn resolve_format(cli: &Cli) -> FormatConfig {
     // Resolve output format: CLI flag > FALLOW_FORMAT env var > default ("human").
     // clap sets the default to "human", so we only override with the env var
     // when the user did NOT explicitly pass --format on the CLI.
     let cli_format_was_explicit = std::env::args()
         .any(|a| a == "--format" || a == "--output" || a.starts_with("--format=") || a == "-f");
     let format: Format = if cli_format_was_explicit {
-        cli.format
+        cli.format.clone()
     } else {
-        format_from_env().unwrap_or(cli.format)
+        format_from_env().unwrap_or_else(|| cli.format.clone())
     };
 
     // Resolve quiet: CLI --quiet flag > FALLOW_QUIET env var > false
     let quiet = cli.quiet || quiet_from_env();
 
-    let output: fallow_config::OutputFormat = format.into();
+    FormatConfig {
+        output: format.into(),
+        quiet,
+        cli_format_was_explicit,
+    }
+}
 
-    // Set up tracing — use WARN level when progress spinners will be active (TTY + not quiet)
-    // to prevent tracing INFO lines from corrupting spinner output on stderr.
-    // In non-TTY (piped/CI), keep INFO level since there are no spinners to conflict with.
-    // Watch mode always uses WARN since spinners replace the per-run INFO noise.
-    let is_watch = matches!(cli.command, Some(Command::Watch { .. }));
+// ── Tracing setup ─────────────────────────────────────────────────
+
+/// Set up tracing — use WARN level when progress spinners will be active (TTY + not quiet)
+/// to prevent tracing INFO lines from corrupting spinner output on stderr.
+/// In non-TTY (piped/CI), keep INFO level since there are no spinners to conflict with.
+/// Watch mode always uses WARN since spinners replace the per-run INFO noise.
+fn setup_tracing(quiet: bool, is_watch: bool) {
     if !quiet {
         let stderr_is_tty = std::io::IsTerminal::is_terminal(&std::io::stderr());
         let default_level = if is_watch || stderr_is_tty {
@@ -436,33 +436,41 @@ fn main() -> ExitCode {
             .with_timer(tracing_subscriber::fmt::time::uptime())
             .init();
     }
+}
 
+// ── Input validation ──────────────────────────────────────────────
+
+fn validate_inputs(
+    cli: &Cli,
+    output: &fallow_config::OutputFormat,
+) -> Result<(PathBuf, usize), ExitCode> {
     // Validate control characters in key string inputs
     if let Some(ref config_path) = cli.config
         && let Some(s) = config_path.to_str()
         && let Err(e) = validate::validate_no_control_chars(s, "--config")
     {
-        return emit_error(&e, 2, &output);
+        return Err(emit_error(&e, 2, output));
     }
     if let Some(ref ws) = cli.workspace
         && let Err(e) = validate::validate_no_control_chars(ws, "--workspace")
     {
-        return emit_error(&e, 2, &output);
+        return Err(emit_error(&e, 2, output));
     }
     if let Some(ref git_ref) = cli.changed_since
         && let Err(e) = validate::validate_no_control_chars(git_ref, "--changed-since")
     {
-        return emit_error(&e, 2, &output);
+        return Err(emit_error(&e, 2, output));
     }
 
     // Validate and resolve root
     let raw_root = cli
         .root
+        .clone()
         .unwrap_or_else(|| std::env::current_dir().expect("Failed to get current directory"));
     let root = match validate::validate_root(&raw_root) {
         Ok(r) => r,
         Err(e) => {
-            return emit_error(&e, 2, &output);
+            return Err(emit_error(&e, 2, output));
         }
     };
 
@@ -470,7 +478,11 @@ fn main() -> ExitCode {
     if let Some(ref git_ref) = cli.changed_since
         && let Err(e) = validate::validate_git_ref(git_ref)
     {
-        return emit_error(&format!("invalid --changed-since: {e}"), 2, &output);
+        return Err(emit_error(
+            &format!("invalid --changed-since: {e}"),
+            2,
+            output,
+        ));
     }
 
     let threads = cli.threads.unwrap_or_else(|| {
@@ -484,6 +496,42 @@ fn main() -> ExitCode {
     let _ = rayon::ThreadPoolBuilder::new()
         .num_threads(threads)
         .build_global();
+
+    Ok((root, threads))
+}
+
+// ── Main ─────────────────────────────────────────────────────────
+
+fn main() -> ExitCode {
+    let cli = Cli::parse();
+
+    // Handle schema commands before tracing setup (no side effects)
+    if matches!(cli.command, Some(Command::Schema)) {
+        return schema::run_schema();
+    }
+    if matches!(cli.command, Some(Command::ConfigSchema)) {
+        return init::run_config_schema();
+    }
+    if matches!(cli.command, Some(Command::PluginSchema)) {
+        return init::run_plugin_schema();
+    }
+
+    let fmt = resolve_format(&cli);
+    setup_tracing(
+        fmt.quiet,
+        matches!(cli.command, Some(Command::Watch { .. })),
+    );
+
+    let (root, threads) = match validate_inputs(&cli, &fmt.output) {
+        Ok(v) => v,
+        Err(code) => return code,
+    };
+
+    let FormatConfig {
+        output,
+        quiet,
+        cli_format_was_explicit,
+    } = fmt;
 
     match cli.command.unwrap_or(Command::Check {
         ci: false,

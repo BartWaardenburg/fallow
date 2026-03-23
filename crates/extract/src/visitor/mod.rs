@@ -229,6 +229,129 @@ impl ModuleInfoExtractor {
             }
         }
     }
+
+    /// Handle `const x = require('./y')` patterns, recording the require call
+    /// and tracking namespace bindings for later member access narrowing.
+    fn handle_require_declaration(
+        &mut self,
+        declarator: &VariableDeclarator<'_>,
+        call: &CallExpression<'_>,
+        source: &str,
+    ) {
+        match &declarator.id {
+            BindingPattern::ObjectPattern(obj_pat) => {
+                if obj_pat.rest.is_some() {
+                    self.require_calls.push(RequireCallInfo {
+                        source: source.to_string(),
+                        span: call.span,
+                        destructured_names: Vec::new(),
+                        local_name: None,
+                    });
+                } else {
+                    let names: Vec<String> = obj_pat
+                        .properties
+                        .iter()
+                        .filter_map(|prop| prop.key.static_name().map(|n| n.to_string()))
+                        .collect();
+                    self.require_calls.push(RequireCallInfo {
+                        source: source.to_string(),
+                        span: call.span,
+                        destructured_names: names,
+                        local_name: None,
+                    });
+                }
+                self.handled_require_spans.push(call.span);
+            }
+            BindingPattern::BindingIdentifier(id) => {
+                // `const mod = require('./x')` → Namespace with local_name for narrowing
+                let local = id.name.to_string();
+                self.namespace_binding_names.push(local.clone());
+                self.require_calls.push(RequireCallInfo {
+                    source: source.to_string(),
+                    span: call.span,
+                    destructured_names: Vec::new(),
+                    local_name: Some(local),
+                });
+                self.handled_require_spans.push(call.span);
+            }
+            _ => {}
+        }
+    }
+
+    /// Handle namespace destructuring: `const { a, b } = ns` where `ns` is a namespace
+    /// import, dynamic import namespace, or require namespace.
+    /// Records member accesses so the graph can narrow which exports are used.
+    fn handle_namespace_destructuring(
+        &mut self,
+        declarator: &VariableDeclarator<'_>,
+        ident_name: &str,
+    ) {
+        if let BindingPattern::ObjectPattern(obj_pat) = &declarator.id {
+            if obj_pat.rest.is_some() {
+                // Rest element captures remaining properties — mark as whole-object use
+                self.whole_object_uses.push(ident_name.to_string());
+            } else {
+                for prop in &obj_pat.properties {
+                    if let Some(name) = prop.key.static_name() {
+                        self.member_accesses.push(MemberAccess {
+                            object: ident_name.to_string(),
+                            member: name.to_string(),
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    /// Handle `const x = await import('./y')` and `const x = import('./y')` patterns,
+    /// recording the dynamic import and tracking namespace bindings.
+    fn handle_dynamic_import_declaration(
+        &mut self,
+        declarator: &VariableDeclarator<'_>,
+        import_expr: &ImportExpression<'_>,
+        source: &str,
+    ) {
+        match &declarator.id {
+            BindingPattern::ObjectPattern(obj_pat) => {
+                // `const { foo, bar } = await import('./x')` → Named imports
+                if obj_pat.rest.is_some() {
+                    // Has rest element: conservative, treat as namespace
+                    self.dynamic_imports.push(DynamicImportInfo {
+                        source: source.to_string(),
+                        span: import_expr.span,
+                        destructured_names: Vec::new(),
+                        local_name: None,
+                    });
+                } else {
+                    let names: Vec<String> = obj_pat
+                        .properties
+                        .iter()
+                        .filter_map(|prop| prop.key.static_name().map(|n| n.to_string()))
+                        .collect();
+                    self.dynamic_imports.push(DynamicImportInfo {
+                        source: source.to_string(),
+                        span: import_expr.span,
+                        destructured_names: names,
+                        local_name: None,
+                    });
+                }
+                self.handled_import_spans.push(import_expr.span);
+            }
+            BindingPattern::BindingIdentifier(id) => {
+                // `const mod = await import('./x')` → Namespace with local_name for narrowing
+                let local = id.name.to_string();
+                self.namespace_binding_names.push(local.clone());
+                self.dynamic_imports.push(DynamicImportInfo {
+                    source: source.to_string(),
+                    span: import_expr.span,
+                    destructured_names: Vec::new(),
+                    local_name: Some(local),
+                });
+                self.handled_import_spans.push(import_expr.span);
+            }
+            _ => {}
+        }
+    }
 }
 
 impl<'a> Visit<'a> for ModuleInfoExtractor {
@@ -431,45 +554,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 && callee.name == "require"
                 && let Some(Argument::StringLiteral(lit)) = call.arguments.first()
             {
-                let source = lit.value.to_string();
-                match &declarator.id {
-                    BindingPattern::ObjectPattern(obj_pat) => {
-                        if obj_pat.rest.is_some() {
-                            self.require_calls.push(RequireCallInfo {
-                                source,
-                                span: call.span,
-                                destructured_names: Vec::new(),
-                                local_name: None,
-                            });
-                        } else {
-                            let names: Vec<String> = obj_pat
-                                .properties
-                                .iter()
-                                .filter_map(|prop| prop.key.static_name().map(|n| n.to_string()))
-                                .collect();
-                            self.require_calls.push(RequireCallInfo {
-                                source,
-                                span: call.span,
-                                destructured_names: names,
-                                local_name: None,
-                            });
-                        }
-                        self.handled_require_spans.push(call.span);
-                    }
-                    BindingPattern::BindingIdentifier(id) => {
-                        // `const mod = require('./x')` → Namespace with local_name for narrowing
-                        let local = id.name.to_string();
-                        self.namespace_binding_names.push(local.clone());
-                        self.require_calls.push(RequireCallInfo {
-                            source,
-                            span: call.span,
-                            destructured_names: Vec::new(),
-                            local_name: Some(local),
-                        });
-                        self.handled_require_spans.push(call.span);
-                    }
-                    _ => {}
-                }
+                self.handle_require_declaration(declarator, call, &lit.value);
                 continue;
             }
 
@@ -489,21 +574,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                     .iter()
                     .any(|n| n == ident.name.as_str())
             {
-                if let BindingPattern::ObjectPattern(obj_pat) = &declarator.id {
-                    if obj_pat.rest.is_some() {
-                        // Rest element captures remaining properties — mark as whole-object use
-                        self.whole_object_uses.push(ident.name.to_string());
-                    } else {
-                        for prop in &obj_pat.properties {
-                            if let Some(name) = prop.key.static_name() {
-                                self.member_accesses.push(MemberAccess {
-                                    object: ident.name.to_string(),
-                                    member: name.to_string(),
-                                });
-                            }
-                        }
-                    }
-                }
+                self.handle_namespace_destructuring(declarator, &ident.name);
                 continue;
             }
 
@@ -529,48 +600,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 continue;
             };
 
-            let source = lit.value.to_string();
-
-            match &declarator.id {
-                BindingPattern::ObjectPattern(obj_pat) => {
-                    // `const { foo, bar } = await import('./x')` → Named imports
-                    if obj_pat.rest.is_some() {
-                        // Has rest element: conservative, treat as namespace
-                        self.dynamic_imports.push(DynamicImportInfo {
-                            source,
-                            span: import_expr.span,
-                            destructured_names: Vec::new(),
-                            local_name: None,
-                        });
-                    } else {
-                        let names: Vec<String> = obj_pat
-                            .properties
-                            .iter()
-                            .filter_map(|prop| prop.key.static_name().map(|n| n.to_string()))
-                            .collect();
-                        self.dynamic_imports.push(DynamicImportInfo {
-                            source,
-                            span: import_expr.span,
-                            destructured_names: names,
-                            local_name: None,
-                        });
-                    }
-                    self.handled_import_spans.push(import_expr.span);
-                }
-                BindingPattern::BindingIdentifier(id) => {
-                    // `const mod = await import('./x')` → Namespace with local_name for narrowing
-                    let local = id.name.to_string();
-                    self.namespace_binding_names.push(local.clone());
-                    self.dynamic_imports.push(DynamicImportInfo {
-                        source,
-                        span: import_expr.span,
-                        destructured_names: Vec::new(),
-                        local_name: Some(local),
-                    });
-                    self.handled_import_spans.push(import_expr.span);
-                }
-                _ => {}
-            }
+            self.handle_dynamic_import_declaration(declarator, import_expr, &lit.value);
         }
         walk::walk_variable_declaration(self, decl);
     }

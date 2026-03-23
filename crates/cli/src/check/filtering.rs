@@ -88,6 +88,55 @@ pub fn resolve_workspace_filter(
         )
 }
 
+// ── Changed-file filtering ───────────────────────────────────────
+
+/// Filter results to only include issues in `changed_files`.
+///
+/// Dependency-level issues (unused deps, dev deps, optional deps, type-only deps) are
+/// intentionally NOT filtered here. Unlike file-level issues, a dependency being "unused"
+/// is a function of the entire import graph and can't be attributed to individual changed
+/// source files. Compare with `filter_to_workspace`, which DOES filter dependencies by
+/// their owning package.json — a different, well-defined scope.
+pub(super) fn filter_changed_files(
+    results: &mut fallow_core::results::AnalysisResults,
+    changed_files: &rustc_hash::FxHashSet<std::path::PathBuf>,
+) {
+    results
+        .unused_files
+        .retain(|f| changed_files.contains(&f.path));
+    results
+        .unused_exports
+        .retain(|e| changed_files.contains(&e.path));
+    results
+        .unused_types
+        .retain(|e| changed_files.contains(&e.path));
+    results
+        .unused_enum_members
+        .retain(|m| changed_files.contains(&m.path));
+    results
+        .unused_class_members
+        .retain(|m| changed_files.contains(&m.path));
+    results
+        .unresolved_imports
+        .retain(|i| changed_files.contains(&i.path));
+
+    // Unlisted deps: keep only if any importing file is changed
+    results
+        .unlisted_dependencies
+        .retain(|d| d.imported_from.iter().any(|p| changed_files.contains(p)));
+
+    // Duplicate exports: filter locations to changed files, drop groups with < 2
+    for dup in &mut results.duplicate_exports {
+        dup.locations.retain(|p| changed_files.contains(p));
+    }
+    results.duplicate_exports.retain(|d| d.locations.len() >= 2);
+
+    // Circular deps: keep cycles where at least one file is changed
+    results
+        .circular_dependencies
+        .retain(|c| c.files.iter().any(|f| changed_files.contains(f)));
+}
+
 // ── Changed files ────────────────────────────────────────────────
 
 /// Get files changed since a git ref.

@@ -30,15 +30,31 @@ pub struct WorkspaceInfo {
 /// 2. `pnpm-workspace.yaml` `packages` field
 /// 3. `tsconfig.json` `references` field (TypeScript project references)
 pub fn discover_workspaces(root: &Path) -> Vec<WorkspaceInfo> {
+    let patterns = collect_workspace_patterns(root);
+    let canonical_root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+
+    let mut workspaces = expand_patterns_to_workspaces(root, &patterns, &canonical_root);
+    workspaces.extend(collect_tsconfig_workspaces(root, &canonical_root));
+
+    if workspaces.is_empty() {
+        return Vec::new();
+    }
+
+    mark_internal_dependencies(&mut workspaces);
+    workspaces.into_iter().map(|(ws, _)| ws).collect()
+}
+
+/// Collect glob patterns from `package.json` `workspaces` field and `pnpm-workspace.yaml`.
+fn collect_workspace_patterns(root: &Path) -> Vec<String> {
     let mut patterns = Vec::new();
 
-    // 1. Check root package.json for workspace patterns
+    // Check root package.json for workspace patterns
     let pkg_path = root.join("package.json");
     if let Ok(pkg) = PackageJson::load(&pkg_path) {
         patterns.extend(pkg.workspace_patterns());
     }
 
-    // 2. Check pnpm-workspace.yaml
+    // Check pnpm-workspace.yaml
     let pnpm_workspace = root.join("pnpm-workspace.yaml");
     if pnpm_workspace.exists()
         && let Ok(content) = std::fs::read_to_string(&pnpm_workspace)
@@ -46,93 +62,114 @@ pub fn discover_workspaces(root: &Path) -> Vec<WorkspaceInfo> {
         patterns.extend(parse_pnpm_workspace_yaml(&content));
     }
 
-    // Pre-compute canonical root once for security checks
-    let canonical_root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    patterns
+}
+
+/// Expand workspace glob patterns to discover workspace directories.
+///
+/// Handles positive/negated pattern splitting, glob matching, and package.json
+/// loading for each matched directory.
+fn expand_patterns_to_workspaces(
+    root: &Path,
+    patterns: &[String],
+    canonical_root: &Path,
+) -> Vec<(WorkspaceInfo, Vec<String>)> {
+    if patterns.is_empty() {
+        return Vec::new();
+    }
+
     let mut workspaces = Vec::new();
 
-    // 3. Expand package.json/pnpm workspace patterns to find workspace directories
-    if !patterns.is_empty() {
-        // Separate positive and negated patterns.
-        // Negated patterns (e.g., `!**/test/**`) are used as exclusion filters —
-        // the `glob` crate does not support `!` prefixed patterns natively.
-        let (positive, negative): (Vec<&String>, Vec<&String>) =
-            patterns.iter().partition(|p| !p.starts_with('!'));
-        let negation_matchers: Vec<globset::GlobMatcher> = negative
-            .iter()
-            .filter_map(|p| {
-                let stripped = p.strip_prefix('!').unwrap_or(p);
-                globset::Glob::new(stripped)
-                    .ok()
-                    .map(|g| g.compile_matcher())
-            })
-            .collect();
+    // Separate positive and negated patterns.
+    // Negated patterns (e.g., `!**/test/**`) are used as exclusion filters —
+    // the `glob` crate does not support `!` prefixed patterns natively.
+    let (positive, negative): (Vec<&String>, Vec<&String>) =
+        patterns.iter().partition(|p| !p.starts_with('!'));
+    let negation_matchers: Vec<globset::GlobMatcher> = negative
+        .iter()
+        .filter_map(|p| {
+            let stripped = p.strip_prefix('!').unwrap_or(p);
+            globset::Glob::new(stripped)
+                .ok()
+                .map(|g| g.compile_matcher())
+        })
+        .collect();
 
-        for pattern in &positive {
-            // Normalize the pattern for directory matching:
-            // - `packages/*` → glob for `packages/*` (find all subdirs)
-            // - `packages/` → glob for `packages/*` (trailing slash means "contents of")
-            // - `apps`       → glob for `apps` (exact directory)
-            let glob_pattern = if pattern.ends_with('/') {
-                format!("{pattern}*")
-            } else if !pattern.contains('*') && !pattern.contains('?') && !pattern.contains('{') {
-                // Bare directory name — treat as exact match
-                (*pattern).clone()
-            } else {
-                (*pattern).clone()
-            };
+    for pattern in &positive {
+        // Normalize the pattern for directory matching:
+        // - `packages/*` → glob for `packages/*` (find all subdirs)
+        // - `packages/` → glob for `packages/*` (trailing slash means "contents of")
+        // - `apps`       → glob for `apps` (exact directory)
+        let glob_pattern = if pattern.ends_with('/') {
+            format!("{pattern}*")
+        } else if !pattern.contains('*') && !pattern.contains('?') && !pattern.contains('{') {
+            // Bare directory name — treat as exact match
+            (*pattern).clone()
+        } else {
+            (*pattern).clone()
+        };
 
-            // Walk directories matching the glob.
-            // expand_workspace_glob already filters to dirs with package.json
-            // and returns (original_path, canonical_path) — no redundant canonicalize().
-            let matched_dirs = expand_workspace_glob(root, &glob_pattern, &canonical_root);
-            for (dir, canonical_dir) in matched_dirs {
-                // Skip workspace entries that point to the project root itself
-                // (e.g. pnpm-workspace.yaml listing `.` as a workspace)
-                if canonical_dir == canonical_root {
-                    continue;
-                }
+        // Walk directories matching the glob.
+        // expand_workspace_glob already filters to dirs with package.json
+        // and returns (original_path, canonical_path) — no redundant canonicalize().
+        let matched_dirs = expand_workspace_glob(root, &glob_pattern, canonical_root);
+        for (dir, canonical_dir) in matched_dirs {
+            // Skip workspace entries that point to the project root itself
+            // (e.g. pnpm-workspace.yaml listing `.` as a workspace)
+            if canonical_dir == *canonical_root {
+                continue;
+            }
 
-                // Check against negation patterns — skip directories that match any negated pattern
-                let relative = dir.strip_prefix(root).unwrap_or(&dir);
-                let relative_str = relative.to_string_lossy();
-                if negation_matchers
-                    .iter()
-                    .any(|m| m.is_match(relative_str.as_ref()))
-                {
-                    continue;
-                }
+            // Check against negation patterns — skip directories that match any negated pattern
+            let relative = dir.strip_prefix(root).unwrap_or(&dir);
+            let relative_str = relative.to_string_lossy();
+            if negation_matchers
+                .iter()
+                .any(|m| m.is_match(relative_str.as_ref()))
+            {
+                continue;
+            }
 
-                // package.json existence already checked in expand_workspace_glob
-                let ws_pkg_path = dir.join("package.json");
-                if let Ok(pkg) = PackageJson::load(&ws_pkg_path) {
-                    // Collect dependency names during initial load to avoid
-                    // re-reading package.json in step 5.
-                    let dep_names = pkg.all_dependency_names();
-                    let name = pkg.name.unwrap_or_else(|| {
-                        dir.file_name()
-                            .map(|n| n.to_string_lossy().to_string())
-                            .unwrap_or_default()
-                    });
-                    workspaces.push((
-                        WorkspaceInfo {
-                            root: dir,
-                            name,
-                            is_internal_dependency: false,
-                        },
-                        dep_names,
-                    ));
-                }
+            // package.json existence already checked in expand_workspace_glob
+            let ws_pkg_path = dir.join("package.json");
+            if let Ok(pkg) = PackageJson::load(&ws_pkg_path) {
+                // Collect dependency names during initial load to avoid
+                // re-reading package.json later.
+                let dep_names = pkg.all_dependency_names();
+                let name = pkg.name.unwrap_or_else(|| {
+                    dir.file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_default()
+                });
+                workspaces.push((
+                    WorkspaceInfo {
+                        root: dir,
+                        name,
+                        is_internal_dependency: false,
+                    },
+                    dep_names,
+                ));
             }
         }
     }
 
-    // 4. Check root tsconfig.json for TypeScript project references.
-    // Referenced directories are added as workspaces, supplementing npm/pnpm workspaces.
-    // This enables cross-workspace resolution for TypeScript composite projects.
+    workspaces
+}
+
+/// Discover workspaces from TypeScript project references in `tsconfig.json`.
+///
+/// Referenced directories are added as workspaces, supplementing npm/pnpm workspaces.
+/// This enables cross-workspace resolution for TypeScript composite projects.
+fn collect_tsconfig_workspaces(
+    root: &Path,
+    canonical_root: &Path,
+) -> Vec<(WorkspaceInfo, Vec<String>)> {
+    let mut workspaces = Vec::new();
+
     for dir in parse_tsconfig_references(root) {
         let canonical_dir = dir.canonicalize().unwrap_or_else(|_| dir.clone());
         // Security: skip references pointing to project root or outside it
-        if canonical_dir == canonical_root || !canonical_dir.starts_with(&canonical_root) {
+        if canonical_dir == *canonical_root || !canonical_dir.starts_with(canonical_root) {
             continue;
         }
 
@@ -162,13 +199,16 @@ pub fn discover_workspaces(root: &Path) -> Vec<WorkspaceInfo> {
         ));
     }
 
-    if workspaces.is_empty() {
-        return Vec::new();
-    }
+    workspaces
+}
 
-    // 5. Deduplicate workspaces by canonical path.
-    // Overlapping sources (npm workspaces + tsconfig references pointing to the same
-    // directory) are collapsed. npm-discovered entries take precedence (they appear first).
+/// Deduplicate workspaces by canonical path and mark internal dependencies.
+///
+/// Overlapping sources (npm workspaces + tsconfig references pointing to the same
+/// directory) are collapsed. npm-discovered entries take precedence (they appear first).
+/// Workspaces depended on by other workspaces are marked as `is_internal_dependency`.
+fn mark_internal_dependencies(workspaces: &mut Vec<(WorkspaceInfo, Vec<String>)>) {
+    // Deduplicate by canonical path
     {
         let mut seen = rustc_hash::FxHashSet::default();
         workspaces.retain(|(ws, _)| {
@@ -177,18 +217,16 @@ pub fn discover_workspaces(root: &Path) -> Vec<WorkspaceInfo> {
         });
     }
 
-    // 6. Mark workspaces that are depended on by other workspaces.
-    // Uses dep names collected during initial package.json load (step 3)
+    // Mark workspaces that are depended on by other workspaces.
+    // Uses dep names collected during initial package.json load
     // to avoid re-reading all workspace package.json files.
     let all_dep_names: rustc_hash::FxHashSet<String> = workspaces
         .iter()
         .flat_map(|(_, deps)| deps.iter().cloned())
         .collect();
-    for (ws, _) in &mut workspaces {
+    for (ws, _) in &mut *workspaces {
         ws.is_internal_dependency = all_dep_names.contains(&ws.name);
     }
-
-    workspaces.into_iter().map(|(ws, _)| ws).collect()
 }
 
 /// Extract the directory name as a string, for workspace name fallback.
