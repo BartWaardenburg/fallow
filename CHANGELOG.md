@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-03-24
+
+### Added
+- `fallow health` command: per-function cyclomatic complexity (McCabe classic) and cognitive complexity (SonarSource algorithm) analysis with configurable thresholds (default: cyclomatic 20, cognitive 15), `--top N`, `--sort`, `--changed-since`, and human/JSON/compact output formats
+- `[health]` config section with `maxCyclomatic`, `maxCognitive`, and `ignore` glob patterns
+- `check_health` MCP tool for AI agent integration
+- Function name capture from class methods, object method shorthand, variable declarators, property definitions, and `export default function()`
+
+### Changed
+- Duplicate export locations now include line and column numbers (JSON output `schema_version` bumped to 2)
+- GitHub Action job summary redesigned with tables, icons, and collapsible sections
+- Cache version bumped to 15 (old caches auto-invalidate)
+
+### Fixed
+- SARIF URIs now percent-encode brackets for Next.js dynamic routes (`[slug]` → `%5Bslug%5D`)
+- JSON output uses relative paths for readable CI summaries
+- GHAS availability check before SARIF upload in GitHub Action
+
 ## [1.4.0] - 2026-03-23
 
 ### Added
@@ -230,7 +248,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[Unreleased]: https://github.com/fallow-rs/fallow/compare/v1.4.0...HEAD
+[Unreleased]: https://github.com/fallow-rs/fallow/compare/v1.5.0...HEAD
+[1.5.0]: https://github.com/fallow-rs/fallow/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/fallow-rs/fallow/compare/v1.3.1...v1.4.0
 [1.3.1]: https://github.com/fallow-rs/fallow/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/fallow-rs/fallow/compare/v1.2.0...v1.3.0
