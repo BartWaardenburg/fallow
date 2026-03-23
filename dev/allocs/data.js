@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1774293445663,
+  "lastUpdate": 1774299686953,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
@@ -395,6 +395,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 3677,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "4a63117b8c4c8c3996151ef3988992bf70bcdc78",
+          "message": "fix: add line/column numbers to duplicate export locations\n\nDuplicateExport.locations changes from Vec<PathBuf> to\nVec<DuplicateLocation> with path, line, and col fields. This fixes\nSARIF and LSP annotations that previously showed :1 for every\nduplicate export because no line information was available.\n\nThe export line/col data was already available in the detection code\nvia ExportSymbol.span but was dropped when only the path was stored.\n\nJSON output schema_version bumped from 1 to 2 (breaking: locations\nchanged from string array to object array).",
+          "timestamp": "2026-03-23T21:59:59+01:00",
+          "tree_id": "81d41047a78fd95272c116db942408162586aa23",
+          "url": "https://github.com/fallow-rs/fallow/commit/4a63117b8c4c8c3996151ef3988992bf70bcdc78"
+        },
+        "date": 1774299686560,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 3002731,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 11571,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 412042,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 3691,
             "unit": "allocations"
           }
         ]
