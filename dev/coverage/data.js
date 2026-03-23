@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1774292526756,
+  "lastUpdate": 1774292952669,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
@@ -284,6 +284,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/d61097c7c1194ca2ef9a35f2480481a8da2bfd2a"
         },
         "date": 1774292526261,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 83.6,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "79829d0c4b031a76c1efa31b40a23e8647f26270",
+          "message": "chore: remove VHS tape, add .vscode to gitignore",
+          "timestamp": "2026-03-23T20:07:32+01:00",
+          "tree_id": "33536f69840db39da0217a238899b9327dfa9509",
+          "url": "https://github.com/fallow-rs/fallow/commit/79829d0c4b031a76c1efa31b40a23e8647f26270"
+        },
+        "date": 1774292952289,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
