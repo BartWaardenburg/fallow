@@ -14,7 +14,7 @@ expression: redact_version(&json_str)
     {
       "package_name": "lodash",
       "location": "dependencies",
-      "path": "/project/package.json"
+      "path": "package.json"
     }
   ],
   "unused_dev_dependencies": [],

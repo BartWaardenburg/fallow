@@ -11,7 +11,7 @@ expression: redact_version(&json_str)
   "unused_exports": [],
   "unused_types": [
     {
-      "path": "/project/src/types.ts",
+      "path": "src/types.ts",
       "export_name": "OldType",
       "is_type_only": true,
       "line": 5,

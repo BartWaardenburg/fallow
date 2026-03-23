@@ -64,7 +64,7 @@ pub fn print_results(
             human::print_human(results, &config.root, &config.rules, elapsed, quiet);
             ExitCode::SUCCESS
         }
-        OutputFormat::Json => json::print_json(results, elapsed),
+        OutputFormat::Json => json::print_json(results, &config.root, elapsed),
         OutputFormat::Compact => {
             compact::print_compact(results, &config.root);
             ExitCode::SUCCESS

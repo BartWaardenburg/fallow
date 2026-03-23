@@ -20,7 +20,7 @@ expression: redact_version(&json_str)
     {
       "package_name": "chalk",
       "imported_from": [
-        "/project/src/cli.ts"
+        "src/cli.ts"
       ]
     }
   ],

@@ -14,14 +14,14 @@ expression: redact_version(&json_str)
     {
       "package_name": "lodash",
       "location": "dependencies",
-      "path": "/project/packages/ui/package.json"
+      "path": "packages/ui/package.json"
     }
   ],
   "unused_dev_dependencies": [
     {
       "package_name": "jest",
       "location": "devDependencies",
-      "path": "/project/packages/ui/package.json"
+      "path": "packages/ui/package.json"
     }
   ],
   "unused_optional_dependencies": [],

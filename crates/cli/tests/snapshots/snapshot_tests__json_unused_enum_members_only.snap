@@ -15,7 +15,7 @@ expression: redact_version(&json_str)
   "unused_optional_dependencies": [],
   "unused_enum_members": [
     {
-      "path": "/project/src/enums.ts",
+      "path": "src/enums.ts",
       "parent_name": "Status",
       "member_name": "Deprecated",
       "kind": "enum_member",

@@ -16,7 +16,7 @@ expression: redact_version(&json_str)
   "unused_enum_members": [],
   "unused_class_members": [
     {
-      "path": "/project/src/service.ts",
+      "path": "src/service.ts",
       "parent_name": "UserService",
       "member_name": "legacyMethod",
       "kind": "class_method",

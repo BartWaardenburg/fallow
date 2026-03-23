@@ -17,7 +17,7 @@ expression: redact_version(&json_str)
   "unused_class_members": [],
   "unresolved_imports": [
     {
-      "path": "/project/src/app.ts",
+      "path": "src/app.ts",
       "specifier": "./missing-module",
       "line": 3,
       "col": 0

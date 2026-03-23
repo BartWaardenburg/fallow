@@ -21,11 +21,11 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
   "type_only_dependencies": [
     {
       "package_name": "zod",
-      "path": "/project/package.json"
+      "path": "package.json"
     },
     {
       "package_name": "@types/react",
-      "path": "/project/package.json"
+      "path": "package.json"
     }
   ],
   "circular_dependencies": []

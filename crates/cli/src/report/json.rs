@@ -1,11 +1,12 @@
+use std::path::Path;
 use std::process::ExitCode;
 use std::time::Duration;
 
 use fallow_core::duplicates::DuplicationReport;
 use fallow_core::results::AnalysisResults;
 
-pub(super) fn print_json(results: &AnalysisResults, elapsed: Duration) -> ExitCode {
-    match build_json(results, elapsed) {
+pub(super) fn print_json(results: &AnalysisResults, root: &Path, elapsed: Duration) -> ExitCode {
+    match build_json(results, root, elapsed) {
         Ok(output) => match serde_json::to_string_pretty(&output) {
             Ok(json) => {
                 println!("{json}");
@@ -33,9 +34,10 @@ const SCHEMA_VERSION: u32 = 1;
 /// Build the JSON output value for analysis results.
 ///
 /// Metadata fields (`schema_version`, `version`, `elapsed_ms`, `total_issues`)
-/// appear first in the output for readability.
+/// appear first in the output for readability. Paths are made relative to `root`.
 pub fn build_json(
     results: &AnalysisResults,
+    root: &Path,
     elapsed: Duration,
 ) -> Result<serde_json::Value, serde_json::Error> {
     let results_value = serde_json::to_value(results)?;
@@ -64,7 +66,35 @@ pub fn build_json(
         }
     }
 
-    Ok(serde_json::Value::Object(map))
+    let mut output = serde_json::Value::Object(map);
+    let root_prefix = format!("{}/", root.display());
+    strip_root_prefix(&mut output, &root_prefix);
+    Ok(output)
+}
+
+/// Recursively strip the root prefix from all string values in the JSON tree.
+///
+/// This converts absolute paths (e.g., `/home/runner/work/repo/repo/src/utils.ts`)
+/// to relative paths (`src/utils.ts`) for all output fields.
+fn strip_root_prefix(value: &mut serde_json::Value, prefix: &str) {
+    match value {
+        serde_json::Value::String(s) => {
+            if let Some(rest) = s.strip_prefix(prefix) {
+                *s = rest.to_string();
+            }
+        }
+        serde_json::Value::Array(arr) => {
+            for item in arr {
+                strip_root_prefix(item, prefix);
+            }
+        }
+        serde_json::Value::Object(map) => {
+            for (_, v) in map.iter_mut() {
+                strip_root_prefix(v, prefix);
+            }
+        }
+        _ => {}
+    }
 }
 
 pub(super) fn print_duplication_json(report: &DuplicationReport, elapsed: Duration) -> ExitCode {
@@ -203,9 +233,10 @@ mod tests {
 
     #[test]
     fn json_output_has_metadata_fields() {
+        let root = PathBuf::from("/project");
         let results = AnalysisResults::default();
         let elapsed = Duration::from_millis(123);
-        let output = build_json(&results, elapsed).expect("should serialize");
+        let output = build_json(&results, &root, elapsed).expect("should serialize");
 
         assert_eq!(output["schema_version"], 1);
         assert!(output["version"].is_string());
@@ -218,7 +249,7 @@ mod tests {
         let root = PathBuf::from("/project");
         let results = sample_results(&root);
         let elapsed = Duration::from_millis(50);
-        let output = build_json(&results, elapsed).expect("should serialize");
+        let output = build_json(&results, &root, elapsed).expect("should serialize");
 
         assert!(output["unused_files"].is_array());
         assert!(output["unused_exports"].is_array());
@@ -235,9 +266,10 @@ mod tests {
 
     #[test]
     fn json_metadata_fields_appear_first() {
+        let root = PathBuf::from("/project");
         let results = AnalysisResults::default();
         let elapsed = Duration::from_millis(0);
-        let output = build_json(&results, elapsed).expect("should serialize");
+        let output = build_json(&results, &root, elapsed).expect("should serialize");
         let keys: Vec<&String> = output.as_object().unwrap().keys().collect();
         assert_eq!(keys[0], "schema_version");
         assert_eq!(keys[1], "version");
@@ -251,16 +283,17 @@ mod tests {
         let results = sample_results(&root);
         let total = results.total_issues();
         let elapsed = Duration::from_millis(0);
-        let output = build_json(&results, elapsed).expect("should serialize");
+        let output = build_json(&results, &root, elapsed).expect("should serialize");
 
         assert_eq!(output["total_issues"], total);
     }
 
     #[test]
     fn json_unused_export_contains_expected_fields() {
+        let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
         results.unused_exports.push(UnusedExport {
-            path: PathBuf::from("/project/src/utils.ts"),
+            path: root.join("src/utils.ts"),
             export_name: "helperFn".to_string(),
             is_type_only: false,
             line: 10,
@@ -269,7 +302,7 @@ mod tests {
             is_re_export: false,
         });
         let elapsed = Duration::from_millis(0);
-        let output = build_json(&results, elapsed).expect("should serialize");
+        let output = build_json(&results, &root, elapsed).expect("should serialize");
 
         let export = &output["unused_exports"][0];
         assert_eq!(export["export_name"], "helperFn");
@@ -285,7 +318,7 @@ mod tests {
         let root = PathBuf::from("/project");
         let results = sample_results(&root);
         let elapsed = Duration::from_millis(42);
-        let output = build_json(&results, elapsed).expect("should serialize");
+        let output = build_json(&results, &root, elapsed).expect("should serialize");
 
         let json_str = serde_json::to_string_pretty(&output).expect("should stringify");
         let reparsed: serde_json::Value =

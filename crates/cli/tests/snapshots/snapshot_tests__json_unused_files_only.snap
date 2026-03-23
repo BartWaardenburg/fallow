@@ -9,7 +9,7 @@ expression: redact_version(&json_str)
   "total_issues": 1,
   "unused_files": [
     {
-      "path": "/project/src/dead.ts"
+      "path": "src/dead.ts"
     }
   ],
   "unused_exports": [],

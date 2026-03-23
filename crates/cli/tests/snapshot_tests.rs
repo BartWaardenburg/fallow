@@ -95,7 +95,7 @@ fn json_output_snapshot() {
     let root = PathBuf::from("/project");
     let results = sample_results(&root);
     let elapsed = Duration::from_millis(42);
-    let value = build_json(&results, elapsed).expect("JSON build should succeed");
+    let value = build_json(&results, &root, elapsed).expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
 
     // Redact dynamic values (version changes with releases, elapsed_ms may vary)
@@ -110,9 +110,10 @@ fn json_output_snapshot() {
 
 #[test]
 fn json_empty_results_snapshot() {
+    let root = PathBuf::from("/project");
     let results = AnalysisResults::default();
     let elapsed = Duration::from_millis(0);
-    let value = build_json(&results, elapsed).expect("JSON build should succeed");
+    let value = build_json(&results, &root, elapsed).expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
 
     insta::assert_snapshot!(
@@ -403,7 +404,7 @@ fn json_re_export_variant_snapshot() {
         is_re_export: true,
     });
     let elapsed = Duration::from_millis(0);
-    let value = build_json(&results, elapsed).expect("JSON build should succeed");
+    let value = build_json(&results, &root, elapsed).expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!(
         "json_re_export_variant",
@@ -486,7 +487,7 @@ fn json_type_only_deps_snapshot() {
         path: root.join("package.json"),
     });
     let elapsed = Duration::from_millis(10);
-    let value = build_json(&results, elapsed).expect("JSON build should succeed");
+    let value = build_json(&results, &root, elapsed).expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!(
         "json_type_only_deps",
@@ -513,7 +514,7 @@ fn json_unused_files_only_snapshot() {
     results.unused_files.push(UnusedFile {
         path: root.join("src/dead.ts"),
     });
-    let value = build_json(&results, Duration::ZERO).expect("JSON build should succeed");
+    let value = build_json(&results, &root, Duration::ZERO).expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!("json_unused_files_only", redact_version(&json_str));
 }
@@ -531,7 +532,7 @@ fn json_unused_exports_only_snapshot() {
         span_start: 120,
         is_re_export: false,
     });
-    let value = build_json(&results, Duration::ZERO).expect("JSON build should succeed");
+    let value = build_json(&results, &root, Duration::ZERO).expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!("json_unused_exports_only", redact_version(&json_str));
 }
@@ -549,7 +550,7 @@ fn json_unused_types_only_snapshot() {
         span_start: 60,
         is_re_export: false,
     });
-    let value = build_json(&results, Duration::ZERO).expect("JSON build should succeed");
+    let value = build_json(&results, &root, Duration::ZERO).expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!("json_unused_types_only", redact_version(&json_str));
 }
@@ -563,7 +564,7 @@ fn json_unused_deps_only_snapshot() {
         location: DependencyLocation::Dependencies,
         path: root.join("package.json"),
     });
-    let value = build_json(&results, Duration::ZERO).expect("JSON build should succeed");
+    let value = build_json(&results, &root, Duration::ZERO).expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!("json_unused_deps_only", redact_version(&json_str));
 }
@@ -578,7 +579,7 @@ fn json_unresolved_imports_only_snapshot() {
         line: 3,
         col: 0,
     });
-    let value = build_json(&results, Duration::ZERO).expect("JSON build should succeed");
+    let value = build_json(&results, &root, Duration::ZERO).expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!("json_unresolved_imports_only", redact_version(&json_str));
 }
@@ -591,7 +592,7 @@ fn json_unlisted_deps_only_snapshot() {
         package_name: "chalk".to_string(),
         imported_from: vec![root.join("src/cli.ts")],
     });
-    let value = build_json(&results, Duration::ZERO).expect("JSON build should succeed");
+    let value = build_json(&results, &root, Duration::ZERO).expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!("json_unlisted_deps_only", redact_version(&json_str));
 }
@@ -608,7 +609,7 @@ fn json_unused_enum_members_only_snapshot() {
         line: 8,
         col: 2,
     });
-    let value = build_json(&results, Duration::ZERO).expect("JSON build should succeed");
+    let value = build_json(&results, &root, Duration::ZERO).expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!("json_unused_enum_members_only", redact_version(&json_str));
 }
@@ -625,7 +626,7 @@ fn json_unused_class_members_only_snapshot() {
         line: 42,
         col: 4,
     });
-    let value = build_json(&results, Duration::ZERO).expect("JSON build should succeed");
+    let value = build_json(&results, &root, Duration::ZERO).expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!("json_unused_class_members_only", redact_version(&json_str));
 }
@@ -638,7 +639,7 @@ fn json_duplicate_exports_only_snapshot() {
         export_name: "Config".to_string(),
         locations: vec![root.join("src/config.ts"), root.join("src/types.ts")],
     });
-    let value = build_json(&results, Duration::ZERO).expect("JSON build should succeed");
+    let value = build_json(&results, &root, Duration::ZERO).expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!("json_duplicate_exports_only", redact_version(&json_str));
 }
@@ -834,7 +835,7 @@ fn json_multiple_exports_same_file_snapshot() {
         span_start: 0,
         is_re_export: false,
     });
-    let value = build_json(&results, Duration::ZERO).expect("JSON build should succeed");
+    let value = build_json(&results, &root, Duration::ZERO).expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!("json_multiple_exports_same_file", redact_version(&json_str));
 }
@@ -912,7 +913,7 @@ fn json_workspace_dep_snapshot() {
         location: DependencyLocation::DevDependencies,
         path: root.join("packages/ui/package.json"),
     });
-    let value = build_json(&results, Duration::ZERO).expect("JSON build should succeed");
+    let value = build_json(&results, &root, Duration::ZERO).expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!("json_workspace_deps", redact_version(&json_str));
 }

@@ -10,7 +10,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
   "unused_files": [],
   "unused_exports": [
     {
-      "path": "/project/src/index.ts",
+      "path": "src/index.ts",
       "export_name": "reExportedFn",
       "is_type_only": false,
       "line": 1,

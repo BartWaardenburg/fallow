@@ -9,12 +9,12 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
   "total_issues": 13,
   "unused_files": [
     {
-      "path": "/project/src/dead.ts"
+      "path": "src/dead.ts"
     }
   ],
   "unused_exports": [
     {
-      "path": "/project/src/utils.ts",
+      "path": "src/utils.ts",
       "export_name": "helperFn",
       "is_type_only": false,
       "line": 10,
@@ -25,7 +25,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
   ],
   "unused_types": [
     {
-      "path": "/project/src/types.ts",
+      "path": "src/types.ts",
       "export_name": "OldType",
       "is_type_only": true,
       "line": 5,
@@ -38,26 +38,26 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
     {
       "package_name": "lodash",
       "location": "dependencies",
-      "path": "/project/package.json"
+      "path": "package.json"
     }
   ],
   "unused_dev_dependencies": [
     {
       "package_name": "jest",
       "location": "devDependencies",
-      "path": "/project/package.json"
+      "path": "package.json"
     }
   ],
   "unused_optional_dependencies": [
     {
       "package_name": "fsevents",
       "location": "optionalDependencies",
-      "path": "/project/package.json"
+      "path": "package.json"
     }
   ],
   "unused_enum_members": [
     {
-      "path": "/project/src/enums.ts",
+      "path": "src/enums.ts",
       "parent_name": "Status",
       "member_name": "Deprecated",
       "kind": "enum_member",
@@ -67,7 +67,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
   ],
   "unused_class_members": [
     {
-      "path": "/project/src/service.ts",
+      "path": "src/service.ts",
       "parent_name": "UserService",
       "member_name": "legacyMethod",
       "kind": "class_method",
@@ -77,7 +77,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
   ],
   "unresolved_imports": [
     {
-      "path": "/project/src/app.ts",
+      "path": "src/app.ts",
       "specifier": "./missing-module",
       "line": 3,
       "col": 0
@@ -87,7 +87,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
     {
       "package_name": "chalk",
       "imported_from": [
-        "/project/src/cli.ts"
+        "src/cli.ts"
       ]
     }
   ],
@@ -95,22 +95,22 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
     {
       "export_name": "Config",
       "locations": [
-        "/project/src/config.ts",
-        "/project/src/types.ts"
+        "src/config.ts",
+        "src/types.ts"
       ]
     }
   ],
   "type_only_dependencies": [
     {
       "package_name": "zod",
-      "path": "/project/package.json"
+      "path": "package.json"
     }
   ],
   "circular_dependencies": [
     {
       "files": [
-        "/project/src/a.ts",
-        "/project/src/b.ts"
+        "src/a.ts",
+        "src/b.ts"
       ],
       "length": 2
     }

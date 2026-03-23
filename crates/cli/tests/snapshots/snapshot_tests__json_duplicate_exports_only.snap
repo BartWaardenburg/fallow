@@ -21,8 +21,8 @@ expression: redact_version(&json_str)
     {
       "export_name": "Config",
       "locations": [
-        "/project/src/config.ts",
-        "/project/src/types.ts"
+        "src/config.ts",
+        "src/types.ts"
       ]
     }
   ],

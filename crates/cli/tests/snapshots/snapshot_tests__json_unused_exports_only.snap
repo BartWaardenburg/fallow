@@ -10,7 +10,7 @@ expression: redact_version(&json_str)
   "unused_files": [],
   "unused_exports": [
     {
-      "path": "/project/src/utils.ts",
+      "path": "src/utils.ts",
       "export_name": "helperFn",
       "is_type_only": false,
       "line": 10,
