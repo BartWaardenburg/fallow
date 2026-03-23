@@ -35,6 +35,9 @@ npm/win32-x64-msvc/fallow.exe
 # Internal planning docs
 .internal-*
 
+# IDE
+.vscode/
+
 # Claude
 .claude/*
 !.claude/settings.json
