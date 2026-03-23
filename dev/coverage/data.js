@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1774293462459,
+  "lastUpdate": 1774293937082,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
@@ -342,6 +342,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/cfc40e10e5c7565c9f289b246a6b1ad35915f9dd"
         },
         "date": 1774293461897,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 83.6,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "16d1132e33db35f5a6d4a61a3632bbb0a27afa30",
+          "message": "feat: redesign GitHub Action job summary with tables, icons, and collapsible sections",
+          "timestamp": "2026-03-23T20:23:49+01:00",
+          "tree_id": "133075b0bbea092a5c2bd3d693912f7bc8a64e6f",
+          "url": "https://github.com/fallow-rs/fallow/commit/16d1132e33db35f5a6d4a61a3632bbb0a27afa30"
+        },
+        "date": 1774293936711,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
