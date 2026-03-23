@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1774280521283,
+  "lastUpdate": 1774292502340,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
@@ -307,6 +307,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 3679,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "d61097c7c1194ca2ef9a35f2480481a8da2bfd2a",
+          "message": "docs: update demo GIF with Victor Mono rendering",
+          "timestamp": "2026-03-23T20:00:19+01:00",
+          "tree_id": "ed81d0796cde7e0bea5cbcd989239120452b39c4",
+          "url": "https://github.com/fallow-rs/fallow/commit/d61097c7c1194ca2ef9a35f2480481a8da2bfd2a"
+        },
+        "date": 1774292501833,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 2983979,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 11547,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 405490,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 3677,
             "unit": "allocations"
           }
         ]
