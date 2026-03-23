@@ -22,6 +22,7 @@ mod report;
 mod schema;
 mod validate;
 mod vital_signs;
+mod viz;
 mod watch;
 
 use check::{CheckOptions, IssueFilters, TraceOptions};
@@ -348,6 +349,21 @@ enum Command {
         /// Path to source config file (auto-detect if not specified)
         #[arg(long, value_name = "PATH")]
         from: Option<PathBuf>,
+    },
+
+    /// Generate an interactive HTML treemap visualization of the codebase
+    Viz {
+        /// Output file path (default: fallow-viz.html in project root)
+        #[arg(long = "out", value_name = "PATH")]
+        output: Option<PathBuf>,
+
+        /// Don't open the output file in the browser
+        #[arg(long)]
+        no_open: bool,
+
+        /// Visualization output format
+        #[arg(long = "viz-format", default_value = "html")]
+        viz_format: viz::VizFormat,
     },
 }
 
@@ -923,6 +939,21 @@ fn main() -> ExitCode {
                 dry_run,
                 from,
             } => migrate::run_migrate(&root, toml, dry_run, from.as_deref()),
+            Command::Viz {
+                output: viz_output,
+                no_open,
+                viz_format,
+            } => viz::run_viz(&viz::VizOptions {
+                root: &root,
+                config_path: &cli.config,
+                no_cache: cli.no_cache,
+                threads,
+                quiet,
+                production: cli.production,
+                output_path: viz_output.as_deref(),
+                no_open,
+                format: viz_format,
+            }),
         },
     }
 }
