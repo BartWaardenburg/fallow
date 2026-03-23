@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Fallow — Project Metrics</title>
+    <style>
+      html {
+        font-family: BlinkMacSystemFont, -apple-system, "Segoe UI", Roboto,
+          Oxygen, Ubuntu, Cantarell, "Fira Sans", "Droid Sans",
+          "Helvetica Neue", Helvetica, Arial, sans-serif;
+        -webkit-font-smoothing: antialiased;
+        background-color: #fff;
+        font-size: 16px;
+      }
+      body {
+        color: #4a4a4a;
+        margin: 0;
+        padding: 24px;
+        font-size: 1em;
+        font-weight: 400;
+      }
+      header {
+        max-width: 960px;
+        margin: 0 auto 32px;
+      }
+      header h1 {
+        font-size: 2em;
+        font-weight: 700;
+        margin: 0 0 8px;
+      }
+      header p {
+        color: #7a7a7a;
+        margin: 0;
+      }
+      main {
+        max-width: 960px;
+        margin: 0 auto;
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+        gap: 20px;
+      }
+      .card {
+        border: 1px solid #dbdbdb;
+        border-radius: 8px;
+        padding: 24px;
+        text-decoration: none;
+        color: inherit;
+        transition: border-color 0.15s, box-shadow 0.15s;
+        display: flex;
+        flex-direction: column;
+      }
+      .card:hover {
+        border-color: #3273dc;
+        box-shadow: 0 2px 8px rgba(50, 115, 220, 0.15);
+      }
+      .card h2 {
+        font-size: 1.25em;
+        margin: 0 0 8px;
+      }
+      .card p {
+        color: #7a7a7a;
+        margin: 0 0 16px;
+        flex: 1;
+        font-size: 0.95em;
+        line-height: 1.5;
+      }
+      .card .link {
+        color: #3273dc;
+        font-size: 0.9em;
+        font-weight: 500;
+      }
+      footer {
+        max-width: 960px;
+        margin: 48px auto 0;
+        padding-top: 24px;
+        border-top: 1px solid #dbdbdb;
+        color: #7a7a7a;
+        font-size: 0.85em;
+      }
+      footer a {
+        color: #3273dc;
+        text-decoration: none;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Fallow</h1>
+      <p>
+        Continuous metrics for the
+        <a
+          href="https://github.com/fallow-rs/fallow"
+          style="color: #3273dc; text-decoration: none"
+          >fallow</a
+        >
+        codebase
+      </p>
+    </header>
+
+    <main>
+      <a class="card" href="./dev/bench/">
+        <h2>Benchmarks</h2>
+        <p>
+          Performance regression tracking. Measures parse speed and full
+          pipeline throughput across commits.
+        </p>
+        <span class="link">View charts &rarr;</span>
+      </a>
+
+      <a class="card" href="./dev/allocs/">
+        <h2>Allocations</h2>
+        <p>
+          Memory allocation tracking. Monitors total bytes allocated, allocation
+          count, and peak memory per analysis run.
+        </p>
+        <span class="link">View charts &rarr;</span>
+      </a>
+
+      <a class="card" href="./dev/coverage/">
+        <h2>Coverage</h2>
+        <p>
+          Test coverage percentage over time, computed from LLVM source-based
+          coverage instrumentation.
+        </p>
+        <span class="link">View charts &rarr;</span>
+      </a>
+
+      <a class="card" href="./dev/conformance/">
+        <h2>Conformance</h2>
+        <p>
+          Weekly agreement rate between fallow and knip on real-world projects.
+          Tracks detection parity over time.
+        </p>
+        <span class="link">View charts &rarr;</span>
+      </a>
+    </main>
+
+    <footer>
+      <a href="https://github.com/fallow-rs/fallow">GitHub</a> &middot;
+      Tracked by
+      <a href="https://github.com/benchmark-action/github-action-benchmark"
+        >github-action-benchmark</a
+      >
+    </footer>
+  </body>
+</html>
