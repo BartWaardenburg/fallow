@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1774268745851,
+  "lastUpdate": 1774273358851,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
@@ -175,6 +175,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 3657,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "f51532c34fee568e60cd01e014c829366596e283",
+          "message": "test: add integration test for package.json #subpath imports\n\nVerify that imports using # prefixes (e.g., `import { foo } from '#utils'`)\nresolve correctly via the package.json `imports` field. oxc_resolver already\nhandles this natively via its default `imports_fields` configuration.\n\nAdds test fixture with simple and wildcard patterns, and integration test\nasserting zero unresolved imports and correct unused-export detection.\n\nAlso verified against real-world Vite (74 # imports) and Svelte fixtures\nwith zero false positives.",
+          "timestamp": "2026-03-23T14:41:15+01:00",
+          "tree_id": "ac55c34a44be8860482520045cf6f8a08116dbeb",
+          "url": "https://github.com/fallow-rs/fallow/commit/f51532c34fee568e60cd01e014c829366596e283"
+        },
+        "date": 1774273357965,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 2994907,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 11567,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 408298,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 3683,
             "unit": "allocations"
           }
         ]
