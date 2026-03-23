@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1774259805400,
+  "lastUpdate": 1774260873068,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
@@ -43,6 +43,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 3667,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "dc388543a716872d2e4999785ecff85eea6e903e",
+          "message": "feat: add type-only-dependencies rule and fix formatter gaps\n\nAdd `type-only-dependencies` to RulesConfig (default: warn) so it is\nconfigurable like all other rules. Previously hardcoded to warn in\nhuman/SARIF output.\n\nAlso adds missing type_only_dependencies support to compact and SARIF\nformatters, deduplicates dependency formatting in human.rs, and\nextracts shared format_dependency helper in markdown.rs.",
+          "timestamp": "2026-03-23T11:12:58+01:00",
+          "tree_id": "d4a14d535e02845b2d8440f3066f06497e0664e6",
+          "url": "https://github.com/fallow-rs/fallow/commit/dc388543a716872d2e4999785ecff85eea6e903e"
+        },
+        "date": 1774260872154,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 2987907,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 11553,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 403618,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 3673,
             "unit": "allocations"
           }
         ]
