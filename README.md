@@ -207,7 +207,25 @@ This reads your knip.json/knip.jsonc/.knip.json/.knip.jsonc and/or .jscpd.json (
 
 ## Framework support
 
-84 built-in plugins covering frameworks (Next.js, Nuxt, Remix, SvelteKit, Gatsby, Astro, Angular, React Router, TanStack Router, React Native, Expo, NestJS, Docusaurus, Nitro, Capacitor, Sanity, VitePress, next-intl, Relay, Electron, i18next), bundlers (Vite, Webpack, Rspack, Rsbuild, Rollup, Rolldown, Tsup, Tsdown, Parcel), testing (Vitest, Jest, Playwright, Cypress, Mocha, Ava, Storybook, Karma, Cucumber, WebdriverIO), linting & formatting (ESLint, Biome, Stylelint, Commitlint, Prettier, Oxlint, markdownlint, cspell, remark), transpilation & runtime (TypeScript, Babel, SWC, Bun), CSS (Tailwind, PostCSS), databases (Prisma, Drizzle, Knex, TypeORM, Kysely), monorepos (Turborepo, Nx, Changesets, Syncpack), CI/CD (semantic-release, Commitizen), deployment (Wrangler, Sentry), git hooks (husky, lint-staged, lefthook, simple-git-hooks), and more (GraphQL Codegen, MSW, SVGO, SVGR, TypeDoc, openapi-ts, Plop, c8, nyc, nodemon, PM2, dependency-cruiser). If your framework isn't listed, you can add a [custom preset](https://docs.fallow.tools/frameworks/custom-plugins) in your config file.
+84 built-in plugins — if your framework isn't listed, you can add a [custom preset](https://docs.fallow.tools/frameworks/custom-plugins) in your config file.
+
+| Category | Plugins |
+|---|---|
+| **Frameworks** | Next.js, Nuxt, Remix, SvelteKit, Gatsby, Astro, Angular, React Router, TanStack Router, React Native, Expo, NestJS, Docusaurus, Nitro, Capacitor, Sanity, VitePress, next-intl, Relay, Electron, i18next |
+| **Bundlers** | Vite, Webpack, Rspack, Rsbuild, Rollup, Rolldown, Tsup, Tsdown, Parcel |
+| **Testing** | Vitest, Jest, Playwright, Cypress, Mocha, Ava, Storybook, Karma, Cucumber, WebdriverIO |
+| **Linting & Formatting** | ESLint, Biome, Stylelint, Commitlint, Prettier, Oxlint, markdownlint, cspell, remark |
+| **Transpilation & Runtime** | TypeScript, Babel, SWC, Bun |
+| **CSS** | Tailwind, PostCSS |
+| **Databases** | Prisma, Drizzle, Knex, TypeORM, Kysely |
+| **Monorepos** | Turborepo, Nx, Changesets, Syncpack |
+| **CI/CD** | semantic-release, Commitizen |
+| **Deployment** | Wrangler, Sentry |
+| **Git Hooks** | husky, lint-staged, lefthook, simple-git-hooks |
+| **Code Generation & Docs** | GraphQL Codegen, TypeDoc, openapi-ts, Plop |
+| **Media & Assets** | SVGO, SVGR |
+| **Coverage** | c8, nyc |
+| **Other** | MSW, nodemon, PM2, dependency-cruiser |
 
 ## CI integration
 
