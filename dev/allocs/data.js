@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1774292502340,
+  "lastUpdate": 1774293445663,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
@@ -341,6 +341,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Total Allocations",
             "value": 11547,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 405490,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 3677,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "cfc40e10e5c7565c9f289b246a6b1ad35915f9dd",
+          "message": "fix: use relative paths in JSON output for readable CI summaries",
+          "timestamp": "2026-03-23T20:16:02+01:00",
+          "tree_id": "7d790ee98f30b035b64c44c56b4d87a15ce279f1",
+          "url": "https://github.com/fallow-rs/fallow/commit/cfc40e10e5c7565c9f289b246a6b1ad35915f9dd"
+        },
+        "date": 1774293445156,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 2996739,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 11569,
             "unit": "allocations"
           },
           {
