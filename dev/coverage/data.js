@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1774343933087,
+  "lastUpdate": 1774344157737,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
@@ -603,6 +603,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/f2bc1c02ea1a9dc0468addd7df06da9ab4faa30f"
         },
         "date": 1774343932494,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 83.2,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "50f3861f70ac5cc170362ea263c6611720c2815a",
+          "message": "chore: bump platform package versions to 1.6.0",
+          "timestamp": "2026-03-24T10:21:50+01:00",
+          "tree_id": "4dfdffdb98980f5696b933ca9c7fd62e0c96ddec",
+          "url": "https://github.com/fallow-rs/fallow/commit/50f3861f70ac5cc170362ea263c6611720c2815a"
+        },
+        "date": 1774344156907,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
