@@ -192,3 +192,405 @@ pub(super) fn warn_plugin_keys(obj: &JsonMap, warnings: &mut Vec<MigrationWarnin
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn empty_config() -> JsonMap {
+        Map::new()
+    }
+
+    // -- migrate_simple_field -------------------------------------------------
+
+    #[test]
+    fn simple_field_present_array() {
+        let obj: JsonMap = serde_json::from_str(r#"{"entry": ["src/index.ts", "src/main.ts"]}"#)
+            .unwrap();
+        let mut config = empty_config();
+        migrate_simple_field(&obj, "entry", "entry", &mut config);
+
+        assert_eq!(
+            config.get("entry").unwrap(),
+            &json!(["src/index.ts", "src/main.ts"])
+        );
+    }
+
+    #[test]
+    fn simple_field_present_string() {
+        let obj: JsonMap = serde_json::from_str(r#"{"entry": "src/index.ts"}"#).unwrap();
+        let mut config = empty_config();
+        migrate_simple_field(&obj, "entry", "entry", &mut config);
+
+        assert_eq!(config.get("entry").unwrap(), &json!(["src/index.ts"]));
+    }
+
+    #[test]
+    fn simple_field_absent() {
+        let obj: JsonMap = serde_json::from_str(r#"{"other": "value"}"#).unwrap();
+        let mut config = empty_config();
+        migrate_simple_field(&obj, "entry", "entry", &mut config);
+
+        assert!(!config.contains_key("entry"));
+    }
+
+    #[test]
+    fn simple_field_renames_key() {
+        let obj: JsonMap = serde_json::from_str(r#"{"ignore": ["**/*.test.ts"]}"#).unwrap();
+        let mut config = empty_config();
+        migrate_simple_field(&obj, "ignore", "ignorePatterns", &mut config);
+
+        assert!(!config.contains_key("ignore"));
+        assert_eq!(
+            config.get("ignorePatterns").unwrap(),
+            &json!(["**/*.test.ts"])
+        );
+    }
+
+    #[test]
+    fn simple_field_non_string_non_array_skipped() {
+        let obj: JsonMap = serde_json::from_str(r#"{"entry": 42}"#).unwrap();
+        let mut config = empty_config();
+        migrate_simple_field(&obj, "entry", "entry", &mut config);
+
+        assert!(!config.contains_key("entry"));
+    }
+
+    #[test]
+    fn simple_field_empty_array_skipped() {
+        let obj: JsonMap = serde_json::from_str(r#"{"entry": []}"#).unwrap();
+        let mut config = empty_config();
+        migrate_simple_field(&obj, "entry", "entry", &mut config);
+
+        assert!(!config.contains_key("entry"));
+    }
+
+    // -- migrate_rules --------------------------------------------------------
+
+    #[test]
+    fn rules_known_mapping() {
+        let rules_val = json!({"files": "error", "exports": "warn"});
+        let mut config = empty_config();
+        let mut warnings = Vec::new();
+        migrate_rules(&rules_val, &mut config, &mut warnings);
+
+        let rules = config.get("rules").unwrap().as_object().unwrap();
+        assert_eq!(rules.get("unused-files").unwrap(), "error");
+        assert_eq!(rules.get("unused-exports").unwrap(), "warn");
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn rules_unknown_unmappable_generates_warning() {
+        let rules_val = json!({"binaries": "warn"});
+        let mut config = empty_config();
+        let mut warnings = Vec::new();
+        migrate_rules(&rules_val, &mut config, &mut warnings);
+
+        assert!(!config.contains_key("rules"));
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].field, "rules.binaries");
+        assert!(warnings[0].message.contains("no fallow equivalent"));
+    }
+
+    #[test]
+    fn rules_unknown_not_in_unmappable_silently_ignored() {
+        let rules_val = json!({"totallyUnknown": "error"});
+        let mut config = empty_config();
+        let mut warnings = Vec::new();
+        migrate_rules(&rules_val, &mut config, &mut warnings);
+
+        assert!(!config.contains_key("rules"));
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn rules_empty_object() {
+        let rules_val = json!({});
+        let mut config = empty_config();
+        let mut warnings = Vec::new();
+        migrate_rules(&rules_val, &mut config, &mut warnings);
+
+        assert!(!config.contains_key("rules"));
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn rules_non_object_is_noop() {
+        let rules_val = json!("not-an-object");
+        let mut config = empty_config();
+        let mut warnings = Vec::new();
+        migrate_rules(&rules_val, &mut config, &mut warnings);
+
+        assert!(!config.contains_key("rules"));
+        assert!(warnings.is_empty());
+    }
+
+    // -- migrate_exclude ------------------------------------------------------
+
+    #[test]
+    fn exclude_single_known_type() {
+        let mut config = empty_config();
+        let mut warnings = Vec::new();
+        migrate_exclude(&["files".to_string()], &mut config, &mut warnings);
+
+        let rules = config.get("rules").unwrap().as_object().unwrap();
+        assert_eq!(rules.get("unused-files").unwrap(), "off");
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn exclude_multiple_types() {
+        let mut config = empty_config();
+        let mut warnings = Vec::new();
+        migrate_exclude(
+            &[
+                "files".to_string(),
+                "types".to_string(),
+                "duplicates".to_string(),
+            ],
+            &mut config,
+            &mut warnings,
+        );
+
+        let rules = config.get("rules").unwrap().as_object().unwrap();
+        assert_eq!(rules.get("unused-files").unwrap(), "off");
+        assert_eq!(rules.get("unused-types").unwrap(), "off");
+        assert_eq!(rules.get("duplicate-exports").unwrap(), "off");
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn exclude_unmappable_type_warns() {
+        let mut config = empty_config();
+        let mut warnings = Vec::new();
+        migrate_exclude(
+            &["optionalPeerDependencies".to_string()],
+            &mut config,
+            &mut warnings,
+        );
+
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].field.contains("optionalPeerDependencies"));
+    }
+
+    #[test]
+    fn exclude_empty_slice() {
+        let mut config = empty_config();
+        let mut warnings = Vec::new();
+        migrate_exclude(&[], &mut config, &mut warnings);
+
+        // Empty rules object is still created via or_insert_with, but has no entries
+        let rules = config.get("rules").unwrap().as_object().unwrap();
+        assert!(rules.is_empty());
+        assert!(warnings.is_empty());
+    }
+
+    // -- migrate_include ------------------------------------------------------
+
+    #[test]
+    fn include_known_types_sets_others_to_off() {
+        let mut config = empty_config();
+        let mut warnings = Vec::new();
+        migrate_include(
+            &["files".to_string(), "exports".to_string()],
+            &mut config,
+            &mut warnings,
+        );
+
+        let rules = config.get("rules").unwrap().as_object().unwrap();
+        // Included types should NOT be in rules
+        assert!(!rules.contains_key("unused-files"));
+        assert!(!rules.contains_key("unused-exports"));
+        // Non-included should be "off"
+        assert_eq!(rules.get("unused-dependencies").unwrap(), "off");
+        assert_eq!(rules.get("unused-types").unwrap(), "off");
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn include_unmappable_type_warns() {
+        let mut config = empty_config();
+        let mut warnings = Vec::new();
+        migrate_include(
+            &["files".to_string(), "binaries".to_string()],
+            &mut config,
+            &mut warnings,
+        );
+
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].field, "include.binaries");
+    }
+
+    #[test]
+    fn include_respects_existing_rules() {
+        let mut config = empty_config();
+        // Pre-set a rule
+        let mut rules = Map::new();
+        rules.insert(
+            "unused-dependencies".to_string(),
+            Value::String("warn".to_string()),
+        );
+        config.insert("rules".to_string(), Value::Object(rules));
+
+        let mut warnings = Vec::new();
+        migrate_include(&["files".to_string()], &mut config, &mut warnings);
+
+        let rules = config.get("rules").unwrap().as_object().unwrap();
+        // "unused-dependencies" was already "warn", include should not override to "off"
+        assert_eq!(rules.get("unused-dependencies").unwrap(), "warn");
+    }
+
+    // -- migrate_ignore_deps --------------------------------------------------
+
+    #[test]
+    fn ignore_deps_plain_strings() {
+        let val = json!(["lodash", "react"]);
+        let mut config = empty_config();
+        let mut warnings = Vec::new();
+        migrate_ignore_deps(&val, &mut config, &mut warnings);
+
+        assert_eq!(
+            config.get("ignoreDependencies").unwrap(),
+            &json!(["lodash", "react"])
+        );
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn ignore_deps_regex_filtered_with_warning() {
+        let val = json!(["/^@scope/", "lodash"]);
+        let mut config = empty_config();
+        let mut warnings = Vec::new();
+        migrate_ignore_deps(&val, &mut config, &mut warnings);
+
+        assert_eq!(
+            config.get("ignoreDependencies").unwrap(),
+            &json!(["lodash"])
+        );
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].message.contains("regex pattern"));
+    }
+
+    #[test]
+    fn ignore_deps_all_regex_no_config_key() {
+        let val = json!(["/^@a/", "/^@b/"]);
+        let mut config = empty_config();
+        let mut warnings = Vec::new();
+        migrate_ignore_deps(&val, &mut config, &mut warnings);
+
+        assert!(!config.contains_key("ignoreDependencies"));
+        assert_eq!(warnings.len(), 2);
+    }
+
+    #[test]
+    fn ignore_deps_single_string() {
+        let val = json!("lodash");
+        let mut config = empty_config();
+        let mut warnings = Vec::new();
+        migrate_ignore_deps(&val, &mut config, &mut warnings);
+
+        assert_eq!(
+            config.get("ignoreDependencies").unwrap(),
+            &json!(["lodash"])
+        );
+    }
+
+    #[test]
+    fn ignore_deps_non_string_value_skipped() {
+        let val = json!(42);
+        let mut config = empty_config();
+        let mut warnings = Vec::new();
+        migrate_ignore_deps(&val, &mut config, &mut warnings);
+
+        assert!(!config.contains_key("ignoreDependencies"));
+        assert!(warnings.is_empty());
+    }
+
+    // -- warn_unmappable_fields -----------------------------------------------
+
+    #[test]
+    fn warn_unmappable_fields_detects_known_fields() {
+        let obj: JsonMap =
+            serde_json::from_str(r#"{"project": ["src/**"], "compilers": {}}"#).unwrap();
+        let mut warnings = Vec::new();
+        warn_unmappable_fields(&obj, &mut warnings);
+
+        assert_eq!(warnings.len(), 2);
+        let fields: Vec<&str> = warnings.iter().map(|w| w.field.as_str()).collect();
+        assert!(fields.contains(&"project"));
+        assert!(fields.contains(&"compilers"));
+    }
+
+    #[test]
+    fn warn_unmappable_fields_empty_object_no_warnings() {
+        let obj = Map::new();
+        let mut warnings = Vec::new();
+        warn_unmappable_fields(&obj, &mut warnings);
+
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn warn_unmappable_fields_unrelated_keys_no_warnings() {
+        let obj: JsonMap = serde_json::from_str(r#"{"entry": ["x"], "rules": {}}"#).unwrap();
+        let mut warnings = Vec::new();
+        warn_unmappable_fields(&obj, &mut warnings);
+
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn warn_unmappable_fields_suggestion_presence() {
+        // "ignoreFiles" has a suggestion, "project" does not
+        let obj: JsonMap =
+            serde_json::from_str(r#"{"ignoreFiles": ["x.ts"], "project": ["src"]}"#).unwrap();
+        let mut warnings = Vec::new();
+        warn_unmappable_fields(&obj, &mut warnings);
+
+        let ignore_files_warning = warnings.iter().find(|w| w.field == "ignoreFiles").unwrap();
+        assert!(ignore_files_warning.suggestion.is_some());
+
+        let project_warning = warnings.iter().find(|w| w.field == "project").unwrap();
+        assert!(project_warning.suggestion.is_none());
+    }
+
+    // -- warn_plugin_keys -----------------------------------------------------
+
+    #[test]
+    fn warn_plugin_keys_detects_plugins() {
+        let obj: JsonMap =
+            serde_json::from_str(r#"{"eslint": {"entry": ["a.js"]}, "jest": true}"#).unwrap();
+        let mut warnings = Vec::new();
+        warn_plugin_keys(&obj, &mut warnings);
+
+        assert_eq!(warnings.len(), 2);
+        let fields: Vec<&str> = warnings.iter().map(|w| w.field.as_str()).collect();
+        assert!(fields.contains(&"eslint"));
+        assert!(fields.contains(&"jest"));
+        // All plugin warnings should have suggestions
+        for w in &warnings {
+            assert!(w.suggestion.is_some());
+        }
+    }
+
+    #[test]
+    fn warn_plugin_keys_empty_object_no_warnings() {
+        let obj = Map::new();
+        let mut warnings = Vec::new();
+        warn_plugin_keys(&obj, &mut warnings);
+
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn warn_plugin_keys_non_plugin_keys_no_warnings() {
+        let obj: JsonMap =
+            serde_json::from_str(r#"{"entry": ["x"], "ignore": ["y"], "rules": {}}"#).unwrap();
+        let mut warnings = Vec::new();
+        warn_plugin_keys(&obj, &mut warnings);
+
+        assert!(warnings.is_empty());
+    }
+}
