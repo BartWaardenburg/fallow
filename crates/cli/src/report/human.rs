@@ -49,6 +49,7 @@ pub(super) fn print_human(
         eprintln!();
     }
 
+    // Human output always includes section footers with doc links.
     for line in build_human_lines(results, root, rules) {
         println!("{line}");
     }
@@ -116,7 +117,7 @@ pub(super) fn build_human_lines(
         }
     };
 
-    build_human_section(
+    build_human_section_ex(
         &mut lines,
         &results.unused_files,
         "Unused files",
@@ -147,7 +148,7 @@ pub(super) fn build_human_lines(
         &format_export,
     );
 
-    build_human_section(
+    build_human_section_ex(
         &mut lines,
         &results.unused_dependencies,
         "Unused dependencies",
@@ -155,7 +156,7 @@ pub(super) fn build_human_lines(
         |dep| vec![format!("  {}", format_dep(&dep.package_name, &dep.path))],
     );
 
-    build_human_section(
+    build_human_section_ex(
         &mut lines,
         &results.unused_dev_dependencies,
         "Unused devDependencies",
@@ -163,7 +164,7 @@ pub(super) fn build_human_lines(
         |dep| vec![format!("  {}", format_dep(&dep.package_name, &dep.path))],
     );
 
-    build_human_section(
+    build_human_section_ex(
         &mut lines,
         &results.unused_optional_dependencies,
         "Unused optionalDependencies",
@@ -201,7 +202,7 @@ pub(super) fn build_human_lines(
         &|i| format!("{} {}", format!(":{}", i.line).dimmed(), i.specifier.bold()),
     );
 
-    build_human_section(
+    build_human_section_ex(
         &mut lines,
         &results.unlisted_dependencies,
         "Unlisted dependencies",
@@ -216,7 +217,7 @@ pub(super) fn build_human_lines(
         root,
     );
 
-    build_human_section(
+    build_human_section_ex(
         &mut lines,
         &results.type_only_dependencies,
         "Type-only dependencies (consider moving to devDependencies)",
@@ -234,8 +235,70 @@ pub(super) fn build_human_lines(
     lines
 }
 
-/// Append a non-empty section with a header and per-item lines (truncated).
-fn build_human_section<T>(
+/// Docs base URLs.
+const DOCS_HEALTH: &str = "https://docs.fallow.tools/explanations/health";
+const DOCS_DUPLICATION: &str = "https://docs.fallow.tools/explanations/duplication";
+
+/// Section footer: description + docs URL (with anchor to specific section).
+fn section_footer_text(title: &str) -> Option<(&'static str, &'static str)> {
+    match title {
+        "Unused files" => Some((
+            "Files not imported or referenced by any entry point",
+            "https://docs.fallow.tools/explanations/dead-code#unused-files",
+        )),
+        "Unused exports" => Some((
+            "Exported symbols not imported by any reachable file",
+            "https://docs.fallow.tools/explanations/dead-code#unused-exports",
+        )),
+        "Unused type exports" => Some((
+            "Exported types/interfaces not imported by any reachable file",
+            "https://docs.fallow.tools/explanations/dead-code#unused-types",
+        )),
+        "Unused dependencies" | "Unused devDependencies" | "Unused optionalDependencies" => Some((
+            "Packages in package.json not imported anywhere in the project",
+            "https://docs.fallow.tools/explanations/dead-code#unused-dependencies",
+        )),
+        "Unused enum members" => Some((
+            "Enum variants never referenced outside their declaration",
+            "https://docs.fallow.tools/explanations/dead-code#unused-enum-members",
+        )),
+        "Unused class members" => Some((
+            "Class methods/properties never referenced outside their class",
+            "https://docs.fallow.tools/explanations/dead-code#unused-class-members",
+        )),
+        "Unresolved imports" => Some((
+            "Import specifiers that could not be resolved to a file",
+            "https://docs.fallow.tools/explanations/dead-code#unresolved-imports",
+        )),
+        "Unlisted dependencies" => Some((
+            "Packages imported in code but missing from package.json",
+            "https://docs.fallow.tools/explanations/dead-code#unlisted-dependencies",
+        )),
+        "Duplicate exports" => Some((
+            "Same export name defined in multiple files",
+            "https://docs.fallow.tools/explanations/dead-code#duplicate-exports",
+        )),
+        "Circular dependencies" => Some((
+            "Files that import each other, forming dependency cycles",
+            "https://docs.fallow.tools/explanations/dead-code#circular-dependencies",
+        )),
+        t if t.starts_with("Type-only") => Some((
+            "Dependencies only used for type imports, safe to move to devDependencies",
+            "https://docs.fallow.tools/explanations/dead-code#type-only-dependencies",
+        )),
+        _ => None,
+    }
+}
+
+/// Push a dimmed section footer line: description — docs_url
+fn push_section_footer(lines: &mut Vec<String>, title: &str) {
+    if let Some((desc, url)) = section_footer_text(title) {
+        lines.push(format!("  {}", format!("{desc} \u{2014} {url}").dimmed()));
+    }
+}
+
+/// Append a non-empty section with a header, doc-link footer, and truncated items.
+fn build_human_section_ex<T>(
     lines: &mut Vec<String>,
     items: &[T],
     title: &str,
@@ -258,6 +321,7 @@ fn build_human_section<T>(
             format!("... and {} more", items.len() - MAX_FLAT_ITEMS).dimmed()
         ));
     }
+    push_section_footer(lines, title);
     lines.push(String::new());
 }
 
@@ -280,6 +344,7 @@ fn build_human_grouped_section<'a, T>(
     }
     lines.push(build_section_header(title, items.len(), level));
     build_grouped_by_file(lines, items, root, get_path, format_detail);
+    push_section_footer(lines, title);
     lines.push(String::new());
 }
 
@@ -369,11 +434,8 @@ fn build_duplicate_exports_section(
     if items.is_empty() {
         return;
     }
-    lines.push(build_section_header(
-        "Duplicate exports",
-        items.len(),
-        level,
-    ));
+    let title = "Duplicate exports";
+    lines.push(build_section_header(title, items.len(), level));
 
     // Group by sorted file-pair key
     let mut pair_groups: Vec<(String, String, Vec<&str>)> = Vec::new();
@@ -453,6 +515,7 @@ fn build_duplicate_exports_section(
             .dimmed()
         ));
     }
+    push_section_footer(lines, title);
     lines.push(String::new());
 }
 
@@ -466,11 +529,8 @@ fn build_circular_deps_section(
     if items.is_empty() {
         return;
     }
-    lines.push(build_section_header(
-        "Circular dependencies",
-        items.len(),
-        level,
-    ));
+    let title = "Circular dependencies";
+    lines.push(build_section_header(title, items.len(), level));
 
     // Group cycles by their first file (hub)
     let mut hub_groups: Vec<(String, Vec<&fallow_core::results::CircularDependency>)> = Vec::new();
@@ -534,6 +594,10 @@ fn build_circular_deps_section(
             .map(|(_, cycles)| cycles.len())
             .sum();
         lines.push(format!("  {}", format!("... and {hidden} more").dimmed()));
+        lines.push(String::new());
+    }
+    push_section_footer(lines, title);
+    if !lines.last().is_some_and(|l| l.is_empty()) {
         lines.push(String::new());
     }
 }
@@ -615,44 +679,22 @@ pub(super) fn print_health_human(
 
     if !quiet {
         let s = &report.summary;
+        let mut parts = Vec::new();
+        parts.push(format!("{} above threshold", s.functions_above_threshold));
+        parts.push(format!("{} analyzed", s.functions_analyzed));
+        if let Some(avg) = s.average_maintainability {
+            parts.push(format!("MI {avg:.1}"));
+        }
         eprintln!(
             "{}",
             format!(
-                "\u{2717} {} function{} exceed{} thresholds (cyclomatic > {}, cognitive > {})",
-                s.functions_above_threshold,
-                if s.functions_above_threshold == 1 {
-                    ""
-                } else {
-                    "s"
-                },
-                if s.functions_above_threshold == 1 {
-                    "s"
-                } else {
-                    ""
-                },
-                s.max_cyclomatic_threshold,
-                s.max_cognitive_threshold,
+                "\u{2717} {} ({:.2}s)",
+                parts.join(" \u{00b7} "),
+                elapsed.as_secs_f64()
             )
             .red()
             .bold()
         );
-        eprintln!(
-            "{}",
-            format!(
-                "  {} functions analyzed across {} files ({:.2}s)",
-                s.functions_analyzed,
-                s.files_analyzed,
-                elapsed.as_secs_f64()
-            )
-            .dimmed()
-        );
-        if let Some(avg) = s.average_maintainability {
-            eprintln!(
-                "{}",
-                format!("  Average maintainability index: {avg:.1}/100").dimmed()
-            );
-        }
-        eprintln!("{}", crate::explain::DOCS_FOOTER.dimmed());
     }
 }
 
@@ -721,10 +763,17 @@ pub(super) fn build_health_human_lines(
         ));
     }
     if !report.findings.is_empty() {
+        lines.push(format!(
+            "  {}",
+            format!(
+                "Functions exceeding cyclomatic or cognitive complexity thresholds \u{2014} {DOCS_HEALTH}#complexity-metrics"
+            )
+            .dimmed()
+        ));
         lines.push(String::new());
     }
 
-    // File health scores
+    // File health scores (truncated)
     if !report.file_scores.is_empty() {
         lines.push(format!(
             "{} {}",
@@ -735,7 +784,8 @@ pub(super) fn build_health_human_lines(
         ));
         lines.push(String::new());
 
-        for score in &report.file_scores {
+        let shown_scores = report.file_scores.len().min(MAX_FLAT_ITEMS);
+        for score in &report.file_scores[..shown_scores] {
             let file_str = relative_path(&score.path, root).display().to_string();
             let mi = score.maintainability_index;
 
@@ -767,6 +817,22 @@ pub(super) fn build_health_human_lines(
             // Blank line between entries
             lines.push(String::new());
         }
+        if report.file_scores.len() > MAX_FLAT_ITEMS {
+            lines.push(format!(
+                "  {}",
+                format!(
+                    "... and {} more files",
+                    report.file_scores.len() - MAX_FLAT_ITEMS
+                )
+                .dimmed()
+            ));
+            lines.push(String::new());
+        }
+        lines.push(format!(
+            "  {}",
+            format!("Composite file quality scores based on complexity, coupling, and dead code \u{2014} {DOCS_HEALTH}#file-health-scores").dimmed()
+        ));
+        lines.push(String::new());
     }
 
     // Hotspots
@@ -854,6 +920,14 @@ pub(super) fn build_health_human_lines(
             ));
             lines.push(String::new());
         }
+        lines.push(format!(
+            "  {}",
+            format!(
+                "Files with high churn and high complexity \u{2014} {DOCS_HEALTH}#hotspot-metrics"
+            )
+            .dimmed()
+        ));
+        lines.push(String::new());
     }
 
     lines
@@ -895,7 +969,7 @@ pub(super) fn print_duplication_human(
         eprintln!(
             "{}",
             format!(
-                "{} lines ({:.1}%) duplicated across {} file{} ({:.2}s)",
+                "\u{2717} {} lines ({:.1}%) duplicated across {} file{} ({:.2}s)",
                 thousands(stats.duplicated_lines),
                 stats.duplication_percentage,
                 stats.files_with_clones,
@@ -906,6 +980,7 @@ pub(super) fn print_duplication_human(
                 },
                 elapsed.as_secs_f64(),
             )
+            .red()
             .bold()
         );
     }
@@ -984,8 +1059,12 @@ pub(super) fn build_duplication_human_lines(
             )
             .dimmed()
         ));
-        lines.push(String::new());
     }
+    lines.push(format!(
+        "  {}",
+        format!("Identical code blocks detected via suffix-array analysis \u{2014} {DOCS_DUPLICATION}#clone-groups").dimmed()
+    ));
+    lines.push(String::new());
 
     // Detect mirrored directory patterns across families.
     // Families with exactly 2 files that share a common filename after stripping
@@ -993,7 +1072,8 @@ pub(super) fn build_duplication_human_lines(
     let (mirrored, non_mirrored) = detect_mirrored_families(&report.clone_families, root);
 
     if !mirrored.is_empty() {
-        for mirror in &mirrored {
+        let shown_mirrors = mirrored.len().min(MAX_FLAT_ITEMS);
+        for mirror in &mirrored[..shown_mirrors] {
             lines.push(format!(
                 "{} {}",
                 "\u{25cf}".yellow(),
@@ -1020,6 +1100,22 @@ pub(super) fn build_duplication_human_lines(
             }
             lines.push(String::new());
         }
+        if mirrored.len() > MAX_FLAT_ITEMS {
+            lines.push(format!(
+                "  {}",
+                format!(
+                    "... and {} more mirrored pairs",
+                    mirrored.len() - MAX_FLAT_ITEMS
+                )
+                .dimmed()
+            ));
+            lines.push(String::new());
+        }
+        lines.push(format!(
+            "  {}",
+            format!("Directories containing identical file copies \u{2014} {DOCS_DUPLICATION}#clone-families").dimmed()
+        ));
+        lines.push(String::new());
     }
 
     // Print remaining clone families with refactoring suggestions
@@ -1039,7 +1135,8 @@ pub(super) fn build_duplication_human_lines(
         ));
         lines.push(String::new());
 
-        for family in &multi_group_families {
+        let shown_families = multi_group_families.len().min(MAX_FLAT_ITEMS);
+        for family in &multi_group_families[..shown_families] {
             let file_names: Vec<_> = family
                 .files
                 .iter()
@@ -1066,6 +1163,22 @@ pub(super) fn build_duplication_human_lines(
             }
             lines.push(String::new());
         }
+        if multi_group_families.len() > MAX_FLAT_ITEMS {
+            lines.push(format!(
+                "  {}",
+                format!(
+                    "... and {} more families",
+                    multi_group_families.len() - MAX_FLAT_ITEMS
+                )
+                .dimmed()
+            ));
+            lines.push(String::new());
+        }
+        lines.push(format!(
+            "  {}",
+            format!("Groups of related clones across the same files \u{2014} {DOCS_DUPLICATION}#clone-families").dimmed()
+        ));
+        lines.push(String::new());
     }
 
     lines
@@ -2889,5 +3002,196 @@ mod tests {
         assert!(!text.contains("\u{2514}\u{2500}"));
         assert!(!text.contains("\u{251c}\u{2500}"));
         assert!(text.contains("a.ts:1-10"));
+    }
+
+    // ── Utility function tests ──
+
+    #[test]
+    fn thousands_zero() {
+        assert_eq!(thousands(0), "0");
+    }
+
+    #[test]
+    fn thousands_small() {
+        assert_eq!(thousands(999), "999");
+    }
+
+    #[test]
+    fn thousands_boundary() {
+        assert_eq!(thousands(1000), "1,000");
+    }
+
+    #[test]
+    fn thousands_large() {
+        assert_eq!(thousands(1_000_000), "1,000,000");
+    }
+
+    #[test]
+    fn thousands_irregular() {
+        assert_eq!(thousands(12345), "12,345");
+    }
+
+    #[test]
+    fn format_path_with_directory() {
+        let result = strip_ansi(&format_path("src/components/Button.tsx"));
+        assert!(result.ends_with("Button.tsx"));
+        assert!(result.contains("src/components/"));
+    }
+
+    #[test]
+    fn format_path_no_directory() {
+        let result = strip_ansi(&format_path("index.ts"));
+        assert_eq!(result, "index.ts");
+    }
+
+    // ── Truncation tests ──
+
+    #[test]
+    fn flat_section_truncates_at_max() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        for i in 0..15 {
+            results.unused_files.push(UnusedFile {
+                path: root.join(format!("src/dead{i}.ts")),
+            });
+        }
+        let rules = RulesConfig::default();
+        let lines = build_human_lines(&results, &root, &rules);
+        let text = plain(&lines);
+        assert!(text.contains("... and 5 more"));
+    }
+
+    #[test]
+    fn grouped_section_truncates_files() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        // 15 files with 1 export each
+        for i in 0..15 {
+            results.unused_exports.push(UnusedExport {
+                path: root.join(format!("src/file{i:02}.ts")),
+                export_name: format!("fn{i}"),
+                is_type_only: false,
+                line: 1,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            });
+        }
+        let rules = RulesConfig::default();
+        let lines = build_human_lines(&results, &root, &rules);
+        let text = plain(&lines);
+        assert!(text.contains("... and 5 more in 5 files"));
+    }
+
+    // ── Hub-grouped circular deps ──
+
+    #[test]
+    fn circular_deps_grouped_by_hub() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        // Two cycles sharing the same hub file
+        results.circular_dependencies.push(CircularDependency {
+            files: vec![root.join("src/hub.ts"), root.join("src/a.ts")],
+            length: 2,
+            line: 1,
+            col: 0,
+        });
+        results.circular_dependencies.push(CircularDependency {
+            files: vec![root.join("src/hub.ts"), root.join("src/b.ts")],
+            length: 2,
+            line: 5,
+            col: 0,
+        });
+        let rules = RulesConfig::default();
+        let lines = build_human_lines(&results, &root, &rules);
+        let text = plain(&lines);
+        // Should show "(2 cycles)" for the hub
+        assert!(text.contains("(2 cycles)"));
+        // Hub file appears once
+        assert_eq!(text.matches("hub.ts").count(), 3); // header + 2 chain endings
+    }
+
+    // ── Mirrored directory detection ──
+
+    #[test]
+    fn mirrored_dirs_detected() {
+        let root = PathBuf::from("/project");
+        let mut families = Vec::new();
+        // 4 families with same dir pattern (above MIN_MIRROR_FAMILIES threshold of 3)
+        for name in &["a.ts", "b.ts", "c.ts", "d.ts"] {
+            families.push(CloneFamily {
+                files: vec![
+                    root.join(format!("src/{name}")),
+                    root.join(format!("deno/lib/{name}")),
+                ],
+                groups: vec![CloneGroup {
+                    instances: vec![],
+                    token_count: 100,
+                    line_count: 50,
+                }],
+                total_duplicated_lines: 50,
+                total_duplicated_tokens: 100,
+                suggestions: vec![],
+            });
+        }
+        let (mirrored, non_mirrored) = detect_mirrored_families(&families, &root);
+        assert_eq!(mirrored.len(), 1);
+        assert_eq!(mirrored[0].file_count, 4);
+        assert!(non_mirrored.is_empty());
+    }
+
+    #[test]
+    fn mirrored_dirs_below_threshold_not_detected() {
+        let root = PathBuf::from("/project");
+        let families = vec![
+            CloneFamily {
+                files: vec![root.join("src/a.ts"), root.join("deno/a.ts")],
+                groups: vec![],
+                total_duplicated_lines: 10,
+                total_duplicated_tokens: 50,
+                suggestions: vec![],
+            },
+            CloneFamily {
+                files: vec![root.join("src/b.ts"), root.join("deno/b.ts")],
+                groups: vec![],
+                total_duplicated_lines: 10,
+                total_duplicated_tokens: 50,
+                suggestions: vec![],
+            },
+        ];
+        let (mirrored, _) = detect_mirrored_families(&families, &root);
+        // Only 2 families — below threshold of 3
+        assert!(mirrored.is_empty());
+    }
+
+    // ── Summary footer ──
+
+    #[test]
+    fn summary_footer_uses_short_labels() {
+        let root = PathBuf::from("/project");
+        let results = sample_results(&root);
+        let footer = build_summary_footer(&results);
+        // Should use short labels, not "unused file" etc.
+        assert!(footer.contains("1 file"));
+        assert!(footer.contains("1 export"));
+        assert!(footer.contains("1 circular"));
+        assert!(!footer.contains("unused file"));
+    }
+
+    // ── Section footers with docs links ──
+
+    #[test]
+    fn section_footer_contains_docs_link() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results.unused_files.push(UnusedFile {
+            path: root.join("src/dead.ts"),
+        });
+        let rules = RulesConfig::default();
+        let lines = build_human_lines(&results, &root, &rules);
+        let text = plain(&lines);
+        // Human output always includes section footers with doc links
+        assert!(text.contains("docs.fallow.tools/explanations/dead-code"));
+        assert!(text.contains("Files not imported or referenced by any entry point"));
     }
 }

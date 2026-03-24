@@ -462,4 +462,52 @@ mod tests {
         assert!(matches!(level, Level::Error));
         assert!(matches!(copy, Level::Error));
     }
+
+    // ── elide_common_prefix ─────────────────────────────────────────
+
+    #[test]
+    fn elide_common_prefix_shared_dir() {
+        assert_eq!(
+            elide_common_prefix("src/components/A.tsx", "src/components/B.tsx"),
+            "B.tsx"
+        );
+    }
+
+    #[test]
+    fn elide_common_prefix_partial_shared() {
+        assert_eq!(
+            elide_common_prefix("src/components/A.tsx", "src/utils/B.tsx"),
+            "utils/B.tsx"
+        );
+    }
+
+    #[test]
+    fn elide_common_prefix_no_shared() {
+        assert_eq!(
+            elide_common_prefix("pkg-a/src/A.tsx", "pkg-b/src/B.tsx"),
+            "pkg-b/src/B.tsx"
+        );
+    }
+
+    #[test]
+    fn elide_common_prefix_identical_files() {
+        // Same dir, different file
+        assert_eq!(elide_common_prefix("a/b/x.ts", "a/b/y.ts"), "y.ts");
+    }
+
+    #[test]
+    fn elide_common_prefix_no_dirs() {
+        assert_eq!(elide_common_prefix("foo.ts", "bar.ts"), "bar.ts");
+    }
+
+    #[test]
+    fn elide_common_prefix_deep_monorepo() {
+        assert_eq!(
+            elide_common_prefix(
+                "packages/rap/src/rap/components/SearchSelect/SearchSelect.tsx",
+                "packages/rap/src/rap/components/SearchSelect/SearchSelectItem.tsx"
+            ),
+            "SearchSelectItem.tsx"
+        );
+    }
 }
