@@ -1,5 +1,4 @@
 //! Circular dependency detection via Tarjan's SCC algorithm + elementary cycle enumeration.
-#![expect(clippy::excessive_nesting)]
 
 use std::ops::Range;
 
@@ -20,6 +19,7 @@ impl ModuleGraph {
     ///
     /// Returns cycles sorted by length (shortest first), with files within each
     /// cycle sorted by path for deterministic output.
+    #[expect(clippy::excessive_nesting)]
     pub fn find_cycles(&self) -> Vec<Vec<FileId>> {
         let n = self.modules.len();
         if n == 0 {
@@ -140,6 +140,12 @@ impl ModuleGraph {
         // For larger SCCs, use bounded DFS to find up to MAX_CYCLES_PER_SCC cycles.
         const MAX_CYCLES_PER_SCC: usize = 20;
 
+        let succs = SuccessorMap {
+            all_succs: &all_succs,
+            succ_ranges: &succ_ranges,
+            modules: &self.modules,
+        };
+
         let mut result: Vec<Vec<FileId>> = Vec::new();
         let mut seen_cycles: FxHashSet<Vec<u32>> = FxHashSet::default();
 
@@ -158,13 +164,7 @@ impl ModuleGraph {
             }
 
             let scc_nodes: Vec<usize> = scc.iter().map(|id| id.0 as usize).collect();
-            let elementary = enumerate_elementary_cycles(
-                &scc_nodes,
-                &all_succs,
-                &succ_ranges,
-                MAX_CYCLES_PER_SCC,
-                &self.modules,
-            );
+            let elementary = enumerate_elementary_cycles(&scc_nodes, &succs, MAX_CYCLES_PER_SCC);
 
             for cycle in elementary {
                 let key: Vec<u32> = cycle.iter().map(|&n| n as u32).collect();
@@ -202,6 +202,102 @@ fn canonical_cycle(cycle: &[usize], modules: &[ModuleNode]) -> Vec<usize> {
     result
 }
 
+/// DFS frame for iterative cycle finding.
+struct CycleFrame {
+    succ_pos: usize,
+    succ_end: usize,
+}
+
+/// Pre-collected, deduplicated successor data for cache-friendly graph traversal.
+struct SuccessorMap<'a> {
+    all_succs: &'a [usize],
+    succ_ranges: &'a [Range<usize>],
+    modules: &'a [ModuleNode],
+}
+
+/// Record a cycle in canonical form if not already seen.
+fn try_record_cycle(
+    path: &[usize],
+    modules: &[ModuleNode],
+    seen: &mut FxHashSet<Vec<u32>>,
+    cycles: &mut Vec<Vec<usize>>,
+) {
+    let canonical = canonical_cycle(path, modules);
+    let key: Vec<u32> = canonical.iter().map(|&n| n as u32).collect();
+    if seen.insert(key) {
+        cycles.push(canonical);
+    }
+}
+
+/// Run a bounded DFS from `start`, looking for elementary cycles of exactly `depth_limit` nodes.
+///
+/// Appends any newly found cycles to `cycles` (deduped via `seen`).
+/// Stops early once `cycles.len() >= max_cycles`.
+fn dfs_find_cycles_from(
+    start: usize,
+    depth_limit: usize,
+    scc_set: &FxHashSet<usize>,
+    succs: &SuccessorMap<'_>,
+    max_cycles: usize,
+    seen: &mut FxHashSet<Vec<u32>>,
+    cycles: &mut Vec<Vec<usize>>,
+) {
+    let mut path: Vec<usize> = vec![start];
+    let mut path_set = FixedBitSet::with_capacity(succs.modules.len());
+    path_set.insert(start);
+
+    let range = &succs.succ_ranges[start];
+    let mut dfs: Vec<CycleFrame> = vec![CycleFrame {
+        succ_pos: range.start,
+        succ_end: range.end,
+    }];
+
+    while let Some(frame) = dfs.last_mut() {
+        if cycles.len() >= max_cycles {
+            return;
+        }
+
+        if frame.succ_pos >= frame.succ_end {
+            // Backtrack: all successors exhausted for this frame
+            dfs.pop();
+            if path.len() > 1 {
+                let removed = path.pop().unwrap();
+                path_set.set(removed, false);
+            }
+            continue;
+        }
+
+        let w = succs.all_succs[frame.succ_pos];
+        frame.succ_pos += 1;
+
+        // Only follow edges within this SCC
+        if !scc_set.contains(&w) {
+            continue;
+        }
+
+        // Found an elementary cycle at exactly this depth
+        if w == start && path.len() >= 2 && path.len() == depth_limit {
+            try_record_cycle(&path, succs.modules, seen, cycles);
+            continue;
+        }
+
+        // Skip if already on current path or beyond depth limit
+        if path_set.contains(w) || path.len() >= depth_limit {
+            continue;
+        }
+
+        // Extend path
+        path.push(w);
+        path_set.insert(w);
+
+        let range = &succs.succ_ranges[w];
+        dfs.push(CycleFrame {
+            succ_pos: range.start,
+            succ_end: range.end,
+        });
+    }
+}
+
 /// Enumerate individual elementary cycles within an SCC using depth-limited DFS.
 ///
 /// Uses iterative deepening: first finds all 2-node cycles, then 3-node, etc.
@@ -209,10 +305,8 @@ fn canonical_cycle(cycle: &[usize], modules: &[ModuleNode]) -> Vec<usize> {
 /// Stops after `max_cycles` total cycles to bound work on dense SCCs.
 fn enumerate_elementary_cycles(
     scc_nodes: &[usize],
-    all_succs: &[usize],
-    succ_ranges: &[Range<usize>],
+    succs: &SuccessorMap<'_>,
     max_cycles: usize,
-    modules: &[ModuleNode],
 ) -> Vec<Vec<usize>> {
     let scc_set: FxHashSet<usize> = scc_nodes.iter().copied().collect();
     let mut cycles: Vec<Vec<usize>> = Vec::new();
@@ -220,13 +314,7 @@ fn enumerate_elementary_cycles(
 
     // Sort start nodes by path for deterministic enumeration order
     let mut sorted_nodes: Vec<usize> = scc_nodes.to_vec();
-    sorted_nodes.sort_by(|a, b| modules[*a].path.cmp(&modules[*b].path));
-
-    // DFS frame for iterative cycle finding
-    struct CycleFrame {
-        succ_pos: usize,
-        succ_end: usize,
-    }
+    sorted_nodes.sort_by(|a, b| succs.modules[*a].path.cmp(&succs.modules[*b].path));
 
     // Iterative deepening: increase max depth from 2 up to SCC size
     let max_depth = scc_nodes.len().min(12); // Cap depth to avoid very long cycles
@@ -240,58 +328,15 @@ fn enumerate_elementary_cycles(
                 break;
             }
 
-            let mut path: Vec<usize> = vec![start];
-            let mut path_set = FixedBitSet::with_capacity(modules.len());
-            path_set.insert(start);
-
-            let range = &succ_ranges[start];
-            let mut dfs: Vec<CycleFrame> = vec![CycleFrame {
-                succ_pos: range.start,
-                succ_end: range.end,
-            }];
-
-            while let Some(frame) = dfs.last_mut() {
-                if cycles.len() >= max_cycles {
-                    break;
-                }
-
-                if frame.succ_pos >= frame.succ_end {
-                    // Backtrack
-                    dfs.pop();
-                    if path.len() > 1 {
-                        let last = path.pop().unwrap();
-                        path_set.set(last, false);
-                    }
-                    continue;
-                }
-
-                let w = all_succs[frame.succ_pos];
-                frame.succ_pos += 1;
-
-                // Only follow edges within this SCC
-                if !scc_set.contains(&w) {
-                    continue;
-                }
-
-                if w == start && path.len() >= 2 && path.len() == depth_limit {
-                    // Found an elementary cycle at exactly this depth
-                    let canonical = canonical_cycle(&path, modules);
-                    let key: Vec<u32> = canonical.iter().map(|&n| n as u32).collect();
-                    if seen.insert(key) {
-                        cycles.push(canonical);
-                    }
-                } else if !path_set.contains(w) && path.len() < depth_limit {
-                    // Extend path (only if within depth limit)
-                    path.push(w);
-                    path_set.insert(w);
-
-                    let range = &succ_ranges[w];
-                    dfs.push(CycleFrame {
-                        succ_pos: range.start,
-                        succ_end: range.end,
-                    });
-                }
-            }
+            dfs_find_cycles_from(
+                start,
+                depth_limit,
+                &scc_set,
+                succs,
+                max_cycles,
+                &mut seen,
+                &mut cycles,
+            );
         }
     }
 
