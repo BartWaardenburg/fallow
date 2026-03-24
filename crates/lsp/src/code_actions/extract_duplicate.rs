@@ -6,6 +6,9 @@ use tower_lsp::lsp_types::*;
 
 use fallow_core::duplicates::CloneGroup;
 
+use super::fragment::dedent_fragment;
+use super::scoping::find_insert_line;
+
 /// Build "Extract duplicate into function" code actions for clone groups overlapping the cursor.
 #[expect(clippy::disallowed_types)]
 pub fn build_extract_duplicate_actions(
@@ -169,46 +172,6 @@ fn build_title(instance_count_in_file: usize, has_cross_file_instances: bool) ->
     } else {
         "Extract duplicate into function".to_string()
     }
-}
-
-/// Strip common leading whitespace from a fragment and re-indent with 2 spaces.
-fn dedent_fragment(fragment: &str) -> String {
-    let common_indent = fragment
-        .lines()
-        .filter(|line| !line.trim().is_empty())
-        .map(|line| line.len() - line.trim_start().len())
-        .min()
-        .unwrap_or(0);
-    fragment
-        .lines()
-        .map(|line| {
-            let stripped = if line.len() > common_indent {
-                &line[common_indent..]
-            } else {
-                line.trim_start()
-            };
-            if stripped.is_empty() {
-                String::new()
-            } else {
-                format!("  {stripped}")
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-/// Find a suitable insert position at module scope above the first instance.
-fn find_insert_line(first_start_0based: u32, file_lines: &[&str]) -> u32 {
-    let mut line = first_start_0based;
-    while line > 0 {
-        line -= 1;
-        let content = file_lines.get(line as usize).copied().unwrap_or("");
-        // An empty line or a line starting at column 0 (module scope) is a good insert point
-        if content.is_empty() || (!content.starts_with(' ') && !content.starts_with('\t')) {
-            break;
-        }
-    }
-    line
 }
 
 /// Sort edits in reverse document order for LSP spec compliance.
@@ -1237,112 +1200,6 @@ export function fetchProducts() {
                 "Function body should NOT have 4-space indent:\n{result}"
             );
         }
-    }
-
-    // -----------------------------------------------------------------------
-    // dedent_fragment unit tests
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn dedent_removes_common_indent_and_adds_two_spaces() {
-        let fragment = "    const x = 1;\n    const y = 2;";
-        let result = dedent_fragment(fragment);
-        assert_eq!(result, "  const x = 1;\n  const y = 2;");
-    }
-
-    #[test]
-    fn dedent_handles_mixed_indent_levels() {
-        let fragment = "    if (true) {\n        return 1;\n    }";
-        let result = dedent_fragment(fragment);
-        // Common indent is 4, so 4 removed from each line
-        assert_eq!(result, "  if (true) {\n      return 1;\n  }");
-    }
-
-    #[test]
-    fn dedent_skips_empty_lines_for_common_indent_calculation() {
-        let fragment = "    const x = 1;\n\n    const y = 2;";
-        let result = dedent_fragment(fragment);
-        // Empty line should become empty (no indent added), others get 2-space indent
-        assert_eq!(result, "  const x = 1;\n\n  const y = 2;");
-    }
-
-    #[test]
-    fn dedent_handles_no_indentation() {
-        let fragment = "const x = 1;\nconst y = 2;";
-        let result = dedent_fragment(fragment);
-        // Common indent is 0, so each line gets 2 spaces prepended
-        assert_eq!(result, "  const x = 1;\n  const y = 2;");
-    }
-
-    #[test]
-    fn dedent_handles_single_line() {
-        let fragment = "  return 42;";
-        let result = dedent_fragment(fragment);
-        assert_eq!(result, "  return 42;");
-    }
-
-    #[test]
-    fn dedent_handles_all_empty_lines() {
-        let fragment = "\n\n";
-        let result = dedent_fragment(fragment);
-        // Rust's .lines() yields ["", ""] for "\n\n" (no trailing empty element).
-        // Both are empty so they stay empty. Joined with "\n" => "\n".
-        assert_eq!(result, "\n");
-    }
-
-    #[test]
-    fn dedent_handles_empty_fragment() {
-        let result = dedent_fragment("");
-        assert_eq!(result, "");
-    }
-
-    // -----------------------------------------------------------------------
-    // find_insert_line unit tests
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn find_insert_line_stops_at_empty_line() {
-        let lines = vec!["function a() {", "  return 1;", "}", "", "  const x = 1;"];
-        // Searching backwards from line 4, should stop at empty line 3
-        assert_eq!(find_insert_line(4, &lines), 3);
-    }
-
-    #[test]
-    fn find_insert_line_stops_at_module_scope_line() {
-        let lines = vec!["const a = 1;", "  indented code", "  more indented"];
-        // Searching backwards from line 2, hits "  indented code" (starts with space),
-        // then hits "const a = 1;" (no leading space/tab) at line 0
-        assert_eq!(find_insert_line(2, &lines), 0);
-    }
-
-    #[test]
-    fn find_insert_line_returns_0_when_all_indented() {
-        let lines = vec!["  a", "  b", "  c"];
-        // Searching backwards from line 2: line 1 is indented, line 0 is indented
-        // Loop goes: line=1 (indented, continue), line=0 (indented, continue),
-        // loop ends (line > 0 is false). Returns 0.
-        assert_eq!(find_insert_line(2, &lines), 0);
-    }
-
-    #[test]
-    fn find_insert_line_at_line_0_returns_0() {
-        let lines = vec!["  something"];
-        // first_start_0based is 0, while loop condition is line > 0, so loop never runs
-        assert_eq!(find_insert_line(0, &lines), 0);
-    }
-
-    #[test]
-    fn find_insert_line_stops_at_line_starting_with_text() {
-        let lines = vec![
-            "import { x } from 'y';",
-            "export function foo() {",
-            "  return x;",
-            "}",
-            "  // indented comment",
-            "  const z = 1;",
-        ];
-        // From line 5, walk back: line 4 (indented), line 3 ("}" at col 0) => stop
-        assert_eq!(find_insert_line(5, &lines), 3);
     }
 
     // -----------------------------------------------------------------------
