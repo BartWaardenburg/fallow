@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.1] - 2026-03-24
+
+### Added
+- Per-file health scores (`fallow health --file-scores`): maintainability index combining complexity density, dead code ratio, fan-in, and fan-out. Available in all output formats (human, JSON, compact, markdown, SARIF). MCP `check_health` tool supports `file_scores: true` parameter.
+- Markdown and SARIF output formats for health command
+- Workspace scoping (`--workspace`) and baseline support (`--baseline`/`--save-baseline`) for health command
+
+### Fixed
+- Re-export chain propagation for entry-point-only exports: exports consumed solely via re-export from an entry point barrel (e.g., `export { render } from './render'` in `src/index.js`) are no longer falsely reported as unused. Fixes false positives for the common library barrel pattern.
+- Entry point star re-exports (`export * from './source'`) now correctly exclude the default export per ES spec
+- Deterministic bare specifier resolution: removed the `BareSpecifierCache` that caused non-deterministic results in multi-threaded mode when per-file tsconfig path aliases resolved the same specifier to different targets. Replaced with a deterministic post-resolution pass that upgrades `NpmPackage` to `InternalModule`. Analysis results are now identical between `--threads 1` and default multi-threaded mode.
+- Hard error on health baseline I/O failures instead of silent fallback
+- MCP server test and review findings addressed
+
 ## [1.6.0] - 2026-03-24
 
 ### Added
@@ -272,7 +286,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[Unreleased]: https://github.com/fallow-rs/fallow/compare/v1.5.0...HEAD
+[Unreleased]: https://github.com/fallow-rs/fallow/compare/v1.6.1...HEAD
+[1.6.1]: https://github.com/fallow-rs/fallow/compare/v1.6.0...v1.6.1
 [1.6.0]: https://github.com/fallow-rs/fallow/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/fallow-rs/fallow/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/fallow-rs/fallow/compare/v1.3.1...v1.4.0
