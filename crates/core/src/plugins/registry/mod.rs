@@ -1951,4 +1951,256 @@ export default defineConfig({
             "discover_json_config_files should find project.json in parent dir of discovered source file"
         );
     }
+
+    // ── builtin::create_builtin_plugins ─────────────────────────
+
+    #[test]
+    fn create_builtin_plugins_returns_non_empty() {
+        let plugins = builtin::create_builtin_plugins();
+        assert!(
+            !plugins.is_empty(),
+            "create_builtin_plugins should return a non-empty list"
+        );
+    }
+
+    #[test]
+    fn create_builtin_plugins_all_have_unique_names() {
+        let plugins = builtin::create_builtin_plugins();
+        let mut seen = FxHashSet::default();
+        for plugin in &plugins {
+            let name = plugin.name();
+            assert!(
+                seen.insert(name),
+                "duplicate plugin name found: {name}"
+            );
+        }
+    }
+
+    #[test]
+    fn create_builtin_plugins_contains_critical_plugins() {
+        let plugins = builtin::create_builtin_plugins();
+        let names: Vec<&str> = plugins.iter().map(|p| p.name()).collect();
+
+        let critical = [
+            "typescript", "eslint", "jest", "vitest", "webpack", "nextjs",
+            "vite", "prettier", "tailwind", "storybook", "prisma", "babel",
+        ];
+        for expected in &critical {
+            assert!(
+                names.contains(expected),
+                "critical plugin '{expected}' missing from builtin plugins"
+            );
+        }
+    }
+
+    #[test]
+    fn create_builtin_plugins_all_have_non_empty_names() {
+        let plugins = builtin::create_builtin_plugins();
+        for plugin in &plugins {
+            assert!(
+                !plugin.name().is_empty(),
+                "all builtin plugins must have a non-empty name"
+            );
+        }
+    }
+
+    // ── process_static_patterns: minimal plugin ─────────────────
+
+    #[test]
+    fn process_static_patterns_with_minimal_plugin() {
+        // MSW has entry_patterns, always_used, tooling_dependencies but no config_patterns
+        let mut result = AggregatedPluginResult::default();
+        let plugin: &dyn Plugin = &super::super::msw::MswPlugin;
+        helpers::process_static_patterns(plugin, Path::new("/project"), &mut result);
+
+        assert!(result.active_plugins.contains(&"msw".to_string()));
+        assert!(!result.entry_patterns.is_empty());
+        assert!(result.config_patterns.is_empty());
+        assert!(!result.always_used.is_empty());
+        assert!(!result.tooling_dependencies.is_empty());
+    }
+
+    #[test]
+    fn process_static_patterns_accumulates_across_plugins() {
+        let mut result = AggregatedPluginResult::default();
+        let next_plugin: &dyn Plugin = &super::super::nextjs::NextJsPlugin;
+        let msw_plugin: &dyn Plugin = &super::super::msw::MswPlugin;
+
+        helpers::process_static_patterns(next_plugin, Path::new("/project"), &mut result);
+        let count_after_first = result.entry_patterns.len();
+
+        helpers::process_static_patterns(msw_plugin, Path::new("/project"), &mut result);
+        assert!(
+            result.entry_patterns.len() > count_after_first,
+            "second plugin should add more entry patterns"
+        );
+        assert_eq!(result.active_plugins.len(), 2);
+        assert!(result.active_plugins.contains(&"nextjs".to_string()));
+        assert!(result.active_plugins.contains(&"msw".to_string()));
+    }
+
+    // ── process_config_result: empty result ─────────────────────
+
+    #[test]
+    fn process_config_result_empty_result_is_noop() {
+        let mut aggregated = AggregatedPluginResult::default();
+        let empty = PluginResult::default();
+        process_config_result("empty-plugin", empty, &mut aggregated);
+
+        assert!(aggregated.entry_patterns.is_empty());
+        assert!(aggregated.referenced_dependencies.is_empty());
+        assert!(aggregated.discovered_always_used.is_empty());
+        assert!(aggregated.setup_files.is_empty());
+    }
+
+    // ── check_plugin_detection: direct unit tests ───────────────
+
+    #[test]
+    fn check_plugin_detection_any_with_single_match() {
+        let detection = PluginDetection::Any {
+            conditions: vec![
+                PluginDetection::Dependency {
+                    package: "missing-pkg".to_string(),
+                },
+                PluginDetection::Dependency {
+                    package: "present-pkg".to_string(),
+                },
+            ],
+        };
+        let deps = vec!["present-pkg"];
+        assert!(
+            check_plugin_detection(&detection, &deps, Path::new("/project"), &[]),
+            "Any should succeed when at least one condition matches"
+        );
+    }
+
+    #[test]
+    fn check_plugin_detection_all_with_all_matching() {
+        let detection = PluginDetection::All {
+            conditions: vec![
+                PluginDetection::Dependency {
+                    package: "pkg-a".to_string(),
+                },
+                PluginDetection::Dependency {
+                    package: "pkg-b".to_string(),
+                },
+            ],
+        };
+        let deps = vec!["pkg-a", "pkg-b"];
+        assert!(
+            check_plugin_detection(&detection, &deps, Path::new("/project"), &[]),
+            "All should succeed when every condition matches"
+        );
+    }
+
+    #[test]
+    fn check_plugin_detection_all_with_partial_match() {
+        let detection = PluginDetection::All {
+            conditions: vec![
+                PluginDetection::Dependency {
+                    package: "pkg-a".to_string(),
+                },
+                PluginDetection::Dependency {
+                    package: "pkg-b".to_string(),
+                },
+            ],
+        };
+        let deps = vec!["pkg-a"];
+        assert!(
+            !check_plugin_detection(&detection, &deps, Path::new("/project"), &[]),
+            "All should fail when only some conditions match"
+        );
+    }
+
+    #[test]
+    fn check_plugin_detection_any_with_no_matches() {
+        let detection = PluginDetection::Any {
+            conditions: vec![
+                PluginDetection::Dependency {
+                    package: "missing-a".to_string(),
+                },
+                PluginDetection::Dependency {
+                    package: "missing-b".to_string(),
+                },
+            ],
+        };
+        let deps: Vec<&str> = vec!["unrelated"];
+        assert!(
+            !check_plugin_detection(&detection, &deps, Path::new("/project"), &[]),
+            "Any should fail when no conditions match"
+        );
+    }
+
+    #[test]
+    fn check_plugin_detection_nested_all_inside_any() {
+        let detection = PluginDetection::Any {
+            conditions: vec![
+                PluginDetection::All {
+                    conditions: vec![
+                        PluginDetection::Dependency {
+                            package: "pkg-a".to_string(),
+                        },
+                        PluginDetection::Dependency {
+                            package: "pkg-b".to_string(),
+                        },
+                    ],
+                },
+                PluginDetection::Dependency {
+                    package: "pkg-c".to_string(),
+                },
+            ],
+        };
+        // Only pkg-c — the Any should succeed via the second branch
+        let deps = vec!["pkg-c"];
+        assert!(
+            check_plugin_detection(&detection, &deps, Path::new("/project"), &[]),
+            "nested All inside Any: should pass via the Any fallback branch"
+        );
+    }
+
+    // ── process_external_plugins: detection via check_plugin_detection ──
+
+    #[test]
+    fn process_external_plugins_detection_dependency() {
+        let ext = ExternalPluginDef {
+            schema: None,
+            name: "detect-dep".to_string(),
+            detection: Some(PluginDetection::Dependency {
+                package: "my-dep".to_string(),
+            }),
+            enablers: vec![],
+            entry_points: vec!["src/**/*.ts".to_string()],
+            config_patterns: vec![],
+            always_used: vec![],
+            tooling_dependencies: vec![],
+            used_exports: vec![],
+        };
+        let mut result = AggregatedPluginResult::default();
+        let deps = vec!["my-dep".to_string()];
+        helpers::process_external_plugins(&[ext], &deps, Path::new("/project"), &[], &mut result);
+        assert!(result.active_plugins.contains(&"detect-dep".to_string()));
+        assert!(result.entry_patterns.iter().any(|(p, _)| p == "src/**/*.ts"));
+    }
+
+    #[test]
+    fn process_external_plugins_detection_not_matched() {
+        let ext = ExternalPluginDef {
+            schema: None,
+            name: "detect-miss".to_string(),
+            detection: Some(PluginDetection::Dependency {
+                package: "missing-dep".to_string(),
+            }),
+            enablers: vec![],
+            entry_points: vec!["src/**/*.ts".to_string()],
+            config_patterns: vec![],
+            always_used: vec![],
+            tooling_dependencies: vec![],
+            used_exports: vec![],
+        };
+        let mut result = AggregatedPluginResult::default();
+        let deps = vec!["other-dep".to_string()];
+        helpers::process_external_plugins(&[ext], &deps, Path::new("/project"), &[], &mut result);
+        assert!(!result.active_plugins.contains(&"detect-miss".to_string()));
+        assert!(result.entry_patterns.is_empty());
+    }
 }
