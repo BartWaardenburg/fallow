@@ -164,14 +164,22 @@ pub fn run_health(opts: &HealthOptions<'_>) -> ExitCode {
         match serde_json::to_string_pretty(&baseline) {
             Ok(json) => {
                 if let Err(e) = std::fs::write(save_path, json) {
-                    eprintln!("Warning: failed to save health baseline: {e}");
-                } else if !opts.quiet {
+                    eprintln!("Error: failed to save health baseline: {e}");
+                    return ExitCode::from(2);
+                }
+                if !opts.quiet {
                     eprintln!("Saved health baseline to {}", save_path.display());
                 }
             }
-            Err(e) => eprintln!("Warning: failed to serialize health baseline: {e}"),
+            Err(e) => {
+                eprintln!("Error: failed to serialize health baseline: {e}");
+                return ExitCode::from(2);
+            }
         }
     }
+
+    // Capture total above threshold before baseline filtering
+    let total_above_threshold = findings.len();
 
     // Filter against baseline
     if let Some(load_path) = opts.baseline {
@@ -180,14 +188,17 @@ pub fn run_health(opts: &HealthOptions<'_>) -> ExitCode {
                 Ok(baseline) => {
                     findings = filter_new_health_findings(findings, &baseline, &config.root);
                 }
-                Err(e) => eprintln!("Warning: failed to parse health baseline: {e}"),
+                Err(e) => {
+                    eprintln!("Error: failed to parse health baseline: {e}");
+                    return ExitCode::from(2);
+                }
             },
-            Err(e) => eprintln!("Warning: failed to read health baseline: {e}"),
+            Err(e) => {
+                eprintln!("Error: failed to read health baseline: {e}");
+                return ExitCode::from(2);
+            }
         }
     }
-
-    // Capture total before --top truncation
-    let total_above_threshold = findings.len();
 
     // Apply --top limit
     if let Some(top) = opts.top {
