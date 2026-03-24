@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1774391735243,
+  "lastUpdate": 1774392844952,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
@@ -956,6 +956,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "Code Coverage",
             "value": 90.3,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "9cfedd96d8195004b83382bd3cf7f33d664c7c8b",
+          "message": "refactor: split human.rs into health, dupes, traces, and perf modules",
+          "timestamp": "2026-03-24T23:51:15+01:00",
+          "tree_id": "dfc69fd5587361bd7d508b7760ea55b26cb2f17c",
+          "url": "https://github.com/fallow-rs/fallow/commit/9cfedd96d8195004b83382bd3cf7f33d664c7c8b"
+        },
+        "date": 1774392843975,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 90.4,
             "unit": "%"
           }
         ]
