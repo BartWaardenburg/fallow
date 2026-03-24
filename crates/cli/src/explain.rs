@@ -36,91 +36,91 @@ pub const CHECK_RULES: &[RuleDef] = &[
         name: "Unused Files",
         short: "File is not reachable from any entry point",
         full: "Source files that are not imported by any other module and are not entry points (scripts, tests, configs). These files can safely be deleted. Detection uses graph reachability from configured entry points.",
-        docs_path: "rules/unused-files",
+        docs_path: "explanations/dead-code#unused-files",
     },
     RuleDef {
         id: "fallow/unused-export",
         name: "Unused Exports",
         short: "Export is never imported",
         full: "Named exports that are never imported by any other module in the project. Includes both direct exports and re-exports through barrel files. The export may still be used locally within the same file.",
-        docs_path: "rules/unused-exports",
+        docs_path: "explanations/dead-code#unused-exports",
     },
     RuleDef {
         id: "fallow/unused-type",
         name: "Unused Type Exports",
         short: "Type export is never imported",
         full: "Type-only exports (interfaces, type aliases, enums used only as types) that are never imported. These do not generate runtime code but add maintenance burden.",
-        docs_path: "rules/unused-types",
+        docs_path: "explanations/dead-code#unused-types",
     },
     RuleDef {
         id: "fallow/unused-dependency",
         name: "Unused Dependencies",
         short: "Dependency listed but never imported",
         full: "Packages listed in dependencies that are never imported or required by any source file. Framework plugins and CLI tools may be false positives — use the ignore_dependencies config to suppress.",
-        docs_path: "rules/unused-dependencies",
+        docs_path: "explanations/dead-code#unused-dependencies",
     },
     RuleDef {
         id: "fallow/unused-dev-dependency",
         name: "Unused Dev Dependencies",
         short: "Dev dependency listed but never imported",
         full: "Packages listed in devDependencies that are never imported by test files, config files, or scripts. Build tools and jest presets that are referenced only in config may appear as false positives.",
-        docs_path: "rules/unused-dev-dependencies",
+        docs_path: "explanations/dead-code#unused-devdependencies",
     },
     RuleDef {
         id: "fallow/unused-optional-dependency",
         name: "Unused Optional Dependencies",
         short: "Optional dependency listed but never imported",
         full: "Packages listed in optionalDependencies that are never imported. Optional dependencies are typically platform-specific — verify they are not needed on any supported platform before removing.",
-        docs_path: "rules/unused-optional-dependencies",
+        docs_path: "explanations/dead-code#unused-optionaldependencies",
     },
     RuleDef {
         id: "fallow/type-only-dependency",
         name: "Type-only Dependencies",
         short: "Production dependency only used via type-only imports",
         full: "Production dependencies that are only imported via `import type` statements. These can be moved to devDependencies since they generate no runtime code and are stripped during compilation.",
-        docs_path: "rules/type-only-dependencies",
+        docs_path: "explanations/dead-code#type-only-dependencies",
     },
     RuleDef {
         id: "fallow/unused-enum-member",
         name: "Unused Enum Members",
         short: "Enum member is never referenced",
         full: "Enum members that are never referenced in the codebase. Uses scope-aware binding analysis to track all references including computed access patterns.",
-        docs_path: "rules/unused-enum-members",
+        docs_path: "explanations/dead-code#unused-enum-members",
     },
     RuleDef {
         id: "fallow/unused-class-member",
         name: "Unused Class Members",
         short: "Class member is never referenced",
         full: "Class methods and properties that are never referenced outside the class. Private members are checked within the class scope; public members are checked project-wide.",
-        docs_path: "rules/unused-class-members",
+        docs_path: "explanations/dead-code#unused-class-members",
     },
     RuleDef {
         id: "fallow/unresolved-import",
         name: "Unresolved Imports",
         short: "Import could not be resolved",
         full: "Import specifiers that could not be resolved to a file on disk. Common causes: deleted files, typos in paths, missing path aliases in tsconfig, or uninstalled packages.",
-        docs_path: "rules/unresolved-imports",
+        docs_path: "explanations/dead-code#unresolved-imports",
     },
     RuleDef {
         id: "fallow/unlisted-dependency",
         name: "Unlisted Dependencies",
         short: "Dependency used but not in package.json",
         full: "Packages that are imported in source code but not listed in package.json. These work by accident (hoisted from another workspace package or transitive dep) and will break in strict package managers.",
-        docs_path: "rules/unlisted-dependencies",
+        docs_path: "explanations/dead-code#unlisted-dependencies",
     },
     RuleDef {
         id: "fallow/duplicate-export",
         name: "Duplicate Exports",
         short: "Export name appears in multiple modules",
         full: "The same export name is defined in multiple modules. Consumers may import from the wrong module, leading to subtle bugs. Consider renaming or consolidating.",
-        docs_path: "rules/duplicate-exports",
+        docs_path: "explanations/dead-code#duplicate-exports",
     },
     RuleDef {
         id: "fallow/circular-dependency",
         name: "Circular Dependencies",
         short: "Circular dependency chain detected",
         full: "A cycle in the module import graph. Circular dependencies cause undefined behavior with CommonJS (partial modules) and initialization ordering issues with ESM. Break cycles by extracting shared code.",
-        docs_path: "rules/circular-dependencies",
+        docs_path: "explanations/dead-code#circular-dependencies",
     },
 ];
 
@@ -146,21 +146,21 @@ pub const HEALTH_RULES: &[RuleDef] = &[
         name: "High Cyclomatic Complexity",
         short: "Function has high cyclomatic complexity",
         full: "McCabe cyclomatic complexity exceeds the configured threshold. Cyclomatic complexity counts the number of independent paths through a function (1 + decision points: if/else, switch cases, loops, ternary, logical operators). High values indicate functions that are hard to test exhaustively.",
-        docs_path: "cli/health#cyclomatic-complexity",
+        docs_path: "explanations/health#cyclomatic-complexity",
     },
     RuleDef {
         id: "fallow/high-cognitive-complexity",
         name: "High Cognitive Complexity",
         short: "Function has high cognitive complexity",
         full: "SonarSource cognitive complexity exceeds the configured threshold. Unlike cyclomatic complexity, cognitive complexity penalizes nesting depth and non-linear control flow (breaks, continues, early returns). It measures how hard a function is to understand when reading sequentially.",
-        docs_path: "cli/health#cognitive-complexity",
+        docs_path: "explanations/health#cognitive-complexity",
     },
     RuleDef {
         id: "fallow/high-complexity",
         name: "High Complexity (Both)",
         short: "Function exceeds both complexity thresholds",
         full: "Function exceeds both cyclomatic and cognitive complexity thresholds. This is the strongest signal that a function needs refactoring — it has many paths AND is hard to understand.",
-        docs_path: "cli/health#complexity-findings",
+        docs_path: "explanations/health#complexity-metrics",
     },
 ];
 
@@ -169,7 +169,7 @@ pub const DUPES_RULES: &[RuleDef] = &[RuleDef {
     name: "Code Duplication",
     short: "Duplicated code block",
     full: "A block of code that appears in multiple locations with identical or near-identical token sequences. Clone detection uses normalized token comparison — identifier names and literals are abstracted away in non-strict modes.",
-    docs_path: "cli/dupes",
+    docs_path: "explanations/duplication#clone-groups",
 }];
 
 // ── JSON _meta builders ─────────────────────────────────────────
@@ -308,6 +308,3 @@ pub fn dupes_meta() -> Value {
         }
     })
 }
-
-/// Human-readable footer line pointing to documentation.
-pub const DOCS_FOOTER: &str = "Learn more: https://docs.fallow.tools/explanations/metrics";
