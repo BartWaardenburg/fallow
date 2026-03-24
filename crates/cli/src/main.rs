@@ -266,6 +266,8 @@ enum Command {
 
         /// Compute per-file health scores (fan-in, fan-out, dead code ratio, maintainability index).
         /// Requires full analysis pipeline (graph + dead code detection).
+        /// Sorted by maintainability index ascending (worst first). --sort and --baseline
+        /// apply to complexity findings only, not file scores.
         #[arg(long)]
         file_scores: bool,
     },

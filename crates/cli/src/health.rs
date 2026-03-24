@@ -234,22 +234,25 @@ pub fn run_health(opts: &HealthOptions<'_>) -> ExitCode {
                         !ignore_set.is_match(relative)
                     });
                 }
+                // Compute average BEFORE --top truncation so it reflects the full project
+                let total_scored = scores.len();
+                let avg = if total_scored > 0 {
+                    let sum: f64 = scores.iter().map(|s| s.maintainability_index).sum();
+                    Some((sum / total_scored as f64 * 10.0).round() / 10.0)
+                } else {
+                    None
+                };
                 // Apply --top to file scores too
                 if let Some(top) = opts.top {
                     scores.truncate(top);
                 }
-                let count = scores.len();
-                let avg = if count > 0 {
-                    let sum: f64 = scores.iter().map(|s| s.maintainability_index).sum();
-                    Some((sum / count as f64 * 10.0).round() / 10.0)
-                } else {
-                    None
-                };
-                (scores, Some(count), avg)
+                (scores, Some(total_scored), avg)
             }
             Err(e) => {
                 eprintln!("Warning: failed to compute file scores: {e}");
-                (Vec::new(), None, None)
+                // Use Some(0) so JSON consumers can distinguish "flag not set" (field absent)
+                // from "flag set but failed" (files_scored: 0).
+                (Vec::new(), Some(0), None)
             }
         }
     } else {
@@ -309,7 +312,10 @@ fn compute_file_scores(
         .map(|f| f.path.as_path())
         .collect();
 
-    // Count unused exports per file path
+    // Count unused VALUE exports per file path (exclude type-only exports).
+    // Type-only exports (interfaces, type aliases) are a different concern than
+    // unused functions/components — including them inflates dead_code_ratio for
+    // well-typed React codebases where every component exports its Props type.
     let mut unused_exports_by_path: rustc_hash::FxHashMap<&std::path::Path, usize> =
         rustc_hash::FxHashMap::default();
     for exp in &results.unused_exports {
@@ -317,11 +323,7 @@ fn compute_file_scores(
             .entry(exp.path.as_path())
             .or_default() += 1;
     }
-    for exp in &results.unused_types {
-        *unused_exports_by_path
-            .entry(exp.path.as_path())
-            .or_default() += 1;
-    }
+    // Note: results.unused_types is intentionally NOT counted here.
 
     // Build FileId → ModuleInfo lookup
     let module_by_id: rustc_hash::FxHashMap<
@@ -366,18 +368,20 @@ fn compute_file_scores(
                 (0, 0, 0, 0)
             };
 
-        // Dead code ratio: fraction of exports with zero references.
+        // Dead code ratio: fraction of VALUE exports with zero references.
+        // Type-only exports are excluded from both numerator and denominator
+        // (see unused_exports_by_path construction above).
         // If the entire file is unused, ratio is 1.0.
         let dead_code_ratio = if unused_files.contains((*path).as_path()) {
             1.0
         } else {
-            let total_exports = node.exports.len();
-            if total_exports > 0 {
+            let value_exports = node.exports.iter().filter(|e| !e.is_type_only).count();
+            if value_exports > 0 {
                 let unused = unused_exports_by_path
                     .get(path.as_path())
                     .copied()
                     .unwrap_or(0);
-                (unused as f64 / total_exports as f64).min(1.0)
+                (unused as f64 / value_exports as f64).min(1.0)
             } else {
                 0.0
             }
@@ -395,9 +399,7 @@ fn compute_file_scores(
         let dead_code_ratio_rounded = (dead_code_ratio * 100.0).round() / 100.0;
         let complexity_density_rounded = (complexity_density * 100.0).round() / 100.0;
 
-        // Maintainability index:
-        // 100 - (complexity_density × 30) - (dead_code_ratio × 20) - (fan_out × 0.5)
-        // Clamped to [0, 100].
+        // Maintainability index (see compute_maintainability_index for full formula).
         let maintainability_index = compute_maintainability_index(
             complexity_density_rounded,
             dead_code_ratio_rounded,
@@ -423,6 +425,12 @@ fn compute_file_scores(
         scores.retain(|s| changed.contains(&s.path));
     }
 
+    // Exclude zero-function files (barrel/re-export files) by default.
+    // These have zero complexity density and can only be penalized by dead_code_ratio
+    // and fan-out, making their MI a dead-code detector rather than a maintainability
+    // metric. They pollute the rankings and obscure actually complex files.
+    scores.retain(|s| s.function_count > 0);
+
     // Sort by maintainability index ascending (worst files first)
     scores.sort_by(|a, b| {
         a.maintainability_index
@@ -435,7 +443,15 @@ fn compute_file_scores(
 
 /// Compute the maintainability index for a single file.
 ///
-/// Formula: `100 - (complexity_density × 30) - (dead_code_ratio × 20) - (fan_out × 0.5)`
+/// Formula:
+/// ```text
+/// fan_out_penalty = min(ln(fan_out + 1) × 4, 15)
+/// MI = 100 - (complexity_density × 30) - (dead_code_ratio × 20) - fan_out_penalty
+/// ```
+///
+/// Fan-out uses logarithmic scaling capped at 15 points to reflect diminishing
+/// marginal risk (the 30th import is less concerning than the 5th) and prevent
+/// composition-root files from being unfairly penalized.
 ///
 /// Clamped to \[0, 100\]. Higher is better.
 fn compute_maintainability_index(
@@ -443,10 +459,10 @@ fn compute_maintainability_index(
     dead_code_ratio: f64,
     fan_out: usize,
 ) -> f64 {
+    let fan_out_penalty = ((fan_out as f64).ln_1p() * 4.0).min(15.0);
     // Keep the formula readable — it matches the documented specification.
     #[expect(clippy::suboptimal_flops)]
-    let score =
-        100.0 - (complexity_density * 30.0) - (dead_code_ratio * 20.0) - (fan_out as f64 * 0.5);
+    let score = 100.0 - (complexity_density * 30.0) - (dead_code_ratio * 20.0) - fan_out_penalty;
     score.clamp(0.0, 100.0)
 }
 
@@ -469,23 +485,43 @@ mod tests {
     #[test]
     fn maintainability_formula_correct() {
         // complexity_density=0.5, dead_code_ratio=0.3, fan_out=10
-        // 100 - (0.5*30) - (0.3*20) - (10*0.5) = 100 - 15 - 6 - 5 = 74
+        // fan_out_penalty = min(ln(11) * 4, 15) = min(9.59, 15) = 9.59
+        // 100 - 15 - 6 - 9.59 = 69.41
         let result = compute_maintainability_index(0.5, 0.3, 10);
-        assert!((result - 74.0).abs() < f64::EPSILON);
+        let expected = 100.0 - 15.0 - 6.0 - (11.0_f64.ln() * 4.0);
+        assert!((result - expected).abs() < 0.01);
     }
 
     #[test]
     fn maintainability_dead_file_penalty() {
-        // Fully dead file: dead_code_ratio=1.0
+        // Fully dead file: dead_code_ratio=1.0, fan_out=0
+        // fan_out_penalty = min(ln(1) * 4, 15) = 0
         // 100 - 0 - 20 - 0 = 80
         let result = compute_maintainability_index(0.0, 1.0, 0);
         assert!((result - 80.0).abs() < f64::EPSILON);
     }
 
     #[test]
-    fn maintainability_high_fan_out_penalty() {
-        // fan_out=100: 100 - 0 - 0 - 50 = 50
-        let result = compute_maintainability_index(0.0, 0.0, 100);
-        assert!((result - 50.0).abs() < f64::EPSILON);
+    fn maintainability_fan_out_is_logarithmic() {
+        // fan_out=10: penalty = min(ln(11) * 4, 15) ≈ 9.59
+        let result_10 = compute_maintainability_index(0.0, 0.0, 10);
+        // fan_out=100: penalty = min(ln(101) * 4, 15) = 15 (capped)
+        let result_100 = compute_maintainability_index(0.0, 0.0, 100);
+        // fan_out=200: also capped at 15
+        let result_200 = compute_maintainability_index(0.0, 0.0, 200);
+
+        // Logarithmic: 10→100 jump is much less than 10× the penalty
+        assert!(result_10 > 90.0); // ~90.4
+        assert!(result_100 > 84.0); // 85.0 (capped)
+        // Capped: 100 and 200 should score the same
+        assert!((result_100 - result_200).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn maintainability_fan_out_capped_at_15() {
+        // Very high fan-out should not push score below 65 (100 - 0 - 20 - 15)
+        // even with full dead code
+        let result = compute_maintainability_index(0.0, 1.0, 1000);
+        assert!((result - 65.0).abs() < f64::EPSILON);
     }
 }

@@ -24,7 +24,7 @@ Tested against real-world projects spanning Next.js, Nuxt, NestJS, React Native/
 
 The goal: `fallow health --hotspots` answers "where should my team spend its refactoring budget?" with data, not gut feel.
 
-Beyond hotspots: file-level health scores (maintainability, coupling, dead code density), codebase-wide vital signs with trend tracking over time, and regression detection in CI.
+File-level health scores are now available via `fallow health --file-scores` — maintainability index combining complexity density, dead code ratio, and coupling (fan-out). Beyond that: codebase-wide vital signs with trend tracking over time, and regression detection in CI.
 
 ### Dependency risk
 
