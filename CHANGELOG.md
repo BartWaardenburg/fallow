@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-03-24
+
+### Added
+- Precise line/column locations in SARIF output for all issue types that previously defaulted to line 1
+  - Unlisted dependencies: SARIF now points to the actual import statement in the source file
+  - Unused dependencies (all variants): SARIF now points to the dependency entry line in package.json
+  - Type-only dependencies: SARIF now points to the dependency entry line in package.json
+  - Circular dependencies: SARIF now points to the import statement that starts the cycle
+- `ImportSite` type in JSON output for unlisted dependencies (replaces plain path strings with `{path, line, col}` objects)
+- `find_import_span_start()` method on `ModuleGraph` for looking up import statement locations between modules
+
+### Changed
+- JSON output `schema_version` bumped to 3 (new fields on `UnusedDependency`, `TypeOnlyDependency`, `CircularDependency`)
+- `UnlistedDependency.imported_from` changed from `string[]` to `ImportSite[]` in JSON output
+- `UnusedDependency` now includes `line` field (1-based line in package.json)
+- `TypeOnlyDependency` now includes `line` field (1-based line in package.json)
+- `CircularDependency` now includes `line` and `col` fields (location of the cycle-starting import)
+
+### Fixed
+- GitHub Code Scanning alerts for unlisted/unused dependencies no longer point to `package.json:1`
+- GitHub Code Scanning alerts for circular dependencies no longer point to line 1 of the first file
+- `output-schema.json` `DuplicateExport.locations` corrected from `string[]` to proper `DuplicateLocation[]` objects
+- `output-schema.json` now includes missing `unused_optional_dependencies` field
+
 ## [1.5.0] - 2026-03-24
 
 ### Added
@@ -249,6 +273,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
 [Unreleased]: https://github.com/fallow-rs/fallow/compare/v1.5.0...HEAD
+[1.6.0]: https://github.com/fallow-rs/fallow/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/fallow-rs/fallow/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/fallow-rs/fallow/compare/v1.3.1...v1.4.0
 [1.3.1]: https://github.com/fallow-rs/fallow/compare/v1.3.0...v1.3.1
