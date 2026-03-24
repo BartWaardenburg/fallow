@@ -4,95 +4,17 @@
 use rustc_hash::FxHashSet;
 use std::path::{Path, PathBuf};
 
-use fallow_config::{ExternalPluginDef, PackageJson, PluginDetection};
+use fallow_config::{ExternalPluginDef, PackageJson};
 
-use super::{Plugin, PluginResult};
+use super::Plugin;
 
-// Import all plugin structs
-use super::angular::AngularPlugin;
-use super::astro::AstroPlugin;
-use super::ava::AvaPlugin;
-use super::babel::BabelPlugin;
-use super::biome::BiomePlugin;
-use super::bun::BunPlugin;
-use super::c8::C8Plugin;
-use super::capacitor::CapacitorPlugin;
-use super::changesets::ChangesetsPlugin;
-use super::commitizen::CommitizenPlugin;
-use super::commitlint::CommitlintPlugin;
-use super::cspell::CspellPlugin;
-use super::cucumber::CucumberPlugin;
-use super::cypress::CypressPlugin;
-use super::dependency_cruiser::DependencyCruiserPlugin;
-use super::docusaurus::DocusaurusPlugin;
-use super::drizzle::DrizzlePlugin;
-use super::electron::ElectronPlugin;
-use super::eslint::EslintPlugin;
-use super::expo::ExpoPlugin;
-use super::gatsby::GatsbyPlugin;
-use super::graphql_codegen::GraphqlCodegenPlugin;
-use super::husky::HuskyPlugin;
-use super::i18next::I18nextPlugin;
-use super::jest::JestPlugin;
-use super::karma::KarmaPlugin;
-use super::knex::KnexPlugin;
-use super::kysely::KyselyPlugin;
-use super::lefthook::LefthookPlugin;
-use super::lint_staged::LintStagedPlugin;
-use super::markdownlint::MarkdownlintPlugin;
-use super::mocha::MochaPlugin;
-use super::msw::MswPlugin;
-use super::nestjs::NestJsPlugin;
-use super::next_intl::NextIntlPlugin;
-use super::nextjs::NextJsPlugin;
-use super::nitro::NitroPlugin;
-use super::nodemon::NodemonPlugin;
-use super::nuxt::NuxtPlugin;
-use super::nx::NxPlugin;
-use super::nyc::NycPlugin;
-use super::openapi_ts::OpenapiTsPlugin;
-use super::oxlint::OxlintPlugin;
-use super::parcel::ParcelPlugin;
-use super::playwright::PlaywrightPlugin;
-use super::plop::PlopPlugin;
-use super::pm2::Pm2Plugin;
-use super::postcss::PostCssPlugin;
-use super::prettier::PrettierPlugin;
-use super::prisma::PrismaPlugin;
-use super::react_native::ReactNativePlugin;
-use super::react_router::ReactRouterPlugin;
-use super::relay::RelayPlugin;
-use super::remark::RemarkPlugin;
-use super::remix::RemixPlugin;
-use super::rolldown::RolldownPlugin;
-use super::rollup::RollupPlugin;
-use super::rsbuild::RsbuildPlugin;
-use super::rspack::RspackPlugin;
-use super::sanity::SanityPlugin;
-use super::semantic_release::SemanticReleasePlugin;
-use super::sentry::SentryPlugin;
-use super::simple_git_hooks::SimpleGitHooksPlugin;
-use super::storybook::StorybookPlugin;
-use super::stylelint::StylelintPlugin;
-use super::sveltekit::SvelteKitPlugin;
-use super::svgo::SvgoPlugin;
-use super::svgr::SvgrPlugin;
-use super::swc::SwcPlugin;
-use super::syncpack::SyncpackPlugin;
-use super::tailwind::TailwindPlugin;
-use super::tanstack_router::TanstackRouterPlugin;
-use super::tsdown::TsdownPlugin;
-use super::tsup::TsupPlugin;
-use super::turborepo::TurborepoPlugin;
-use super::typedoc::TypedocPlugin;
-use super::typeorm::TypeormPlugin;
-use super::typescript::TypeScriptPlugin;
-use super::vite::VitePlugin;
-use super::vitepress::VitePressPlugin;
-use super::vitest::VitestPlugin;
-use super::webdriverio::WebdriverioPlugin;
-use super::webpack::WebpackPlugin;
-use super::wrangler::WranglerPlugin;
+mod builtin;
+mod helpers;
+
+use helpers::{
+    check_has_config_file, discover_json_config_files, process_config_result,
+    process_external_plugins, process_static_patterns,
+};
 
 /// Registry of all available plugins (built-in + external).
 pub struct PluginRegistry {
@@ -134,110 +56,8 @@ pub struct AggregatedPluginResult {
 impl PluginRegistry {
     /// Create a registry with all built-in plugins and optional external plugins.
     pub fn new(external: Vec<ExternalPluginDef>) -> Self {
-        let plugins: Vec<Box<dyn Plugin>> = vec![
-            // Frameworks
-            Box::new(NextJsPlugin),
-            Box::new(NuxtPlugin),
-            Box::new(RemixPlugin),
-            Box::new(AstroPlugin),
-            Box::new(AngularPlugin),
-            Box::new(ReactRouterPlugin),
-            Box::new(TanstackRouterPlugin),
-            Box::new(ReactNativePlugin),
-            Box::new(ExpoPlugin),
-            Box::new(NestJsPlugin),
-            Box::new(DocusaurusPlugin),
-            Box::new(GatsbyPlugin),
-            Box::new(SvelteKitPlugin),
-            Box::new(NitroPlugin),
-            Box::new(CapacitorPlugin),
-            Box::new(SanityPlugin),
-            Box::new(VitePressPlugin),
-            Box::new(NextIntlPlugin),
-            Box::new(RelayPlugin),
-            Box::new(ElectronPlugin),
-            Box::new(I18nextPlugin),
-            // Bundlers
-            Box::new(VitePlugin),
-            Box::new(WebpackPlugin),
-            Box::new(RollupPlugin),
-            Box::new(RolldownPlugin),
-            Box::new(RspackPlugin),
-            Box::new(RsbuildPlugin),
-            Box::new(TsupPlugin),
-            Box::new(TsdownPlugin),
-            Box::new(ParcelPlugin),
-            // Testing
-            Box::new(VitestPlugin),
-            Box::new(JestPlugin),
-            Box::new(PlaywrightPlugin),
-            Box::new(CypressPlugin),
-            Box::new(MochaPlugin),
-            Box::new(AvaPlugin),
-            Box::new(StorybookPlugin),
-            Box::new(KarmaPlugin),
-            Box::new(CucumberPlugin),
-            Box::new(WebdriverioPlugin),
-            // Linting & formatting
-            Box::new(EslintPlugin),
-            Box::new(BiomePlugin),
-            Box::new(StylelintPlugin),
-            Box::new(PrettierPlugin),
-            Box::new(OxlintPlugin),
-            Box::new(MarkdownlintPlugin),
-            Box::new(CspellPlugin),
-            Box::new(RemarkPlugin),
-            // Transpilation & language
-            Box::new(TypeScriptPlugin),
-            Box::new(BabelPlugin),
-            Box::new(SwcPlugin),
-            // CSS
-            Box::new(TailwindPlugin),
-            Box::new(PostCssPlugin),
-            // Database & ORM
-            Box::new(PrismaPlugin),
-            Box::new(DrizzlePlugin),
-            Box::new(KnexPlugin),
-            Box::new(TypeormPlugin),
-            Box::new(KyselyPlugin),
-            // Monorepo
-            Box::new(TurborepoPlugin),
-            Box::new(NxPlugin),
-            Box::new(ChangesetsPlugin),
-            Box::new(SyncpackPlugin),
-            // CI/CD & release
-            Box::new(CommitlintPlugin),
-            Box::new(CommitizenPlugin),
-            Box::new(SemanticReleasePlugin),
-            // Deployment
-            Box::new(WranglerPlugin),
-            Box::new(SentryPlugin),
-            // Git hooks
-            Box::new(HuskyPlugin),
-            Box::new(LintStagedPlugin),
-            Box::new(LefthookPlugin),
-            Box::new(SimpleGitHooksPlugin),
-            // Media & assets
-            Box::new(SvgoPlugin),
-            Box::new(SvgrPlugin),
-            // Code generation & docs
-            Box::new(GraphqlCodegenPlugin),
-            Box::new(TypedocPlugin),
-            Box::new(OpenapiTsPlugin),
-            Box::new(PlopPlugin),
-            // Coverage
-            Box::new(C8Plugin),
-            Box::new(NycPlugin),
-            // Other tools
-            Box::new(MswPlugin),
-            Box::new(NodemonPlugin),
-            Box::new(Pm2Plugin),
-            Box::new(DependencyCruiserPlugin),
-            // Runtime
-            Box::new(BunPlugin),
-        ];
         Self {
-            plugins,
+            plugins: builtin::create_builtin_plugins(),
             external_plugins: external,
         }
     }
@@ -586,225 +406,6 @@ impl PluginRegistry {
     }
 }
 
-/// Collect static patterns from a single plugin into the aggregated result.
-fn process_static_patterns(plugin: &dyn Plugin, root: &Path, result: &mut AggregatedPluginResult) {
-    result.active_plugins.push(plugin.name().to_string());
-
-    let pname = plugin.name().to_string();
-    for pat in plugin.entry_patterns() {
-        result
-            .entry_patterns
-            .push(((*pat).to_string(), pname.clone()));
-    }
-    for pat in plugin.config_patterns() {
-        result.config_patterns.push((*pat).to_string());
-    }
-    for pat in plugin.always_used() {
-        result.always_used.push(((*pat).to_string(), pname.clone()));
-    }
-    for (file_pat, exports) in plugin.used_exports() {
-        result.used_exports.push((
-            file_pat.to_string(),
-            exports.iter().map(|s| s.to_string()).collect(),
-        ));
-    }
-    for dep in plugin.tooling_dependencies() {
-        result.tooling_dependencies.push((*dep).to_string());
-    }
-    for prefix in plugin.virtual_module_prefixes() {
-        result.virtual_module_prefixes.push((*prefix).to_string());
-    }
-    for (prefix, replacement) in plugin.path_aliases(root) {
-        result.path_aliases.push((prefix.to_string(), replacement));
-    }
-}
-
-/// Process external plugin definitions, checking activation and aggregating patterns.
-fn process_external_plugins(
-    external_plugins: &[ExternalPluginDef],
-    all_deps: &[String],
-    root: &Path,
-    discovered_files: &[PathBuf],
-    result: &mut AggregatedPluginResult,
-) {
-    let all_dep_refs: Vec<&str> = all_deps.iter().map(|s| s.as_str()).collect();
-    for ext in external_plugins {
-        let is_active = if let Some(detection) = &ext.detection {
-            check_plugin_detection(detection, &all_dep_refs, root, discovered_files)
-        } else if !ext.enablers.is_empty() {
-            ext.enablers.iter().any(|enabler| {
-                if enabler.ends_with('/') {
-                    all_deps.iter().any(|d| d.starts_with(enabler))
-                } else {
-                    all_deps.iter().any(|d| d == enabler)
-                }
-            })
-        } else {
-            false
-        };
-        if is_active {
-            result.active_plugins.push(ext.name.clone());
-            result.entry_patterns.extend(
-                ext.entry_points
-                    .iter()
-                    .map(|p| (p.clone(), ext.name.clone())),
-            );
-            // Track config patterns for introspection (not used for AST parsing —
-            // external plugins cannot do resolve_config())
-            result.config_patterns.extend(ext.config_patterns.clone());
-            result.always_used.extend(
-                ext.config_patterns
-                    .iter()
-                    .chain(ext.always_used.iter())
-                    .map(|p| (p.clone(), ext.name.clone())),
-            );
-            result
-                .tooling_dependencies
-                .extend(ext.tooling_dependencies.clone());
-            for ue in &ext.used_exports {
-                result
-                    .used_exports
-                    .push((ue.pattern.clone(), ue.exports.clone()));
-            }
-        }
-    }
-}
-
-/// Discover JSON config files on the filesystem for plugins that weren't matched against
-/// discovered source files. Returns `(path, plugin)` pairs.
-fn discover_json_config_files<'a>(
-    config_matchers: &[(&'a dyn Plugin, Vec<globset::GlobMatcher>)],
-    resolved_plugins: &FxHashSet<&str>,
-    relative_files: &[(&PathBuf, String)],
-    root: &Path,
-) -> Vec<(PathBuf, &'a dyn Plugin)> {
-    let mut json_configs: Vec<(PathBuf, &'a dyn Plugin)> = Vec::new();
-    for (plugin, _) in config_matchers {
-        if resolved_plugins.contains(plugin.name()) {
-            continue;
-        }
-        for pat in plugin.config_patterns() {
-            let has_glob = pat.contains("**") || pat.contains('*') || pat.contains('?');
-            if !has_glob {
-                // Simple pattern (e.g., "angular.json") — check at root
-                let abs_path = root.join(pat);
-                if abs_path.is_file() {
-                    json_configs.push((abs_path, *plugin));
-                }
-            } else {
-                // Glob pattern (e.g., "**/project.json") — check directories
-                // that contain discovered source files
-                let filename = std::path::Path::new(pat)
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or(pat);
-                let matcher = globset::Glob::new(pat).ok().map(|g| g.compile_matcher());
-                if let Some(matcher) = matcher {
-                    let mut checked_dirs: FxHashSet<&Path> = FxHashSet::default();
-                    checked_dirs.insert(root);
-                    for (abs_path, _) in relative_files {
-                        if let Some(parent) = abs_path.parent() {
-                            checked_dirs.insert(parent);
-                        }
-                    }
-                    for dir in checked_dirs {
-                        let candidate = dir.join(filename);
-                        if candidate.is_file() {
-                            let rel = candidate
-                                .strip_prefix(root)
-                                .map(|p| p.to_string_lossy())
-                                .unwrap_or_default();
-                            if matcher.is_match(rel.as_ref()) {
-                                json_configs.push((candidate, *plugin));
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    json_configs
-}
-
-/// Merge a `PluginResult` from config parsing into the aggregated result.
-fn process_config_result(
-    plugin_name: &str,
-    plugin_result: PluginResult,
-    result: &mut AggregatedPluginResult,
-) {
-    let pname = plugin_name.to_string();
-    result.entry_patterns.extend(
-        plugin_result
-            .entry_patterns
-            .into_iter()
-            .map(|p| (p, pname.clone())),
-    );
-    result
-        .referenced_dependencies
-        .extend(plugin_result.referenced_dependencies);
-    result.discovered_always_used.extend(
-        plugin_result
-            .always_used_files
-            .into_iter()
-            .map(|p| (p, pname.clone())),
-    );
-    result.setup_files.extend(
-        plugin_result
-            .setup_files
-            .into_iter()
-            .map(|p| (p, pname.clone())),
-    );
-}
-
-/// Check if a plugin already has a config file matched against discovered files.
-fn check_has_config_file(
-    plugin: &dyn Plugin,
-    config_matchers: &[(&dyn Plugin, Vec<globset::GlobMatcher>)],
-    relative_files: &[(&PathBuf, String)],
-) -> bool {
-    !plugin.config_patterns().is_empty()
-        && config_matchers.iter().any(|(p, matchers)| {
-            p.name() == plugin.name()
-                && relative_files
-                    .iter()
-                    .any(|(_, rel)| matchers.iter().any(|m| m.is_match(rel.as_str())))
-        })
-}
-
-/// Check if a `PluginDetection` condition is satisfied.
-fn check_plugin_detection(
-    detection: &PluginDetection,
-    all_deps: &[&str],
-    root: &Path,
-    discovered_files: &[PathBuf],
-) -> bool {
-    match detection {
-        PluginDetection::Dependency { package } => all_deps.iter().any(|d| *d == package),
-        PluginDetection::FileExists { pattern } => {
-            // Check against discovered files first (fast path)
-            if let Ok(matcher) = globset::Glob::new(pattern).map(|g| g.compile_matcher()) {
-                for file in discovered_files {
-                    let relative = file.strip_prefix(root).unwrap_or(file);
-                    if matcher.is_match(relative) {
-                        return true;
-                    }
-                }
-            }
-            // Fall back to glob on disk for non-source files (e.g., config files)
-            let full_pattern = root.join(pattern).to_string_lossy().to_string();
-            glob::glob(&full_pattern)
-                .ok()
-                .is_some_and(|mut g| g.next().is_some())
-        }
-        PluginDetection::All { conditions } => conditions
-            .iter()
-            .all(|c| check_plugin_detection(c, all_deps, root, discovered_files)),
-        PluginDetection::Any { conditions } => conditions
-            .iter()
-            .any(|c| check_plugin_detection(c, all_deps, root, discovered_files)),
-    }
-}
-
 impl Default for PluginRegistry {
     fn default() -> Self {
         Self::new(vec![])
@@ -814,8 +415,10 @@ impl Default for PluginRegistry {
 #[cfg(test)]
 #[expect(clippy::disallowed_types)]
 mod tests {
+    use super::super::PluginResult;
     use super::*;
     use fallow_config::{ExternalPluginDef, ExternalUsedExport, PluginDetection};
+    use helpers::{check_plugin_detection, discover_json_config_files, process_config_result};
     use std::collections::HashMap;
 
     /// Helper: build a PackageJson with given dependency names.
@@ -1727,7 +1330,7 @@ mod tests {
         let has_next = matchers.iter().any(|(p, _)| p.name() == "nextjs");
         assert!(has_next, "nextjs should be in precompiled matchers");
 
-        let next_plugin: &dyn Plugin = &NextJsPlugin;
+        let next_plugin: &dyn Plugin = &super::super::nextjs::NextJsPlugin;
         // A file matching next.config.ts should be detected
         let abs = PathBuf::from("/project/next.config.ts");
         let relative_files: Vec<(&PathBuf, String)> = vec![(&abs, "next.config.ts".to_string())];
@@ -1743,7 +1346,7 @@ mod tests {
         let registry = PluginRegistry::default();
         let matchers = registry.precompile_config_matchers();
 
-        let next_plugin: &dyn Plugin = &NextJsPlugin;
+        let next_plugin: &dyn Plugin = &super::super::nextjs::NextJsPlugin;
         let abs = PathBuf::from("/project/src/index.ts");
         let relative_files: Vec<(&PathBuf, String)> = vec![(&abs, "src/index.ts".to_string())];
 
@@ -1813,8 +1416,8 @@ mod tests {
     #[test]
     fn process_static_patterns_populates_all_fields() {
         let mut result = AggregatedPluginResult::default();
-        let plugin: &dyn Plugin = &NextJsPlugin;
-        process_static_patterns(plugin, Path::new("/project"), &mut result);
+        let plugin: &dyn Plugin = &super::super::nextjs::NextJsPlugin;
+        helpers::process_static_patterns(plugin, Path::new("/project"), &mut result);
 
         assert!(result.active_plugins.contains(&"nextjs".to_string()));
         assert!(!result.entry_patterns.is_empty());
@@ -1828,8 +1431,8 @@ mod tests {
     #[test]
     fn process_static_patterns_entry_patterns_tagged_with_plugin_name() {
         let mut result = AggregatedPluginResult::default();
-        let plugin: &dyn Plugin = &NextJsPlugin;
-        process_static_patterns(plugin, Path::new("/project"), &mut result);
+        let plugin: &dyn Plugin = &super::super::nextjs::NextJsPlugin;
+        helpers::process_static_patterns(plugin, Path::new("/project"), &mut result);
 
         for (_, name) in &result.entry_patterns {
             assert_eq!(
@@ -1842,8 +1445,8 @@ mod tests {
     #[test]
     fn process_static_patterns_always_used_tagged_with_plugin_name() {
         let mut result = AggregatedPluginResult::default();
-        let plugin: &dyn Plugin = &NextJsPlugin;
-        process_static_patterns(plugin, Path::new("/project"), &mut result);
+        let plugin: &dyn Plugin = &super::super::nextjs::NextJsPlugin;
+        helpers::process_static_patterns(plugin, Path::new("/project"), &mut result);
 
         for (_, name) in &result.always_used {
             assert_eq!(
@@ -2020,7 +1623,7 @@ mod tests {
     #[test]
     fn process_external_plugins_empty_list() {
         let mut result = AggregatedPluginResult::default();
-        process_external_plugins(&[], &[], Path::new("/project"), &[], &mut result);
+        helpers::process_external_plugins(&[], &[], Path::new("/project"), &[], &mut result);
         assert!(result.active_plugins.is_empty());
     }
 
@@ -2040,7 +1643,13 @@ mod tests {
         };
         let mut result = AggregatedPluginResult::default();
         let deps = vec!["@organism".to_string()];
-        process_external_plugins(&[ext], &deps, Path::new("/project"), &[], &mut result);
+        helpers::process_external_plugins(
+            &[ext],
+            &deps,
+            Path::new("/project"),
+            &[],
+            &mut result,
+        );
         assert!(
             !result.active_plugins.contains(&"prefix-strict".to_string()),
             "@org/ prefix should not match @organism"
@@ -2062,7 +1671,13 @@ mod tests {
         };
         let mut result = AggregatedPluginResult::default();
         let deps = vec!["@org/core".to_string()];
-        process_external_plugins(&[ext], &deps, Path::new("/project"), &[], &mut result);
+        helpers::process_external_plugins(
+            &[ext],
+            &deps,
+            Path::new("/project"),
+            &[],
+            &mut result,
+        );
         assert!(
             result.active_plugins.contains(&"prefix-match".to_string()),
             "@org/ prefix should match @org/core"
