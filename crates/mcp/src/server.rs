@@ -1201,9 +1201,9 @@ mod tests {
             top: Some(20),
             sort: Some("cognitive".to_string()),
             changed_since: Some("develop".to_string()),
-            file_scores: None,
-            workspace: None,
-            production: None,
+            file_scores: Some(true),
+            workspace: Some("packages/ui".to_string()),
+            production: Some(true),
         };
         let args = build_health_args(&params);
         assert_eq!(
@@ -1225,6 +1225,10 @@ mod tests {
                 "cognitive",
                 "--changed-since",
                 "develop",
+                "--file-scores",
+                "--workspace",
+                "packages/ui",
+                "--production",
             ]
         );
     }

@@ -1169,7 +1169,7 @@ mod tests {
     }
 
     #[test]
-    fn unused_dev_dep_flagged_when_never_imported() {
+    fn known_tooling_dev_deps_not_flagged_as_unused() {
         let (graph, _) = build_graph_with_npm_imports(&[]);
         let pkg = make_pkg(&[], &["jest", "vitest"], &[]);
         let config = test_config(PathBuf::from("/project"));

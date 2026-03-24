@@ -989,12 +989,11 @@ mod tests {
         let elapsed = Duration::from_millis(100);
         let output = build_json(&results, &root, elapsed).expect("should serialize");
 
-        // sample_results adds one of each main issue type (no optional deps or type-only deps).
-        // Count: unused_files(1) + unused_exports(1) + unused_types(1)
-        //   + unused_dependencies(1) + unused_dev_dependencies(1)
-        //   + unused_enum_members(1) + unused_class_members(1)
-        //   + unresolved_imports(1) + unlisted_dependencies(1)
-        //   + duplicate_exports(1) + circular_dependencies(1) = 11
+        // sample_results adds one of each issue type (12 total).
+        // unused_files + unused_exports + unused_types + unused_dependencies
+        // + unused_dev_dependencies + unused_enum_members + unused_class_members
+        // + unresolved_imports + unlisted_dependencies + duplicate_exports
+        // + type_only_dependencies + circular_dependencies
         assert_eq!(output["total_issues"], results.total_issues());
     }
 
