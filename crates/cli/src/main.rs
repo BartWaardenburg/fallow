@@ -31,7 +31,7 @@ use list::ListOptions;
 #[derive(Parser)]
 #[command(
     name = "fallow",
-    about = "Find unused code, circular dependencies, and code duplication in JavaScript/TypeScript projects",
+    about = "Find unused code, circular dependencies, code duplication, and complexity hotspots in TypeScript/JavaScript projects",
     version
 )]
 struct Cli {
@@ -241,12 +241,19 @@ enum Command {
         #[arg(long)]
         cross_language: bool,
 
+        /// Show only the N largest clone groups
+        #[arg(long)]
+        top: Option<usize>,
+
         /// Trace all clones at a specific location (format: `FILE:LINE`)
         #[arg(long, value_name = "FILE:LINE")]
         trace: Option<String>,
     },
 
     /// Analyze function complexity (cyclomatic + cognitive)
+    ///
+    /// By default, shows all sections: complexity findings, file scores, and hotspots.
+    /// When any section flag is specified, only those sections are shown.
     Health {
         /// Maximum cyclomatic complexity threshold (overrides config)
         #[arg(long)]
@@ -264,14 +271,19 @@ enum Command {
         #[arg(long, default_value = "cyclomatic")]
         sort: SortBy,
 
-        /// Compute per-file health scores (fan-in, fan-out, dead code ratio, maintainability index).
+        /// Show only complexity findings (functions exceeding thresholds).
+        /// By default all sections are shown; use this to select only complexity.
+        #[arg(long)]
+        complexity: bool,
+
+        /// Show only per-file health scores (fan-in, fan-out, dead code ratio, maintainability index).
         /// Requires full analysis pipeline (graph + dead code detection).
         /// Sorted by maintainability index ascending (worst first). --sort and --baseline
         /// apply to complexity findings only, not file scores.
         #[arg(long)]
         file_scores: bool,
 
-        /// Identify hotspots: files that are both complex and frequently changing.
+        /// Show only hotspots: files that are both complex and frequently changing.
         /// Combines git churn history with complexity data. Requires a git repository.
         #[arg(long)]
         hotspots: bool,
@@ -710,6 +722,7 @@ fn main() -> ExitCode {
             threshold,
             skip_local,
             cross_language,
+            top,
             trace,
         } => dupes::run_dupes(&DupesOptions {
             root: &root,
@@ -724,6 +737,7 @@ fn main() -> ExitCode {
             threshold,
             skip_local,
             cross_language,
+            top,
             baseline_path: cli.baseline.as_deref(),
             save_baseline_path: cli.save_baseline.as_deref(),
             production: cli.production,
@@ -735,31 +749,40 @@ fn main() -> ExitCode {
             max_cognitive,
             top,
             sort,
+            complexity,
             file_scores,
             hotspots,
             since,
             min_commits,
-        } => health::run_health(&HealthOptions {
-            root: &root,
-            config_path: &cli.config,
-            output,
-            no_cache: cli.no_cache,
-            threads,
-            quiet,
-            max_cyclomatic,
-            max_cognitive,
-            top,
-            sort,
-            production: cli.production,
-            changed_since: cli.changed_since.as_deref(),
-            workspace: cli.workspace.as_deref(),
-            baseline: cli.baseline.as_deref(),
-            save_baseline: cli.save_baseline.as_deref(),
-            file_scores,
-            hotspots,
-            since: since.as_deref(),
-            min_commits,
-        }),
+        } => {
+            // No section flags = show all. Any flag set = show only those.
+            let any_section = complexity || file_scores || hotspots;
+            let eff_file_scores = if any_section { file_scores } else { true };
+            let eff_hotspots = if any_section { hotspots } else { true };
+            let eff_complexity = if any_section { complexity } else { true };
+            health::run_health(&HealthOptions {
+                root: &root,
+                config_path: &cli.config,
+                output,
+                no_cache: cli.no_cache,
+                threads,
+                quiet,
+                max_cyclomatic,
+                max_cognitive,
+                top,
+                sort,
+                production: cli.production,
+                changed_since: cli.changed_since.as_deref(),
+                workspace: cli.workspace.as_deref(),
+                baseline: cli.baseline.as_deref(),
+                save_baseline: cli.save_baseline.as_deref(),
+                complexity: eff_complexity,
+                file_scores: eff_file_scores,
+                hotspots: eff_hotspots,
+                since: since.as_deref(),
+                min_commits,
+            })
+        }
         Command::Schema => unreachable!("handled above"),
         Command::Migrate {
             toml,

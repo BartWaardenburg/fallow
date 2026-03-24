@@ -29,6 +29,7 @@ pub struct DupesOptions<'a> {
     pub threshold: f64,
     pub skip_local: bool,
     pub cross_language: bool,
+    pub top: Option<usize>,
     pub baseline_path: Option<&'a std::path::Path>,
     pub save_baseline_path: Option<&'a std::path::Path>,
     pub production: bool,
@@ -196,6 +197,13 @@ pub fn run_dupes(opts: &DupesOptions<'_>) -> ExitCode {
         filter_by_changed_files(&mut report, &changed);
     }
 
+    // Apply --top: truncate display to N largest groups but keep stats over the full set
+    if let Some(n) = opts.top {
+        report.clone_groups.truncate(n);
+        report.clone_families =
+            fallow_core::duplicates::families::group_into_families(&report.clone_groups);
+    }
+
     let elapsed = start.elapsed();
 
     // Print results
@@ -283,6 +291,7 @@ mod tests {
             threshold: 0.0,
             skip_local: false,
             cross_language: false,
+            top: None,
             baseline_path: None,
             save_baseline_path: None,
             production: false,
