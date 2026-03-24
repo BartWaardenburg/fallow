@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1774362454995,
+  "lastUpdate": 1774364215443,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
@@ -923,6 +923,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 5168,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "df293aa9727a78d323217d03b320932f950828e5",
+          "message": "refactor: replace eprintln! with tracing::warn! in config crate\n\nLibrary crates should not print directly to stderr. Replace all\neprintln! calls in fallow-config with tracing::warn! so warnings\nflow through the structured logging pipeline. Removes all\n#[expect(clippy::print_stderr)] annotations from the config crate.",
+          "timestamp": "2026-03-24T15:55:09+01:00",
+          "tree_id": "f7c77d0e446e76fbdd0faae764b01648a6a3aeb8",
+          "url": "https://github.com/fallow-rs/fallow/commit/df293aa9727a78d323217d03b320932f950828e5"
+        },
+        "date": 1774364214459,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 3035297,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 12148,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 421594,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 3972,
             "unit": "allocations"
           }
         ]
