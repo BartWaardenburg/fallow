@@ -345,13 +345,20 @@ fn enumerate_elementary_cycles(
 
 #[cfg(test)]
 mod tests {
+    use std::ops::Range;
     use std::path::PathBuf;
 
+    use rustc_hash::FxHashSet;
+
+    use crate::graph::types::ModuleNode;
     use crate::resolve::{ResolveResult, ResolvedImport, ResolvedModule};
     use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
     use fallow_types::extract::{ExportName, ImportInfo, ImportedName};
 
-    use super::ModuleGraph;
+    use super::{
+        SuccessorMap, canonical_cycle, dfs_find_cycles_from, enumerate_elementary_cycles,
+        try_record_cycle, ModuleGraph,
+    };
 
     /// Helper: build a graph from files+edges, no entry points needed for cycle detection.
     fn build_cycle_graph(file_count: usize, edges_spec: &[(u32, u32)]) -> ModuleGraph {
@@ -562,6 +569,474 @@ mod tests {
         let graph = build_cycle_graph(3, &[(0, 1), (1, 2), (2, 0)]);
         let cycles = graph.find_cycles();
         assert_eq!(cycles.len(), 1, "triangle should produce exactly 1 cycle");
+        assert_eq!(cycles[0].len(), 3);
+    }
+
+    // -----------------------------------------------------------------------
+    // Unit-level helpers for testing extracted functions directly
+    // -----------------------------------------------------------------------
+
+    /// Build lightweight `ModuleNode` stubs and successor data for unit tests.
+    ///
+    /// `edges_spec` is a list of (source, target) pairs (0-indexed).
+    /// Returns (modules, all_succs, succ_ranges) suitable for constructing a `SuccessorMap`.
+    fn build_test_succs(
+        file_count: usize,
+        edges_spec: &[(usize, usize)],
+    ) -> (Vec<ModuleNode>, Vec<usize>, Vec<Range<usize>>) {
+        let modules: Vec<ModuleNode> = (0..file_count)
+            .map(|i| ModuleNode {
+                file_id: FileId(i as u32),
+                path: PathBuf::from(format!("/project/file{i}.ts")),
+                edge_range: 0..0,
+                exports: vec![],
+                re_exports: vec![],
+                is_entry_point: i == 0,
+                is_reachable: true,
+                has_cjs_exports: false,
+            })
+            .collect();
+
+        let mut all_succs: Vec<usize> = Vec::new();
+        let mut succ_ranges: Vec<Range<usize>> = Vec::with_capacity(file_count);
+        for src in 0..file_count {
+            let start = all_succs.len();
+            let mut seen = FxHashSet::default();
+            for &(s, t) in edges_spec {
+                if s == src && t < file_count && seen.insert(t) {
+                    all_succs.push(t);
+                }
+            }
+            let end = all_succs.len();
+            succ_ranges.push(start..end);
+        }
+
+        (modules, all_succs, succ_ranges)
+    }
+
+    // -----------------------------------------------------------------------
+    // canonical_cycle tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn canonical_cycle_empty() {
+        let modules: Vec<ModuleNode> = vec![];
+        assert!(canonical_cycle(&[], &modules).is_empty());
+    }
+
+    #[test]
+    fn canonical_cycle_rotates_to_smallest_path() {
+        let (modules, _, _) = build_test_succs(3, &[]);
+        // Cycle [2, 0, 1] — file0 has the smallest path, so canonical is [0, 1, 2]
+        let result = canonical_cycle(&[2, 0, 1], &modules);
+        assert_eq!(result, vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn canonical_cycle_already_canonical() {
+        let (modules, _, _) = build_test_succs(3, &[]);
+        let result = canonical_cycle(&[0, 1, 2], &modules);
+        assert_eq!(result, vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn canonical_cycle_single_node() {
+        let (modules, _, _) = build_test_succs(1, &[]);
+        let result = canonical_cycle(&[0], &modules);
+        assert_eq!(result, vec![0]);
+    }
+
+    // -----------------------------------------------------------------------
+    // try_record_cycle tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn try_record_cycle_inserts_new_cycle() {
+        let (modules, _, _) = build_test_succs(3, &[]);
+        let mut seen = FxHashSet::default();
+        let mut cycles = Vec::new();
+
+        try_record_cycle(&[0, 1, 2], &modules, &mut seen, &mut cycles);
+        assert_eq!(cycles.len(), 1);
+        assert_eq!(cycles[0], vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn try_record_cycle_deduplicates_rotated_cycle() {
+        // Same cycle in two rotations: [0,1,2] and [1,2,0]
+        // Both should canonicalize to the same key, so only one is recorded.
+        let (modules, _, _) = build_test_succs(3, &[]);
+        let mut seen = FxHashSet::default();
+        let mut cycles = Vec::new();
+
+        try_record_cycle(&[0, 1, 2], &modules, &mut seen, &mut cycles);
+        try_record_cycle(&[1, 2, 0], &modules, &mut seen, &mut cycles);
+        try_record_cycle(&[2, 0, 1], &modules, &mut seen, &mut cycles);
+
+        assert_eq!(cycles.len(), 1, "rotations of the same cycle should be deduped");
+    }
+
+    #[test]
+    fn try_record_cycle_single_node_self_loop() {
+        // A single-node "cycle" (self-loop) — should be recorded if passed in
+        let (modules, _, _) = build_test_succs(1, &[]);
+        let mut seen = FxHashSet::default();
+        let mut cycles = Vec::new();
+
+        try_record_cycle(&[0], &modules, &mut seen, &mut cycles);
+        assert_eq!(cycles.len(), 1);
+        assert_eq!(cycles[0], vec![0]);
+    }
+
+    #[test]
+    fn try_record_cycle_distinct_cycles_both_recorded() {
+        // Two genuinely different cycles
+        let (modules, _, _) = build_test_succs(4, &[]);
+        let mut seen = FxHashSet::default();
+        let mut cycles = Vec::new();
+
+        try_record_cycle(&[0, 1], &modules, &mut seen, &mut cycles);
+        try_record_cycle(&[2, 3], &modules, &mut seen, &mut cycles);
+
+        assert_eq!(cycles.len(), 2);
+    }
+
+    // -----------------------------------------------------------------------
+    // SuccessorMap construction tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn successor_map_empty_graph() {
+        let (modules, all_succs, succ_ranges) = build_test_succs(0, &[]);
+        let succs = SuccessorMap {
+            all_succs: &all_succs,
+            succ_ranges: &succ_ranges,
+            modules: &modules,
+        };
+        assert!(succs.all_succs.is_empty());
+        assert!(succs.succ_ranges.is_empty());
+    }
+
+    #[test]
+    fn successor_map_single_node_self_edge() {
+        let (modules, all_succs, succ_ranges) = build_test_succs(1, &[(0, 0)]);
+        let succs = SuccessorMap {
+            all_succs: &all_succs,
+            succ_ranges: &succ_ranges,
+            modules: &modules,
+        };
+        assert_eq!(succs.all_succs.len(), 1);
+        assert_eq!(succs.all_succs[0], 0);
+        assert_eq!(succs.succ_ranges[0], 0..1);
+    }
+
+    #[test]
+    fn successor_map_deduplicates_edges() {
+        // Two edges from 0 to 1 — should be deduped
+        let (modules, all_succs, succ_ranges) = build_test_succs(2, &[(0, 1), (0, 1)]);
+        let succs = SuccessorMap {
+            all_succs: &all_succs,
+            succ_ranges: &succ_ranges,
+            modules: &modules,
+        };
+        let range = &succs.succ_ranges[0];
+        assert_eq!(range.end - range.start, 1, "duplicate edges should be deduped");
+    }
+
+    #[test]
+    fn successor_map_multiple_successors() {
+        let (modules, all_succs, succ_ranges) = build_test_succs(4, &[(0, 1), (0, 2), (0, 3)]);
+        let succs = SuccessorMap {
+            all_succs: &all_succs,
+            succ_ranges: &succ_ranges,
+            modules: &modules,
+        };
+        let range = &succs.succ_ranges[0];
+        assert_eq!(range.end - range.start, 3);
+        // Node 1, 2, 3 have no successors
+        for i in 1..4 {
+            let r = &succs.succ_ranges[i];
+            assert_eq!(r.end - r.start, 0);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // dfs_find_cycles_from tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn dfs_find_cycles_from_isolated_node() {
+        // Node 0 with no successors — should find no cycles
+        let (modules, all_succs, succ_ranges) = build_test_succs(1, &[]);
+        let succs = SuccessorMap {
+            all_succs: &all_succs,
+            succ_ranges: &succ_ranges,
+            modules: &modules,
+        };
+        let scc_set: FxHashSet<usize> = [0].into_iter().collect();
+        let mut seen = FxHashSet::default();
+        let mut cycles = Vec::new();
+
+        dfs_find_cycles_from(0, 2, &scc_set, &succs, 10, &mut seen, &mut cycles);
+        assert!(cycles.is_empty(), "isolated node should have no cycles");
+    }
+
+    #[test]
+    fn dfs_find_cycles_from_simple_two_cycle() {
+        // 0 -> 1, 1 -> 0, both in SCC
+        let (modules, all_succs, succ_ranges) = build_test_succs(2, &[(0, 1), (1, 0)]);
+        let succs = SuccessorMap {
+            all_succs: &all_succs,
+            succ_ranges: &succ_ranges,
+            modules: &modules,
+        };
+        let scc_set: FxHashSet<usize> = [0, 1].into_iter().collect();
+        let mut seen = FxHashSet::default();
+        let mut cycles = Vec::new();
+
+        dfs_find_cycles_from(0, 2, &scc_set, &succs, 10, &mut seen, &mut cycles);
+        assert_eq!(cycles.len(), 1);
+        assert_eq!(cycles[0].len(), 2);
+    }
+
+    #[test]
+    fn dfs_find_cycles_from_diamond_graph() {
+        // Diamond: 0->1, 0->2, 1->3, 2->3, 3->0 (all in SCC)
+        // At depth 3: 0->1->3->0 and 0->2->3->0
+        // At depth 4: 0->1->3->?->0 — but 3 only goes to 0, so no 4-cycle
+        let (modules, all_succs, succ_ranges) =
+            build_test_succs(4, &[(0, 1), (0, 2), (1, 3), (2, 3), (3, 0)]);
+        let succs = SuccessorMap {
+            all_succs: &all_succs,
+            succ_ranges: &succ_ranges,
+            modules: &modules,
+        };
+        let scc_set: FxHashSet<usize> = [0, 1, 2, 3].into_iter().collect();
+        let mut seen = FxHashSet::default();
+        let mut cycles = Vec::new();
+
+        // Depth 3: should find two 3-node cycles
+        dfs_find_cycles_from(0, 3, &scc_set, &succs, 10, &mut seen, &mut cycles);
+        assert_eq!(cycles.len(), 2, "diamond should have two 3-node cycles");
+        assert!(cycles.iter().all(|c| c.len() == 3));
+    }
+
+    #[test]
+    fn dfs_find_cycles_from_depth_limit_prevents_longer_cycles() {
+        // 0->1->2->3->0 forms a 4-cycle
+        // With depth_limit=3, the DFS should NOT find this 4-cycle
+        let (modules, all_succs, succ_ranges) =
+            build_test_succs(4, &[(0, 1), (1, 2), (2, 3), (3, 0)]);
+        let succs = SuccessorMap {
+            all_succs: &all_succs,
+            succ_ranges: &succ_ranges,
+            modules: &modules,
+        };
+        let scc_set: FxHashSet<usize> = [0, 1, 2, 3].into_iter().collect();
+        let mut seen = FxHashSet::default();
+        let mut cycles = Vec::new();
+
+        dfs_find_cycles_from(0, 3, &scc_set, &succs, 10, &mut seen, &mut cycles);
+        assert!(
+            cycles.is_empty(),
+            "depth_limit=3 should prevent finding a 4-node cycle"
+        );
+    }
+
+    #[test]
+    fn dfs_find_cycles_from_depth_limit_exact_match() {
+        // 0->1->2->3->0 forms a 4-cycle
+        // With depth_limit=4, the DFS should find it
+        let (modules, all_succs, succ_ranges) =
+            build_test_succs(4, &[(0, 1), (1, 2), (2, 3), (3, 0)]);
+        let succs = SuccessorMap {
+            all_succs: &all_succs,
+            succ_ranges: &succ_ranges,
+            modules: &modules,
+        };
+        let scc_set: FxHashSet<usize> = [0, 1, 2, 3].into_iter().collect();
+        let mut seen = FxHashSet::default();
+        let mut cycles = Vec::new();
+
+        dfs_find_cycles_from(0, 4, &scc_set, &succs, 10, &mut seen, &mut cycles);
+        assert_eq!(cycles.len(), 1, "depth_limit=4 should find the 4-node cycle");
+        assert_eq!(cycles[0].len(), 4);
+    }
+
+    #[test]
+    fn dfs_find_cycles_from_respects_max_cycles() {
+        // Dense graph: complete graph of 4 nodes — many cycles
+        let edges: Vec<(usize, usize)> = (0..4)
+            .flat_map(|i| (0..4).filter(move |&j| i != j).map(move |j| (i, j)))
+            .collect();
+        let (modules, all_succs, succ_ranges) = build_test_succs(4, &edges);
+        let succs = SuccessorMap {
+            all_succs: &all_succs,
+            succ_ranges: &succ_ranges,
+            modules: &modules,
+        };
+        let scc_set: FxHashSet<usize> = (0..4).collect();
+        let mut seen = FxHashSet::default();
+        let mut cycles = Vec::new();
+
+        // max_cycles = 2: should stop after finding 2
+        dfs_find_cycles_from(0, 2, &scc_set, &succs, 2, &mut seen, &mut cycles);
+        assert!(
+            cycles.len() <= 2,
+            "should respect max_cycles limit, got {}",
+            cycles.len()
+        );
+    }
+
+    #[test]
+    fn dfs_find_cycles_from_ignores_nodes_outside_scc() {
+        // 0->1->2->0 but only {0, 1} in SCC set — node 2 should be ignored
+        let (modules, all_succs, succ_ranges) =
+            build_test_succs(3, &[(0, 1), (1, 2), (2, 0)]);
+        let succs = SuccessorMap {
+            all_succs: &all_succs,
+            succ_ranges: &succ_ranges,
+            modules: &modules,
+        };
+        let scc_set: FxHashSet<usize> = [0, 1].into_iter().collect();
+        let mut seen = FxHashSet::default();
+        let mut cycles = Vec::new();
+
+        for depth in 2..=3 {
+            dfs_find_cycles_from(0, depth, &scc_set, &succs, 10, &mut seen, &mut cycles);
+        }
+        assert!(
+            cycles.is_empty(),
+            "should not find cycles through nodes outside the SCC set"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // enumerate_elementary_cycles tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn enumerate_elementary_cycles_empty_scc() {
+        let (modules, all_succs, succ_ranges) = build_test_succs(0, &[]);
+        let succs = SuccessorMap {
+            all_succs: &all_succs,
+            succ_ranges: &succ_ranges,
+            modules: &modules,
+        };
+        let cycles = enumerate_elementary_cycles(&[], &succs, 10);
+        assert!(cycles.is_empty());
+    }
+
+    #[test]
+    fn enumerate_elementary_cycles_max_cycles_limit() {
+        // Complete graph of 4 nodes — many elementary cycles
+        let edges: Vec<(usize, usize)> = (0..4)
+            .flat_map(|i| (0..4).filter(move |&j| i != j).map(move |j| (i, j)))
+            .collect();
+        let (modules, all_succs, succ_ranges) = build_test_succs(4, &edges);
+        let succs = SuccessorMap {
+            all_succs: &all_succs,
+            succ_ranges: &succ_ranges,
+            modules: &modules,
+        };
+        let scc_nodes: Vec<usize> = (0..4).collect();
+
+        let cycles = enumerate_elementary_cycles(&scc_nodes, &succs, 3);
+        assert!(
+            cycles.len() <= 3,
+            "should respect max_cycles=3 limit, got {}",
+            cycles.len()
+        );
+    }
+
+    #[test]
+    fn enumerate_elementary_cycles_finds_all_in_triangle() {
+        // 0->1->2->0 — single elementary cycle
+        let (modules, all_succs, succ_ranges) =
+            build_test_succs(3, &[(0, 1), (1, 2), (2, 0)]);
+        let succs = SuccessorMap {
+            all_succs: &all_succs,
+            succ_ranges: &succ_ranges,
+            modules: &modules,
+        };
+        let scc_nodes: Vec<usize> = vec![0, 1, 2];
+
+        let cycles = enumerate_elementary_cycles(&scc_nodes, &succs, 20);
+        assert_eq!(cycles.len(), 1);
+        assert_eq!(cycles[0].len(), 3);
+    }
+
+    #[test]
+    fn enumerate_elementary_cycles_iterative_deepening_order() {
+        // SCC with both 2-node and 3-node cycles
+        // 0->1->0 (2-cycle) and 0->1->2->0 (3-cycle)
+        let (modules, all_succs, succ_ranges) =
+            build_test_succs(3, &[(0, 1), (1, 0), (1, 2), (2, 0)]);
+        let succs = SuccessorMap {
+            all_succs: &all_succs,
+            succ_ranges: &succ_ranges,
+            modules: &modules,
+        };
+        let scc_nodes: Vec<usize> = vec![0, 1, 2];
+
+        let cycles = enumerate_elementary_cycles(&scc_nodes, &succs, 20);
+        assert!(cycles.len() >= 2, "should find at least 2 cycles");
+        // Iterative deepening: shorter cycles should come first
+        assert!(
+            cycles[0].len() <= cycles[cycles.len() - 1].len(),
+            "shorter cycles should be found before longer ones"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Integration-level edge cases
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn find_cycles_max_cycles_per_scc_respected() {
+        // Dense SCC (complete graph of 5 nodes) — should cap at MAX_CYCLES_PER_SCC (20)
+        let edges: Vec<(u32, u32)> = (0..5)
+            .flat_map(|i| (0..5).filter(move |&j| i != j).map(move |j| (i, j)))
+            .collect();
+        let graph = build_cycle_graph(5, &edges);
+        let cycles = graph.find_cycles();
+        // K5 has many elementary cycles, but we cap at 20 per SCC
+        assert!(
+            cycles.len() <= 20,
+            "should cap at MAX_CYCLES_PER_SCC, got {}",
+            cycles.len()
+        );
+        assert!(
+            !cycles.is_empty(),
+            "dense graph should still find some cycles"
+        );
+    }
+
+    #[test]
+    fn find_cycles_graph_with_no_cycles_returns_empty() {
+        // Star topology: center -> all leaves, no cycles possible
+        let graph = build_cycle_graph(5, &[(0, 1), (0, 2), (0, 3), (0, 4)]);
+        assert!(graph.find_cycles().is_empty());
+    }
+
+    #[test]
+    fn find_cycles_diamond_no_cycle() {
+        // Diamond without back-edge: A->B, A->C, B->D, C->D — no cycle
+        let graph = build_cycle_graph(4, &[(0, 1), (0, 2), (1, 3), (2, 3)]);
+        assert!(graph.find_cycles().is_empty());
+    }
+
+    #[test]
+    fn find_cycles_diamond_with_back_edge() {
+        // Diamond with back-edge: A->B, A->C, B->D, C->D, D->A
+        let graph = build_cycle_graph(4, &[(0, 1), (0, 2), (1, 3), (2, 3), (3, 0)]);
+        let cycles = graph.find_cycles();
+        assert!(
+            cycles.len() >= 2,
+            "diamond with back-edge should have at least 2 elementary cycles, got {}",
+            cycles.len()
+        );
+        // Shortest cycles should be length 3 (A->B->D->A and A->C->D->A)
         assert_eq!(cycles[0].len(), 3);
     }
 }
