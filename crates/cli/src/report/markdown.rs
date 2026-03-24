@@ -501,6 +501,29 @@ pub fn build_health_markdown(report: &crate::health_types::HealthReport, root: &
         }
     }
 
+    // Metric legend — explains abbreviations used in the tables above
+    let has_scores = !report.file_scores.is_empty();
+    let has_hotspots = !report.hotspots.is_empty();
+    if has_scores || has_hotspots {
+        out.push_str("\n---\n\n<details><summary>Metric definitions</summary>\n\n");
+        if has_scores {
+            out.push_str("- **MI** — Maintainability Index (0\u{2013}100, higher is better)\n");
+            out.push_str("- **Fan-in** — files that import this file (blast radius)\n");
+            out.push_str("- **Fan-out** — files this file imports (coupling)\n");
+            out.push_str("- **Dead Code** — % of value exports with zero references\n");
+            out.push_str("- **Density** — cyclomatic complexity / lines of code\n");
+        }
+        if has_hotspots {
+            out.push_str(
+                "- **Score** — churn \u{00d7} complexity (0\u{2013}100, higher = riskier)\n",
+            );
+            out.push_str("- **Commits** — commits in the analysis window\n");
+            out.push_str("- **Churn** — total lines added + deleted\n");
+            out.push_str("- **Trend** — accelerating / stable / cooling\n");
+        }
+        out.push_str("\n[Full metric reference](https://docs.fallow.tools/explanations/metrics)\n\n</details>\n");
+    }
+
     out
 }
 

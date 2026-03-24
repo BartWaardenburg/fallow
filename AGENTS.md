@@ -15,7 +15,8 @@ Fallow is a codebase analyzer for JS/TS projects. It detects unused files, expor
 3. **Always use `--dry-run` before `fix`** mutations. Review the dry-run output, then run `fix --yes` to apply. The `--yes` flag (alias: `--force`) is **required** in non-TTY environments (CI, piped input, agent subprocesses).
 4. **Use issue type filter flags** (`--unused-files`, `--unused-exports`, etc.) to limit response scope. This keeps output small and avoids exceeding context windows.
 5. **All paths in output are relative** to the project root. Do not join them with an absolute prefix unless you know the working directory.
-6. **Do not run `watch`** in agent workflows. It is interactive and never exits.
+6. **Use `--explain`** to include a `_meta` object in JSON output with metric definitions, value ranges, and interpretation hints. The MCP server enables this automatically. This helps you understand what values like `complexity_density: 0.12` or `trend: accelerating` mean without consulting external docs.
+7. **Do not run `watch`** in agent workflows. It is interactive and never exits.
 
 ## Exit codes
 

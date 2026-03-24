@@ -35,6 +35,7 @@ pub struct DupesOptions<'a> {
     pub production: bool,
     pub trace: Option<&'a str>,
     pub changed_since: Option<&'a str>,
+    pub explain: bool,
 }
 
 /// Parse a `--trace` spec string into (file_path, line_number).
@@ -207,8 +208,14 @@ pub fn run_dupes(opts: &DupesOptions<'_>) -> ExitCode {
     let elapsed = start.elapsed();
 
     // Print results
-    let result =
-        report::print_duplication_report(&report, &config, elapsed, opts.quiet, &opts.output);
+    let result = report::print_duplication_report(
+        &report,
+        &config,
+        elapsed,
+        opts.quiet,
+        &opts.output,
+        opts.explain,
+    );
     if result != ExitCode::SUCCESS {
         return result;
     }
@@ -297,6 +304,7 @@ mod tests {
             production: false,
             trace: None,
             changed_since: None,
+            explain: false,
         }
     }
 

@@ -5,18 +5,30 @@ use std::time::Duration;
 use fallow_core::duplicates::DuplicationReport;
 use fallow_core::results::AnalysisResults;
 
-pub(super) fn print_json(results: &AnalysisResults, root: &Path, elapsed: Duration) -> ExitCode {
+use crate::explain;
+
+pub(super) fn print_json(
+    results: &AnalysisResults,
+    root: &Path,
+    elapsed: Duration,
+    explain: bool,
+) -> ExitCode {
     match build_json(results, root, elapsed) {
-        Ok(output) => match serde_json::to_string_pretty(&output) {
-            Ok(json) => {
-                println!("{json}");
-                ExitCode::SUCCESS
+        Ok(mut output) => {
+            if explain {
+                insert_meta(&mut output, explain::check_meta());
             }
-            Err(e) => {
-                eprintln!("Error: failed to serialize JSON output: {e}");
-                ExitCode::from(2)
+            match serde_json::to_string_pretty(&output) {
+                Ok(json) => {
+                    println!("{json}");
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("Error: failed to serialize JSON output: {e}");
+                    ExitCode::from(2)
+                }
             }
-        },
+        }
         Err(e) => {
             eprintln!("Error: failed to serialize results: {e}");
             ExitCode::from(2)
@@ -97,10 +109,18 @@ fn strip_root_prefix(value: &mut serde_json::Value, prefix: &str) {
     }
 }
 
+/// Insert a `_meta` key into a JSON object value.
+fn insert_meta(output: &mut serde_json::Value, meta: serde_json::Value) {
+    if let serde_json::Value::Object(map) = output {
+        map.insert("_meta".to_string(), meta);
+    }
+}
+
 pub(super) fn print_health_json(
     report: &crate::health_types::HealthReport,
     root: &Path,
     elapsed: Duration,
+    explain: bool,
 ) -> ExitCode {
     let report_value = match serde_json::to_value(report) {
         Ok(v) => v,
@@ -132,6 +152,10 @@ pub(super) fn print_health_json(
     let root_prefix = format!("{}/", root.display());
     strip_root_prefix(&mut output, &root_prefix);
 
+    if explain {
+        insert_meta(&mut output, explain::health_meta());
+    }
+
     match serde_json::to_string_pretty(&output) {
         Ok(json) => {
             println!("{json}");
@@ -144,7 +168,11 @@ pub(super) fn print_health_json(
     }
 }
 
-pub(super) fn print_duplication_json(report: &DuplicationReport, elapsed: Duration) -> ExitCode {
+pub(super) fn print_duplication_json(
+    report: &DuplicationReport,
+    elapsed: Duration,
+    explain: bool,
+) -> ExitCode {
     let report_value = match serde_json::to_value(report) {
         Ok(v) => v,
         Err(e) => {
@@ -172,7 +200,11 @@ pub(super) fn print_duplication_json(report: &DuplicationReport, elapsed: Durati
             map.insert(key, value);
         }
     }
-    let output = serde_json::Value::Object(map);
+    let mut output = serde_json::Value::Object(map);
+
+    if explain {
+        insert_meta(&mut output, explain::dupes_meta());
+    }
 
     match serde_json::to_string_pretty(&output) {
         Ok(json) => {

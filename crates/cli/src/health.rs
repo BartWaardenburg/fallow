@@ -38,6 +38,7 @@ pub struct HealthOptions<'a> {
     pub hotspots: bool,
     pub since: Option<&'a str>,
     pub min_commits: Option<u32>,
+    pub explain: bool,
 }
 
 pub fn run_health(opts: &HealthOptions<'_>) -> ExitCode {
@@ -304,7 +305,14 @@ pub fn run_health(opts: &HealthOptions<'_>) -> ExitCode {
     let elapsed = start.elapsed();
 
     // Print report
-    let result = report::print_health_report(&report, &config, elapsed, opts.quiet, &opts.output);
+    let result = report::print_health_report(
+        &report,
+        &config,
+        elapsed,
+        opts.quiet,
+        &opts.output,
+        opts.explain,
+    );
     if result != ExitCode::SUCCESS {
         return result;
     }

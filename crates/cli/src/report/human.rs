@@ -8,7 +8,7 @@ use fallow_core::duplicates::DuplicationReport;
 use fallow_core::results::{AnalysisResults, UnusedExport, UnusedMember};
 use fallow_core::trace::{CloneTrace, DependencyTrace, ExportTrace, FileTrace, PipelineTimings};
 
-use super::{Level, relative_path, severity_to_level, split_dir_filename};
+use super::{Level, elide_common_prefix, relative_path, severity_to_level, split_dir_filename};
 
 /// Maximum items shown per flat section (unused files, deps, etc.).
 const MAX_FLAT_ITEMS: usize = 10;
@@ -224,33 +224,11 @@ pub(super) fn build_human_lines(
         |dep| vec![format!("  {}", format_dep(&dep.package_name, &dep.path))],
     );
 
-    build_human_section(
+    build_circular_deps_section(
         &mut lines,
         &results.circular_dependencies,
-        "Circular dependencies",
         severity_to_level(rules.circular_dependencies),
-        |cycle| {
-            let chain: Vec<String> = cycle
-                .files
-                .iter()
-                .map(|p| {
-                    let path_str = relative_path(p, root).display().to_string();
-                    format_path(&path_str)
-                })
-                .collect();
-            // Repeat the first file at the end to make the cycle visually clear
-            let mut display_chain = chain.clone();
-            if let Some(first) = chain.first() {
-                display_chain.push(first.clone());
-            }
-            // Line 1: first file, Line 2: indented chain for 80-col readability
-            let first = &display_chain[0];
-            let rest = &display_chain[1..];
-            vec![
-                format!("  {first}"),
-                format!("    \u{2192} {}", rest.join(" \u{2192} ")),
-            ]
-        },
+        root,
     );
 
     lines
@@ -446,14 +424,18 @@ fn build_duplicate_exports_section(
             display.join(", ")
         };
 
+        // Vertical layout: file_a on line 1, ↔ file_b on line 2, exports on line 3
+        let elided_b = elide_common_prefix(file_a, file_b);
+        lines.push(format!("  {}", format_path(file_a)));
         lines.push(format!(
-            "  {} \u{2194} {} ({} export{})",
-            format_path(file_a),
-            format_path(file_b),
+            "    {} {} ({} export{})",
+            "\u{2194}".dimmed(),
+            format_path(elided_b),
             exports.len(),
             if exports.len() == 1 { "" } else { "s" }
         ));
         lines.push(format!("    {export_list}"));
+        lines.push(String::new());
     }
 
     if pair_groups.len() > MAX_FLAT_ITEMS {
@@ -474,6 +456,88 @@ fn build_duplicate_exports_section(
     lines.push(String::new());
 }
 
+/// Build circular dependencies grouped by hub file with path elision.
+fn build_circular_deps_section(
+    lines: &mut Vec<String>,
+    items: &[fallow_core::results::CircularDependency],
+    level: Level,
+    root: &Path,
+) {
+    if items.is_empty() {
+        return;
+    }
+    lines.push(build_section_header(
+        "Circular dependencies",
+        items.len(),
+        level,
+    ));
+
+    // Group cycles by their first file (hub)
+    let mut hub_groups: Vec<(String, Vec<&fallow_core::results::CircularDependency>)> = Vec::new();
+    let mut hub_map: rustc_hash::FxHashMap<String, usize> = rustc_hash::FxHashMap::default();
+
+    for cycle in items {
+        let hub = cycle
+            .files
+            .first()
+            .map(|p| relative_path(p, root).display().to_string())
+            .unwrap_or_default();
+        if let Some(&idx) = hub_map.get(&hub) {
+            hub_groups[idx].1.push(cycle);
+        } else {
+            hub_map.insert(hub.clone(), hub_groups.len());
+            hub_groups.push((hub, vec![cycle]));
+        }
+    }
+
+    // Sort by cycle count descending, alphabetical tiebreaker
+    hub_groups.sort_by(|a, b| b.1.len().cmp(&a.1.len()).then_with(|| a.0.cmp(&b.0)));
+
+    let shown = hub_groups.len().min(MAX_FLAT_ITEMS);
+    for (hub_path, cycles) in &hub_groups[..shown] {
+        let count_tag = if cycles.len() > 1 {
+            format!(" ({} cycles)", cycles.len()).dimmed().to_string()
+        } else {
+            String::new()
+        };
+        lines.push(format!("  {}{}", format_path(hub_path), count_tag));
+
+        for cycle in cycles {
+            let rel_paths: Vec<String> = cycle
+                .files
+                .iter()
+                .map(|p| relative_path(p, root).display().to_string())
+                .collect();
+
+            // Build chain: elide common prefix with hub, add closing return to hub
+            let mut chain_parts: Vec<String> = Vec::new();
+            for path in &rel_paths[1..] {
+                let elided = elide_common_prefix(hub_path, path);
+                chain_parts.push(format_path(elided));
+            }
+            // Close the cycle back to hub filename
+            let (_, hub_filename) = split_dir_filename(hub_path);
+            chain_parts.push(hub_filename.bold().to_string());
+
+            lines.push(format!(
+                "    {} {}",
+                "\u{2192}".dimmed(),
+                chain_parts.join(&format!(" {} ", "\u{2192}".dimmed()))
+            ));
+        }
+        lines.push(String::new());
+    }
+
+    if hub_groups.len() > MAX_FLAT_ITEMS {
+        let hidden: usize = hub_groups[MAX_FLAT_ITEMS..]
+            .iter()
+            .map(|(_, cycles)| cycles.len())
+            .sum();
+        lines.push(format!("  {}", format!("... and {hidden} more").dimmed()));
+        lines.push(String::new());
+    }
+}
+
 /// Build a one-line summary footer showing counts per issue type.
 fn build_summary_footer(results: &AnalysisResults) -> String {
     let mut parts = Vec::new();
@@ -488,22 +552,22 @@ fn build_summary_footer(results: &AnalysisResults) -> String {
         }
     };
 
-    add(results.unused_files.len(), "unused file");
-    add(results.unused_exports.len(), "unused export");
-    add(results.unused_types.len(), "unused type");
+    add(results.unused_files.len(), "file");
+    add(results.unused_exports.len(), "export");
+    add(results.unused_types.len(), "type");
     add(
         results.unused_dependencies.len()
             + results.unused_dev_dependencies.len()
             + results.unused_optional_dependencies.len(),
-        "unused dep",
+        "dep",
     );
-    add(results.unused_enum_members.len(), "unused enum member");
-    add(results.unused_class_members.len(), "unused class member");
-    add(results.unresolved_imports.len(), "unresolved import");
-    add(results.unlisted_dependencies.len(), "unlisted dep");
-    add(results.duplicate_exports.len(), "duplicate export");
-    add(results.type_only_dependencies.len(), "type-only dep");
-    add(results.circular_dependencies.len(), "circular dep");
+    add(results.unused_enum_members.len(), "enum");
+    add(results.unused_class_members.len(), "class");
+    add(results.unresolved_imports.len(), "unresolved");
+    add(results.unlisted_dependencies.len(), "unlisted");
+    add(results.duplicate_exports.len(), "duplicate");
+    add(results.type_only_dependencies.len(), "type-only");
+    add(results.circular_dependencies.len(), "circular");
 
     parts.join(" \u{00b7} ")
 }
@@ -520,7 +584,7 @@ pub(super) fn print_health_human(
         eprintln!();
     }
 
-    if report.findings.is_empty() && report.file_scores.is_empty() {
+    if report.findings.is_empty() && report.file_scores.is_empty() && report.hotspots.is_empty() {
         if !quiet {
             eprintln!(
                 "{}",
@@ -588,6 +652,7 @@ pub(super) fn print_health_human(
                 format!("  Average maintainability index: {avg:.1}/100").dimmed()
             );
         }
+        eprintln!("{}", crate::explain::DOCS_FOOTER.dimmed());
     }
 }
 
@@ -922,13 +987,44 @@ pub(super) fn build_duplication_human_lines(
         lines.push(String::new());
     }
 
-    // Print clone families with refactoring suggestions
+    // Detect mirrored directory patterns across families.
+    // Families with exactly 2 files that share a common filename after stripping
+    // directory prefixes are grouped under a "Mirrored directories" header.
+    let (mirrored, non_mirrored) = detect_mirrored_families(&report.clone_families, root);
+
+    if !mirrored.is_empty() {
+        for mirror in &mirrored {
+            lines.push(format!(
+                "{} {}",
+                "\u{25cf}".yellow(),
+                format!(
+                    "Mirrored: {} \u{2194} {} ({} files, {} lines)",
+                    mirror.dir_a,
+                    mirror.dir_b,
+                    mirror.file_count,
+                    thousands(mirror.total_lines),
+                )
+                .yellow()
+                .bold()
+            ));
+
+            let shown = mirror.files.len().min(MAX_FLAT_ITEMS);
+            for filename in &mirror.files[..shown] {
+                lines.push(format!("  {}", filename.dimmed()));
+            }
+            if mirror.files.len() > MAX_FLAT_ITEMS {
+                lines.push(format!(
+                    "  {}",
+                    format!("... and {} more", mirror.files.len() - MAX_FLAT_ITEMS).dimmed()
+                ));
+            }
+            lines.push(String::new());
+        }
+    }
+
+    // Print remaining clone families with refactoring suggestions
     // Suppress single-group families — not actionable
-    let multi_group_families: Vec<_> = report
-        .clone_families
-        .iter()
-        .filter(|f| f.groups.len() > 1)
-        .collect();
+    let multi_group_families: Vec<_> = non_mirrored.iter().filter(|f| f.groups.len() > 1).collect();
 
     if !multi_group_families.is_empty() {
         lines.push(format!(
@@ -973,6 +1069,104 @@ pub(super) fn build_duplication_human_lines(
     }
 
     lines
+}
+
+/// A detected mirrored directory pattern: two directory prefixes that contain
+/// identical files (e.g., `src/` and `deno/lib/`).
+struct MirroredDirs {
+    dir_a: String,
+    dir_b: String,
+    files: Vec<String>,
+    file_count: usize,
+    total_lines: usize,
+}
+
+/// Detect mirrored directory patterns in clone families.
+///
+/// Scans families with exactly 2 files. If multiple families share the same
+/// directory prefix pair (after stripping to the common filename), they're
+/// grouped into a `MirroredDirs`. Families that don't match any mirror pattern
+/// are returned as non-mirrored.
+///
+/// Minimum 3 families must share a pattern to qualify as "mirrored".
+fn detect_mirrored_families<'a>(
+    families: &'a [fallow_core::duplicates::CloneFamily],
+    root: &Path,
+) -> (
+    Vec<MirroredDirs>,
+    Vec<&'a fallow_core::duplicates::CloneFamily>,
+) {
+    const MIN_MIRROR_FAMILIES: usize = 3;
+
+    // For each 2-file family, extract the directory pair + relative filename
+    // Entry: (family_index, filename, duplicated_lines)
+    type MirrorEntry = (usize, String, usize);
+    let mut pair_map: rustc_hash::FxHashMap<(String, String), Vec<MirrorEntry>> =
+        rustc_hash::FxHashMap::default();
+
+    for (idx, family) in families.iter().enumerate() {
+        if family.files.len() != 2 {
+            continue;
+        }
+        let path_a = relative_path(&family.files[0], root).display().to_string();
+        let path_b = relative_path(&family.files[1], root).display().to_string();
+
+        let (dir_a, file_a) = split_dir_filename(&path_a);
+        let (dir_b, file_b) = split_dir_filename(&path_b);
+
+        // Only match if the filenames are the same
+        if file_a != file_b {
+            continue;
+        }
+
+        // Normalize: always use the lexically smaller dir first
+        let (da, db) = if dir_a <= dir_b {
+            (dir_a.to_string(), dir_b.to_string())
+        } else {
+            (dir_b.to_string(), dir_a.to_string())
+        };
+
+        pair_map.entry((da, db)).or_default().push((
+            idx,
+            file_a.to_string(),
+            family.total_duplicated_lines,
+        ));
+    }
+
+    let mut mirrored_indices: rustc_hash::FxHashSet<usize> = rustc_hash::FxHashSet::default();
+    let mut mirrors: Vec<MirroredDirs> = Vec::new();
+
+    for ((dir_a, dir_b), entries) in &pair_map {
+        if entries.len() < MIN_MIRROR_FAMILIES {
+            continue;
+        }
+        for &(idx, _, _) in entries {
+            mirrored_indices.insert(idx);
+        }
+        let total_lines: usize = entries.iter().map(|&(_, _, lines)| lines).sum();
+        let mut files: Vec<String> = entries.iter().map(|(_, f, _)| f.clone()).collect();
+        files.sort();
+        let file_count = files.len();
+        mirrors.push(MirroredDirs {
+            dir_a: dir_a.clone(),
+            dir_b: dir_b.clone(),
+            files,
+            file_count,
+            total_lines,
+        });
+    }
+
+    // Sort mirrors by total lines descending
+    mirrors.sort_by(|a, b| b.total_lines.cmp(&a.total_lines));
+
+    let non_mirrored: Vec<&fallow_core::duplicates::CloneFamily> = families
+        .iter()
+        .enumerate()
+        .filter(|(idx, _)| !mirrored_indices.contains(idx))
+        .map(|(_, f)| f)
+        .collect();
+
+    (mirrors, non_mirrored)
 }
 
 // ── Cross-reference findings ──────────────────────────────────────
@@ -1822,7 +2016,8 @@ mod tests {
         let text = plain(&lines);
         assert!(text.contains("Config"));
         assert!(text.contains("src/config.ts"));
-        assert!(text.contains("src/types.ts"));
+        // file_b shown with common prefix elided
+        assert!(text.contains("types.ts"));
     }
 
     // ── Circular dependencies show cycle with arrow ──
@@ -1844,9 +2039,11 @@ mod tests {
         let rules = RulesConfig::default();
         let lines = build_human_lines(&results, &root, &rules);
         let text = plain(&lines);
-        // Line 1 shows first file, line 2 shows the rest of the chain with arrows
-        assert!(text.contains("src/a.ts"));
-        assert!(text.contains("\u{2192} src/b.ts \u{2192} src/c.ts \u{2192} src/a.ts"));
+        // Hub file shown first, chain with elided paths and arrows
+        assert!(text.contains("a.ts"));
+        assert!(text.contains("b.ts"));
+        assert!(text.contains("c.ts"));
+        assert!(text.contains("\u{2192}"));
     }
 
     // ── Empty sections are omitted ──

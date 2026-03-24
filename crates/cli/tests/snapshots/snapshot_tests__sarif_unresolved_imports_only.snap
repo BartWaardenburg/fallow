@@ -18,6 +18,10 @@ expression: redact_sarif_version(&json_str)
               "shortDescription": {
                 "text": "File is not reachable from any entry point"
               },
+              "fullDescription": {
+                "text": "Source files that are not imported by any other module and are not entry points (scripts, tests, configs). These files can safely be deleted. Detection uses graph reachability from configured entry points."
+              },
+              "helpUri": "https://docs.fallow.tools/rules/unused-files",
               "defaultConfiguration": {
                 "level": "error"
               }
@@ -27,6 +31,10 @@ expression: redact_sarif_version(&json_str)
               "shortDescription": {
                 "text": "Export is never imported"
               },
+              "fullDescription": {
+                "text": "Named exports that are never imported by any other module in the project. Includes both direct exports and re-exports through barrel files. The export may still be used locally within the same file."
+              },
+              "helpUri": "https://docs.fallow.tools/rules/unused-exports",
               "defaultConfiguration": {
                 "level": "error"
               }
@@ -36,6 +44,10 @@ expression: redact_sarif_version(&json_str)
               "shortDescription": {
                 "text": "Type export is never imported"
               },
+              "fullDescription": {
+                "text": "Type-only exports (interfaces, type aliases, enums used only as types) that are never imported. These do not generate runtime code but add maintenance burden."
+              },
+              "helpUri": "https://docs.fallow.tools/rules/unused-types",
               "defaultConfiguration": {
                 "level": "error"
               }
@@ -45,6 +57,10 @@ expression: redact_sarif_version(&json_str)
               "shortDescription": {
                 "text": "Dependency listed but never imported"
               },
+              "fullDescription": {
+                "text": "Packages listed in dependencies that are never imported or required by any source file. Framework plugins and CLI tools may be false positives — use the ignore_dependencies config to suppress."
+              },
+              "helpUri": "https://docs.fallow.tools/rules/unused-dependencies",
               "defaultConfiguration": {
                 "level": "error"
               }
@@ -54,6 +70,10 @@ expression: redact_sarif_version(&json_str)
               "shortDescription": {
                 "text": "Dev dependency listed but never imported"
               },
+              "fullDescription": {
+                "text": "Packages listed in devDependencies that are never imported by test files, config files, or scripts. Build tools and jest presets that are referenced only in config may appear as false positives."
+              },
+              "helpUri": "https://docs.fallow.tools/rules/unused-dev-dependencies",
               "defaultConfiguration": {
                 "level": "error"
               }
@@ -63,6 +83,10 @@ expression: redact_sarif_version(&json_str)
               "shortDescription": {
                 "text": "Optional dependency listed but never imported"
               },
+              "fullDescription": {
+                "text": "Packages listed in optionalDependencies that are never imported. Optional dependencies are typically platform-specific — verify they are not needed on any supported platform before removing."
+              },
+              "helpUri": "https://docs.fallow.tools/rules/unused-optional-dependencies",
               "defaultConfiguration": {
                 "level": "error"
               }
@@ -72,6 +96,10 @@ expression: redact_sarif_version(&json_str)
               "shortDescription": {
                 "text": "Production dependency only used via type-only imports"
               },
+              "fullDescription": {
+                "text": "Production dependencies that are only imported via `import type` statements. These can be moved to devDependencies since they generate no runtime code and are stripped during compilation."
+              },
+              "helpUri": "https://docs.fallow.tools/rules/type-only-dependencies",
               "defaultConfiguration": {
                 "level": "warning"
               }
@@ -81,6 +109,10 @@ expression: redact_sarif_version(&json_str)
               "shortDescription": {
                 "text": "Enum member is never referenced"
               },
+              "fullDescription": {
+                "text": "Enum members that are never referenced in the codebase. Uses scope-aware binding analysis to track all references including computed access patterns."
+              },
+              "helpUri": "https://docs.fallow.tools/rules/unused-enum-members",
               "defaultConfiguration": {
                 "level": "error"
               }
@@ -90,6 +122,10 @@ expression: redact_sarif_version(&json_str)
               "shortDescription": {
                 "text": "Class member is never referenced"
               },
+              "fullDescription": {
+                "text": "Class methods and properties that are never referenced outside the class. Private members are checked within the class scope; public members are checked project-wide."
+              },
+              "helpUri": "https://docs.fallow.tools/rules/unused-class-members",
               "defaultConfiguration": {
                 "level": "error"
               }
@@ -99,6 +135,10 @@ expression: redact_sarif_version(&json_str)
               "shortDescription": {
                 "text": "Import could not be resolved"
               },
+              "fullDescription": {
+                "text": "Import specifiers that could not be resolved to a file on disk. Common causes: deleted files, typos in paths, missing path aliases in tsconfig, or uninstalled packages."
+              },
+              "helpUri": "https://docs.fallow.tools/rules/unresolved-imports",
               "defaultConfiguration": {
                 "level": "error"
               }
@@ -108,6 +148,10 @@ expression: redact_sarif_version(&json_str)
               "shortDescription": {
                 "text": "Dependency used but not in package.json"
               },
+              "fullDescription": {
+                "text": "Packages that are imported in source code but not listed in package.json. These work by accident (hoisted from another workspace package or transitive dep) and will break in strict package managers."
+              },
+              "helpUri": "https://docs.fallow.tools/rules/unlisted-dependencies",
               "defaultConfiguration": {
                 "level": "error"
               }
@@ -117,6 +161,10 @@ expression: redact_sarif_version(&json_str)
               "shortDescription": {
                 "text": "Export name appears in multiple modules"
               },
+              "fullDescription": {
+                "text": "The same export name is defined in multiple modules. Consumers may import from the wrong module, leading to subtle bugs. Consider renaming or consolidating."
+              },
+              "helpUri": "https://docs.fallow.tools/rules/duplicate-exports",
               "defaultConfiguration": {
                 "level": "error"
               }
@@ -126,6 +174,10 @@ expression: redact_sarif_version(&json_str)
               "shortDescription": {
                 "text": "Circular dependency chain detected"
               },
+              "fullDescription": {
+                "text": "A cycle in the module import graph. Circular dependencies cause undefined behavior with CommonJS (partial modules) and initialization ordering issues with ESM. Break cycles by extracting shared code."
+              },
+              "helpUri": "https://docs.fallow.tools/rules/circular-dependencies",
               "defaultConfiguration": {
                 "level": "error"
               }

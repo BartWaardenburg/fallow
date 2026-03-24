@@ -23,6 +23,7 @@ pub struct WatchOptions<'a> {
     pub quiet: bool,
     pub production: bool,
     pub clear_screen: bool,
+    pub explain: bool,
 }
 
 fn is_relevant_source(path: &Path) -> bool {
@@ -107,7 +108,7 @@ pub fn run_watch(opts: &WatchOptions<'_>) -> ExitCode {
         }
     };
     let elapsed = start.elapsed();
-    let report_code = report::print_results(&results, &config, elapsed, opts.quiet);
+    let report_code = report::print_results(&results, &config, elapsed, opts.quiet, opts.explain);
     if report_code != ExitCode::SUCCESS {
         eprintln!("Warning: report output failed");
     }
@@ -165,8 +166,13 @@ pub fn run_watch(opts: &WatchOptions<'_>) -> ExitCode {
                 match fallow_core::analyze(&config) {
                     Ok(results) => {
                         let elapsed = start.elapsed();
-                        let report_code =
-                            report::print_results(&results, &config, elapsed, opts.quiet);
+                        let report_code = report::print_results(
+                            &results,
+                            &config,
+                            elapsed,
+                            opts.quiet,
+                            opts.explain,
+                        );
                         if report_code != ExitCode::SUCCESS {
                             eprintln!("Warning: report output failed");
                         }

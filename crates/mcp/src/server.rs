@@ -208,6 +208,7 @@ fn build_analyze_args(params: &AnalyzeParams) -> Result<Vec<String>, String> {
         "--format".to_string(),
         "json".to_string(),
         "--quiet".to_string(),
+        "--explain".to_string(),
     ];
 
     if let Some(ref root) = params.root {
@@ -248,6 +249,7 @@ fn build_check_changed_args(params: CheckChangedParams) -> Vec<String> {
         "--format".to_string(),
         "json".to_string(),
         "--quiet".to_string(),
+        "--explain".to_string(),
         "--changed-since".to_string(),
         params.since,
     ];
@@ -276,6 +278,7 @@ fn build_find_dupes_args(params: &FindDupesParams) -> Result<Vec<String>, String
         "--format".to_string(),
         "json".to_string(),
         "--quiet".to_string(),
+        "--explain".to_string(),
     ];
 
     if let Some(ref root) = params.root {
@@ -383,6 +386,7 @@ fn build_health_args(params: &HealthParams) -> Vec<String> {
         "--format".to_string(),
         "json".to_string(),
         "--quiet".to_string(),
+        "--explain".to_string(),
     ];
 
     if let Some(ref root) = params.root {
@@ -788,7 +792,7 @@ mod tests {
             issue_types: None,
         };
         let args = build_analyze_args(&params).unwrap();
-        assert_eq!(args, ["check", "--format", "json", "--quiet"]);
+        assert_eq!(args, ["check", "--format", "json", "--quiet", "--explain"]);
     }
 
     #[test]
@@ -811,6 +815,7 @@ mod tests {
                 "--format",
                 "json",
                 "--quiet",
+                "--explain",
                 "--root",
                 "/my/project",
                 "--config",
@@ -900,7 +905,7 @@ mod tests {
             issue_types: Some(vec![]),
         };
         let args = build_analyze_args(&params).unwrap();
-        assert_eq!(args, ["check", "--format", "json", "--quiet"]);
+        assert_eq!(args, ["check", "--format", "json", "--quiet", "--explain"]);
     }
 
     // ── Argument building: check_changed ──────────────────────────
@@ -922,6 +927,7 @@ mod tests {
                 "--format",
                 "json",
                 "--quiet",
+                "--explain",
                 "--changed-since",
                 "main"
             ]
@@ -945,6 +951,7 @@ mod tests {
                 "--format",
                 "json",
                 "--quiet",
+                "--explain",
                 "--changed-since",
                 "HEAD~5",
                 "--root",
@@ -986,7 +993,7 @@ mod tests {
             top: None,
         };
         let args = build_find_dupes_args(&params).unwrap();
-        assert_eq!(args, ["dupes", "--format", "json", "--quiet"]);
+        assert_eq!(args, ["dupes", "--format", "json", "--quiet", "--explain"]);
     }
 
     #[test]
@@ -1009,6 +1016,7 @@ mod tests {
                 "--format",
                 "json",
                 "--quiet",
+                "--explain",
                 "--root",
                 "/repo",
                 "--mode",
@@ -1233,7 +1241,7 @@ mod tests {
             workspace: None,
         };
         let args = build_health_args(&params);
-        assert_eq!(args, ["health", "--format", "json", "--quiet"]);
+        assert_eq!(args, ["health", "--format", "json", "--quiet", "--explain"]);
     }
 
     #[test]
@@ -1261,6 +1269,7 @@ mod tests {
                 "--format",
                 "json",
                 "--quiet",
+                "--explain",
                 "--root",
                 "/src",
                 "--max-cyclomatic",
@@ -1312,6 +1321,7 @@ mod tests {
                 "--format",
                 "json",
                 "--quiet",
+                "--explain",
                 "--max-cyclomatic",
                 "10",
                 "--sort",

@@ -27,6 +27,28 @@ fn split_dir_filename(path: &str) -> (&str, &str) {
     }
 }
 
+/// Elide the common directory prefix between a base path and a target path.
+/// Only strips complete directory segments (never partial filenames).
+/// Returns the remaining suffix of `target`.
+///
+/// Example: `elide_common_prefix("a/b/c/foo.ts", "a/b/d/bar.ts")` → `"d/bar.ts"`
+fn elide_common_prefix<'a>(base: &str, target: &'a str) -> &'a str {
+    let mut last_sep = 0;
+    for (i, (a, b)) in base.bytes().zip(target.bytes()).enumerate() {
+        if a != b {
+            break;
+        }
+        if a == b'/' {
+            last_sep = i + 1;
+        }
+    }
+    if last_sep > 0 && last_sep <= target.len() {
+        &target[last_sep..]
+    } else {
+        target
+    }
+}
+
 /// Compute a SARIF-compatible relative URI from an absolute path and project root.
 fn relative_uri(path: &Path, root: &Path) -> String {
     normalize_uri(&relative_path(path, root).display().to_string())
@@ -67,13 +89,14 @@ pub fn print_results(
     config: &ResolvedConfig,
     elapsed: Duration,
     quiet: bool,
+    explain: bool,
 ) -> ExitCode {
     match config.output {
         OutputFormat::Human => {
             human::print_human(results, &config.root, &config.rules, elapsed, quiet);
             ExitCode::SUCCESS
         }
-        OutputFormat::Json => json::print_json(results, &config.root, elapsed),
+        OutputFormat::Json => json::print_json(results, &config.root, elapsed, explain),
         OutputFormat::Compact => {
             compact::print_compact(results, &config.root);
             ExitCode::SUCCESS
@@ -95,13 +118,14 @@ pub fn print_duplication_report(
     elapsed: Duration,
     quiet: bool,
     output: &OutputFormat,
+    explain: bool,
 ) -> ExitCode {
     match output {
         OutputFormat::Human => {
             human::print_duplication_human(report, &config.root, elapsed, quiet);
             ExitCode::SUCCESS
         }
-        OutputFormat::Json => json::print_duplication_json(report, elapsed),
+        OutputFormat::Json => json::print_duplication_json(report, elapsed, explain),
         OutputFormat::Compact => {
             compact::print_duplication_compact(report, &config.root);
             ExitCode::SUCCESS
@@ -123,6 +147,7 @@ pub fn print_health_report(
     elapsed: Duration,
     quiet: bool,
     output: &OutputFormat,
+    explain: bool,
 ) -> ExitCode {
     match output {
         OutputFormat::Human => {
@@ -138,7 +163,7 @@ pub fn print_health_report(
             ExitCode::SUCCESS
         }
         OutputFormat::Sarif => sarif::print_health_sarif(report, &config.root),
-        OutputFormat::Json => json::print_health_json(report, &config.root, elapsed),
+        OutputFormat::Json => json::print_health_json(report, &config.root, elapsed, explain),
     }
 }
 

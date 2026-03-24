@@ -10,6 +10,7 @@ use fallow_config::FallowConfig;
 mod baseline;
 mod check;
 mod dupes;
+mod explain;
 mod fix;
 mod health;
 mod health_types;
@@ -94,6 +95,12 @@ struct Cli {
     /// Show pipeline performance timing breakdown
     #[arg(long, global = true)]
     performance: bool,
+
+    /// Include metric definitions and rule descriptions in output.
+    /// JSON: adds a `_meta` object with docs URLs, metric ranges, and interpretations.
+    /// Always enabled for MCP server responses.
+    #[arg(long, global = true)]
+    explain: bool,
 }
 
 #[derive(Subcommand)]
@@ -675,6 +682,7 @@ fn main() -> ExitCode {
                 workspace: cli.workspace.as_deref(),
                 include_dupes,
                 trace_opts: &trace_opts,
+                explain: cli.explain,
             })
         }
         Command::Watch { no_clear } => watch::run_watch(&watch::WatchOptions {
@@ -686,6 +694,7 @@ fn main() -> ExitCode {
             quiet,
             production: cli.production,
             clear_screen: !no_clear,
+            explain: cli.explain,
         }),
         Command::Fix { dry_run, yes } => fix::run_fix(&fix::FixOptions {
             root: &root,
@@ -743,6 +752,7 @@ fn main() -> ExitCode {
             production: cli.production,
             trace: trace.as_deref(),
             changed_since: cli.changed_since.as_deref(),
+            explain: cli.explain,
         }),
         Command::Health {
             max_cyclomatic,
@@ -781,6 +791,7 @@ fn main() -> ExitCode {
                 hotspots: eff_hotspots,
                 since: since.as_deref(),
                 min_commits,
+                explain: cli.explain,
             })
         }
         Command::Schema => unreachable!("handled above"),

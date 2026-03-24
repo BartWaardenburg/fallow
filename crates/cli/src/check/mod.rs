@@ -121,6 +121,7 @@ pub struct CheckOptions<'a> {
     pub workspace: Option<&'a str>,
     pub include_dupes: bool,
     pub trace_opts: &'a TraceOptions,
+    pub explain: bool,
 }
 
 pub fn run_check(opts: &CheckOptions<'_>) -> ExitCode {
@@ -233,7 +234,7 @@ pub fn run_check(opts: &CheckOptions<'_>) -> ExitCode {
         config.rules.clone()
     };
 
-    let report_code = report::print_results(&results, &config, elapsed, opts.quiet);
+    let report_code = report::print_results(&results, &config, elapsed, opts.quiet, opts.explain);
     if report_code != ExitCode::SUCCESS {
         return report_code;
     }

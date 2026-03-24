@@ -6,6 +6,7 @@ use fallow_core::duplicates::DuplicationReport;
 use fallow_core::results::{AnalysisResults, UnusedDependency, UnusedExport, UnusedMember};
 
 use super::relative_uri;
+use crate::explain;
 
 /// Intermediate fields extracted from an issue for SARIF result construction.
 struct SarifFields {
@@ -71,6 +72,26 @@ fn push_sarif_results<T>(
             result["properties"] = props;
         }
         sarif_results.push(result);
+    }
+}
+
+/// Build a SARIF rule definition with optional `fullDescription` and `helpUri`
+/// sourced from the centralized explain module.
+fn sarif_rule(id: &str, fallback_short: &str, level: &str) -> serde_json::Value {
+    if let Some(def) = explain::rule_by_id(id) {
+        serde_json::json!({
+            "id": id,
+            "shortDescription": { "text": def.short },
+            "fullDescription": { "text": def.full },
+            "helpUri": explain::rule_docs_url(def),
+            "defaultConfiguration": { "level": level }
+        })
+    } else {
+        serde_json::json!({
+            "id": id,
+            "shortDescription": { "text": fallback_short },
+            "defaultConfiguration": { "level": level }
+        })
     }
 }
 
@@ -316,6 +337,74 @@ pub fn build_sarif(
         },
     );
 
+    let sarif_rules = vec![
+        sarif_rule(
+            "fallow/unused-file",
+            "File is not reachable from any entry point",
+            severity_to_sarif_level(rules.unused_files),
+        ),
+        sarif_rule(
+            "fallow/unused-export",
+            "Export is never imported",
+            severity_to_sarif_level(rules.unused_exports),
+        ),
+        sarif_rule(
+            "fallow/unused-type",
+            "Type export is never imported",
+            severity_to_sarif_level(rules.unused_types),
+        ),
+        sarif_rule(
+            "fallow/unused-dependency",
+            "Dependency listed but never imported",
+            severity_to_sarif_level(rules.unused_dependencies),
+        ),
+        sarif_rule(
+            "fallow/unused-dev-dependency",
+            "Dev dependency listed but never imported",
+            severity_to_sarif_level(rules.unused_dev_dependencies),
+        ),
+        sarif_rule(
+            "fallow/unused-optional-dependency",
+            "Optional dependency listed but never imported",
+            severity_to_sarif_level(rules.unused_optional_dependencies),
+        ),
+        sarif_rule(
+            "fallow/type-only-dependency",
+            "Production dependency only used via type-only imports",
+            severity_to_sarif_level(rules.type_only_dependencies),
+        ),
+        sarif_rule(
+            "fallow/unused-enum-member",
+            "Enum member is never referenced",
+            severity_to_sarif_level(rules.unused_enum_members),
+        ),
+        sarif_rule(
+            "fallow/unused-class-member",
+            "Class member is never referenced",
+            severity_to_sarif_level(rules.unused_class_members),
+        ),
+        sarif_rule(
+            "fallow/unresolved-import",
+            "Import could not be resolved",
+            severity_to_sarif_level(rules.unresolved_imports),
+        ),
+        sarif_rule(
+            "fallow/unlisted-dependency",
+            "Dependency used but not in package.json",
+            severity_to_sarif_level(rules.unlisted_dependencies),
+        ),
+        sarif_rule(
+            "fallow/duplicate-export",
+            "Export name appears in multiple modules",
+            severity_to_sarif_level(rules.duplicate_exports),
+        ),
+        sarif_rule(
+            "fallow/circular-dependency",
+            "Circular dependency chain detected",
+            severity_to_sarif_level(rules.circular_dependencies),
+        ),
+    ];
+
     serde_json::json!({
         "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
         "version": "2.1.0",
@@ -325,73 +414,7 @@ pub fn build_sarif(
                     "name": "fallow",
                     "version": env!("CARGO_PKG_VERSION"),
                     "informationUri": "https://github.com/fallow-rs/fallow",
-                    "rules": [
-                        {
-                            "id": "fallow/unused-file",
-                            "shortDescription": { "text": "File is not reachable from any entry point" },
-                            "defaultConfiguration": { "level": severity_to_sarif_level(rules.unused_files) }
-                        },
-                        {
-                            "id": "fallow/unused-export",
-                            "shortDescription": { "text": "Export is never imported" },
-                            "defaultConfiguration": { "level": severity_to_sarif_level(rules.unused_exports) }
-                        },
-                        {
-                            "id": "fallow/unused-type",
-                            "shortDescription": { "text": "Type export is never imported" },
-                            "defaultConfiguration": { "level": severity_to_sarif_level(rules.unused_types) }
-                        },
-                        {
-                            "id": "fallow/unused-dependency",
-                            "shortDescription": { "text": "Dependency listed but never imported" },
-                            "defaultConfiguration": { "level": severity_to_sarif_level(rules.unused_dependencies) }
-                        },
-                        {
-                            "id": "fallow/unused-dev-dependency",
-                            "shortDescription": { "text": "Dev dependency listed but never imported" },
-                            "defaultConfiguration": { "level": severity_to_sarif_level(rules.unused_dev_dependencies) }
-                        },
-                        {
-                            "id": "fallow/unused-optional-dependency",
-                            "shortDescription": { "text": "Optional dependency listed but never imported" },
-                            "defaultConfiguration": { "level": severity_to_sarif_level(rules.unused_optional_dependencies) }
-                        },
-                        {
-                            "id": "fallow/type-only-dependency",
-                            "shortDescription": { "text": "Production dependency only used via type-only imports" },
-                            "defaultConfiguration": { "level": severity_to_sarif_level(rules.type_only_dependencies) }
-                        },
-                        {
-                            "id": "fallow/unused-enum-member",
-                            "shortDescription": { "text": "Enum member is never referenced" },
-                            "defaultConfiguration": { "level": severity_to_sarif_level(rules.unused_enum_members) }
-                        },
-                        {
-                            "id": "fallow/unused-class-member",
-                            "shortDescription": { "text": "Class member is never referenced" },
-                            "defaultConfiguration": { "level": severity_to_sarif_level(rules.unused_class_members) }
-                        },
-                        {
-                            "id": "fallow/unresolved-import",
-                            "shortDescription": { "text": "Import could not be resolved" },
-                            "defaultConfiguration": { "level": severity_to_sarif_level(rules.unresolved_imports) }
-                        },
-                        {
-                            "id": "fallow/unlisted-dependency",
-                            "shortDescription": { "text": "Dependency used but not in package.json" },
-                            "defaultConfiguration": { "level": severity_to_sarif_level(rules.unlisted_dependencies) }
-                        },
-                        {
-                            "id": "fallow/duplicate-export",
-                            "shortDescription": { "text": "Export name appears in multiple modules" },
-                            "defaultConfiguration": { "level": severity_to_sarif_level(rules.duplicate_exports) }
-                        },
-                        {
-                            "id": "fallow/circular-dependency",
-                            "shortDescription": { "text": "Circular dependency chain detected" },
-                            "defaultConfiguration": { "level": severity_to_sarif_level(rules.circular_dependencies) }
-                        }
-                    ]
+                    "rules": sarif_rules
                 }
             },
             "results": sarif_results
@@ -442,11 +465,7 @@ pub(super) fn print_duplication_sarif(report: &DuplicationReport, root: &Path) -
                     "name": "fallow",
                     "version": env!("CARGO_PKG_VERSION"),
                     "informationUri": "https://github.com/fallow-rs/fallow",
-                    "rules": [{
-                        "id": "fallow/code-duplication",
-                        "shortDescription": { "text": "Duplicated code block" },
-                        "defaultConfiguration": { "level": "warning" }
-                    }]
+                    "rules": [sarif_rule("fallow/code-duplication", "Duplicated code block", "warning")]
                 }
             },
             "results": sarif_results
@@ -517,6 +536,24 @@ pub fn build_health_sarif(
         ));
     }
 
+    let health_rules = vec![
+        sarif_rule(
+            "fallow/high-cyclomatic-complexity",
+            "Function has high cyclomatic complexity",
+            "warning",
+        ),
+        sarif_rule(
+            "fallow/high-cognitive-complexity",
+            "Function has high cognitive complexity",
+            "warning",
+        ),
+        sarif_rule(
+            "fallow/high-complexity",
+            "Function exceeds both complexity thresholds",
+            "warning",
+        ),
+    ];
+
     serde_json::json!({
         "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
         "version": "2.1.0",
@@ -526,23 +563,7 @@ pub fn build_health_sarif(
                     "name": "fallow",
                     "version": env!("CARGO_PKG_VERSION"),
                     "informationUri": "https://github.com/fallow-rs/fallow",
-                    "rules": [
-                        {
-                            "id": "fallow/high-cyclomatic-complexity",
-                            "shortDescription": { "text": "Function exceeds cyclomatic complexity threshold" },
-                            "defaultConfiguration": { "level": "warning" }
-                        },
-                        {
-                            "id": "fallow/high-cognitive-complexity",
-                            "shortDescription": { "text": "Function exceeds cognitive complexity threshold" },
-                            "defaultConfiguration": { "level": "warning" }
-                        },
-                        {
-                            "id": "fallow/high-complexity",
-                            "shortDescription": { "text": "Function exceeds both cyclomatic and cognitive complexity thresholds" },
-                            "defaultConfiguration": { "level": "warning" }
-                        }
-                    ]
+                    "rules": health_rules
                 }
             },
             "results": sarif_results

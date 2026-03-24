@@ -74,7 +74,8 @@
         "circular_dependencies": {
           "type": "array",
           "items": { "$ref": "#/definitions/CircularDependency" }
-        }
+        },
+        "_meta": { "$ref": "#/definitions/Meta" }
       }
     },
 
@@ -105,19 +106,32 @@
         "hotspot_summary": {
           "$ref": "#/definitions/HotspotSummary",
           "description": "Hotspot analysis summary. Only present when --hotspots is used."
-        }
+        },
+        "_meta": { "$ref": "#/definitions/Meta" }
       }
     },
 
     "DupesOutput": {
       "title": "fallow dupes --format json",
-      "description": "Duplication analysis output. Structure: clone_groups, clone_families, stats.",
+      "description": "Duplication analysis output. Contains clone groups (individual duplicates), clone families (groups sharing the same files), and aggregate statistics.",
       "type": "object",
-      "required": ["schema_version", "version", "elapsed_ms"],
+      "required": ["schema_version", "version", "elapsed_ms", "clone_groups", "clone_families", "stats"],
       "properties": {
         "schema_version": { "$ref": "#/definitions/SchemaVersion" },
         "version": { "$ref": "#/definitions/ToolVersion" },
-        "elapsed_ms": { "$ref": "#/definitions/ElapsedMs" }
+        "elapsed_ms": { "$ref": "#/definitions/ElapsedMs" },
+        "clone_groups": {
+          "type": "array",
+          "description": "All detected clone groups. Each group contains 2+ instances of identical or near-identical code.",
+          "items": { "$ref": "#/definitions/CloneGroup" }
+        },
+        "clone_families": {
+          "type": "array",
+          "description": "Clone families: groups of clone groups sharing the same file set, indicating systematic duplication patterns.",
+          "items": { "$ref": "#/definitions/CloneFamily" }
+        },
+        "stats": { "$ref": "#/definitions/DuplicationStats" },
+        "_meta": { "$ref": "#/definitions/Meta" }
       }
     },
 
@@ -560,6 +574,188 @@
         "col": {
           "type": "integer",
           "description": "0-based byte column offset of the import that starts the cycle."
+        }
+      }
+    },
+
+    "CloneGroup": {
+      "type": "object",
+      "required": ["instances", "token_count", "line_count"],
+      "description": "A group of code clones — the same (or normalized-equivalent) code appearing in multiple places.",
+      "properties": {
+        "instances": {
+          "type": "array",
+          "description": "All instances where this duplicated code appears.",
+          "items": { "$ref": "#/definitions/CloneInstance" }
+        },
+        "token_count": {
+          "type": "integer",
+          "description": "Number of normalized source tokens in the duplicated block."
+        },
+        "line_count": {
+          "type": "integer",
+          "description": "Number of source lines in the duplicated block."
+        }
+      }
+    },
+    "CloneInstance": {
+      "type": "object",
+      "required": ["file", "start_line", "end_line", "start_col", "end_col", "fragment"],
+      "description": "A single instance of duplicated code at a specific location.",
+      "properties": {
+        "file": {
+          "type": "string",
+          "description": "File path (relative to project root)."
+        },
+        "start_line": {
+          "type": "integer",
+          "description": "1-based start line of the clone."
+        },
+        "end_line": {
+          "type": "integer",
+          "description": "1-based end line of the clone."
+        },
+        "start_col": {
+          "type": "integer",
+          "description": "0-based start column."
+        },
+        "end_col": {
+          "type": "integer",
+          "description": "0-based end column."
+        },
+        "fragment": {
+          "type": "string",
+          "description": "The actual source code fragment."
+        }
+      }
+    },
+    "CloneFamily": {
+      "type": "object",
+      "required": ["files", "groups", "total_duplicated_lines", "total_duplicated_tokens", "suggestions"],
+      "description": "A clone family: a set of clone groups sharing the same file set, indicating systematic duplication.",
+      "properties": {
+        "files": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Files involved in this family (sorted)."
+        },
+        "groups": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/CloneGroup" },
+          "description": "Clone groups belonging to this family."
+        },
+        "total_duplicated_lines": {
+          "type": "integer",
+          "description": "Total duplicated lines across all groups in this family."
+        },
+        "total_duplicated_tokens": {
+          "type": "integer",
+          "description": "Total duplicated tokens across all groups in this family."
+        },
+        "suggestions": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/RefactoringSuggestion" },
+          "description": "Refactoring suggestions for this family."
+        }
+      }
+    },
+    "RefactoringSuggestion": {
+      "type": "object",
+      "required": ["kind", "description", "estimated_savings"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["ExtractFunction", "ExtractModule"],
+          "description": "What kind of refactoring is suggested."
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable description of the suggestion."
+        },
+        "estimated_savings": {
+          "type": "integer",
+          "description": "Estimated lines that could be eliminated."
+        }
+      }
+    },
+    "DuplicationStats": {
+      "type": "object",
+      "required": ["total_files", "files_with_clones", "total_lines", "duplicated_lines", "total_tokens", "duplicated_tokens", "clone_groups", "clone_instances", "duplication_percentage"],
+      "description": "Aggregate duplication statistics for the analyzed project.",
+      "properties": {
+        "total_files": {
+          "type": "integer",
+          "description": "Total files analyzed."
+        },
+        "files_with_clones": {
+          "type": "integer",
+          "description": "Files containing at least one clone instance."
+        },
+        "total_lines": {
+          "type": "integer",
+          "description": "Total lines across all analyzed files."
+        },
+        "duplicated_lines": {
+          "type": "integer",
+          "description": "Lines that are part of at least one clone."
+        },
+        "total_tokens": {
+          "type": "integer",
+          "description": "Total tokens across all analyzed files."
+        },
+        "duplicated_tokens": {
+          "type": "integer",
+          "description": "Tokens that are part of at least one clone."
+        },
+        "clone_groups": {
+          "type": "integer",
+          "description": "Number of clone groups found."
+        },
+        "clone_instances": {
+          "type": "integer",
+          "description": "Total clone instances across all groups."
+        },
+        "duplication_percentage": {
+          "type": "number",
+          "description": "Percentage of duplicated lines (0.0–100.0).",
+          "minimum": 0,
+          "maximum": 100
+        }
+      }
+    },
+
+    "Meta": {
+      "type": "object",
+      "description": "Metric definitions and documentation links. Included when --explain is passed (always present in MCP responses). Helps AI agents and CI systems interpret metric values.",
+      "properties": {
+        "docs": {
+          "type": "string",
+          "description": "URL to the documentation page for this command."
+        },
+        "metrics": {
+          "type": "object",
+          "description": "Per-metric definitions: name, description, range, interpretation.",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string", "description": "Human-readable metric name." },
+              "description": { "type": "string", "description": "What this metric measures and how it is computed." },
+              "range": { "type": "string", "description": "Valid value range (e.g., '[0, 100]')." },
+              "interpretation": { "type": "string", "description": "How to read the value (e.g., 'lower is better')." }
+            }
+          }
+        },
+        "rules": {
+          "type": "object",
+          "description": "Per-rule definitions for check command output.",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string", "description": "Human-readable rule name." },
+              "description": { "type": "string", "description": "What this rule detects." },
+              "docs": { "type": "string", "description": "URL to the rule documentation." }
+            }
+          }
         }
       }
     }
