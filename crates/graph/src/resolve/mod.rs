@@ -20,7 +20,10 @@ use rayon::prelude::*;
 use rustc_hash::FxHashMap;
 
 use fallow_types::discover::{DiscoveredFile, FileId};
-use fallow_types::extract::{ImportInfo, ModuleInfo};
+use fallow_types::extract::{
+    DynamicImportInfo, DynamicImportPattern, ImportInfo, ImportedName, ModuleInfo, ReExportInfo,
+    RequireCallInfo,
+};
 
 use fallbacks::make_glob_from_pattern;
 use specifier::{create_resolver, resolve_specifier};
@@ -98,159 +101,31 @@ pub fn resolve_all_imports(
                 return None;
             };
 
-            let resolved_imports: Vec<ResolvedImport> = module
-                .imports
-                .iter()
-                .map(|imp| ResolvedImport {
-                    info: imp.clone(),
-                    target: resolve_specifier(&ctx, file_path, &imp.source),
-                })
-                .collect();
+            let mut all_imports = resolve_static_imports(&ctx, file_path, &module.imports);
+            all_imports.extend(resolve_require_imports(&ctx, file_path, &module.require_calls));
 
-            let resolved_dynamic_imports: Vec<ResolvedImport> = module
-                .dynamic_imports
-                .iter()
-                .flat_map(|imp| {
-                    let target = resolve_specifier(&ctx, file_path, &imp.source);
-                    if !imp.destructured_names.is_empty() {
-                        // `const { a, b } = await import('./x')` → Named imports
-                        imp.destructured_names
-                            .iter()
-                            .map(|name| ResolvedImport {
-                                info: ImportInfo {
-                                    source: imp.source.clone(),
-                                    imported_name: fallow_types::extract::ImportedName::Named(
-                                        name.clone(),
-                                    ),
-                                    local_name: name.clone(),
-                                    is_type_only: false,
-                                    span: imp.span,
-                                },
-                                target: target.clone(),
-                            })
-                            .collect()
-                    } else if imp.local_name.is_some() {
-                        // `const mod = await import('./x')` → Namespace with local_name
-                        vec![ResolvedImport {
-                            info: ImportInfo {
-                                source: imp.source.clone(),
-                                imported_name: fallow_types::extract::ImportedName::Namespace,
-                                local_name: imp.local_name.clone().unwrap_or_default(),
-                                is_type_only: false,
-                                span: imp.span,
-                            },
-                            target,
-                        }]
-                    } else {
-                        // Side-effect only: `await import('./x')` with no assignment
-                        vec![ResolvedImport {
-                            info: ImportInfo {
-                                source: imp.source.clone(),
-                                imported_name: fallow_types::extract::ImportedName::SideEffect,
-                                local_name: String::new(),
-                                is_type_only: false,
-                                span: imp.span,
-                            },
-                            target,
-                        }]
-                    }
-                })
-                .collect();
-
-            let re_exports: Vec<ResolvedReExport> = module
-                .re_exports
-                .iter()
-                .map(|re| ResolvedReExport {
-                    info: re.clone(),
-                    target: resolve_specifier(&ctx, file_path, &re.source),
-                })
-                .collect();
-
-            // Also resolve require() calls.
-            // Destructured requires → Named imports; others → Namespace (conservative).
-            let require_imports: Vec<ResolvedImport> = module
-                .require_calls
-                .iter()
-                .flat_map(|req| {
-                    let target = resolve_specifier(&ctx, file_path, &req.source);
-                    if req.destructured_names.is_empty() {
-                        vec![ResolvedImport {
-                            info: ImportInfo {
-                                source: req.source.clone(),
-                                imported_name: fallow_types::extract::ImportedName::Namespace,
-                                local_name: req.local_name.clone().unwrap_or_default(),
-                                is_type_only: false,
-                                span: req.span,
-                            },
-                            target,
-                        }]
-                    } else {
-                        req.destructured_names
-                            .iter()
-                            .map(|name| ResolvedImport {
-                                info: ImportInfo {
-                                    source: req.source.clone(),
-                                    imported_name: fallow_types::extract::ImportedName::Named(
-                                        name.clone(),
-                                    ),
-                                    local_name: name.clone(),
-                                    is_type_only: false,
-                                    span: req.span,
-                                },
-                                target: target.clone(),
-                            })
-                            .collect()
-                    }
-                })
-                .collect();
-
-            let mut all_imports = resolved_imports;
-            all_imports.extend(require_imports);
-
-            // Resolve dynamic import patterns via glob matching against discovered files.
-            // Use pre-computed canonical paths (no syscalls in inner loop).
             let from_dir = canonical_paths
                 .get(module.file_id.0 as usize)
                 .and_then(|p| p.parent())
                 .unwrap_or(file_path);
-            let resolved_dynamic_patterns: Vec<(
-                fallow_types::extract::DynamicImportPattern,
-                Vec<FileId>,
-            )> = module
-                .dynamic_import_patterns
-                .iter()
-                .filter_map(|pattern| {
-                    let glob_str = make_glob_from_pattern(pattern);
-                    let matcher = globset::Glob::new(&glob_str)
-                        .ok()
-                        .map(|g| g.compile_matcher())?;
-                    let matched: Vec<FileId> = canonical_paths
-                        .iter()
-                        .enumerate()
-                        .filter(|(_idx, canonical)| {
-                            canonical.strip_prefix(from_dir).is_ok_and(|relative| {
-                                let rel_str = format!("./{}", relative.to_string_lossy());
-                                matcher.is_match(&rel_str)
-                            })
-                        })
-                        .map(|(idx, _)| files[idx].id)
-                        .collect();
-                    if matched.is_empty() {
-                        None
-                    } else {
-                        Some((pattern.clone(), matched))
-                    }
-                })
-                .collect();
 
             Some(ResolvedModule {
                 file_id: module.file_id,
                 path: file_path.to_path_buf(),
                 exports: module.exports.clone(),
-                re_exports,
+                re_exports: resolve_re_exports(&ctx, file_path, &module.re_exports),
                 resolved_imports: all_imports,
-                resolved_dynamic_imports,
-                resolved_dynamic_patterns,
+                resolved_dynamic_imports: resolve_dynamic_imports(
+                    &ctx,
+                    file_path,
+                    &module.dynamic_imports,
+                ),
+                resolved_dynamic_patterns: resolve_dynamic_patterns(
+                    from_dir,
+                    &module.dynamic_import_patterns,
+                    &canonical_paths,
+                    files,
+                ),
                 member_accesses: module.member_accesses.clone(),
                 whole_object_uses: module.whole_object_uses.clone(),
                 has_cjs_exports: module.has_cjs_exports,
@@ -259,24 +134,208 @@ pub fn resolve_all_imports(
         })
         .collect();
 
-    // Post-resolution pass: deterministic specifier upgrade.
-    //
-    // With TsconfigDiscovery::Auto, the same bare specifier (e.g., `preact/hooks`)
-    // may resolve to InternalModule from files under a tsconfig with path aliases
-    // but NpmPackage from files without such aliases. The parallel resolution cache
-    // makes the per-file result depend on which thread resolved first (non-deterministic).
-    //
-    // To fix this: scan all resolved imports/re-exports to find bare specifiers where
-    // ANY file resolved to InternalModule. For those specifiers, upgrade all NpmPackage
-    // results to InternalModule. This is correct because if any tsconfig context maps
-    // a specifier to a project source file, that source file IS the origin of the
-    // package — all imports of that specifier reference the same source.
-    //
-    // Note: if two tsconfigs map the same specifier to different FileIds, the first
-    // one encountered (by module order = FileId order) wins. This is deterministic
-    // but may be imprecise for that edge case — both files get connected regardless.
+    apply_specifier_upgrades(&mut resolved);
+
+    resolved
+}
+
+/// Resolve standard ES module imports (`import x from './y'`).
+fn resolve_static_imports(
+    ctx: &ResolveContext,
+    file_path: &Path,
+    imports: &[ImportInfo],
+) -> Vec<ResolvedImport> {
+    imports
+        .iter()
+        .map(|imp| ResolvedImport {
+            info: imp.clone(),
+            target: resolve_specifier(ctx, file_path, &imp.source),
+        })
+        .collect()
+}
+
+/// Resolve dynamic `import()` calls, expanding destructured names into individual imports.
+fn resolve_dynamic_imports(
+    ctx: &ResolveContext,
+    file_path: &Path,
+    dynamic_imports: &[DynamicImportInfo],
+) -> Vec<ResolvedImport> {
+    dynamic_imports
+        .iter()
+        .flat_map(|imp| resolve_single_dynamic_import(ctx, file_path, imp))
+        .collect()
+}
+
+/// Convert a single dynamic import into one or more `ResolvedImport` entries.
+fn resolve_single_dynamic_import(
+    ctx: &ResolveContext,
+    file_path: &Path,
+    imp: &DynamicImportInfo,
+) -> Vec<ResolvedImport> {
+    let target = resolve_specifier(ctx, file_path, &imp.source);
+
+    if !imp.destructured_names.is_empty() {
+        // `const { a, b } = await import('./x')` -> Named imports
+        return imp
+            .destructured_names
+            .iter()
+            .map(|name| ResolvedImport {
+                info: ImportInfo {
+                    source: imp.source.clone(),
+                    imported_name: ImportedName::Named(name.clone()),
+                    local_name: name.clone(),
+                    is_type_only: false,
+                    span: imp.span,
+                },
+                target: target.clone(),
+            })
+            .collect();
+    }
+
+    if imp.local_name.is_some() {
+        // `const mod = await import('./x')` -> Namespace with local_name
+        return vec![ResolvedImport {
+            info: ImportInfo {
+                source: imp.source.clone(),
+                imported_name: ImportedName::Namespace,
+                local_name: imp.local_name.clone().unwrap_or_default(),
+                is_type_only: false,
+                span: imp.span,
+            },
+            target,
+        }];
+    }
+
+    // Side-effect only: `await import('./x')` with no assignment
+    vec![ResolvedImport {
+        info: ImportInfo {
+            source: imp.source.clone(),
+            imported_name: ImportedName::SideEffect,
+            local_name: String::new(),
+            is_type_only: false,
+            span: imp.span,
+        },
+        target,
+    }]
+}
+
+/// Resolve re-export sources (`export { x } from './y'`).
+fn resolve_re_exports(
+    ctx: &ResolveContext,
+    file_path: &Path,
+    re_exports: &[ReExportInfo],
+) -> Vec<ResolvedReExport> {
+    re_exports
+        .iter()
+        .map(|re| ResolvedReExport {
+            info: re.clone(),
+            target: resolve_specifier(ctx, file_path, &re.source),
+        })
+        .collect()
+}
+
+/// Resolve CommonJS `require()` calls.
+/// Destructured requires become Named imports; others become Namespace (conservative).
+fn resolve_require_imports(
+    ctx: &ResolveContext,
+    file_path: &Path,
+    require_calls: &[RequireCallInfo],
+) -> Vec<ResolvedImport> {
+    require_calls
+        .iter()
+        .flat_map(|req| resolve_single_require(ctx, file_path, req))
+        .collect()
+}
+
+/// Convert a single `require()` call into one or more `ResolvedImport` entries.
+fn resolve_single_require(
+    ctx: &ResolveContext,
+    file_path: &Path,
+    req: &RequireCallInfo,
+) -> Vec<ResolvedImport> {
+    let target = resolve_specifier(ctx, file_path, &req.source);
+
+    if req.destructured_names.is_empty() {
+        return vec![ResolvedImport {
+            info: ImportInfo {
+                source: req.source.clone(),
+                imported_name: ImportedName::Namespace,
+                local_name: req.local_name.clone().unwrap_or_default(),
+                is_type_only: false,
+                span: req.span,
+            },
+            target,
+        }];
+    }
+
+    req.destructured_names
+        .iter()
+        .map(|name| ResolvedImport {
+            info: ImportInfo {
+                source: req.source.clone(),
+                imported_name: ImportedName::Named(name.clone()),
+                local_name: name.clone(),
+                is_type_only: false,
+                span: req.span,
+            },
+            target: target.clone(),
+        })
+        .collect()
+}
+
+/// Resolve dynamic import patterns via glob matching against discovered files.
+/// Uses pre-computed canonical paths (no syscalls in inner loop).
+fn resolve_dynamic_patterns(
+    from_dir: &Path,
+    patterns: &[DynamicImportPattern],
+    canonical_paths: &[PathBuf],
+    files: &[DiscoveredFile],
+) -> Vec<(DynamicImportPattern, Vec<FileId>)> {
+    patterns
+        .iter()
+        .filter_map(|pattern| {
+            let glob_str = make_glob_from_pattern(pattern);
+            let matcher = globset::Glob::new(&glob_str)
+                .ok()
+                .map(|g| g.compile_matcher())?;
+            let matched: Vec<FileId> = canonical_paths
+                .iter()
+                .enumerate()
+                .filter(|(_idx, canonical)| {
+                    canonical.strip_prefix(from_dir).is_ok_and(|relative| {
+                        let rel_str = format!("./{}", relative.to_string_lossy());
+                        matcher.is_match(&rel_str)
+                    })
+                })
+                .map(|(idx, _)| files[idx].id)
+                .collect();
+            if matched.is_empty() {
+                None
+            } else {
+                Some((pattern.clone(), matched))
+            }
+        })
+        .collect()
+}
+
+/// Post-resolution pass: deterministic specifier upgrade.
+///
+/// With `TsconfigDiscovery::Auto`, the same bare specifier (e.g., `preact/hooks`)
+/// may resolve to `InternalModule` from files under a tsconfig with path aliases
+/// but `NpmPackage` from files without such aliases. The parallel resolution cache
+/// makes the per-file result depend on which thread resolved first (non-deterministic).
+///
+/// Scans all resolved imports/re-exports to find bare specifiers where ANY file resolved
+/// to `InternalModule`. For those specifiers, upgrades all `NpmPackage` results to
+/// `InternalModule`. This is correct because if any tsconfig context maps a specifier to
+/// a project source file, that source file IS the origin of the package.
+///
+/// Note: if two tsconfigs map the same specifier to different `FileId`s, the first one
+/// encountered (by module order = `FileId` order) wins. This is deterministic but may be
+/// imprecise for that edge case — both files get connected regardless.
+fn apply_specifier_upgrades(resolved: &mut [ResolvedModule]) {
     let mut specifier_upgrades: FxHashMap<String, FileId> = FxHashMap::default();
-    for module in &resolved {
+    for module in resolved.iter() {
         for imp in module
             .resolved_imports
             .iter()
@@ -302,11 +361,11 @@ pub fn resolve_all_imports(
     }
 
     if specifier_upgrades.is_empty() {
-        return resolved;
+        return;
     }
 
     // Apply upgrades: replace NpmPackage with InternalModule for matched specifiers
-    for module in &mut resolved {
+    for module in resolved.iter_mut() {
         for imp in module
             .resolved_imports
             .iter_mut()
@@ -326,6 +385,4 @@ pub fn resolve_all_imports(
             }
         }
     }
-
-    resolved
 }
