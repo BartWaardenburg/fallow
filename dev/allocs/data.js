@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1774391186559,
+  "lastUpdate": 1774391773199,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
@@ -1143,6 +1143,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 3980,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "49cad71ec5ee2978e6a70789649d73098032668e",
+          "message": "Merge branch 'worktree-agent-a8f8b47c'",
+          "timestamp": "2026-03-24T23:32:43+01:00",
+          "tree_id": "21c55b2f8b467219a5008141256af3017db92fb3",
+          "url": "https://github.com/fallow-rs/fallow/commit/49cad71ec5ee2978e6a70789649d73098032668e"
+        },
+        "date": 1774391772633,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 3033409,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 12042,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 419434,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 5168,
             "unit": "allocations"
           }
         ]
