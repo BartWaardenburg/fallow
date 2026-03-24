@@ -465,6 +465,105 @@ pub(super) fn print_duplication_sarif(report: &DuplicationReport, root: &Path) -
     }
 }
 
+// ── Health SARIF output ────────────────────────────────────────────
+
+pub fn build_health_sarif(
+    report: &crate::health_types::HealthReport,
+    root: &Path,
+) -> serde_json::Value {
+    use crate::health_types::ExceededThreshold;
+
+    let mut sarif_results = Vec::new();
+
+    for finding in &report.findings {
+        let uri = relative_uri(&finding.path, root);
+        let (rule_id, message) = match finding.exceeded {
+            ExceededThreshold::Cyclomatic => (
+                "fallow/high-cyclomatic-complexity",
+                format!(
+                    "'{}' has cyclomatic complexity {} (threshold: {})",
+                    finding.name, finding.cyclomatic, report.summary.max_cyclomatic_threshold,
+                ),
+            ),
+            ExceededThreshold::Cognitive => (
+                "fallow/high-cognitive-complexity",
+                format!(
+                    "'{}' has cognitive complexity {} (threshold: {})",
+                    finding.name, finding.cognitive, report.summary.max_cognitive_threshold,
+                ),
+            ),
+            ExceededThreshold::Both => (
+                "fallow/high-complexity",
+                format!(
+                    "'{}' has cyclomatic complexity {} (threshold: {}) and cognitive complexity {} (threshold: {})",
+                    finding.name,
+                    finding.cyclomatic,
+                    report.summary.max_cyclomatic_threshold,
+                    finding.cognitive,
+                    report.summary.max_cognitive_threshold,
+                ),
+            ),
+        };
+
+        sarif_results.push(sarif_result(
+            rule_id,
+            "warning",
+            &message,
+            &uri,
+            Some((finding.line, finding.col + 1)),
+        ));
+    }
+
+    serde_json::json!({
+        "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+        "version": "2.1.0",
+        "runs": [{
+            "tool": {
+                "driver": {
+                    "name": "fallow",
+                    "version": env!("CARGO_PKG_VERSION"),
+                    "informationUri": "https://github.com/fallow-rs/fallow",
+                    "rules": [
+                        {
+                            "id": "fallow/high-cyclomatic-complexity",
+                            "shortDescription": { "text": "Function exceeds cyclomatic complexity threshold" },
+                            "defaultConfiguration": { "level": "warning" }
+                        },
+                        {
+                            "id": "fallow/high-cognitive-complexity",
+                            "shortDescription": { "text": "Function exceeds cognitive complexity threshold" },
+                            "defaultConfiguration": { "level": "warning" }
+                        },
+                        {
+                            "id": "fallow/high-complexity",
+                            "shortDescription": { "text": "Function exceeds both cyclomatic and cognitive complexity thresholds" },
+                            "defaultConfiguration": { "level": "warning" }
+                        }
+                    ]
+                }
+            },
+            "results": sarif_results
+        }]
+    })
+}
+
+pub(super) fn print_health_sarif(
+    report: &crate::health_types::HealthReport,
+    root: &Path,
+) -> ExitCode {
+    let sarif = build_health_sarif(report, root);
+    match serde_json::to_string_pretty(&sarif) {
+        Ok(json) => {
+            println!("{json}");
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("Error: failed to serialize SARIF output: {e}");
+            ExitCode::from(2)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -857,5 +956,136 @@ mod tests {
         // Clean up
         let _ = std::fs::remove_file(&sarif_path);
         let _ = std::fs::remove_dir(&dir);
+    }
+
+    // ── Health SARIF ──
+
+    #[test]
+    fn health_sarif_empty_no_results() {
+        let root = PathBuf::from("/project");
+        let report = crate::health_types::HealthReport {
+            findings: vec![],
+            summary: crate::health_types::HealthSummary {
+                files_analyzed: 10,
+                functions_analyzed: 50,
+                functions_above_threshold: 0,
+                max_cyclomatic_threshold: 20,
+                max_cognitive_threshold: 15,
+            },
+        };
+        let sarif = build_health_sarif(&report, &root);
+        assert_eq!(sarif["version"], "2.1.0");
+        let results = sarif["runs"][0]["results"].as_array().unwrap();
+        assert!(results.is_empty());
+        let rules = sarif["runs"][0]["tool"]["driver"]["rules"]
+            .as_array()
+            .unwrap();
+        assert_eq!(rules.len(), 3);
+    }
+
+    #[test]
+    fn health_sarif_cyclomatic_only() {
+        let root = PathBuf::from("/project");
+        let report = crate::health_types::HealthReport {
+            findings: vec![crate::health_types::HealthFinding {
+                path: root.join("src/utils.ts"),
+                name: "parseExpression".to_string(),
+                line: 42,
+                col: 0,
+                cyclomatic: 25,
+                cognitive: 10,
+                line_count: 80,
+                exceeded: crate::health_types::ExceededThreshold::Cyclomatic,
+            }],
+            summary: crate::health_types::HealthSummary {
+                files_analyzed: 5,
+                functions_analyzed: 20,
+                functions_above_threshold: 1,
+                max_cyclomatic_threshold: 20,
+                max_cognitive_threshold: 15,
+            },
+        };
+        let sarif = build_health_sarif(&report, &root);
+        let entry = &sarif["runs"][0]["results"][0];
+        assert_eq!(entry["ruleId"], "fallow/high-cyclomatic-complexity");
+        assert_eq!(entry["level"], "warning");
+        assert!(
+            entry["message"]["text"]
+                .as_str()
+                .unwrap()
+                .contains("cyclomatic complexity 25")
+        );
+        assert_eq!(
+            entry["locations"][0]["physicalLocation"]["artifactLocation"]["uri"],
+            "src/utils.ts"
+        );
+        let region = &entry["locations"][0]["physicalLocation"]["region"];
+        assert_eq!(region["startLine"], 42);
+        assert_eq!(region["startColumn"], 1);
+    }
+
+    #[test]
+    fn health_sarif_cognitive_only() {
+        let root = PathBuf::from("/project");
+        let report = crate::health_types::HealthReport {
+            findings: vec![crate::health_types::HealthFinding {
+                path: root.join("src/api.ts"),
+                name: "handleRequest".to_string(),
+                line: 10,
+                col: 4,
+                cyclomatic: 8,
+                cognitive: 20,
+                line_count: 40,
+                exceeded: crate::health_types::ExceededThreshold::Cognitive,
+            }],
+            summary: crate::health_types::HealthSummary {
+                files_analyzed: 3,
+                functions_analyzed: 10,
+                functions_above_threshold: 1,
+                max_cyclomatic_threshold: 20,
+                max_cognitive_threshold: 15,
+            },
+        };
+        let sarif = build_health_sarif(&report, &root);
+        let entry = &sarif["runs"][0]["results"][0];
+        assert_eq!(entry["ruleId"], "fallow/high-cognitive-complexity");
+        assert!(
+            entry["message"]["text"]
+                .as_str()
+                .unwrap()
+                .contains("cognitive complexity 20")
+        );
+        let region = &entry["locations"][0]["physicalLocation"]["region"];
+        assert_eq!(region["startColumn"], 5); // col 4 + 1
+    }
+
+    #[test]
+    fn health_sarif_both_thresholds() {
+        let root = PathBuf::from("/project");
+        let report = crate::health_types::HealthReport {
+            findings: vec![crate::health_types::HealthFinding {
+                path: root.join("src/complex.ts"),
+                name: "doEverything".to_string(),
+                line: 1,
+                col: 0,
+                cyclomatic: 30,
+                cognitive: 45,
+                line_count: 100,
+                exceeded: crate::health_types::ExceededThreshold::Both,
+            }],
+            summary: crate::health_types::HealthSummary {
+                files_analyzed: 1,
+                functions_analyzed: 1,
+                functions_above_threshold: 1,
+                max_cyclomatic_threshold: 20,
+                max_cognitive_threshold: 15,
+            },
+        };
+        let sarif = build_health_sarif(&report, &root);
+        let entry = &sarif["runs"][0]["results"][0];
+        assert_eq!(entry["ruleId"], "fallow/high-complexity");
+        let msg = entry["message"]["text"].as_str().unwrap();
+        assert!(msg.contains("cyclomatic complexity 30"));
+        assert!(msg.contains("cognitive complexity 45"));
     }
 }

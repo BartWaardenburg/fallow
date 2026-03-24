@@ -1,86 +1,89 @@
 # Fallow Roadmap
 
-> Last updated: 2026-03-22
+> Last updated: 2026-03-24
 
-JavaScript/TypeScript codebases accumulate dead code and duplication faster than any other ecosystem — broad dependency trees, rapid framework churn, and copy-paste-driven development create entropy at scale. AI-assisted development accelerates this: agents generate code but rarely suggest deletions, and code clones have grown significantly since AI assistants became prevalent.
+Fallow finds and fixes dead code in JavaScript/TypeScript projects. Fast, framework-aware, zero-config.
 
-Code analysis should be fast enough to be invisible — part of the feedback loop on every save and every commit, not a quarterly audit. Fallow combines dead code analysis and duplication detection in a single sub-second tool: one install, one config, one CI step.
-
----
-
-## Current State
-
-**Unused code analysis** covers 13 issue types (unused files, exports, types, dependencies, devDeps, optionalDeps, enum members, class members, unresolved imports, unlisted deps, duplicate exports, circular dependencies, type-only dependencies) with 84 framework plugins (31 with AST-based config parsing), 5 output formats (human, JSON, SARIF, compact, markdown), auto-fix, and a per-issue severity rules system. Production mode, inline suppression, cross-workspace resolution (npm/yarn/pnpm workspaces and TypeScript project references), `--changed-since` for incremental CI, TypeScript function overload deduplication, and class instance member tracking (`const svc = new Foo(); svc.method()` counts as member usage) are all shipped.
-
-**Duplication detection** uses a suffix array with LCP for clone detection — no quadratic pairwise comparison. 4 detection modes (strict, mild, weak, semantic), clone family grouping with refactoring suggestions, baseline tracking for CI adoption, and cross-language TS↔JS matching.
-
-**Integrations**: LSP server with diagnostics, code actions, and Code Lens; VS Code extension with tree views and auto-download; MCP server for AI agent integration; GitHub Action with SARIF upload; external plugin system (`fallow-plugin-*.{toml,json,jsonc}`); migration from knip/jscpd configs.
-
-**Bundler coverage**: Vite, Webpack, Rspack, Rollup, Rolldown, Tsup, Tsdown — all major JS/TS bundlers are supported with entry point and dependency extraction.
-
-**Non-JS files**: Vue/Svelte SFC, Astro frontmatter, MDX imports, CSS/SCSS modules.
-
-**Codebase health**: `fallow health` provides complexity metrics (cyclomatic + cognitive) per function, with project-level summaries and configurable thresholds.
-
-**Debug tooling**: `--trace` for exports, files, dependencies, and clone locations; `--performance` for pipeline timing breakdown.
-
-**1.0 readiness validation**: Tested against 5 real-world projects spanning major archetypes — dub.sh (Next.js), elk (Nuxt), nestjs-boilerplate (NestJS), showtime-frontend (React Native/Expo), trpc (pnpm monorepo). Six critical fixes shipped: `export *` chain propagation through multi-level barrels, tsconfig path alias resolution (`TsconfigDiscovery::Auto` for per-file resolution), Nuxt plugin enhancements (app/ directory, `resolve_config()`, path aliases), React Native platform extensions (`.web`/`.ios`/`.android`/`.native`) with hidden dir allowlist, decorated class member skip for DI frameworks, and plugin improvements (workspace dedup, tsdown, Jest mocks/inline config, Docusaurus virtual modules, `path_aliases()` trait). Backwards compatibility policy documented (`docs/backwards-compatibility.md`), JSON output schema formalized (`docs/output-schema.json`).
-
-See the [README](README.md) for full feature details, benchmarks, and configuration reference.
+AI-assisted development is accelerating codebase entropy — agents generate code but rarely suggest deletions. Fallow is the cleanup tool that keeps up: sub-second analysis on every commit, one binary, one config, one CI step.
 
 ---
 
-## Known Limitations
+## Where we are
 
-- **Syntactic analysis only**: No TypeScript type information. Projects using `isolatedModules: true` (required for esbuild/swc/vite) are well-served; legacy tsc-only projects may see false positives on type-only imports.
-- **Config parsing ceiling**: AST-based extraction covers static object literals, string arrays, and simple wrappers like `defineConfig(...)`. Computed values (`getPlugins()`), conditionals (`process.env.NODE_ENV`), and nested config factories are out of reach without JS eval.
-- **Svelte export false negatives**: All exports from `.svelte` files are skipped because props (`export let`) can't be distinguished from utility exports without Svelte compiler semantics.
-- **CSS/SCSS parsing is regex-based**: Handles `@import`, `@use`, `@forward`, `@apply`, `@tailwind` with comment stripping and CSS Module class name extraction. Does not parse full CSS syntax — `composes:` and `:global()`/`:local()` are not tracked.
-- **LSP column offsets are byte-based**: May be off for non-ASCII characters. Identical for ASCII-only source files.
-- **NestJS/DI class members**: Abstract class methods consumed via dependency injection are not tracked (syntactic analysis cannot trace DI-resolved calls). Users can set `unused_class_members = "off"` for DI-heavy projects.
-- **React Native native modules**: Packages auto-linked by the RN/Expo build system (native modules) are not detected as used since linking happens outside JS imports.
-- **Library consumer types**: Types exported for external consumers (not used within the repo itself) are flagged as unused. This is correct behavior but noisy for library packages.
+Fallow ships dead code analysis (13 issue types), duplication detection (4 modes), and complexity metrics — with 84 framework plugins, 5 output formats, auto-fix, and a severity rules system. Integrations include an LSP server, VS Code extension, MCP server for AI agents, and a GitHub Action with SARIF upload.
+
+Tested against real-world projects spanning Next.js, Nuxt, NestJS, React Native/Expo, and pnpm monorepos. See the [README](README.md) for full details.
 
 ---
 
-## Competitive Context
+## Where we're going
 
-Fallow exists in a small but active space. Here's how it fits:
+### Smarter health analysis
 
-- **Knip** adopted the Oxc parser in v6.0, making it 2-4x faster than Knip v5. Fallow remains 3-18x faster than Knip 6.0 due to native Rust compilation and rayon-based parallelism — the parser is only one part of the pipeline, and JavaScript overhead in module resolution, graph construction, and analysis still dominates Knip's runtime. On the largest monorepos (20k+ files), knip errors out entirely while fallow completes in under 2 seconds.
-- **Biome** has module graph infrastructure and a `noUnusedImports` lint rule, but `noUnusedExports` (cross-file analysis) is not on their published roadmap. If they ship it, Biome becomes the main competitive pressure. Their advantage is bundled formatting/linting; Fallow's advantage is deeper detection (12 issue types, duplication, framework plugins).
-- **rev-dep** (Go-based) performs unused export detection but lacks a plugin system. Its author has stated that framework-specific config parsing is "not feasible in Go" — this is Fallow's core differentiation.
-- **AI coding tools** (Cursor, Copilot, Claude Code) are complementary demand drivers, not replacements. They generate code but don't track cross-file usage graphs. AI-assisted development increases dead code accumulation, making analysis tools more important, not less.
+`fallow health` currently reports function complexity. That's useful but incomplete — a complex function that hasn't changed in two years is stable legacy code, not a priority. The next step is combining complexity with git change history to surface **hotspots**: the files that are complex, changing frequently, and most likely to cause problems.
+
+The goal: `fallow health --hotspots` answers "where should my team spend its refactoring budget?" with data, not gut feel.
+
+Beyond hotspots: file-level health scores (maintainability, coupling, dead code density), codebase-wide vital signs with trend tracking over time, and regression detection in CI.
+
+### Dependency risk
+
+Fallow already detects unused dependencies. The next step is cross-referencing with vulnerability data: "these 5 unused dependencies have known CVEs — remove them for a free security win." Only fallow can surface this because only fallow knows which deps are actually unused.
+
+### Visualization
+
+`fallow viz` — a self-contained interactive HTML report showing your codebase as a treemap with dead code highlighted. No external dependencies, no server, opens in any browser. Dependency graph, cycle visualization, and duplication heatmaps as additional views.
+
+### Smarter auto-fix + AI-assisted cleanup
+
+Auto-fix currently handles safe, reversible changes: removing unused exports, enum members, and dependencies. These are low-risk — worst case you get a compile error and revert.
+
+Riskier cleanups — deleting unused files, removing class members, restructuring modules — are better handled by AI coding agents that can read context, check for dynamic references, and make judgment calls. Fallow's role is to be the **source of truth** for what's unused: structured JSON output and MCP server tools that agents consume to decide what to do. Fallow detects, the agent decides.
+
+For safe auto-fix: unused class member removal and post-fix formatting integration are next.
+
+### Architecture boundaries
+
+Define import rules between directory-based layers (`src/ui/` cannot import from `src/db/`). Validated against the module graph at Rust speed — same idea as dependency-cruiser but faster and integrated with dead code analysis.
+
+### Static test coverage gaps
+
+Identify exports and files with no test file dependency — without running tests. Uses the module graph to determine which source files are reachable from test files. The CI use case: "your PR adds 3 untested exports."
 
 ---
 
-## Future Exploration
+## Ongoing
 
-These are ideas, not commitments. They ship as 1.x releases based on user demand.
-
-- ~~**Complexity metrics**~~ — shipped via `fallow health`.
-- **More auto-fix targets** — delete unused files (`--allow-remove-files`), remove unused class members, post-fix formatting integration. Auto-fix is the highest-leverage feature for adoption — users want one-command cleanup.
-- **Fine-grained incremental analysis** — patch the graph in place, track export-level dependencies. Cache-aware parsing already covers the main bottleneck; this would additionally skip file I/O for unchanged files.
-- **Custom export conditions / unbuilt workspace fallback** — when resolving cross-workspace imports and `build`/`dist` directories don't exist, fall back to `src/` resolution. Many monorepos (TanStack/query, etc.) use custom conditions.
-- **VS Code extension screenshots** — visual demos for the Marketplace listing (diagnostics, tree views, Code Lens, code actions).
-- **Security framing for unused dependencies** — flag unused deps with known CVEs, integrate with `npm audit` data.
-- **Historical trend tracking** — store baselines over time, generate trend reports.
+- **Incremental analysis** — finer-grained caching beyond file-level, to make watch mode and CI even faster on large monorepos
+- **Plugin ecosystem** — more framework coverage, better external plugin authoring experience, community contributions
+- **Cross-workspace resolution** — custom export conditions, unbuilt workspace fallback for monorepos without build artifacts
 
 ---
 
-## Community & Adoption
+## Known limitations
 
-- **Framework compatibility matrix** — for each of the top 20 frameworks, document exactly what fallow detects vs. knip
-- **Contributing guide** — plugin authoring tutorial, "your first PR" guide
-- **Blog posts** — technical deep-dives on the suffix array algorithm, Oxc integration, benchmark methodology
+- **Syntactic analysis only** — no TypeScript type information. Projects using `isolatedModules: true` (the modern default) are well-served; legacy tsc-only projects may see false positives.
+- **Config parsing ceiling** — AST-based extraction handles static configs. Computed values and conditionals are out of reach without JS eval.
+- **Svelte export false negatives** — props (`export let`) can't be distinguished from utility exports without Svelte compiler semantics.
+- **NestJS/DI class members** — abstract methods consumed via DI are not tracked. Use `unused_class_members = "off"` for DI-heavy projects.
+
+See the [README](README.md) for the full list.
 
 ---
 
-## Try It
+## Competitive context
+
+- **Knip** — the closest alternative. Fallow is 3-18x faster than Knip v6 due to native Rust compilation. On the largest monorepos (20k+ files), knip errors out entirely.
+- **Biome** — has module graph infrastructure but hasn't shipped cross-file unused export detection. If they do, they cover ~1 of fallow's 13 issue types.
+- **SonarQube** — dominates enterprise code quality but is Java-centric, slow on JS/TS, and lacks framework-aware analysis.
+- **AI tools** — complementary, not competitive. AI generates code faster than humans can review it, accelerating the dead code problem fallow solves.
+
+---
 
 ```bash
 npx fallow check    # Unused code — zero config, sub-second
 npx fallow dupes    # Duplication — find copy-paste clones
+npx fallow health   # Complexity — find functions that need refactoring
 ```
 
 [Open an issue](https://github.com/fallow-rs/fallow/issues) if your use case isn't covered.

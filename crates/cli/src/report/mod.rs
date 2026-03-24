@@ -124,10 +124,12 @@ pub fn print_health_report(
             compact::print_health_compact(report, &config.root);
             ExitCode::SUCCESS
         }
-        // JSON, SARIF, and Markdown all use JSON output
-        OutputFormat::Json | OutputFormat::Sarif | OutputFormat::Markdown => {
-            json::print_health_json(report, &config.root, elapsed)
+        OutputFormat::Markdown => {
+            markdown::print_health_markdown(report, &config.root);
+            ExitCode::SUCCESS
         }
+        OutputFormat::Sarif => sarif::print_health_sarif(report, &config.root),
+        OutputFormat::Json => json::print_health_json(report, &config.root, elapsed),
     }
 }
 
@@ -197,7 +199,11 @@ pub use json::build_json;
 #[allow(unused_imports)]
 pub use markdown::build_duplication_markdown;
 #[allow(unused_imports)]
+pub use markdown::build_health_markdown;
+#[allow(unused_imports)]
 pub use markdown::build_markdown;
+#[allow(unused_imports)]
+pub use sarif::build_health_sarif;
 #[allow(unused_imports)]
 pub use sarif::build_sarif;
 

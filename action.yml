@@ -8,7 +8,7 @@ branding:
 
 inputs:
   command:
-    description: 'Command to run: check (unused code), dupes (code duplication), fix (auto-remove unused code)'
+    description: 'Command to run: check (unused code), dupes (code duplication), health (complexity), fix (auto-remove unused code)'
     required: false
     default: 'check'
   root:
@@ -76,6 +76,19 @@ inputs:
   # Workspace
   workspace:
     description: 'Scope output to a single workspace package by name (monorepo support)'
+    required: false
+  # Health-specific inputs
+  max-cyclomatic:
+    description: 'Maximum cyclomatic complexity threshold (health command, default: 20)'
+    required: false
+  max-cognitive:
+    description: 'Maximum cognitive complexity threshold (health command, default: 15)'
+    required: false
+  top:
+    description: 'Show only the N worst offenders (health command)'
+    required: false
+  sort:
+    description: 'Sort order for health results: cyclomatic, cognitive, or lines (health command)'
     required: false
   # Fix-specific inputs
   dry-run:
@@ -253,6 +266,24 @@ runs:
         end
         JQEOF
 
+        # --- Health command summary ---
+        cat > "$FALLOW_TMP/summary-health.jq" << 'JQEOF'
+        if (.findings | length) == 0 then
+          "## Fallow — Code Complexity\n\n" +
+          "> [!NOTE]\n> **No functions exceed complexity thresholds** \u00b7 \(.elapsed_ms)ms\n\n" +
+          "\(.summary.functions_analyzed) functions analyzed (max cyclomatic: \(.summary.max_cyclomatic_threshold), max cognitive: \(.summary.max_cognitive_threshold))"
+        else
+          "## Fallow — Code Complexity\n\n" +
+          "> [!WARNING]\n> **\(.summary.functions_above_threshold) function\(if .summary.functions_above_threshold == 1 then "" else "s" end) exceed\(if .summary.functions_above_threshold == 1 then "s" else "" end) thresholds** \u00b7 \(.elapsed_ms)ms\n\n" +
+          "| File | Function | Cyclomatic | Cognitive | Lines |\n|:-----|:---------|:-----------|:----------|:------|\n" +
+          ([.findings[:25][] |
+            "| `\(.path):\(.line)` | `\(.name)` | \(.cyclomatic)\(if .exceeded == "cyclomatic" or .exceeded == "both" then " **!**" else "" end) | \(.cognitive)\(if .exceeded == "cognitive" or .exceeded == "both" then " **!**" else "" end) | \(.line_count) |"
+          ] | join("\n")) +
+          (if (.findings | length) > 25 then "\n\n> \((.findings | length) - 25) more \u2014 run `fallow health` locally for the full list" else "" end) +
+          "\n\n**\(.summary.files_analyzed)** files, **\(.summary.functions_analyzed)** functions analyzed (thresholds: cyclomatic > \(.summary.max_cyclomatic_threshold), cognitive > \(.summary.max_cognitive_threshold))"
+        end
+        JQEOF
+
     - name: Install fallow
       shell: bash
       env:
@@ -299,15 +330,21 @@ runs:
         INPUT_SKIP_LOCAL: ${{ inputs.skip-local }}
         INPUT_DRY_RUN: ${{ inputs.dry-run }}
         INPUT_WORKSPACE: ${{ inputs.workspace }}
+        INPUT_MAX_CYCLOMATIC: ${{ inputs.max-cyclomatic }}
+        INPUT_MAX_COGNITIVE: ${{ inputs.max-cognitive }}
+        INPUT_TOP: ${{ inputs.top }}
+        INPUT_SORT: ${{ inputs.sort }}
       run: |
         # Validate command
         case "$INPUT_COMMAND" in
-          check|dupes|fix) ;;
-          *) echo "::error::Invalid command: ${INPUT_COMMAND}. Must be check, dupes, or fix."; exit 2 ;;
+          check|dupes|health|fix) ;;
+          *) echo "::error::Invalid command: ${INPUT_COMMAND}. Must be check, dupes, health, or fix."; exit 2 ;;
         esac
 
         # Validate numeric inputs
-        for name_val in "min-tokens:$INPUT_MIN_TOKENS" "min-lines:$INPUT_MIN_LINES"; do
+        for name_val in "min-tokens:$INPUT_MIN_TOKENS" "min-lines:$INPUT_MIN_LINES" \
+                       "max-cyclomatic:$INPUT_MAX_CYCLOMATIC" "max-cognitive:$INPUT_MAX_COGNITIVE" \
+                       "top:$INPUT_TOP"; do
           name="${name_val%%:*}"; val="${name_val#*:}"
           if [ -n "$val" ] && ! [[ "$val" =~ ^[0-9]+$ ]]; then
             echo "::error::${name} must be a positive integer, got: ${val}"; exit 2
@@ -352,6 +389,12 @@ runs:
             [ -n "$INPUT_THRESHOLD" ] && ARGS+=(--threshold "$INPUT_THRESHOLD")
             [ "$INPUT_SKIP_LOCAL" = "true" ] && ARGS+=(--skip-local)
             ;;
+          health)
+            [ -n "$INPUT_MAX_CYCLOMATIC" ] && ARGS+=(--max-cyclomatic "$INPUT_MAX_CYCLOMATIC")
+            [ -n "$INPUT_MAX_COGNITIVE" ] && ARGS+=(--max-cognitive "$INPUT_MAX_COGNITIVE")
+            [ -n "$INPUT_TOP" ] && ARGS+=(--top "$INPUT_TOP")
+            [ -n "$INPUT_SORT" ] && ARGS+=(--sort "$INPUT_SORT")
+            ;;
           fix)
             [ "$INPUT_DRY_RUN" = "true" ] && ARGS+=(--dry-run)
             ;;
@@ -385,13 +428,17 @@ runs:
           [ -n "$INPUT_SAVE_BASELINE" ] && SARIF_ARGS+=(--save-baseline "$INPUT_SAVE_BASELINE")
           [ -n "$INPUT_WORKSPACE" ] && SARIF_ARGS+=(--workspace "$INPUT_WORKSPACE")
 
-          # Carry over dupes-specific args for SARIF run
+          # Carry over command-specific args for SARIF run
           if [ "$INPUT_COMMAND" = "dupes" ]; then
             SARIF_ARGS+=(--mode "$INPUT_DUPES_MODE")
             [ -n "$INPUT_MIN_TOKENS" ] && SARIF_ARGS+=(--min-tokens "$INPUT_MIN_TOKENS")
             [ -n "$INPUT_MIN_LINES" ] && SARIF_ARGS+=(--min-lines "$INPUT_MIN_LINES")
             [ -n "$INPUT_THRESHOLD" ] && SARIF_ARGS+=(--threshold "$INPUT_THRESHOLD")
             [ "$INPUT_SKIP_LOCAL" = "true" ] && SARIF_ARGS+=(--skip-local)
+          elif [ "$INPUT_COMMAND" = "health" ]; then
+            [ -n "$INPUT_MAX_CYCLOMATIC" ] && SARIF_ARGS+=(--max-cyclomatic "$INPUT_MAX_CYCLOMATIC")
+            [ -n "$INPUT_MAX_COGNITIVE" ] && SARIF_ARGS+=(--max-cognitive "$INPUT_MAX_COGNITIVE")
+            # --top intentionally omitted: SARIF should contain all findings for Code Scanning
           fi
 
           if ! fallow "${SARIF_ARGS[@]}" "${EXTRA_ARGS[@]}" > fallow-results.sarif 2>/dev/null; then
@@ -408,9 +455,10 @@ runs:
 
         # Extract issue count based on command
         case "$INPUT_COMMAND" in
-          check) ISSUES=$(jq -r '.total_issues' fallow-results.json) ;;
-          dupes) ISSUES=$(jq -r '.stats.clone_groups' fallow-results.json) ;;
-          fix)   ISSUES=$(jq -r '(.fixes | length)' fallow-results.json) ;;
+          check)  ISSUES=$(jq -r '.total_issues' fallow-results.json) ;;
+          dupes)  ISSUES=$(jq -r '.stats.clone_groups' fallow-results.json) ;;
+          health) ISSUES=$(jq -r '.summary.functions_above_threshold' fallow-results.json) ;;
+          fix)    ISSUES=$(jq -r '(.fixes | length)' fallow-results.json) ;;
         esac
 
         if ! [[ "$ISSUES" =~ ^[0-9]+$ ]]; then
@@ -428,9 +476,10 @@ runs:
 
         if [ "$ISSUES" -gt 0 ]; then
           case "$INPUT_COMMAND" in
-            check) echo "::warning::Fallow found ${ISSUES} unused code issues" ;;
-            dupes) echo "::warning::Fallow found ${ISSUES} clone groups" ;;
-            fix)   echo "::warning::Fallow proposed ${ISSUES} fixes" ;;
+            check)  echo "::warning::Fallow found ${ISSUES} unused code issues" ;;
+            dupes)  echo "::warning::Fallow found ${ISSUES} clone groups" ;;
+            health) echo "::warning::Fallow found ${ISSUES} high complexity functions" ;;
+            fix)    echo "::warning::Fallow proposed ${ISSUES} fixes" ;;
           esac
         fi
 
@@ -441,10 +490,11 @@ runs:
         FALLOW_COMMAND: ${{ steps.analyze.outputs.command }}
       run: |
         case "$FALLOW_COMMAND" in
-          check) JQ_FILE="$FALLOW_TMP/summary-check.jq" ;;
-          dupes) JQ_FILE="$FALLOW_TMP/summary-dupes.jq" ;;
-          fix)   JQ_FILE="$FALLOW_TMP/summary-fix.jq" ;;
-          *)     echo "::error::Unexpected command: ${FALLOW_COMMAND}"; exit 2 ;;
+          check)  JQ_FILE="$FALLOW_TMP/summary-check.jq" ;;
+          dupes)  JQ_FILE="$FALLOW_TMP/summary-dupes.jq" ;;
+          health) JQ_FILE="$FALLOW_TMP/summary-health.jq" ;;
+          fix)    JQ_FILE="$FALLOW_TMP/summary-fix.jq" ;;
+          *)      echo "::error::Unexpected command: ${FALLOW_COMMAND}"; exit 2 ;;
         esac
         jq -r -f "$JQ_FILE" fallow-results.json >> "$GITHUB_STEP_SUMMARY"
 
@@ -495,10 +545,11 @@ runs:
       run: |
         # Select jq script safely
         case "$FALLOW_COMMAND" in
-          check) JQ_FILE="$FALLOW_TMP/summary-check.jq" ;;
-          dupes) JQ_FILE="$FALLOW_TMP/summary-dupes.jq" ;;
-          fix)   JQ_FILE="$FALLOW_TMP/summary-fix.jq" ;;
-          *)     echo "::error::Unexpected command: ${FALLOW_COMMAND}"; exit 2 ;;
+          check)  JQ_FILE="$FALLOW_TMP/summary-check.jq" ;;
+          dupes)  JQ_FILE="$FALLOW_TMP/summary-dupes.jq" ;;
+          health) JQ_FILE="$FALLOW_TMP/summary-health.jq" ;;
+          fix)    JQ_FILE="$FALLOW_TMP/summary-fix.jq" ;;
+          *)      echo "::error::Unexpected command: ${FALLOW_COMMAND}"; exit 2 ;;
         esac
 
         # Generate comment body
@@ -548,9 +599,10 @@ runs:
       run: |
         if [ "$INPUT_FAIL_ON_ISSUES" = "true" ] && [ "$ISSUES" -gt 0 ]; then
           case "$INPUT_COMMAND" in
-            check) echo "::error::Fallow found ${ISSUES} unused code issues" ;;
-            dupes) echo "::error::Fallow found ${ISSUES} clone groups" ;;
-            fix)   echo "::error::Fallow found ${ISSUES} fixable issues" ;;
+            check)  echo "::error::Fallow found ${ISSUES} unused code issues" ;;
+            dupes)  echo "::error::Fallow found ${ISSUES} clone groups" ;;
+            health) echo "::error::Fallow found ${ISSUES} high complexity functions" ;;
+            fix)    echo "::error::Fallow found ${ISSUES} fixable issues" ;;
           esac
           exit 1
         fi

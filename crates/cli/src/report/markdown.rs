@@ -346,6 +346,90 @@ pub fn build_duplication_markdown(report: &DuplicationReport, root: &Path) -> St
     out
 }
 
+// ── Health markdown output ──────────────────────────────────────────
+
+pub(super) fn print_health_markdown(report: &crate::health_types::HealthReport, root: &Path) {
+    println!("{}", build_health_markdown(report, root));
+}
+
+/// Build markdown output for health (complexity) results.
+pub fn build_health_markdown(report: &crate::health_types::HealthReport, root: &Path) -> String {
+    let rel = |p: &Path| {
+        escape_backticks(&normalize_uri(
+            &relative_path(p, root).display().to_string(),
+        ))
+    };
+
+    let mut out = String::new();
+
+    if report.findings.is_empty() {
+        let _ = write!(
+            out,
+            "## Fallow: no functions exceed complexity thresholds\n\n\
+             **{}** functions analyzed (max cyclomatic: {}, max cognitive: {})\n",
+            report.summary.functions_analyzed,
+            report.summary.max_cyclomatic_threshold,
+            report.summary.max_cognitive_threshold,
+        );
+        return out;
+    }
+
+    let count = report.summary.functions_above_threshold;
+    let shown = report.findings.len();
+    if shown < count {
+        let _ = write!(
+            out,
+            "## Fallow: {count} high complexity function{} ({shown} shown)\n\n",
+            if count == 1 { "" } else { "s" },
+        );
+    } else {
+        let _ = write!(
+            out,
+            "## Fallow: {count} high complexity function{}\n\n",
+            if count == 1 { "" } else { "s" },
+        );
+    }
+
+    out.push_str("| File | Function | Cyclomatic | Cognitive | Lines |\n");
+    out.push_str("|:-----|:---------|:-----------|:----------|:------|\n");
+
+    for finding in &report.findings {
+        let file_str = rel(&finding.path);
+        let cyc_marker = if finding.cyclomatic > report.summary.max_cyclomatic_threshold {
+            " **!**"
+        } else {
+            ""
+        };
+        let cog_marker = if finding.cognitive > report.summary.max_cognitive_threshold {
+            " **!**"
+        } else {
+            ""
+        };
+        let _ = writeln!(
+            out,
+            "| `{file_str}:{line}` | `{name}` | {cyc}{cyc_marker} | {cog}{cog_marker} | {lines} |",
+            line = finding.line,
+            name = escape_backticks(&finding.name),
+            cyc = finding.cyclomatic,
+            cog = finding.cognitive,
+            lines = finding.line_count,
+        );
+    }
+
+    let s = &report.summary;
+    let _ = write!(
+        out,
+        "\n**{files}** files, **{funcs}** functions analyzed \
+         (thresholds: cyclomatic > {cyc}, cognitive > {cog})\n",
+        files = s.files_analyzed,
+        funcs = s.functions_analyzed,
+        cyc = s.max_cyclomatic_threshold,
+        cog = s.max_cognitive_threshold,
+    );
+
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -733,5 +817,86 @@ mod tests {
         assert!(md.contains("**Family 1**"));
         assert!(md.contains("Extract shared utility function"));
         assert!(md.contains("~15 lines saved"));
+    }
+
+    // ── Health markdown ──
+
+    #[test]
+    fn health_markdown_empty_no_findings() {
+        let root = PathBuf::from("/project");
+        let report = crate::health_types::HealthReport {
+            findings: vec![],
+            summary: crate::health_types::HealthSummary {
+                files_analyzed: 10,
+                functions_analyzed: 50,
+                functions_above_threshold: 0,
+                max_cyclomatic_threshold: 20,
+                max_cognitive_threshold: 15,
+            },
+        };
+        let md = build_health_markdown(&report, &root);
+        assert!(md.contains("no functions exceed complexity thresholds"));
+        assert!(md.contains("**50** functions analyzed"));
+    }
+
+    #[test]
+    fn health_markdown_table_format() {
+        let root = PathBuf::from("/project");
+        let report = crate::health_types::HealthReport {
+            findings: vec![crate::health_types::HealthFinding {
+                path: root.join("src/utils.ts"),
+                name: "parseExpression".to_string(),
+                line: 42,
+                col: 0,
+                cyclomatic: 25,
+                cognitive: 30,
+                line_count: 80,
+                exceeded: crate::health_types::ExceededThreshold::Both,
+            }],
+            summary: crate::health_types::HealthSummary {
+                files_analyzed: 10,
+                functions_analyzed: 50,
+                functions_above_threshold: 1,
+                max_cyclomatic_threshold: 20,
+                max_cognitive_threshold: 15,
+            },
+        };
+        let md = build_health_markdown(&report, &root);
+        assert!(md.contains("## Fallow: 1 high complexity function\n"));
+        assert!(md.contains("| File | Function |"));
+        assert!(md.contains("`src/utils.ts:42`"));
+        assert!(md.contains("`parseExpression`"));
+        assert!(md.contains("25 **!**"));
+        assert!(md.contains("30 **!**"));
+        assert!(md.contains("| 80 |"));
+    }
+
+    #[test]
+    fn health_markdown_no_marker_when_below_threshold() {
+        let root = PathBuf::from("/project");
+        let report = crate::health_types::HealthReport {
+            findings: vec![crate::health_types::HealthFinding {
+                path: root.join("src/utils.ts"),
+                name: "helper".to_string(),
+                line: 10,
+                col: 0,
+                cyclomatic: 15,
+                cognitive: 20,
+                line_count: 30,
+                exceeded: crate::health_types::ExceededThreshold::Cognitive,
+            }],
+            summary: crate::health_types::HealthSummary {
+                files_analyzed: 5,
+                functions_analyzed: 20,
+                functions_above_threshold: 1,
+                max_cyclomatic_threshold: 20,
+                max_cognitive_threshold: 15,
+            },
+        };
+        let md = build_health_markdown(&report, &root);
+        // Cyclomatic 15 is below threshold 20, no marker
+        assert!(md.contains("| 15 |"));
+        // Cognitive 20 exceeds threshold 15, has marker
+        assert!(md.contains("20 **!**"));
     }
 }
