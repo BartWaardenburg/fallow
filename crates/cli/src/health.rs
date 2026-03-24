@@ -325,6 +325,106 @@ pub fn run_health(opts: &HealthOptions<'_>) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+/// Validate git prerequisites and return churn data for hotspot analysis.
+///
+/// Returns `None` (with an error printed) if the repo is invalid, `--since` is
+/// malformed, or git analysis fails.
+fn fetch_churn_data(
+    opts: &HealthOptions<'_>,
+) -> Option<(
+    fallow_core::churn::ChurnResult,
+    fallow_core::churn::SinceDuration,
+)> {
+    use fallow_core::churn;
+
+    if !churn::is_git_repo(opts.root) {
+        eprintln!("Error: hotspot analysis requires a git repository");
+        return None;
+    }
+
+    let since_input = opts.since.unwrap_or("6m");
+    if let Err(e) = crate::validate::validate_no_control_chars(since_input, "--since") {
+        eprintln!("Error: {e}");
+        return None;
+    }
+    let since = match churn::parse_since(since_input) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Error: invalid --since: {e}");
+            return None;
+        }
+    };
+
+    let churn_result = churn::analyze_churn(opts.root, &since)?;
+    Some((churn_result, since))
+}
+
+/// Find the maximum weighted-commits and complexity-density across eligible files.
+///
+/// Used to normalize hotspot scores into the 0–100 range.
+fn compute_normalization_maxima(
+    file_scores: &[FileHealthScore],
+    churn_files: &rustc_hash::FxHashMap<std::path::PathBuf, fallow_core::churn::FileChurn>,
+    min_commits: u32,
+) -> (f64, f64) {
+    let mut max_weighted: f64 = 0.0;
+    let mut max_density: f64 = 0.0;
+    for score in file_scores {
+        if let Some(churn) = churn_files.get(&score.path)
+            && churn.commits >= min_commits
+        {
+            max_weighted = max_weighted.max(churn.weighted_commits);
+            max_density = max_density.max(score.complexity_density);
+        }
+    }
+    (max_weighted, max_density)
+}
+
+/// Check whether a file should be excluded from hotspot results
+/// based on workspace filter and ignore patterns.
+fn is_excluded_from_hotspots(
+    path: &std::path::Path,
+    root: &std::path::Path,
+    ignore_set: &globset::GlobSet,
+    ws_root: Option<&std::path::Path>,
+) -> bool {
+    if let Some(ws) = ws_root
+        && !path.starts_with(ws)
+    {
+        return true;
+    }
+    if !ignore_set.is_empty() {
+        let relative = path.strip_prefix(root).unwrap_or(path);
+        if ignore_set.is_match(relative) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Compute a normalized hotspot score from churn and complexity data.
+///
+/// Both inputs are normalized against their respective maxima so the result
+/// falls in the 0–100 range (rounded to one decimal).
+fn compute_hotspot_score(
+    weighted_commits: f64,
+    max_weighted: f64,
+    complexity_density: f64,
+    max_density: f64,
+) -> f64 {
+    let norm_churn = if max_weighted > 0.0 {
+        weighted_commits / max_weighted
+    } else {
+        0.0
+    };
+    let norm_complexity = if max_density > 0.0 {
+        complexity_density / max_density
+    } else {
+        0.0
+    };
+    (norm_churn * norm_complexity * 100.0 * 10.0).round() / 10.0
+}
+
 /// Compute hotspot entries by combining git churn data with file health scores.
 fn compute_hotspots(
     opts: &HealthOptions<'_>,
@@ -333,30 +433,7 @@ fn compute_hotspots(
     ignore_set: &globset::GlobSet,
     ws_root: Option<&std::path::Path>,
 ) -> (Vec<HotspotEntry>, Option<HotspotSummary>) {
-    use fallow_core::churn;
-
-    // Validate we're in a git repo
-    if !churn::is_git_repo(opts.root) {
-        eprintln!("Error: hotspot analysis requires a git repository");
-        return (Vec::new(), None);
-    }
-
-    // Parse --since (default: 6m), with control character validation
-    let since_input = opts.since.unwrap_or("6m");
-    if let Err(e) = crate::validate::validate_no_control_chars(since_input, "--since") {
-        eprintln!("Error: {e}");
-        return (Vec::new(), None);
-    }
-    let since = match churn::parse_since(since_input) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("Error: invalid --since: {e}");
-            return (Vec::new(), None);
-        }
-    };
-
-    // Get churn data from git
-    let Some(churn_result) = churn::analyze_churn(opts.root, &since) else {
+    let Some((churn_result, since)) = fetch_churn_data(opts) else {
         return (Vec::new(), None);
     };
 
@@ -370,68 +447,42 @@ fn compute_hotspots(
     }
 
     let min_commits = opts.min_commits.unwrap_or(3);
-
-    // Find normalization maxima from all eligible files
-    let mut max_weighted: f64 = 0.0;
-    let mut max_density: f64 = 0.0;
-    for score in file_scores {
-        if let Some(churn) = churn_result.files.get(&score.path)
-            && churn.commits >= min_commits
-        {
-            max_weighted = max_weighted.max(churn.weighted_commits);
-            max_density = max_density.max(score.complexity_density);
-        }
-    }
+    let (max_weighted, max_density) =
+        compute_normalization_maxima(file_scores, &churn_result.files, min_commits);
 
     // Build hotspot entries
     let mut hotspot_entries = Vec::new();
     let mut files_excluded: usize = 0;
 
     for score in file_scores {
-        // Apply workspace filter
-        if let Some(ws) = ws_root
-            && !score.path.starts_with(ws)
-        {
+        if is_excluded_from_hotspots(&score.path, &config.root, ignore_set, ws_root) {
             continue;
         }
-        // Apply ignore patterns
-        if !ignore_set.is_empty() {
-            let relative = score.path.strip_prefix(&config.root).unwrap_or(&score.path);
-            if ignore_set.is_match(relative) {
-                continue;
-            }
+
+        let Some(churn) = churn_result.files.get(&score.path) else {
+            continue;
+        };
+        if churn.commits < min_commits {
+            files_excluded += 1;
+            continue;
         }
 
-        if let Some(churn) = churn_result.files.get(&score.path) {
-            if churn.commits < min_commits {
-                files_excluded += 1;
-                continue;
-            }
-
-            let norm_churn = if max_weighted > 0.0 {
-                churn.weighted_commits / max_weighted
-            } else {
-                0.0
-            };
-            let norm_complexity = if max_density > 0.0 {
-                score.complexity_density / max_density
-            } else {
-                0.0
-            };
-            let hotspot_score = (norm_churn * norm_complexity * 100.0 * 10.0).round() / 10.0;
-
-            hotspot_entries.push(HotspotEntry {
-                path: score.path.clone(),
-                score: hotspot_score,
-                commits: churn.commits,
-                weighted_commits: churn.weighted_commits,
-                lines_added: churn.lines_added,
-                lines_deleted: churn.lines_deleted,
-                complexity_density: score.complexity_density,
-                fan_in: score.fan_in,
-                trend: churn.trend,
-            });
-        }
+        hotspot_entries.push(HotspotEntry {
+            path: score.path.clone(),
+            score: compute_hotspot_score(
+                churn.weighted_commits,
+                max_weighted,
+                score.complexity_density,
+                max_density,
+            ),
+            commits: churn.commits,
+            weighted_commits: churn.weighted_commits,
+            lines_added: churn.lines_added,
+            lines_deleted: churn.lines_deleted,
+            complexity_density: score.complexity_density,
+            fan_in: score.fan_in,
+            trend: churn.trend,
+        });
     }
 
     // Sort by score descending (highest risk first)
@@ -459,6 +510,75 @@ fn compute_hotspots(
     (hotspot_entries, Some(summary))
 }
 
+/// Aggregate complexity totals from a parsed module.
+///
+/// Returns `(total_cyclomatic, total_cognitive, function_count, lines)`.
+fn aggregate_complexity(module: &fallow_core::extract::ModuleInfo) -> (u32, u32, usize, u32) {
+    let cyc: u32 = module
+        .complexity
+        .iter()
+        .map(|f| u32::from(f.cyclomatic))
+        .sum();
+    let cog: u32 = module
+        .complexity
+        .iter()
+        .map(|f| u32::from(f.cognitive))
+        .sum();
+    let funcs = module.complexity.len();
+    // line_offsets length = number of lines in the file
+    let lines = module.line_offsets.len() as u32;
+    (cyc, cog, funcs, lines)
+}
+
+/// Compute the dead code ratio for a single file.
+///
+/// Returns the fraction of VALUE exports with zero references (0.0–1.0).
+/// Type-only exports (interfaces, type aliases) are excluded from both
+/// numerator and denominator to avoid inflating the ratio for well-typed
+/// codebases. Returns 1.0 if the entire file is unused, 0.0 if it has no
+/// value exports.
+fn compute_dead_code_ratio(
+    path: &std::path::Path,
+    exports: &[fallow_core::graph::ExportSymbol],
+    unused_files: &rustc_hash::FxHashSet<&std::path::Path>,
+    unused_exports_by_path: &rustc_hash::FxHashMap<&std::path::Path, usize>,
+) -> f64 {
+    if unused_files.contains(path) {
+        return 1.0;
+    }
+    let value_exports = exports.iter().filter(|e| !e.is_type_only).count();
+    if value_exports == 0 {
+        return 0.0;
+    }
+    let unused = unused_exports_by_path.get(path).copied().unwrap_or(0);
+    (unused as f64 / value_exports as f64).min(1.0)
+}
+
+/// Compute complexity density: total cyclomatic / lines of code.
+///
+/// Returns 0.0 when the file has no lines.
+fn compute_complexity_density(total_cyclomatic: u32, lines: u32) -> f64 {
+    if lines > 0 {
+        f64::from(total_cyclomatic) / f64::from(lines)
+    } else {
+        0.0
+    }
+}
+
+/// Count unused VALUE exports per file path for O(1) lookup.
+///
+/// Type-only exports (interfaces, type aliases) are intentionally excluded —
+/// they are a different concern than unused functions/components.
+fn count_unused_exports_by_path(
+    unused_exports: &[fallow_core::results::UnusedExport],
+) -> rustc_hash::FxHashMap<&std::path::Path, usize> {
+    let mut map: rustc_hash::FxHashMap<&std::path::Path, usize> = rustc_hash::FxHashMap::default();
+    for exp in unused_exports {
+        *map.entry(exp.path.as_path()).or_default() += 1;
+    }
+    map
+}
+
 /// Compute per-file health scores by running the full analysis pipeline.
 ///
 /// This builds the module graph and runs dead code detection to obtain
@@ -482,18 +602,7 @@ fn compute_file_scores(
         .map(|f| f.path.as_path())
         .collect();
 
-    // Count unused VALUE exports per file path (exclude type-only exports).
-    // Type-only exports (interfaces, type aliases) are a different concern than
-    // unused functions/components — including them inflates dead_code_ratio for
-    // well-typed React codebases where every component exports its Props type.
-    let mut unused_exports_by_path: rustc_hash::FxHashMap<&std::path::Path, usize> =
-        rustc_hash::FxHashMap::default();
-    for exp in &results.unused_exports {
-        *unused_exports_by_path
-            .entry(exp.path.as_path())
-            .or_default() += 1;
-    }
-    // Note: results.unused_types is intentionally NOT counted here.
+    let unused_exports_by_path = count_unused_exports_by_path(&results.unused_exports);
 
     // Build FileId → ModuleInfo lookup
     let module_by_id: rustc_hash::FxHashMap<
@@ -517,59 +626,25 @@ fn compute_file_scores(
         // Fan-out: number of files this file imports (from edge_range)
         let fan_out = node.edge_range.len();
 
-        // Get complexity data from parsed module
         let (total_cyclomatic, total_cognitive, function_count, lines) =
-            if let Some(module) = module_by_id.get(&node.file_id) {
-                let cyc: u32 = module
-                    .complexity
-                    .iter()
-                    .map(|f| u32::from(f.cyclomatic))
-                    .sum();
-                let cog: u32 = module
-                    .complexity
-                    .iter()
-                    .map(|f| u32::from(f.cognitive))
-                    .sum();
-                let funcs = module.complexity.len();
-                // line_offsets length = number of lines in the file
-                let line_count = module.line_offsets.len() as u32;
-                (cyc, cog, funcs, line_count)
-            } else {
-                (0, 0, 0, 0)
+            match module_by_id.get(&node.file_id) {
+                Some(module) => aggregate_complexity(module),
+                None => (0, 0, 0, 0),
             };
 
-        // Dead code ratio: fraction of VALUE exports with zero references.
-        // Type-only exports are excluded from both numerator and denominator
-        // (see unused_exports_by_path construction above).
-        // If the entire file is unused, ratio is 1.0.
-        let dead_code_ratio = if unused_files.contains((*path).as_path()) {
-            1.0
-        } else {
-            let value_exports = node.exports.iter().filter(|e| !e.is_type_only).count();
-            if value_exports > 0 {
-                let unused = unused_exports_by_path
-                    .get(path.as_path())
-                    .copied()
-                    .unwrap_or(0);
-                (unused as f64 / value_exports as f64).min(1.0)
-            } else {
-                0.0
-            }
-        };
-
-        // Complexity density: total cyclomatic / lines of code
-        let complexity_density = if lines > 0 {
-            f64::from(total_cyclomatic) / f64::from(lines)
-        } else {
-            0.0
-        };
+        let dead_code_ratio = compute_dead_code_ratio(
+            (*path).as_path(),
+            &node.exports,
+            &unused_files,
+            &unused_exports_by_path,
+        );
+        let complexity_density = compute_complexity_density(total_cyclomatic, lines);
 
         // Round intermediate values first so the MI in JSON is reproducible
         // from the other rounded fields in the same JSON object.
         let dead_code_ratio_rounded = (dead_code_ratio * 100.0).round() / 100.0;
         let complexity_density_rounded = (complexity_density * 100.0).round() / 100.0;
 
-        // Maintainability index (see compute_maintainability_index for full formula).
         let maintainability_index = compute_maintainability_index(
             complexity_density_rounded,
             dead_code_ratio_rounded,
