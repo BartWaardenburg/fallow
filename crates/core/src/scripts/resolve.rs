@@ -64,3 +64,123 @@ pub fn extract_package_from_bin_path(target: &std::path::Path) -> Option<String>
 
     None
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- BINARY_TO_PACKAGE known mappings ---
+
+    #[test]
+    fn tsserver_maps_to_typescript() {
+        let pkg = resolve_binary_to_package("tsserver", Path::new("/nonexistent"));
+        assert_eq!(pkg, "typescript");
+    }
+
+    #[test]
+    fn nuxi_maps_to_nuxt() {
+        let pkg = resolve_binary_to_package("nuxi", Path::new("/nonexistent"));
+        assert_eq!(pkg, "nuxt");
+    }
+
+    #[test]
+    fn run_p_maps_to_npm_run_all() {
+        let pkg = resolve_binary_to_package("run-p", Path::new("/nonexistent"));
+        assert_eq!(pkg, "npm-run-all");
+    }
+
+    #[test]
+    fn run_s2_maps_to_npm_run_all2() {
+        let pkg = resolve_binary_to_package("run-s2", Path::new("/nonexistent"));
+        assert_eq!(pkg, "npm-run-all2");
+    }
+
+    #[test]
+    fn run_p2_maps_to_npm_run_all2() {
+        let pkg = resolve_binary_to_package("run-p2", Path::new("/nonexistent"));
+        assert_eq!(pkg, "npm-run-all2");
+    }
+
+    #[test]
+    fn sb_maps_to_storybook() {
+        let pkg = resolve_binary_to_package("sb", Path::new("/nonexistent"));
+        assert_eq!(pkg, "storybook");
+    }
+
+    #[test]
+    fn oxlint_maps_to_oxlint() {
+        let pkg = resolve_binary_to_package("oxlint", Path::new("/nonexistent"));
+        assert_eq!(pkg, "oxlint");
+    }
+
+    // --- Unknown binary falls back to identity ---
+
+    #[test]
+    fn unknown_binary_returns_identity() {
+        let pkg = resolve_binary_to_package("some-random-tool", Path::new("/nonexistent"));
+        assert_eq!(pkg, "some-random-tool");
+    }
+
+    #[test]
+    fn jest_identity_without_symlink() {
+        // jest is not in the divergence map, and no symlink exists at /nonexistent
+        let pkg = resolve_binary_to_package("jest", Path::new("/nonexistent"));
+        assert_eq!(pkg, "jest");
+    }
+
+    #[test]
+    fn eslint_identity_without_symlink() {
+        let pkg = resolve_binary_to_package("eslint", Path::new("/nonexistent"));
+        assert_eq!(pkg, "eslint");
+    }
+
+    // --- extract_package_from_bin_path ---
+
+    #[test]
+    fn bin_path_simple_package() {
+        let path = std::path::Path::new("../eslint/bin/eslint.js");
+        assert_eq!(extract_package_from_bin_path(path), Some("eslint".to_string()));
+    }
+
+    #[test]
+    fn bin_path_scoped_package() {
+        let path = std::path::Path::new("../@angular/cli/bin/ng");
+        assert_eq!(
+            extract_package_from_bin_path(path),
+            Some("@angular/cli".to_string())
+        );
+    }
+
+    #[test]
+    fn bin_path_deeply_nested() {
+        let path = std::path::Path::new("../../typescript/bin/tsc");
+        assert_eq!(
+            extract_package_from_bin_path(path),
+            Some("typescript".to_string())
+        );
+    }
+
+    #[test]
+    fn bin_path_no_parent_dots() {
+        let path = std::path::Path::new("webpack/bin/webpack.js");
+        assert_eq!(
+            extract_package_from_bin_path(path),
+            Some("webpack".to_string())
+        );
+    }
+
+    #[test]
+    fn bin_path_only_dots() {
+        let path = std::path::Path::new("../../..");
+        assert_eq!(extract_package_from_bin_path(path), None);
+    }
+
+    #[test]
+    fn bin_path_scoped_with_multiple_parents() {
+        let path = std::path::Path::new("../../../@biomejs/biome/bin/biome");
+        assert_eq!(
+            extract_package_from_bin_path(path),
+            Some("@biomejs/biome".to_string())
+        );
+    }
+}

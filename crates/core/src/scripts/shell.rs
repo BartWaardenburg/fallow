@@ -148,3 +148,272 @@ pub fn advance_past_package_manager(tokens: &[&str], mut idx: usize) -> Option<u
 
     Some(idx)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- shell_operator_len ---
+
+    #[test]
+    fn operator_len_double_ampersand() {
+        assert_eq!(shell_operator_len(b"&&", 0), Some(2));
+    }
+
+    #[test]
+    fn operator_len_double_pipe() {
+        assert_eq!(shell_operator_len(b"||", 0), Some(2));
+    }
+
+    #[test]
+    fn operator_len_semicolon() {
+        assert_eq!(shell_operator_len(b";", 0), Some(1));
+    }
+
+    #[test]
+    fn operator_len_single_pipe() {
+        assert_eq!(shell_operator_len(b"|x", 0), Some(1));
+    }
+
+    #[test]
+    fn operator_len_single_ampersand() {
+        assert_eq!(shell_operator_len(b"&x", 0), Some(1));
+    }
+
+    #[test]
+    fn operator_len_non_operator() {
+        assert_eq!(shell_operator_len(b"abc", 0), None);
+        assert_eq!(shell_operator_len(b"xyz", 1), None);
+    }
+
+    #[test]
+    fn operator_len_ampersand_at_end_of_slice() {
+        assert_eq!(shell_operator_len(b"&", 0), Some(1));
+    }
+
+    #[test]
+    fn operator_len_pipe_at_end_of_slice() {
+        assert_eq!(shell_operator_len(b"|", 0), Some(1));
+    }
+
+    #[test]
+    fn operator_len_semicolon_at_end() {
+        assert_eq!(shell_operator_len(b";", 0), Some(1));
+    }
+
+    // --- split_shell_operators ---
+
+    #[test]
+    fn split_empty_input() {
+        let segments = split_shell_operators("");
+        assert!(segments.is_empty());
+    }
+
+    #[test]
+    fn split_only_operators() {
+        let segments = split_shell_operators("&&||;");
+        assert!(segments.iter().all(|s| s.is_empty()));
+    }
+
+    #[test]
+    fn split_single_quoted_operators_preserved() {
+        let segments = split_shell_operators("echo 'a && b || c'");
+        assert_eq!(segments.len(), 1);
+        assert_eq!(segments[0], "echo 'a && b || c'");
+    }
+
+    #[test]
+    fn split_double_quoted_operators_preserved() {
+        let segments = split_shell_operators("echo \"a | b ; c\"");
+        assert_eq!(segments.len(), 1);
+        assert_eq!(segments[0], "echo \"a | b ; c\"");
+    }
+
+    #[test]
+    fn split_nested_single_in_double_quotes() {
+        let segments = split_shell_operators("echo \"it's fine\" && jest");
+        assert_eq!(segments.len(), 2);
+        assert_eq!(segments[1].trim(), "jest");
+    }
+
+    #[test]
+    fn split_nested_double_in_single_quotes() {
+        let segments = split_shell_operators("echo 'say \"hello\"' && jest");
+        assert_eq!(segments.len(), 2);
+        assert_eq!(segments[1].trim(), "jest");
+    }
+
+    #[test]
+    fn split_no_operators() {
+        let segments = split_shell_operators("webpack --mode production");
+        assert_eq!(segments.len(), 1);
+        assert_eq!(segments[0], "webpack --mode production");
+    }
+
+    #[test]
+    fn split_trailing_operator() {
+        let segments = split_shell_operators("server &");
+        assert_eq!(segments.len(), 1);
+        assert_eq!(segments[0], "server ");
+    }
+
+    #[test]
+    fn split_mixed_operators() {
+        let segments = split_shell_operators("a && b || c ; d | e & f");
+        assert_eq!(segments.len(), 6);
+        assert_eq!(segments[0].trim(), "a");
+        assert_eq!(segments[1].trim(), "b");
+        assert_eq!(segments[2].trim(), "c");
+        assert_eq!(segments[3].trim(), "d");
+        assert_eq!(segments[4].trim(), "e");
+        assert_eq!(segments[5].trim(), "f");
+    }
+
+    // --- skip_initial_wrappers ---
+
+    #[test]
+    fn skip_wrappers_no_wrappers() {
+        let tokens = vec!["webpack", "--mode", "production"];
+        assert_eq!(skip_initial_wrappers(&tokens, 0), Some(0));
+    }
+
+    #[test]
+    fn skip_wrappers_env_prefix() {
+        let tokens = vec!["env", "NODE_ENV=production", "webpack"];
+        assert_eq!(skip_initial_wrappers(&tokens, 0), Some(2));
+    }
+
+    #[test]
+    fn skip_wrappers_cross_env_prefix() {
+        let tokens = vec!["cross-env", "NODE_ENV=production", "webpack"];
+        assert_eq!(skip_initial_wrappers(&tokens, 0), Some(2));
+    }
+
+    #[test]
+    fn skip_wrappers_dotenv_with_separator() {
+        let tokens = vec!["dotenv", "--", "webpack"];
+        assert_eq!(skip_initial_wrappers(&tokens, 0), Some(2));
+    }
+
+    #[test]
+    fn skip_wrappers_env_var_only() {
+        let tokens = vec!["NODE_ENV=production", "CI=true"];
+        assert_eq!(skip_initial_wrappers(&tokens, 0), None);
+    }
+
+    #[test]
+    fn skip_wrappers_cross_env_only() {
+        let tokens = vec!["cross-env", "NODE_ENV=production"];
+        assert_eq!(skip_initial_wrappers(&tokens, 0), None);
+    }
+
+    #[test]
+    fn skip_wrappers_multiple_env_vars_then_binary() {
+        let tokens = vec!["NODE_ENV=test", "CI=true", "DEBUG=1", "jest"];
+        assert_eq!(skip_initial_wrappers(&tokens, 0), Some(3));
+    }
+
+    #[test]
+    fn skip_wrappers_starting_at_nonzero_index() {
+        let tokens = vec!["ignored", "cross-env", "NODE_ENV=prod", "webpack"];
+        assert_eq!(skip_initial_wrappers(&tokens, 1), Some(3));
+    }
+
+    // --- advance_past_package_manager ---
+
+    #[test]
+    fn advance_npm_run_returns_none() {
+        let tokens = vec!["npm", "run", "build"];
+        assert_eq!(advance_past_package_manager(&tokens, 0), None);
+    }
+
+    #[test]
+    fn advance_npm_run_script_returns_none() {
+        let tokens = vec!["npm", "run-script", "test"];
+        assert_eq!(advance_past_package_manager(&tokens, 0), None);
+    }
+
+    #[test]
+    fn advance_yarn_bare_returns_none() {
+        let tokens = vec!["yarn", "build"];
+        assert_eq!(advance_past_package_manager(&tokens, 0), None);
+    }
+
+    #[test]
+    fn advance_yarn_exec() {
+        let tokens = vec!["yarn", "exec", "jest", "--coverage"];
+        assert_eq!(advance_past_package_manager(&tokens, 0), Some(2));
+    }
+
+    #[test]
+    fn advance_pnpm_exec() {
+        let tokens = vec!["pnpm", "exec", "vitest", "run"];
+        assert_eq!(advance_past_package_manager(&tokens, 0), Some(2));
+    }
+
+    #[test]
+    fn advance_pnpm_dlx() {
+        let tokens = vec!["pnpm", "dlx", "create-react-app"];
+        assert_eq!(advance_past_package_manager(&tokens, 0), Some(2));
+    }
+
+    #[test]
+    fn advance_npx_simple() {
+        let tokens = vec!["npx", "eslint", "src"];
+        assert_eq!(advance_past_package_manager(&tokens, 0), Some(1));
+    }
+
+    #[test]
+    fn advance_npx_with_flags() {
+        let tokens = vec!["npx", "--yes", "--package", "@scope/tool", "eslint"];
+        assert_eq!(advance_past_package_manager(&tokens, 0), Some(4));
+    }
+
+    #[test]
+    fn advance_pnpx_simple() {
+        let tokens = vec!["pnpx", "vitest"];
+        assert_eq!(advance_past_package_manager(&tokens, 0), Some(1));
+    }
+
+    #[test]
+    fn advance_bunx_simple() {
+        let tokens = vec!["bunx", "esbuild", "src/index.ts"];
+        assert_eq!(advance_past_package_manager(&tokens, 0), Some(1));
+    }
+
+    #[test]
+    fn advance_no_package_manager() {
+        let tokens = vec!["webpack", "--mode", "production"];
+        assert_eq!(advance_past_package_manager(&tokens, 0), Some(0));
+    }
+
+    #[test]
+    fn advance_bare_npm_returns_none() {
+        let tokens = vec!["npm"];
+        assert_eq!(advance_past_package_manager(&tokens, 0), None);
+    }
+
+    #[test]
+    fn advance_bare_yarn_returns_none() {
+        let tokens = vec!["yarn"];
+        assert_eq!(advance_past_package_manager(&tokens, 0), None);
+    }
+
+    #[test]
+    fn advance_npx_with_only_flags() {
+        let tokens = vec!["npx", "--yes"];
+        assert_eq!(advance_past_package_manager(&tokens, 0), None);
+    }
+
+    #[test]
+    fn advance_bun_exec() {
+        let tokens = vec!["bun", "exec", "jest"];
+        assert_eq!(advance_past_package_manager(&tokens, 0), Some(2));
+    }
+
+    #[test]
+    fn advance_bun_run_returns_none() {
+        let tokens = vec!["bun", "run", "dev"];
+        assert_eq!(advance_past_package_manager(&tokens, 0), None);
+    }
+}
