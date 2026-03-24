@@ -37,7 +37,7 @@ pub enum TokenKind {
     Punctuation(PunctuationType),
 }
 
-/// JavaScript/TypeScript keyword types.
+/// TypeScript/JavaScript keyword types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum KeywordType {
     Var,

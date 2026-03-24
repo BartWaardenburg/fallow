@@ -1,6 +1,6 @@
 # Fallow - Rust-native codebase analyzer for TypeScript/JavaScript
 
-Fallow finds unused files, exports, dependencies, types, enum members, class members, unresolved imports, unlisted deps, duplicate exports, circular dependencies, and code duplication in JS/TS projects. Rust alternative to [knip](https://github.com/webpro-nl/knip) built on the Oxc parser ecosystem.
+Fallow finds unused files, exports, dependencies, types, enum members, class members, unresolved imports, unlisted deps, duplicate exports, circular dependencies, code duplication, and complexity hotspots in TypeScript/JavaScript projects. Rust alternative to [knip](https://github.com/webpro-nl/knip) built on the Oxc parser ecosystem.
 
 ## Project structure
 

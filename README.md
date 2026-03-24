@@ -15,7 +15,7 @@
 
 ---
 
-Unused code, circular dependencies, and code duplication. Found in seconds, not minutes. fallow analyzes your entire codebase for unused files, exports, dependencies, and types, detects circular dependencies, and finds duplicated code blocks. 3-36x faster than [knip](https://knip.dev) v5 (2-14x faster than knip v6) for unused code analysis, 20-33x faster than [jscpd](https://github.com/kucherenko/jscpd) for duplication detection, with no Node.js runtime dependency.
+Unused code, circular dependencies, code duplication, and complexity hotspots. Found in seconds, not minutes. fallow analyzes your entire codebase for unused files, exports, dependencies, and types, detects circular dependencies, finds duplicated code blocks, and surfaces high-complexity functions and risky hotspots. 3-36x faster than [knip](https://knip.dev) v5 (2-14x faster than knip v6) for unused code analysis, 20-33x faster than [jscpd](https://github.com/kucherenko/jscpd) for duplication detection, with no Node.js runtime dependency.
 
 ```bash
 npx fallow check    # Unused code analysis
@@ -74,6 +74,7 @@ fallow dupes --threshold 5      # Fail CI if duplication exceeds 5%
 fallow dupes --changed-since main  # Only duplication in changed files
 fallow dupes --save-baseline    # Save current duplication as baseline
 fallow dupes --baseline         # Fail only on new duplication vs baseline
+fallow dupes --top 10                 # Show only the 10 largest clone groups
 fallow dupes --trace src/utils.ts:42  # Show all clones of code at this location
 ```
 
@@ -174,12 +175,13 @@ node bench-circular.mjs              # Run circular dep benchmarks (fallow vs ma
 | Speed vs knip v6 | **3-18x faster** | Baseline |
 | Memory usage | **3-11x less** | Baseline |
 | Dead code detection | 13 issue types | Comparable |
+| Complexity analysis | Built-in (cyclomatic + cognitive, file scores, hotspots) | Not included |
 | Duplication detection | Built-in | Not included |
 | Framework plugins | 84 (31 with config parsing) | 140+ (runtime config loading) |
 | Runtime dependency | None (standalone binary) | Node.js |
 | Config format | JSONC, JSON, TOML | JSON |
 
-knip is a good tool with broader framework coverage. fallow covers the most popular frameworks and adds speed, duplication detection, git-aware analysis (`--changed-since`), baseline comparison (`--baseline`), and SARIF output for GitHub Code Scanning.
+knip is a good tool with broader framework coverage. fallow covers the most popular frameworks and adds speed, duplication detection, complexity analysis with hotspot detection, git-aware analysis (`--changed-since`), baseline comparison (`--baseline`), and SARIF output for GitHub Code Scanning.
 
 ## Comparison with jscpd
 

@@ -1,6 +1,6 @@
 ---
 name: fallow
-description: Rust-native codebase analyzer for TypeScript/JavaScript projects. Finds unused code, circular dependencies, and code duplication. 3-36x faster than knip v5.
+description: Rust-native codebase analyzer for TypeScript/JavaScript projects. Finds unused code, circular dependencies, code duplication, and complexity hotspots. 3-36x faster than knip v5.
 agent-usage: This CLI is frequently invoked by AI coding agents (Claude Code, Cursor, Copilot, etc.) for codebase hygiene tasks.
 ---
 
@@ -95,6 +95,7 @@ fallow dupes --format json --quiet --changed-since main
 - `--cross-language` -- strip TypeScript type annotations for `.ts` ↔ `.js` matching
 - `--changed-since <ref>` -- only report duplication in files changed since a git ref
 - `--trace <FILE:LINE>` -- trace all clones at a specific source location
+- `--top <N>` -- show only the N largest clone groups (sorted by line count descending)
 - `--baseline <path>` / `--save-baseline <path>` -- incremental CI adoption
 
 ### `health`

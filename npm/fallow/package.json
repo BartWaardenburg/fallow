@@ -1,7 +1,7 @@
 {
   "name": "fallow",
   "version": "1.7.0",
-  "description": "Find unused code, circular dependencies, and code duplication in TypeScript/JavaScript projects",
+  "description": "Find unused code, circular dependencies, code duplication, and complexity hotspots in TypeScript/JavaScript projects",
   "license": "MIT",
   "repository": {
     "type": "git",

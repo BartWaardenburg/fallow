@@ -2,7 +2,7 @@
 
 > Last updated: 2026-03-24
 
-Fallow finds and fixes dead code in JavaScript/TypeScript projects. Fast, framework-aware, zero-config.
+Fallow finds and fixes dead code, code duplication, and complexity hotspots in TypeScript/JavaScript projects. Fast, framework-aware, zero-config.
 
 AI-assisted development is accelerating codebase entropy — agents generate code but rarely suggest deletions. Fallow is the cleanup tool that keeps up: sub-second analysis on every commit, one binary, one config, one CI step.
 
@@ -55,6 +55,7 @@ Identify exports and files with no test file dependency — without running test
 - **Incremental analysis** — finer-grained caching beyond file-level, to make watch mode and CI even faster on large monorepos
 - **Plugin ecosystem** — more framework coverage, better external plugin authoring experience, community contributions
 - **Cross-workspace resolution** — custom export conditions, unbuilt workspace fallback for monorepos without build artifacts
+- **MCP server completeness** — expose remaining global CLI flags (`--config`, `--baseline`, `--save-baseline`, `--no-cache`, `--threads`) across all MCP tools to complete the API surface
 
 ---
 
