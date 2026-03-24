@@ -1,82 +1,260 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "Fallow JSON Output Schema",
-  "description": "Schema for the JSON output of `fallow check --format json`. The `fallow dupes` command has a separate output structure (clone_groups, clone_families, stats) sharing only the metadata fields (schema_version, version, elapsed_ms).",
-  "type": "object",
-  "required": ["schema_version", "version", "elapsed_ms", "total_issues", "unused_files", "unused_exports", "unused_types", "unused_dependencies", "unused_dev_dependencies", "unused_optional_dependencies", "unused_enum_members", "unused_class_members", "unresolved_imports", "unlisted_dependencies", "duplicate_exports", "type_only_dependencies", "circular_dependencies"],
-  "properties": {
-    "schema_version": {
-      "type": "integer",
-      "description": "Schema version for this output format (independent of tool version). Consumers should check this field to detect structural changes.",
-      "examples": [1]
+  "title": "Fallow JSON Output Schemas",
+  "description": "Schemas for the JSON output of fallow commands: `fallow check --format json`, `fallow health --format json`, and `fallow dupes --format json`. Each command produces a distinct top-level structure sharing the metadata envelope (schema_version, version, elapsed_ms).",
+
+  "oneOf": [
+    { "$ref": "#/definitions/CheckOutput" },
+    { "$ref": "#/definitions/HealthOutput" },
+    { "$ref": "#/definitions/DupesOutput" }
+  ],
+
+  "definitions": {
+
+    "CheckOutput": {
+      "title": "fallow check --format json",
+      "type": "object",
+      "required": ["schema_version", "version", "elapsed_ms", "total_issues", "unused_files", "unused_exports", "unused_types", "unused_dependencies", "unused_dev_dependencies", "unused_optional_dependencies", "unused_enum_members", "unused_class_members", "unresolved_imports", "unlisted_dependencies", "duplicate_exports", "type_only_dependencies", "circular_dependencies"],
+      "properties": {
+        "schema_version": { "$ref": "#/definitions/SchemaVersion" },
+        "version": { "$ref": "#/definitions/ToolVersion" },
+        "elapsed_ms": { "$ref": "#/definitions/ElapsedMs" },
+        "total_issues": {
+          "type": "integer",
+          "description": "Total number of issues found across all categories."
+        },
+        "unused_files": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/UnusedFile" }
+        },
+        "unused_exports": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/UnusedExport" }
+        },
+        "unused_types": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/UnusedExport" }
+        },
+        "unused_dependencies": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/UnusedDependency" }
+        },
+        "unused_dev_dependencies": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/UnusedDependency" }
+        },
+        "unused_optional_dependencies": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/UnusedDependency" }
+        },
+        "unused_enum_members": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/UnusedMember" }
+        },
+        "unused_class_members": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/UnusedMember" }
+        },
+        "unresolved_imports": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/UnresolvedImport" }
+        },
+        "unlisted_dependencies": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/UnlistedDependency" }
+        },
+        "duplicate_exports": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/DuplicateExport" }
+        },
+        "type_only_dependencies": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/TypeOnlyDependency" }
+        },
+        "circular_dependencies": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/CircularDependency" }
+        }
+      }
     },
-    "version": {
+
+    "HealthOutput": {
+      "title": "fallow health --format json",
+      "type": "object",
+      "required": ["schema_version", "version", "elapsed_ms", "summary", "findings"],
+      "properties": {
+        "schema_version": { "$ref": "#/definitions/SchemaVersion" },
+        "version": { "$ref": "#/definitions/ToolVersion" },
+        "elapsed_ms": { "$ref": "#/definitions/ElapsedMs" },
+        "summary": { "$ref": "#/definitions/HealthSummary" },
+        "findings": {
+          "type": "array",
+          "description": "Functions exceeding complexity thresholds, sorted by the --sort criteria.",
+          "items": { "$ref": "#/definitions/HealthFinding" }
+        },
+        "file_scores": {
+          "type": "array",
+          "description": "Per-file health scores. Only present when --file-scores is used. Sorted by maintainability_index ascending (worst first). Zero-function files (barrels) are excluded by default.",
+          "items": { "$ref": "#/definitions/FileHealthScore" }
+        }
+      }
+    },
+
+    "DupesOutput": {
+      "title": "fallow dupes --format json",
+      "description": "Duplication analysis output. Structure: clone_groups, clone_families, stats.",
+      "type": "object",
+      "required": ["schema_version", "version", "elapsed_ms"],
+      "properties": {
+        "schema_version": { "$ref": "#/definitions/SchemaVersion" },
+        "version": { "$ref": "#/definitions/ToolVersion" },
+        "elapsed_ms": { "$ref": "#/definitions/ElapsedMs" }
+      }
+    },
+
+    "SchemaVersion": {
+      "type": "integer",
+      "description": "Schema version for this output format (independent of tool version). Adding new fields does not bump the version. Consumers should check this field to detect structural changes.",
+      "examples": [3]
+    },
+    "ToolVersion": {
       "type": "string",
       "description": "Fallow tool version that produced this output.",
-      "examples": ["1.0.0"]
+      "examples": ["1.6.0"]
     },
-    "elapsed_ms": {
+    "ElapsedMs": {
       "type": "integer",
       "description": "Analysis duration in milliseconds."
     },
-    "total_issues": {
-      "type": "integer",
-      "description": "Total number of issues found across all categories."
+
+    "HealthSummary": {
+      "type": "object",
+      "required": ["files_analyzed", "functions_analyzed", "functions_above_threshold", "max_cyclomatic_threshold", "max_cognitive_threshold"],
+      "properties": {
+        "files_analyzed": {
+          "type": "integer",
+          "description": "Number of files analyzed for complexity."
+        },
+        "functions_analyzed": {
+          "type": "integer",
+          "description": "Total number of functions found."
+        },
+        "functions_above_threshold": {
+          "type": "integer",
+          "description": "Number of functions exceeding at least one threshold (before --top truncation)."
+        },
+        "max_cyclomatic_threshold": {
+          "type": "integer",
+          "description": "Configured cyclomatic complexity threshold."
+        },
+        "max_cognitive_threshold": {
+          "type": "integer",
+          "description": "Configured cognitive complexity threshold."
+        },
+        "files_scored": {
+          "type": "integer",
+          "description": "Number of files with health scores. Only present when --file-scores is used. 0 indicates the flag was set but scoring failed."
+        },
+        "average_maintainability": {
+          "type": "number",
+          "description": "Average maintainability index across all scored files (before --top truncation). Only present when --file-scores is used and at least one file was scored.",
+          "minimum": 0,
+          "maximum": 100
+        }
+      }
     },
-    "unused_files": {
-      "type": "array",
-      "items": { "$ref": "#/definitions/UnusedFile" }
+    "HealthFinding": {
+      "type": "object",
+      "required": ["path", "name", "line", "col", "cyclomatic", "cognitive", "line_count", "exceeded"],
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "File path (relative to project root)."
+        },
+        "name": {
+          "type": "string",
+          "description": "Function name, or \"<anonymous>\" for unnamed functions/arrows."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number."
+        },
+        "col": {
+          "type": "integer",
+          "description": "0-based byte column offset."
+        },
+        "cyclomatic": {
+          "type": "integer",
+          "description": "McCabe cyclomatic complexity (1 + decision points)."
+        },
+        "cognitive": {
+          "type": "integer",
+          "description": "SonarSource cognitive complexity (structural + nesting penalty)."
+        },
+        "line_count": {
+          "type": "integer",
+          "description": "Number of lines in the function body."
+        },
+        "exceeded": {
+          "type": "string",
+          "enum": ["cyclomatic", "cognitive", "both"],
+          "description": "Which threshold(s) this function exceeds."
+        }
+      }
     },
-    "unused_exports": {
-      "type": "array",
-      "items": { "$ref": "#/definitions/UnusedExport" }
+    "FileHealthScore": {
+      "type": "object",
+      "required": ["path", "fan_in", "fan_out", "dead_code_ratio", "complexity_density", "maintainability_index", "total_cyclomatic", "total_cognitive", "function_count", "lines"],
+      "description": "Per-file health score. Formula: MI = 100 - (complexity_density × 30) - (dead_code_ratio × 20) - min(ln(fan_out+1) × 4, 15), clamped to [0, 100]. Type-only exports excluded from dead_code_ratio.",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "File path (relative to project root)."
+        },
+        "fan_in": {
+          "type": "integer",
+          "description": "Number of files that import this file."
+        },
+        "fan_out": {
+          "type": "integer",
+          "description": "Number of files this file directly imports."
+        },
+        "dead_code_ratio": {
+          "type": "number",
+          "description": "Fraction of value exports (excluding type-only) with zero references (0.0–1.0).",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "complexity_density": {
+          "type": "number",
+          "description": "Total cyclomatic complexity / lines of code.",
+          "minimum": 0
+        },
+        "maintainability_index": {
+          "type": "number",
+          "description": "Weighted composite score (0–100, higher is better).",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "total_cyclomatic": {
+          "type": "integer",
+          "description": "Sum of cyclomatic complexity across all functions in this file."
+        },
+        "total_cognitive": {
+          "type": "integer",
+          "description": "Sum of cognitive complexity across all functions in this file."
+        },
+        "function_count": {
+          "type": "integer",
+          "description": "Number of functions in this file."
+        },
+        "lines": {
+          "type": "integer",
+          "description": "Total lines of code in the file."
+        }
+      }
     },
-    "unused_types": {
-      "type": "array",
-      "items": { "$ref": "#/definitions/UnusedExport" }
-    },
-    "unused_dependencies": {
-      "type": "array",
-      "items": { "$ref": "#/definitions/UnusedDependency" }
-    },
-    "unused_dev_dependencies": {
-      "type": "array",
-      "items": { "$ref": "#/definitions/UnusedDependency" }
-    },
-    "unused_optional_dependencies": {
-      "type": "array",
-      "items": { "$ref": "#/definitions/UnusedDependency" }
-    },
-    "unused_enum_members": {
-      "type": "array",
-      "items": { "$ref": "#/definitions/UnusedMember" }
-    },
-    "unused_class_members": {
-      "type": "array",
-      "items": { "$ref": "#/definitions/UnusedMember" }
-    },
-    "unresolved_imports": {
-      "type": "array",
-      "items": { "$ref": "#/definitions/UnresolvedImport" }
-    },
-    "unlisted_dependencies": {
-      "type": "array",
-      "items": { "$ref": "#/definitions/UnlistedDependency" }
-    },
-    "duplicate_exports": {
-      "type": "array",
-      "items": { "$ref": "#/definitions/DuplicateExport" }
-    },
-    "type_only_dependencies": {
-      "type": "array",
-      "items": { "$ref": "#/definitions/TypeOnlyDependency" }
-    },
-    "circular_dependencies": {
-      "type": "array",
-      "items": { "$ref": "#/definitions/CircularDependency" }
-    }
-  },
-  "definitions": {
+
     "UnusedFile": {
       "type": "object",
       "required": ["path"],

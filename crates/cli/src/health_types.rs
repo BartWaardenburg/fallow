@@ -72,20 +72,23 @@ pub struct HealthSummary {
 
 /// Per-file health score combining complexity, coupling, and dead code metrics.
 ///
+/// Files with zero functions (barrel files, re-export files) are excluded by default.
+///
 /// ## Maintainability Index Formula
 ///
 /// ```text
+/// fan_out_penalty = min(ln(fan_out + 1) × 4, 15)
 /// maintainability = 100
 ///     - (complexity_density × 30)
 ///     - (dead_code_ratio × 20)
-///     - (fan_out × 0.5)
+///     - fan_out_penalty
 /// ```
 ///
 /// Clamped to \[0, 100\]. Higher is better.
 ///
 /// - **complexity_density**: total cyclomatic complexity / lines of code
-/// - **dead_code_ratio**: fraction of exports with zero references (0.0–1.0)
-/// - **fan_out**: number of files this file directly imports
+/// - **dead_code_ratio**: fraction of value exports (excluding type-only exports) with zero references (0.0–1.0)
+/// - **fan_out_penalty**: logarithmic scaling with cap at 15 points; reflects diminishing marginal risk of additional imports
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct FileHealthScore {
     /// File path (absolute; stripped to relative in output).
@@ -94,10 +97,9 @@ pub struct FileHealthScore {
     pub fan_in: usize,
     /// Number of files this file imports.
     pub fan_out: usize,
-    /// Fraction of exports with zero references (0.0–1.0). Files with no exports get 0.0.
-    /// Numerator: exports reported as unused by the analyzer (respects `@public`, suppression
-    /// comments, and rule severity). Denominator: total exports in the graph (all declared exports).
-    /// Suppressed-but-dead exports lower the ratio, making it a conservative estimate.
+    /// Fraction of value exports with zero references (0.0–1.0). Files with no value exports get 0.0.
+    /// Type-only exports (interfaces, type aliases) are excluded from both numerator and denominator
+    /// to avoid inflating the ratio for well-typed codebases that export props types alongside components.
     pub dead_code_ratio: f64,
     /// Total cyclomatic complexity / lines of code.
     pub complexity_density: f64,
