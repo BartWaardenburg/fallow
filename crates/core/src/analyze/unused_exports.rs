@@ -3,11 +3,81 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use fallow_config::ResolvedConfig;
 
 use crate::discover::FileId;
-use crate::graph::ModuleGraph;
+use crate::graph::{ModuleGraph, ModuleNode};
 use crate::results::*;
 use crate::suppress::{self, IssueKind, Suppression};
 
 use super::{LineOffsetsMap, byte_offset_to_line_col, read_source};
+
+/// Pre-compiled glob matchers for config ignore_exports rules.
+type IgnoreMatchers<'a> = Vec<(globset::GlobMatcher, &'a [String])>;
+
+/// Pre-compiled glob matchers for plugin/framework used_exports rules.
+type PluginMatchers<'a> = Vec<(globset::GlobMatcher, Vec<&'a str>)>;
+
+/// Compile config ignore_exports rules into glob matchers.
+fn compile_ignore_matchers(config: &ResolvedConfig) -> IgnoreMatchers<'_> {
+    config
+        .ignore_export_rules
+        .iter()
+        .filter_map(|rule| {
+            globset::Glob::new(&rule.file)
+                .ok()
+                .map(|g| (g.compile_matcher(), rule.exports.as_slice()))
+        })
+        .collect()
+}
+
+/// Compile plugin-discovered used_exports rules (includes framework preset rules).
+fn compile_plugin_matchers(
+    plugin_result: Option<&crate::plugins::AggregatedPluginResult>,
+) -> PluginMatchers<'_> {
+    let Some(pr) = plugin_result else {
+        return Vec::new();
+    };
+    pr.used_exports
+        .iter()
+        .filter_map(|(file_pat, exports)| {
+            globset::Glob::new(file_pat).ok().map(|g| {
+                (
+                    g.compile_matcher(),
+                    exports.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+                )
+            })
+        })
+        .collect()
+}
+
+/// Check whether a module should be skipped for unused-export analysis.
+///
+/// Skips unreachable modules, entry points, CJS-only modules, and Svelte files
+/// (whose `export let` declarations are component props, not unused exports).
+fn should_skip_module(module: &ModuleNode) -> bool {
+    if !module.is_reachable || module.is_entry_point {
+        return true;
+    }
+    // CJS modules with module.exports but no named exports: hard to track individually
+    if module.has_cjs_exports && module.exports.is_empty() {
+        return true;
+    }
+    // Svelte `export let`/`export const` are component props consumed by the runtime;
+    // unreachable Svelte files are still caught by `find_unused_files`.
+    module.path.extension().is_some_and(|ext| ext == "svelte")
+}
+
+/// Check whether an export name is covered by config ignore rules or plugin/framework rules.
+fn is_export_ignored(
+    export_name: &str,
+    matching_ignore: &[&[String]],
+    matching_plugin: &[&Vec<&str>],
+) -> bool {
+    matching_ignore
+        .iter()
+        .any(|exports| exports.iter().any(|e| e == "*" || e == export_name))
+        || matching_plugin
+            .iter()
+            .any(|exports| exports.contains(&export_name))
+}
 
 /// Find exports that are never imported by other files.
 pub fn find_unused_exports(
@@ -20,77 +90,31 @@ pub fn find_unused_exports(
     let mut unused_exports = Vec::new();
     let mut unused_types = Vec::new();
 
-    // Pre-compile glob matchers for ignore rules
-    let ignore_matchers: Vec<(globset::GlobMatcher, &[String])> = config
-        .ignore_export_rules
-        .iter()
-        .filter_map(|rule| {
-            globset::Glob::new(&rule.file)
-                .ok()
-                .map(|g| (g.compile_matcher(), rule.exports.as_slice()))
-        })
-        .collect();
-
-    // Compile plugin-discovered used_exports rules (includes framework preset rules)
-    let plugin_matchers: Vec<(globset::GlobMatcher, Vec<&str>)> = plugin_result
-        .map(|pr| {
-            pr.used_exports
-                .iter()
-                .filter_map(|(file_pat, exports)| {
-                    globset::Glob::new(file_pat).ok().map(|g| {
-                        (
-                            g.compile_matcher(),
-                            exports.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
-                        )
-                    })
-                })
-                .collect()
-        })
-        .unwrap_or_default();
+    let ignore_matchers = compile_ignore_matchers(config);
+    let plugin_matchers = compile_plugin_matchers(plugin_result);
 
     for module in &graph.modules {
-        // Skip unreachable modules (already reported as unused files)
-        if !module.is_reachable {
-            continue;
-        }
-
-        // Skip entry points (their exports are consumed externally)
-        if module.is_entry_point {
-            continue;
-        }
-
-        // Skip CJS modules with module.exports (hard to track individual exports)
-        if module.has_cjs_exports && module.exports.is_empty() {
+        if should_skip_module(module) {
             continue;
         }
 
         // Namespace imports are now handled with member-access narrowing in graph.rs:
         // only specific accessed members get references populated. No blanket skip needed.
 
-        // Svelte files use `export let`/`export const` for component props, which are
-        // consumed by the Svelte runtime rather than imported by other modules. Since we
-        // can't distinguish props from utility exports in the `<script>` block without
-        // Svelte compiler semantics, we skip export analysis entirely for reachable
-        // .svelte files. Unreachable Svelte files are still caught by `find_unused_files`.
-        if module.path.extension().is_some_and(|ext| ext == "svelte") {
-            continue;
-        }
-
-        // Check ignore rules — compute relative path and string once per module
+        // Compute relative path once per module for glob matching
         let relative_path = module
             .path
             .strip_prefix(&config.root)
             .unwrap_or(&module.path);
         let file_str = relative_path.to_string_lossy();
 
-        // Pre-check which ignore/plugin matchers match this file
+        // Collect ignore/plugin matchers that apply to this file
         let matching_ignore: Vec<&[String]> = ignore_matchers
             .iter()
             .filter(|(m, _)| m.is_match(file_str.as_ref()))
             .map(|(_, exports)| *exports)
             .collect();
 
-        // Check plugin-discovered used_exports rules (includes framework preset rules)
         let matching_plugin: Vec<&Vec<&str>> = plugin_matchers
             .iter()
             .filter(|(m, _)| m.is_match(file_str.as_ref()))
@@ -98,66 +122,51 @@ pub fn find_unused_exports(
             .collect();
 
         for export in &module.exports {
-            // Skip exports marked @public (library API surface, consumed externally)
-            if export.is_public {
+            if export.is_public || !export.references.is_empty() {
                 continue;
             }
 
-            if export.references.is_empty() {
-                let export_str = export.name.to_string();
+            let export_str = export.name.to_string();
 
-                // Check if this export is ignored by config
-                if matching_ignore
-                    .iter()
-                    .any(|exports| exports.iter().any(|e| e == "*" || e == &export_str))
-                {
-                    continue;
-                }
+            if is_export_ignored(&export_str, &matching_ignore, &matching_plugin) {
+                continue;
+            }
 
-                // Check if this export is considered "used" by a plugin/framework rule
-                if matching_plugin
-                    .iter()
-                    .any(|exports| exports.iter().any(|e| *e == export_str))
-                {
-                    continue;
-                }
+            let (line, col) = byte_offset_to_line_col(
+                line_offsets_by_file,
+                module.file_id,
+                export.span.start,
+            );
 
-                let (line, col) = byte_offset_to_line_col(
-                    line_offsets_by_file,
-                    module.file_id,
-                    export.span.start,
-                );
+            // Barrel re-exports are synthesized in graph.rs with Span::new(0, 0) as a sentinel.
+            let is_re_export = export.span.start == 0 && export.span.end == 0;
 
-                // Barrel re-exports are synthesized in graph.rs with Span::new(0, 0) as a sentinel.
-                let is_re_export = export.span.start == 0 && export.span.end == 0;
+            // Check inline suppression
+            let issue_kind = if export.is_type_only {
+                IssueKind::UnusedType
+            } else {
+                IssueKind::UnusedExport
+            };
+            if let Some(supps) = suppressions_by_file.get(&module.file_id)
+                && suppress::is_suppressed(supps, line, issue_kind)
+            {
+                continue;
+            }
 
-                // Check inline suppression
-                let issue_kind = if export.is_type_only {
-                    IssueKind::UnusedType
-                } else {
-                    IssueKind::UnusedExport
-                };
-                if let Some(supps) = suppressions_by_file.get(&module.file_id)
-                    && suppress::is_suppressed(supps, line, issue_kind)
-                {
-                    continue;
-                }
+            let unused = UnusedExport {
+                path: module.path.clone(),
+                export_name: export_str,
+                is_type_only: export.is_type_only,
+                line,
+                col,
+                span_start: export.span.start,
+                is_re_export,
+            };
 
-                let unused = UnusedExport {
-                    path: module.path.clone(),
-                    export_name: export_str,
-                    is_type_only: export.is_type_only,
-                    line,
-                    col,
-                    span_start: export.span.start,
-                    is_re_export,
-                };
-
-                if export.is_type_only {
-                    unused_types.push(unused);
-                } else {
-                    unused_exports.push(unused);
-                }
+            if export.is_type_only {
+                unused_types.push(unused);
+            } else {
+                unused_exports.push(unused);
             }
         }
     }
@@ -666,6 +675,537 @@ mod tests {
         let suppressions = FxHashMap::default();
         let result = find_duplicate_exports(&graph, &config, &suppressions, &FxHashMap::default());
         assert!(result.is_empty());
+    }
+
+    // ---- find_unused_exports tests (exercises compile_ignore_matchers, compile_plugin_matchers,
+    //       should_skip_module, is_export_ignored) ----
+
+    /// Helper: build a config with ignore_exports rules.
+    fn test_config_with_ignore_exports(rules: Vec<fallow_config::IgnoreExportRule>) -> ResolvedConfig {
+        fallow_config::FallowConfig {
+            schema: None,
+            extends: vec![],
+            entry: vec![],
+            ignore_patterns: vec![],
+            framework: vec![],
+            workspaces: None,
+            ignore_dependencies: vec![],
+            ignore_exports: rules,
+            duplicates: fallow_config::DuplicatesConfig::default(),
+            health: fallow_config::HealthConfig::default(),
+            rules: fallow_config::RulesConfig::default(),
+            production: false,
+            plugins: vec![],
+            overrides: vec![],
+        }
+        .resolve(
+            PathBuf::from("/tmp/test"),
+            fallow_config::OutputFormat::Human,
+            1,
+            true,
+            true,
+        )
+    }
+
+    /// Helper: build a minimal AggregatedPluginResult with used_exports.
+    fn make_plugin_result(used_exports: Vec<(String, Vec<String>)>) -> crate::plugins::AggregatedPluginResult {
+        crate::plugins::AggregatedPluginResult {
+            entry_patterns: vec![],
+            config_patterns: vec![],
+            always_used: vec![],
+            used_exports,
+            referenced_dependencies: vec![],
+            discovered_always_used: vec![],
+            setup_files: vec![],
+            tooling_dependencies: vec![],
+            script_used_packages: FxHashSet::default(),
+            virtual_module_prefixes: vec![],
+            path_aliases: vec![],
+            active_plugins: vec![],
+        }
+    }
+
+    fn make_type_export(name: &str, span_start: u32, span_end: u32) -> ExportSymbol {
+        ExportSymbol {
+            name: ExportName::Named(name.to_string()),
+            is_type_only: true,
+            is_public: false,
+            span: Span::new(span_start, span_end),
+            references: vec![],
+            members: vec![],
+        }
+    }
+
+    // -- find_unused_exports: basic behavior --
+
+    #[test]
+    fn unused_exports_empty_graph() {
+        let graph = build_graph(&[]);
+        let config = test_config();
+        let suppressions = FxHashMap::default();
+        let (exports, types) =
+            find_unused_exports(&graph, &config, None, &suppressions, &FxHashMap::default());
+        assert!(exports.is_empty());
+        assert!(types.is_empty());
+    }
+
+    #[test]
+    fn unused_exports_detects_unreferenced_export() {
+        let mut graph = build_graph(&[
+            ("/tmp/test/src/entry.ts", true),
+            ("/tmp/test/src/utils.ts", false),
+        ]);
+        graph.modules[1].is_reachable = true;
+        graph.modules[1].exports = vec![make_export("helper", 10, 20)];
+        let config = test_config();
+        let suppressions = FxHashMap::default();
+        let (exports, types) =
+            find_unused_exports(&graph, &config, None, &suppressions, &FxHashMap::default());
+        assert_eq!(exports.len(), 1);
+        assert_eq!(exports[0].export_name, "helper");
+        assert!(types.is_empty());
+    }
+
+    #[test]
+    fn unused_exports_skips_referenced_export() {
+        let mut graph = build_graph(&[
+            ("/tmp/test/src/entry.ts", true),
+            ("/tmp/test/src/utils.ts", false),
+        ]);
+        graph.modules[1].is_reachable = true;
+        graph.modules[1].exports = vec![make_referenced_export("helper", 10, 20, 0)];
+        let config = test_config();
+        let suppressions = FxHashMap::default();
+        let (exports, types) =
+            find_unused_exports(&graph, &config, None, &suppressions, &FxHashMap::default());
+        assert!(exports.is_empty());
+        assert!(types.is_empty());
+    }
+
+    #[test]
+    fn unused_exports_skips_public_export() {
+        let mut graph = build_graph(&[
+            ("/tmp/test/src/entry.ts", true),
+            ("/tmp/test/src/utils.ts", false),
+        ]);
+        graph.modules[1].is_reachable = true;
+        graph.modules[1].exports = vec![ExportSymbol {
+            name: ExportName::Named("publicFn".to_string()),
+            is_type_only: false,
+            is_public: true,
+            span: Span::new(10, 20),
+            references: vec![],
+            members: vec![],
+        }];
+        let config = test_config();
+        let suppressions = FxHashMap::default();
+        let (exports, types) =
+            find_unused_exports(&graph, &config, None, &suppressions, &FxHashMap::default());
+        assert!(exports.is_empty());
+        assert!(types.is_empty());
+    }
+
+    #[test]
+    fn unused_exports_separates_types_from_values() {
+        let mut graph = build_graph(&[
+            ("/tmp/test/src/entry.ts", true),
+            ("/tmp/test/src/utils.ts", false),
+        ]);
+        graph.modules[1].is_reachable = true;
+        graph.modules[1].exports = vec![
+            make_export("valueFn", 10, 20),
+            make_type_export("MyType", 30, 40),
+        ];
+        let config = test_config();
+        let suppressions = FxHashMap::default();
+        let (exports, types) =
+            find_unused_exports(&graph, &config, None, &suppressions, &FxHashMap::default());
+        assert_eq!(exports.len(), 1);
+        assert_eq!(exports[0].export_name, "valueFn");
+        assert_eq!(types.len(), 1);
+        assert_eq!(types[0].export_name, "MyType");
+    }
+
+    // -- should_skip_module: unreachable --
+
+    #[test]
+    fn unused_exports_skips_unreachable_module() {
+        let mut graph = build_graph(&[
+            ("/tmp/test/src/entry.ts", true),
+            ("/tmp/test/src/dead.ts", false),
+        ]);
+        // Module stays unreachable (default)
+        graph.modules[1].exports = vec![make_export("orphan", 10, 20)];
+        let config = test_config();
+        let suppressions = FxHashMap::default();
+        let (exports, types) =
+            find_unused_exports(&graph, &config, None, &suppressions, &FxHashMap::default());
+        assert!(exports.is_empty());
+        assert!(types.is_empty());
+    }
+
+    // -- should_skip_module: entry point --
+
+    #[test]
+    fn unused_exports_skips_entry_point() {
+        let mut graph = build_graph(&[("/tmp/test/src/entry.ts", true)]);
+        graph.modules[0].exports = vec![make_export("main", 10, 20)];
+        let config = test_config();
+        let suppressions = FxHashMap::default();
+        let (exports, types) =
+            find_unused_exports(&graph, &config, None, &suppressions, &FxHashMap::default());
+        assert!(exports.is_empty());
+        assert!(types.is_empty());
+    }
+
+    // -- should_skip_module: CJS-only --
+
+    #[test]
+    fn unused_exports_skips_cjs_only_module() {
+        let mut graph = build_graph(&[
+            ("/tmp/test/src/entry.ts", true),
+            ("/tmp/test/src/legacy.js", false),
+        ]);
+        graph.modules[1].is_reachable = true;
+        graph.modules[1].has_cjs_exports = true;
+        // No named exports, only module.exports
+        graph.modules[1].exports = vec![];
+        let config = test_config();
+        let suppressions = FxHashMap::default();
+        let (exports, types) =
+            find_unused_exports(&graph, &config, None, &suppressions, &FxHashMap::default());
+        assert!(exports.is_empty());
+        assert!(types.is_empty());
+    }
+
+    #[test]
+    fn unused_exports_does_not_skip_cjs_module_with_named_exports() {
+        let mut graph = build_graph(&[
+            ("/tmp/test/src/entry.ts", true),
+            ("/tmp/test/src/mixed.js", false),
+        ]);
+        graph.modules[1].is_reachable = true;
+        graph.modules[1].has_cjs_exports = true;
+        graph.modules[1].exports = vec![make_export("namedFn", 10, 20)];
+        let config = test_config();
+        let suppressions = FxHashMap::default();
+        let (exports, _) =
+            find_unused_exports(&graph, &config, None, &suppressions, &FxHashMap::default());
+        assert_eq!(exports.len(), 1);
+        assert_eq!(exports[0].export_name, "namedFn");
+    }
+
+    // -- should_skip_module: Svelte files --
+
+    #[test]
+    fn unused_exports_skips_svelte_files() {
+        let mut graph = build_graph(&[
+            ("/tmp/test/src/entry.ts", true),
+            ("/tmp/test/src/Component.svelte", false),
+        ]);
+        graph.modules[1].is_reachable = true;
+        graph.modules[1].exports = vec![make_export("count", 10, 20)];
+        let config = test_config();
+        let suppressions = FxHashMap::default();
+        let (exports, types) =
+            find_unused_exports(&graph, &config, None, &suppressions, &FxHashMap::default());
+        assert!(exports.is_empty());
+        assert!(types.is_empty());
+    }
+
+    // -- should_skip_module: module passes all checks --
+
+    #[test]
+    fn unused_exports_reports_reachable_non_entry_non_cjs_non_svelte() {
+        let mut graph = build_graph(&[
+            ("/tmp/test/src/entry.ts", true),
+            ("/tmp/test/src/utils.ts", false),
+        ]);
+        graph.modules[1].is_reachable = true;
+        graph.modules[1].has_cjs_exports = false;
+        graph.modules[1].exports = vec![make_export("helper", 10, 20)];
+        let config = test_config();
+        let suppressions = FxHashMap::default();
+        let (exports, _) =
+            find_unused_exports(&graph, &config, None, &suppressions, &FxHashMap::default());
+        assert_eq!(exports.len(), 1);
+        assert_eq!(exports[0].export_name, "helper");
+    }
+
+    // -- compile_ignore_matchers: empty config --
+
+    #[test]
+    fn unused_exports_empty_ignore_config() {
+        let mut graph = build_graph(&[
+            ("/tmp/test/src/entry.ts", true),
+            ("/tmp/test/src/utils.ts", false),
+        ]);
+        graph.modules[1].is_reachable = true;
+        graph.modules[1].exports = vec![make_export("foo", 10, 20)];
+        let config = test_config(); // no ignore_exports rules
+        let suppressions = FxHashMap::default();
+        let (exports, _) =
+            find_unused_exports(&graph, &config, None, &suppressions, &FxHashMap::default());
+        assert_eq!(exports.len(), 1, "no ignore rules, export should be reported");
+    }
+
+    // -- compile_ignore_matchers: multiple patterns --
+
+    #[test]
+    fn unused_exports_ignore_multiple_patterns() {
+        let mut graph = build_graph(&[
+            ("/tmp/test/src/entry.ts", true),
+            ("/tmp/test/src/types.ts", false),
+            ("/tmp/test/src/constants.ts", false),
+        ]);
+        graph.modules[1].is_reachable = true;
+        graph.modules[1].exports = vec![make_export("MyType", 10, 20)];
+        graph.modules[2].is_reachable = true;
+        graph.modules[2].exports = vec![make_export("MY_CONST", 10, 20)];
+
+        let config = test_config_with_ignore_exports(vec![
+            fallow_config::IgnoreExportRule {
+                file: "src/types.ts".to_string(),
+                exports: vec!["*".to_string()],
+            },
+            fallow_config::IgnoreExportRule {
+                file: "src/constants.ts".to_string(),
+                exports: vec!["MY_CONST".to_string()],
+            },
+        ]);
+        let suppressions = FxHashMap::default();
+        let (exports, _) =
+            find_unused_exports(&graph, &config, None, &suppressions, &FxHashMap::default());
+        assert!(exports.is_empty(), "both exports should be ignored by config rules");
+    }
+
+    // -- compile_ignore_matchers: invalid glob handled gracefully --
+
+    #[test]
+    fn unused_exports_invalid_ignore_glob_skipped() {
+        let mut graph = build_graph(&[
+            ("/tmp/test/src/entry.ts", true),
+            ("/tmp/test/src/utils.ts", false),
+        ]);
+        graph.modules[1].is_reachable = true;
+        graph.modules[1].exports = vec![make_export("foo", 10, 20)];
+
+        // Invalid glob pattern with unclosed bracket
+        let config = test_config_with_ignore_exports(vec![
+            fallow_config::IgnoreExportRule {
+                file: "[invalid".to_string(),
+                exports: vec!["*".to_string()],
+            },
+        ]);
+        let suppressions = FxHashMap::default();
+        // Should not panic — invalid globs are silently skipped
+        let (exports, _) =
+            find_unused_exports(&graph, &config, None, &suppressions, &FxHashMap::default());
+        assert_eq!(exports.len(), 1, "invalid glob should be skipped, export still reported");
+    }
+
+    // -- is_export_ignored: config wildcard match --
+
+    #[test]
+    fn unused_exports_ignore_wildcard_matches_all() {
+        let mut graph = build_graph(&[
+            ("/tmp/test/src/entry.ts", true),
+            ("/tmp/test/src/types.ts", false),
+        ]);
+        graph.modules[1].is_reachable = true;
+        graph.modules[1].exports = vec![
+            make_export("TypeA", 10, 20),
+            make_export("TypeB", 30, 40),
+        ];
+
+        let config = test_config_with_ignore_exports(vec![
+            fallow_config::IgnoreExportRule {
+                file: "src/types.ts".to_string(),
+                exports: vec!["*".to_string()],
+            },
+        ]);
+        let suppressions = FxHashMap::default();
+        let (exports, _) =
+            find_unused_exports(&graph, &config, None, &suppressions, &FxHashMap::default());
+        assert!(exports.is_empty(), "wildcard * should ignore all exports in matching file");
+    }
+
+    // -- is_export_ignored: config specific name match --
+
+    #[test]
+    fn unused_exports_ignore_specific_name_only() {
+        let mut graph = build_graph(&[
+            ("/tmp/test/src/entry.ts", true),
+            ("/tmp/test/src/utils.ts", false),
+        ]);
+        graph.modules[1].is_reachable = true;
+        graph.modules[1].exports = vec![
+            make_export("ignored", 10, 20),
+            make_export("reported", 30, 40),
+        ];
+
+        let config = test_config_with_ignore_exports(vec![
+            fallow_config::IgnoreExportRule {
+                file: "src/utils.ts".to_string(),
+                exports: vec!["ignored".to_string()],
+            },
+        ]);
+        let suppressions = FxHashMap::default();
+        let (exports, _) =
+            find_unused_exports(&graph, &config, None, &suppressions, &FxHashMap::default());
+        assert_eq!(exports.len(), 1);
+        assert_eq!(exports[0].export_name, "reported");
+    }
+
+    // -- is_export_ignored: no match --
+
+    #[test]
+    fn unused_exports_ignore_rule_wrong_file_no_effect() {
+        let mut graph = build_graph(&[
+            ("/tmp/test/src/entry.ts", true),
+            ("/tmp/test/src/utils.ts", false),
+        ]);
+        graph.modules[1].is_reachable = true;
+        graph.modules[1].exports = vec![make_export("foo", 10, 20)];
+
+        let config = test_config_with_ignore_exports(vec![
+            fallow_config::IgnoreExportRule {
+                file: "src/other.ts".to_string(),
+                exports: vec!["*".to_string()],
+            },
+        ]);
+        let suppressions = FxHashMap::default();
+        let (exports, _) =
+            find_unused_exports(&graph, &config, None, &suppressions, &FxHashMap::default());
+        assert_eq!(exports.len(), 1, "ignore rule for different file should not suppress");
+    }
+
+    // -- compile_plugin_matchers: no plugin result --
+
+    #[test]
+    fn unused_exports_no_plugin_result() {
+        let mut graph = build_graph(&[
+            ("/tmp/test/src/entry.ts", true),
+            ("/tmp/test/src/utils.ts", false),
+        ]);
+        graph.modules[1].is_reachable = true;
+        graph.modules[1].exports = vec![make_export("foo", 10, 20)];
+        let config = test_config();
+        let suppressions = FxHashMap::default();
+        let (exports, _) =
+            find_unused_exports(&graph, &config, None, &suppressions, &FxHashMap::default());
+        assert_eq!(exports.len(), 1, "None plugin_result means no plugin matchers");
+    }
+
+    // -- compile_plugin_matchers: plugin with empty used_exports --
+
+    #[test]
+    fn unused_exports_plugin_no_used_exports() {
+        let mut graph = build_graph(&[
+            ("/tmp/test/src/entry.ts", true),
+            ("/tmp/test/src/utils.ts", false),
+        ]);
+        graph.modules[1].is_reachable = true;
+        graph.modules[1].exports = vec![make_export("foo", 10, 20)];
+        let config = test_config();
+        let suppressions = FxHashMap::default();
+        let pr = make_plugin_result(vec![]);
+        let (exports, _) =
+            find_unused_exports(&graph, &config, Some(&pr), &suppressions, &FxHashMap::default());
+        assert_eq!(exports.len(), 1, "plugin with no used_exports should not suppress");
+    }
+
+    // -- compile_plugin_matchers / is_export_ignored: plugin used_exports match --
+
+    #[test]
+    fn unused_exports_plugin_used_exports_suppresses() {
+        let mut graph = build_graph(&[
+            ("/tmp/test/src/entry.ts", true),
+            ("/tmp/test/src/pages/index.ts", false),
+        ]);
+        graph.modules[1].is_reachable = true;
+        graph.modules[1].exports = vec![
+            make_export("getStaticProps", 10, 20),
+            make_export("unusedHelper", 30, 40),
+        ];
+        let config = test_config();
+        let suppressions = FxHashMap::default();
+        let pr = make_plugin_result(vec![(
+            "src/pages/**".to_string(),
+            vec!["getStaticProps".to_string()],
+        )]);
+        let (exports, _) =
+            find_unused_exports(&graph, &config, Some(&pr), &suppressions, &FxHashMap::default());
+        assert_eq!(exports.len(), 1);
+        assert_eq!(exports[0].export_name, "unusedHelper");
+    }
+
+    // -- is_export_ignored: matching both config and plugin --
+
+    #[test]
+    fn unused_exports_both_config_and_plugin_ignore() {
+        let mut graph = build_graph(&[
+            ("/tmp/test/src/entry.ts", true),
+            ("/tmp/test/src/api/handler.ts", false),
+        ]);
+        graph.modules[1].is_reachable = true;
+        graph.modules[1].exports = vec![make_export("handler", 10, 20)];
+
+        let config = test_config_with_ignore_exports(vec![
+            fallow_config::IgnoreExportRule {
+                file: "src/api/*.ts".to_string(),
+                exports: vec!["handler".to_string()],
+            },
+        ]);
+        let suppressions = FxHashMap::default();
+        let pr = make_plugin_result(vec![(
+            "src/api/**".to_string(),
+            vec!["handler".to_string()],
+        )]);
+        let (exports, _) =
+            find_unused_exports(&graph, &config, Some(&pr), &suppressions, &FxHashMap::default());
+        assert!(exports.is_empty(), "export matching both config and plugin should be ignored");
+    }
+
+    // -- compile_plugin_matchers: invalid plugin glob handled gracefully --
+
+    #[test]
+    fn unused_exports_invalid_plugin_glob_skipped() {
+        let mut graph = build_graph(&[
+            ("/tmp/test/src/entry.ts", true),
+            ("/tmp/test/src/utils.ts", false),
+        ]);
+        graph.modules[1].is_reachable = true;
+        graph.modules[1].exports = vec![make_export("foo", 10, 20)];
+        let config = test_config();
+        let suppressions = FxHashMap::default();
+        let pr = make_plugin_result(vec![(
+            "[invalid".to_string(),
+            vec!["foo".to_string()],
+        )]);
+        // Should not panic
+        let (exports, _) =
+            find_unused_exports(&graph, &config, Some(&pr), &suppressions, &FxHashMap::default());
+        assert_eq!(exports.len(), 1, "invalid plugin glob should be skipped");
+    }
+
+    // -- find_unused_exports: re-export sentinel detection --
+
+    #[test]
+    fn unused_exports_marks_re_export_sentinel() {
+        let mut graph = build_graph(&[
+            ("/tmp/test/src/entry.ts", true),
+            ("/tmp/test/src/barrel.ts", false),
+        ]);
+        graph.modules[1].is_reachable = true;
+        // Span 0..0 is the re-export sentinel
+        graph.modules[1].exports = vec![make_export("reexported", 0, 0)];
+        let config = test_config();
+        let suppressions = FxHashMap::default();
+        let (exports, _) =
+            find_unused_exports(&graph, &config, None, &suppressions, &FxHashMap::default());
+        assert_eq!(exports.len(), 1);
+        assert!(exports[0].is_re_export, "span 0..0 should be flagged as re-export");
     }
 
     // ---- collect_export_usages tests ----
