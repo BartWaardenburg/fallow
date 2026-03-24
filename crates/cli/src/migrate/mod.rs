@@ -1,5 +1,7 @@
 mod jscpd;
 mod knip;
+mod knip_fields;
+mod knip_tables;
 
 use std::fmt::Write as _;
 use std::io::Read as _;
