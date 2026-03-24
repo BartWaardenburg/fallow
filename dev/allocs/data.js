@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1774391773199,
+  "lastUpdate": 1774392863354,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
@@ -1177,6 +1177,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Total Allocations",
             "value": 12042,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 419434,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 5168,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "9cfedd96d8195004b83382bd3cf7f33d664c7c8b",
+          "message": "refactor: split human.rs into health, dupes, traces, and perf modules",
+          "timestamp": "2026-03-24T23:51:15+01:00",
+          "tree_id": "dfc69fd5587361bd7d508b7760ea55b26cb2f17c",
+          "url": "https://github.com/fallow-rs/fallow/commit/9cfedd96d8195004b83382bd3cf7f33d664c7c8b"
+        },
+        "date": 1774392862384,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 3027129,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 12032,
             "unit": "allocations"
           },
           {
