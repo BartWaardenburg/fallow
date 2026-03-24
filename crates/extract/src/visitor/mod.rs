@@ -294,30 +294,16 @@ impl ModuleInfoExtractor {
     ) {
         match &declarator.id {
             BindingPattern::ObjectPattern(obj_pat) => {
-                if obj_pat.rest.is_some() {
-                    self.require_calls.push(RequireCallInfo {
-                        source: source.to_string(),
-                        span: call.span,
-                        destructured_names: Vec::new(),
-                        local_name: None,
-                    });
-                } else {
-                    let names: Vec<String> = obj_pat
-                        .properties
-                        .iter()
-                        .filter_map(|prop| prop.key.static_name().map(|n| n.to_string()))
-                        .collect();
-                    self.require_calls.push(RequireCallInfo {
-                        source: source.to_string(),
-                        span: call.span,
-                        destructured_names: names,
-                        local_name: None,
-                    });
-                }
+                let names = extract_destructured_names(obj_pat);
+                self.require_calls.push(RequireCallInfo {
+                    source: source.to_string(),
+                    span: call.span,
+                    destructured_names: names,
+                    local_name: None,
+                });
                 self.handled_require_spans.push(call.span);
             }
             BindingPattern::BindingIdentifier(id) => {
-                // `const mod = require('./x')` → Namespace with local_name for narrowing
                 let local = id.name.to_string();
                 self.namespace_binding_names.push(local.clone());
                 self.require_calls.push(RequireCallInfo {
@@ -367,32 +353,16 @@ impl ModuleInfoExtractor {
     ) {
         match &declarator.id {
             BindingPattern::ObjectPattern(obj_pat) => {
-                // `const { foo, bar } = await import('./x')` → Named imports
-                if obj_pat.rest.is_some() {
-                    // Has rest element: conservative, treat as namespace
-                    self.dynamic_imports.push(DynamicImportInfo {
-                        source: source.to_string(),
-                        span: import_expr.span,
-                        destructured_names: Vec::new(),
-                        local_name: None,
-                    });
-                } else {
-                    let names: Vec<String> = obj_pat
-                        .properties
-                        .iter()
-                        .filter_map(|prop| prop.key.static_name().map(|n| n.to_string()))
-                        .collect();
-                    self.dynamic_imports.push(DynamicImportInfo {
-                        source: source.to_string(),
-                        span: import_expr.span,
-                        destructured_names: names,
-                        local_name: None,
-                    });
-                }
+                let names = extract_destructured_names(obj_pat);
+                self.dynamic_imports.push(DynamicImportInfo {
+                    source: source.to_string(),
+                    span: import_expr.span,
+                    destructured_names: names,
+                    local_name: None,
+                });
                 self.handled_import_spans.push(import_expr.span);
             }
             BindingPattern::BindingIdentifier(id) => {
-                // `const mod = await import('./x')` → Namespace with local_name for narrowing
                 let local = id.name.to_string();
                 self.namespace_binding_names.push(local.clone());
                 self.dynamic_imports.push(DynamicImportInfo {
@@ -406,6 +376,63 @@ impl ModuleInfoExtractor {
             _ => {}
         }
     }
+}
+
+/// Extract destructured property names from an object pattern.
+///
+/// Returns an empty `Vec` when a rest element is present (conservative:
+/// the caller cannot know which names are captured).
+fn extract_destructured_names(obj_pat: &ObjectPattern<'_>) -> Vec<String> {
+    if obj_pat.rest.is_some() {
+        return Vec::new();
+    }
+    obj_pat
+        .properties
+        .iter()
+        .filter_map(|prop| prop.key.static_name().map(|n| n.to_string()))
+        .collect()
+}
+
+/// Try to match `require('...')` from a call expression initializer.
+///
+/// Returns `(call_expr, source_string)` on success.
+fn try_extract_require<'a, 'b>(
+    init: &'b Expression<'a>,
+) -> Option<(&'b CallExpression<'a>, &'b str)> {
+    let Expression::CallExpression(call) = init else {
+        return None;
+    };
+    let Expression::Identifier(callee) = &call.callee else {
+        return None;
+    };
+    if callee.name != "require" {
+        return None;
+    }
+    let Some(Argument::StringLiteral(lit)) = call.arguments.first() else {
+        return None;
+    };
+    Some((call, &lit.value))
+}
+
+/// Try to extract a dynamic `import()` expression (possibly wrapped in `await`)
+/// with a static string source.
+///
+/// Returns `(import_expr, source_string)` on success.
+fn try_extract_dynamic_import<'a, 'b>(
+    init: &'b Expression<'a>,
+) -> Option<(&'b ImportExpression<'a>, &'b str)> {
+    let import_expr = match init {
+        Expression::AwaitExpression(await_expr) => match &await_expr.argument {
+            Expression::ImportExpression(imp) => imp,
+            _ => return None,
+        },
+        Expression::ImportExpression(imp) => imp,
+        _ => return None,
+    };
+    let Expression::StringLiteral(lit) = &import_expr.source else {
+        return None;
+    };
+    Some((import_expr, &lit.value))
 }
 
 impl<'a> Visit<'a> for ModuleInfoExtractor {
@@ -604,27 +631,15 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 continue;
             };
 
-            // Try to detect `const x = require('./y')` patterns
-            if let Expression::CallExpression(call) = init
-                && let Expression::Identifier(callee) = &call.callee
-                && callee.name == "require"
-                && let Some(Argument::StringLiteral(lit)) = call.arguments.first()
-            {
-                self.handle_require_declaration(declarator, call, &lit.value);
+            // `const x = require('./y')` — static require
+            if let Some((call, source)) = try_extract_require(init) {
+                self.handle_require_declaration(declarator, call, source);
                 continue;
             }
 
-            // Detect instance creation: `const x = new ClassName(...)`.
-            // Records the binding so that `x.method()` member accesses are mapped
-            // to `ClassName.method` during post-processing, enabling unused class
-            // member detection through instance variables.
-            //
-            // Scope-unaware (same as namespace_binding_names): shadowing can cause
-            // false negatives (unused member not reported), not false positives.
+            // `const x = new ClassName(...)` — instance creation for member tracking.
+            // Scope-unaware: shadowing causes false negatives, not false positives.
             // Built-in constructors are skipped to avoid spurious mappings.
-            //
-            // Limitation: instance destructuring (`const { method } = new Foo()`)
-            // is not tracked — only `x.method` property access patterns.
             if let Expression::NewExpression(new_expr) = init
                 && let Expression::Identifier(callee) = &new_expr.callee
                 && let BindingPattern::BindingIdentifier(id) = &declarator.id
@@ -633,20 +648,11 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 self.instance_binding_names
                     .push((id.name.to_string(), callee.name.to_string()));
                 // No `continue` — falls through to dynamic import detection (which
-                // won't match NewExpression) and then hits `continue` at line 665.
-                // Children are visited by `walk::walk_variable_declaration` after the loop.
+                // won't match NewExpression) and then the loop continues.
             }
 
-            // Detect namespace destructuring: `const { a, b } = ns` where `ns`
-            // is a namespace import, dynamic import namespace, or require namespace.
-            // Generates member accesses so the graph can narrow which exports are used.
-            //
-            // Limitation: `namespace_binding_names` is scope-unaware. A local variable
-            // that shadows an import with the same name (e.g., `const ns = {...}` inside
-            // a function after `import * as ns`) would also match. This is consistent
-            // with the existing `member_accesses` approach which is also flat/unscoped.
-            // The effect is a false negative (unused export not reported), not a false
-            // positive, so it errs on the side of safety.
+            // `const { a, b } = ns` — namespace destructuring for member narrowing.
+            // Scope-unaware: consistent with flat member_accesses approach.
             if let Expression::Identifier(ident) = init
                 && self
                     .namespace_binding_names
@@ -657,29 +663,11 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 continue;
             }
 
-            // Try to detect `const x = await import('./y')` and `const x = import('./y')` patterns
-            // The import expression may be wrapped in an AwaitExpression or used directly.
-            let import_expr = match init {
-                Expression::AwaitExpression(await_expr) => {
-                    if let Expression::ImportExpression(imp) = &await_expr.argument {
-                        Some(imp)
-                    } else {
-                        None
-                    }
-                }
-                Expression::ImportExpression(imp) => Some(imp),
-                _ => None,
-            };
-
-            let Some(import_expr) = import_expr else {
+            // `const x = await import('./y')` or `const x = import('./y')`
+            let Some((import_expr, source)) = try_extract_dynamic_import(init) else {
                 continue;
             };
-
-            let Expression::StringLiteral(lit) = &import_expr.source else {
-                continue;
-            };
-
-            self.handle_dynamic_import_declaration(declarator, import_expr, &lit.value);
+            self.handle_dynamic_import_declaration(declarator, import_expr, source);
         }
         walk::walk_variable_declaration(self, decl);
     }
