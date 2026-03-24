@@ -444,10 +444,10 @@ pub fn build_health_markdown(report: &crate::health_types::HealthReport, root: &
             let file_str = rel(&score.path);
             let _ = writeln!(
                 out,
-                "| `{file_str}` | {mi:.1} | {fi} | {fo} | {dead:.0}% | {density:.2} |",
+                "| `{file_str}` | {mi:.1} | {fi} | {fan_out} | {dead:.0}% | {density:.2} |",
                 mi = score.maintainability_index,
                 fi = score.fan_in,
-                fo = score.fan_out,
+                fan_out = score.fan_out,
                 dead = score.dead_code_ratio * 100.0,
                 density = score.complexity_density,
             );

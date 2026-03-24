@@ -170,7 +170,7 @@ fn list_json_files_are_relative_paths() {
             "file path should be relative, got: {path}"
         );
         assert!(
-            path.starts_with("src/"),
+            path.starts_with("src/") || path.starts_with("src\\"),
             "file path should start with src/, got: {path}"
         );
     }
@@ -272,7 +272,10 @@ fn list_basic_project_main_entry_point_source() {
     // basic-project has "main": "src/index.ts" in package.json
     let main_ep = eps
         .iter()
-        .find(|ep| ep["path"].as_str().unwrap() == "src/index.ts")
+        .find(|ep| {
+            let p = ep["path"].as_str().unwrap();
+            p == "src/index.ts" || p == "src\\index.ts"
+        })
         .expect("should have src/index.ts as entry point");
 
     assert_eq!(
@@ -345,15 +348,18 @@ fn list_workspace_project_discovers_files_across_packages() {
     let files = json["files"].as_array().unwrap();
 
     // Should discover files from multiple workspace packages
-    let has_app = files
-        .iter()
-        .any(|f| f.as_str().unwrap().starts_with("packages/app/"));
-    let has_shared = files
-        .iter()
-        .any(|f| f.as_str().unwrap().starts_with("packages/shared/"));
-    let has_utils = files
-        .iter()
-        .any(|f| f.as_str().unwrap().starts_with("packages/utils/"));
+    let has_app = files.iter().any(|f| {
+        let p = f.as_str().unwrap();
+        p.starts_with("packages/app/") || p.starts_with("packages\\app\\")
+    });
+    let has_shared = files.iter().any(|f| {
+        let p = f.as_str().unwrap();
+        p.starts_with("packages/shared/") || p.starts_with("packages\\shared\\")
+    });
+    let has_utils = files.iter().any(|f| {
+        let p = f.as_str().unwrap();
+        p.starts_with("packages/utils/") || p.starts_with("packages\\utils\\")
+    });
 
     assert!(has_app, "should discover files in packages/app/");
     assert!(has_shared, "should discover files in packages/shared/");
@@ -371,11 +377,17 @@ fn list_workspace_project_discovers_entry_points_from_multiple_packages() {
     // Each workspace package has its own entry points
     let app_entries = eps
         .iter()
-        .filter(|ep| ep["path"].as_str().unwrap().starts_with("packages/app/"))
+        .filter(|ep| {
+            let p = ep["path"].as_str().unwrap();
+            p.starts_with("packages/app/") || p.starts_with("packages\\app\\")
+        })
         .count();
     let shared_entries = eps
         .iter()
-        .filter(|ep| ep["path"].as_str().unwrap().starts_with("packages/shared/"))
+        .filter(|ep| {
+            let p = ep["path"].as_str().unwrap();
+            p.starts_with("packages/shared/") || p.starts_with("packages\\shared\\")
+        })
         .count();
 
     assert!(
@@ -470,7 +482,9 @@ fn list_human_output_files_are_absolute_paths() {
             continue;
         }
         assert!(
-            trimmed.starts_with('/'),
+            trimmed.starts_with('/')
+                || trimmed.starts_with("\\\\")
+                || trimmed.chars().nth(1) == Some(':'),
             "human output file path should be absolute, got: {trimmed}"
         );
     }
