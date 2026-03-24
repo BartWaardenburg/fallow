@@ -2,13 +2,21 @@
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::resolve::{ResolveResult, ResolvedModule};
+use crate::resolve::{ResolveResult, ResolvedImport, ResolvedModule};
 use fallow_types::discover::{DiscoveredFile, FileId};
 use fallow_types::extract::{ExportName, ImportedName};
 
 use super::types::ModuleNode;
 use super::types::{ExportSymbol, ReExportEdge, ReferenceKind, SymbolReference};
 use super::{Edge, ImportedSymbol, ModuleGraph};
+
+/// Mutable accumulator state shared across all files during edge population.
+struct EdgeAccumulator {
+    package_usage: FxHashMap<String, Vec<FileId>>,
+    type_only_package_usage: FxHashMap<String, Vec<FileId>>,
+    namespace_imported: fixedbitset::FixedBitSet,
+    total_capacity: usize,
+}
 
 /// Insert into the namespace-imported bitset with bounds checking.
 fn record_namespace_import(
@@ -23,23 +31,115 @@ fn record_namespace_import(
 }
 
 /// Track that a file uses an npm package, and optionally record type-only usage.
-fn record_package_usage(
-    name: &str,
-    file_id: FileId,
-    package_usage: &mut FxHashMap<String, Vec<FileId>>,
-    type_only_package_usage: &mut FxHashMap<String, Vec<FileId>>,
-    is_type_only: bool,
-) {
-    package_usage
+fn record_package_usage(acc: &mut EdgeAccumulator, name: &str, file_id: FileId, is_type_only: bool) {
+    acc.package_usage
         .entry(name.to_owned())
         .or_default()
         .push(file_id);
     if is_type_only {
-        type_only_package_usage
+        acc.type_only_package_usage
             .entry(name.to_owned())
             .or_default()
             .push(file_id);
     }
+}
+
+/// Process a single resolved import (static or dynamic), adding it to the edge map.
+///
+/// Internal module imports create an `ImportedSymbol` entry grouped by target.
+/// Namespace imports are also recorded in the namespace-imported bitset.
+/// npm package imports are recorded in the package usage maps.
+fn collect_import_edge(
+    import: &ResolvedImport,
+    file_id: FileId,
+    edges_by_target: &mut FxHashMap<FileId, Vec<ImportedSymbol>>,
+    acc: &mut EdgeAccumulator,
+) {
+    match &import.target {
+        ResolveResult::InternalModule(target_id) => {
+            if matches!(import.info.imported_name, ImportedName::Namespace) {
+                record_namespace_import(
+                    *target_id,
+                    &mut acc.namespace_imported,
+                    acc.total_capacity,
+                );
+            }
+            edges_by_target
+                .entry(*target_id)
+                .or_default()
+                .push(ImportedSymbol {
+                    imported_name: import.info.imported_name.clone(),
+                    local_name: import.info.local_name.clone(),
+                    import_span: import.info.span,
+                });
+        }
+        ResolveResult::NpmPackage(name) => {
+            record_package_usage(acc, name, file_id, import.info.is_type_only);
+        }
+        _ => {}
+    }
+}
+
+/// Collect edges from a resolved module's static imports, re-exports, dynamic imports,
+/// and dynamic import patterns into a grouped edge map.
+///
+/// Returns the grouped edges sorted by target `FileId` for deterministic ordering.
+fn collect_edges_for_module(
+    resolved: &ResolvedModule,
+    file_id: FileId,
+    acc: &mut EdgeAccumulator,
+) -> Vec<(FileId, Vec<ImportedSymbol>)> {
+    let mut edges_by_target: FxHashMap<FileId, Vec<ImportedSymbol>> = FxHashMap::default();
+
+    // Static imports
+    for import in &resolved.resolved_imports {
+        collect_import_edge(import, file_id, &mut edges_by_target, acc);
+    }
+
+    // Re-exports — use SideEffect edges to avoid marking source exports as "used"
+    // just because they're re-exported. Re-export chain propagation handles tracking
+    // which specific names consumers actually import.
+    for re_export in &resolved.re_exports {
+        if let ResolveResult::InternalModule(target_id) = &re_export.target {
+            edges_by_target
+                .entry(*target_id)
+                .or_default()
+                .push(ImportedSymbol {
+                    imported_name: ImportedName::SideEffect,
+                    local_name: String::new(),
+                    import_span: oxc_span::Span::new(0, 0),
+                });
+        } else if let ResolveResult::NpmPackage(name) = &re_export.target {
+            record_package_usage(acc, name, file_id, re_export.info.is_type_only);
+        }
+    }
+
+    // Dynamic imports — Named imports create Named edges, Namespace imports create
+    // Namespace edges with a local_name (enabling member access narrowing),
+    // Side-effect imports create SideEffect edges.
+    for import in &resolved.resolved_dynamic_imports {
+        collect_import_edge(import, file_id, &mut edges_by_target, acc);
+    }
+
+    // Dynamic import patterns (template literals, string concat, import.meta.glob)
+    for (_pattern, matched_ids) in &resolved.resolved_dynamic_patterns {
+        for target_id in matched_ids {
+            record_namespace_import(*target_id, &mut acc.namespace_imported, acc.total_capacity);
+            edges_by_target
+                .entry(*target_id)
+                .or_default()
+                .push(ImportedSymbol {
+                    imported_name: ImportedName::Namespace,
+                    local_name: String::new(),
+                    import_span: oxc_span::Span::new(0, 0),
+                });
+        }
+    }
+
+    // Sort by target FileId for deterministic edge order across runs
+    let mut sorted: Vec<_> = edges_by_target.into_iter().collect();
+    sorted.sort_by_key(|(target_id, _)| target_id.0);
+    sorted
 }
 
 /// Build a `ModuleNode` for a file, including exports, re-export edges, and metadata.
@@ -362,6 +462,89 @@ fn narrow_css_module_references(
     }
 }
 
+/// Determine the `ReferenceKind` for an imported name.
+fn reference_kind_for(imported_name: &ImportedName) -> ReferenceKind {
+    match imported_name {
+        ImportedName::Named(_) => ReferenceKind::NamedImport,
+        ImportedName::Default => ReferenceKind::DefaultImport,
+        ImportedName::Namespace => ReferenceKind::NamespaceImport,
+        ImportedName::SideEffect => ReferenceKind::SideEffectImport,
+    }
+}
+
+/// Process a single imported symbol, attaching references to the target module's exports.
+///
+/// Handles: direct export matching, namespace import narrowing, and CSS module narrowing.
+fn attach_symbol_reference(
+    target_module: &mut ModuleNode,
+    source_id: FileId,
+    sym: &ImportedSymbol,
+    module_by_id: &FxHashMap<FileId, &ResolvedModule>,
+    entry_point_ids: &FxHashSet<FileId>,
+) {
+    let ref_kind = reference_kind_for(&sym.imported_name);
+
+    // Skip references for import bindings that are never used in the importing file.
+    if is_unused_import_binding(
+        &sym.local_name,
+        &sym.imported_name,
+        module_by_id.get(&source_id),
+    ) {
+        return;
+    }
+
+    // Match to specific export
+    if let Some(export) = target_module
+        .exports
+        .iter_mut()
+        .find(|e| export_matches(&e.name, &sym.imported_name))
+    {
+        export.references.push(SymbolReference {
+            from_file: source_id,
+            kind: ref_kind,
+            import_span: sym.import_span,
+        });
+    }
+
+    // Namespace imports: narrow to specific member accesses when possible,
+    // otherwise conservatively mark all exports as used.
+    if matches!(sym.imported_name, ImportedName::Namespace) {
+        if !sym.local_name.is_empty() {
+            narrow_namespace_references(
+                target_module,
+                source_id,
+                &sym.local_name,
+                sym.import_span,
+                module_by_id,
+                entry_point_ids,
+            );
+        } else {
+            // No local name available — mark all (conservative)
+            mark_all_exports_referenced(
+                &mut target_module.exports,
+                source_id,
+                sym.import_span,
+                &ReferenceKind::NamespaceImport,
+            );
+        }
+    }
+
+    // CSS Module default imports: member accesses like `styles.primary` mark
+    // the `primary` named export as referenced.
+    if matches!(sym.imported_name, ImportedName::Default)
+        && !sym.local_name.is_empty()
+        && is_css_module_path(&target_module.path)
+    {
+        narrow_css_module_references(
+            &mut target_module.exports,
+            source_id,
+            &sym.local_name,
+            sym.import_span,
+            module_by_id,
+        );
+    }
+}
+
 impl ModuleGraph {
     /// Build flat edge storage from resolved modules.
     ///
@@ -376,125 +559,19 @@ impl ModuleGraph {
     ) -> Self {
         let mut all_edges = Vec::new();
         let mut modules = Vec::with_capacity(module_count);
-        let mut package_usage: FxHashMap<String, Vec<FileId>> = FxHashMap::default();
-        let mut type_only_package_usage: FxHashMap<String, Vec<FileId>> = FxHashMap::default();
         let mut reverse_deps = vec![Vec::new(); total_capacity];
-        let mut namespace_imported = fixedbitset::FixedBitSet::with_capacity(total_capacity);
+        let mut acc = EdgeAccumulator {
+            package_usage: FxHashMap::default(),
+            type_only_package_usage: FxHashMap::default(),
+            namespace_imported: fixedbitset::FixedBitSet::with_capacity(total_capacity),
+            total_capacity,
+        };
 
         for file in files {
             let edge_start = all_edges.len();
 
             if let Some(resolved) = module_by_id.get(&file.id) {
-                // Group imports by target
-                let mut edges_by_target: FxHashMap<FileId, Vec<ImportedSymbol>> =
-                    FxHashMap::default();
-
-                for import in &resolved.resolved_imports {
-                    match &import.target {
-                        ResolveResult::InternalModule(target_id) => {
-                            // Track namespace imports during edge creation
-                            if matches!(import.info.imported_name, ImportedName::Namespace) {
-                                record_namespace_import(
-                                    *target_id,
-                                    &mut namespace_imported,
-                                    total_capacity,
-                                );
-                            }
-                            edges_by_target
-                                .entry(*target_id)
-                                .or_default()
-                                .push(ImportedSymbol {
-                                    imported_name: import.info.imported_name.clone(),
-                                    local_name: import.info.local_name.clone(),
-                                    import_span: import.info.span,
-                                });
-                        }
-                        ResolveResult::NpmPackage(name) => {
-                            record_package_usage(
-                                name,
-                                file.id,
-                                &mut package_usage,
-                                &mut type_only_package_usage,
-                                import.info.is_type_only,
-                            );
-                        }
-                        _ => {}
-                    }
-                }
-
-                // Re-exports also create edges
-                for re_export in &resolved.re_exports {
-                    if let ResolveResult::InternalModule(target_id) = &re_export.target {
-                        // ALL re-exports use SideEffect edges to avoid marking source
-                        // exports as "used" just because they're re-exported. The
-                        // re-export chain propagation handles tracking which specific
-                        // names consumers actually import.
-                        edges_by_target
-                            .entry(*target_id)
-                            .or_default()
-                            .push(ImportedSymbol {
-                                imported_name: ImportedName::SideEffect,
-                                local_name: String::new(),
-                                import_span: oxc_span::Span::new(0, 0),
-                            });
-                    } else if let ResolveResult::NpmPackage(name) = &re_export.target {
-                        record_package_usage(
-                            name,
-                            file.id,
-                            &mut package_usage,
-                            &mut type_only_package_usage,
-                            re_export.info.is_type_only,
-                        );
-                    }
-                }
-
-                // Dynamic imports — use the imported_name/local_name from resolution.
-                // Named imports (`const { foo } = await import('./x')`) create Named edges.
-                // Namespace imports (`const mod = await import('./x')`) create Namespace edges
-                // with a local_name, enabling member access narrowing.
-                // Side-effect imports (`await import('./x')`) create SideEffect edges.
-                for import in &resolved.resolved_dynamic_imports {
-                    if let ResolveResult::InternalModule(target_id) = &import.target {
-                        if matches!(import.info.imported_name, ImportedName::Namespace) {
-                            record_namespace_import(
-                                *target_id,
-                                &mut namespace_imported,
-                                total_capacity,
-                            );
-                        }
-                        edges_by_target
-                            .entry(*target_id)
-                            .or_default()
-                            .push(ImportedSymbol {
-                                imported_name: import.info.imported_name.clone(),
-                                local_name: import.info.local_name.clone(),
-                                import_span: import.info.span,
-                            });
-                    }
-                }
-
-                // Dynamic import patterns (template literals, string concat, import.meta.glob)
-                for (_pattern, matched_ids) in &resolved.resolved_dynamic_patterns {
-                    for target_id in matched_ids {
-                        record_namespace_import(
-                            *target_id,
-                            &mut namespace_imported,
-                            total_capacity,
-                        );
-                        edges_by_target
-                            .entry(*target_id)
-                            .or_default()
-                            .push(ImportedSymbol {
-                                imported_name: ImportedName::Namespace,
-                                local_name: String::new(),
-                                import_span: oxc_span::Span::new(0, 0),
-                            });
-                    }
-                }
-
-                // Sort by target FileId for deterministic edge order across runs
-                let mut sorted_edges: Vec<_> = edges_by_target.into_iter().collect();
-                sorted_edges.sort_by_key(|(target_id, _)| target_id.0);
+                let sorted_edges = collect_edges_for_module(resolved, file.id, &mut acc);
 
                 for (target_id, symbols) in sorted_edges {
                     all_edges.push(Edge {
@@ -522,11 +599,11 @@ impl ModuleGraph {
         Self {
             modules,
             edges: all_edges,
-            package_usage,
-            type_only_package_usage,
+            package_usage: acc.package_usage,
+            type_only_package_usage: acc.type_only_package_usage,
             entry_points: entry_point_ids.clone(),
             reverse_deps,
-            namespace_imported,
+            namespace_imported: acc.namespace_imported,
         }
     }
 
@@ -547,83 +624,14 @@ impl ModuleGraph {
                 continue;
             }
             for sym_idx in 0..self.edges[edge_idx].symbols.len() {
-                let sym_imported_name = self.edges[edge_idx].symbols[sym_idx].imported_name.clone();
-                let sym_local_name = self.edges[edge_idx].symbols[sym_idx].local_name.clone();
-                let sym_import_span = self.edges[edge_idx].symbols[sym_idx].import_span;
-
-                let ref_kind = match &sym_imported_name {
-                    ImportedName::Named(_) => ReferenceKind::NamedImport,
-                    ImportedName::Default => ReferenceKind::DefaultImport,
-                    ImportedName::Namespace => ReferenceKind::NamespaceImport,
-                    ImportedName::SideEffect => ReferenceKind::SideEffectImport,
-                };
-
-                // Skip references for import bindings that are never used in the
-                // importing file.
-                if is_unused_import_binding(
-                    &sym_local_name,
-                    &sym_imported_name,
-                    module_by_id.get(&source_id),
-                ) {
-                    continue;
-                }
-
-                let target_module = &mut self.modules[target_idx];
-
-                // Match to specific export
-                if let Some(export) = target_module
-                    .exports
-                    .iter_mut()
-                    .find(|e| export_matches(&e.name, &sym_imported_name))
-                {
-                    export.references.push(SymbolReference {
-                        from_file: source_id,
-                        kind: ref_kind,
-                        import_span: sym_import_span,
-                    });
-                }
-
-                // Namespace imports: check if we can narrow to specific member accesses.
-                // `import * as ns from './x'; ns.foo; ns.bar` → only mark foo, bar as used.
-                // If the namespace variable is re-exported (`export { ns }`) or no member
-                // accesses are found, conservatively mark ALL exports as used.
-                if matches!(sym_imported_name, ImportedName::Namespace)
-                    && !sym_local_name.is_empty()
-                {
-                    narrow_namespace_references(
-                        &mut self.modules[target_idx],
-                        source_id,
-                        &sym_local_name,
-                        sym_import_span,
-                        module_by_id,
-                        entry_point_ids,
-                    );
-                } else if matches!(sym_imported_name, ImportedName::Namespace) {
-                    // No local name available — mark all (conservative)
-                    mark_all_exports_referenced(
-                        &mut self.modules[target_idx].exports,
-                        source_id,
-                        sym_import_span,
-                        &ReferenceKind::NamespaceImport,
-                    );
-                }
-
-                // CSS Module default imports: `import styles from './Button.module.css'`
-                // Member accesses like `styles.primary` should mark the `primary` named
-                // export as referenced, since CSS module default imports act as namespace
-                // objects where each property corresponds to a class name (named export).
-                if matches!(sym_imported_name, ImportedName::Default)
-                    && !sym_local_name.is_empty()
-                    && is_css_module_path(&self.modules[target_idx].path)
-                {
-                    narrow_css_module_references(
-                        &mut self.modules[target_idx].exports,
-                        source_id,
-                        &sym_local_name,
-                        sym_import_span,
-                        module_by_id,
-                    );
-                }
+                let sym = &self.edges[edge_idx].symbols[sym_idx];
+                attach_symbol_reference(
+                    &mut self.modules[target_idx],
+                    source_id,
+                    sym,
+                    module_by_id,
+                    entry_point_ids,
+                );
             }
         }
     }
