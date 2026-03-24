@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-03-24
+
+### Added
+- **Human output polish**: completely redesigned terminal output across all three commands for readability at scale
+  - Per-section footers with one-line explanations and docs links (always shown, replaces `--explain` for human output)
+  - Mirrored directory detection in dupes: collapses `src/ ↔ deno/lib/` patterns into a single group
+  - Circular dependency hub grouping: cycles sharing the same file are grouped with path elision
+  - Duplicate exports stacked vertically with path elision for long monorepo paths
+  - Global truncation: all sections default to 10 items with `... and N more` overflow hints
+  - Thousands separators for large numbers (e.g., `5,433` lines)
+- **`--complexity` flag** for `fallow health`: select only the complexity findings section
+- **Health defaults to all sections**: `fallow health` now shows complexity + file-scores + hotspots by default. Use `--complexity`, `--file-scores`, or `--hotspots` to select specific sections.
+- **`--explain` flag**: adds `_meta` object with metric definitions and docs URLs to JSON output. Human output always includes explanations.
+- **`--top` flag** for `fallow dupes`: limit the number of clone groups shown
+- `elide_common_prefix` utility for shorter paths in dependency chains and duplicate exports
+
+### Changed
+- Summary footer uses shortened labels (`27 files · 89 exports` instead of `27 unused files · 89 unused exports`)
+- Health footer compacted to single line (`✗ 22 above threshold · 3111 analyzed · MI 90.5`)
+- Dupes footer uses `✗` prefix consistent with check and health
+- Health complexity findings use two-line format (function name on line 1, metrics on line 2)
+- Single-group clone families suppressed from default output
+- Tree connectors (├─ └─) replaced with simple indentation in dupes
+- All docs URLs updated to `/explanations/{dead-code,health,duplication}` with section anchors
+- Config warnings use `tracing::warn!` instead of `eprintln!`
+- CI workflow permissions scoped to per-job level
+
 ## [1.7.0] - 2026-03-24
 
 ### Added
@@ -305,7 +332,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[Unreleased]: https://github.com/fallow-rs/fallow/compare/v1.6.1...HEAD
+[Unreleased]: https://github.com/fallow-rs/fallow/compare/v1.8.0...HEAD
+[1.8.0]: https://github.com/fallow-rs/fallow/compare/v1.7.0...v1.8.0
 [1.7.0]: https://github.com/fallow-rs/fallow/compare/v1.6.1...v1.7.0
 [1.6.1]: https://github.com/fallow-rs/fallow/compare/v1.6.0...v1.6.1
 [1.6.0]: https://github.com/fallow-rs/fallow/compare/v1.5.0...v1.6.0
