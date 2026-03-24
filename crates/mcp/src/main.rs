@@ -2,7 +2,9 @@ use rmcp::ServiceExt;
 use rmcp::transport::stdio;
 use tracing_subscriber::EnvFilter;
 
+mod params;
 mod server;
+mod tools;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
