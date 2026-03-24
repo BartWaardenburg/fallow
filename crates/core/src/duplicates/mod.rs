@@ -1,7 +1,7 @@
 //! Code duplication / clone detection module.
 //!
 //! This module implements suffix array + LCP based clone detection
-//! for JavaScript/TypeScript source files. It supports multiple detection
+//! for TypeScript/JavaScript source files. It supports multiple detection
 //! modes from strict (exact matches only) to semantic (structure-aware
 //! matching that ignores identifier names and literal values).
 

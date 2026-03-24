@@ -73,6 +73,9 @@ pub struct FindDupesParams {
 
     /// Enable cross-language detection (strip TS type annotations for TS↔JS matching).
     pub cross_language: Option<bool>,
+
+    /// Show only the N largest clone groups.
+    pub top: Option<usize>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -116,10 +119,13 @@ pub struct HealthParams {
     /// Git ref to compare against. Only files changed since this ref are analyzed.
     pub changed_since: Option<String>,
 
-    /// Compute per-file health scores (fan-in, fan-out, dead code ratio, maintainability index).
+    /// Show only complexity findings. By default all sections are shown; use this to select only complexity.
+    pub complexity: Option<bool>,
+
+    /// Show only per-file health scores (fan-in, fan-out, dead code ratio, maintainability index).
     pub file_scores: Option<bool>,
 
-    /// Identify hotspots: files that are both complex and frequently changing.
+    /// Show only hotspots: files that are both complex and frequently changing.
     pub hotspots: Option<bool>,
 
     /// Git history window for hotspot analysis. Accepts durations (6m, 90d, 1y) or ISO dates.
@@ -298,6 +304,9 @@ fn build_find_dupes_args(params: &FindDupesParams) -> Result<Vec<String>, String
     if params.cross_language == Some(true) {
         args.push("--cross-language".to_string());
     }
+    if let Some(top) = params.top {
+        args.extend(["--top".to_string(), top.to_string()]);
+    }
 
     Ok(args)
 }
@@ -394,6 +403,9 @@ fn build_health_args(params: &HealthParams) -> Vec<String> {
     if let Some(ref changed_since) = params.changed_since {
         args.extend(["--changed-since".to_string(), changed_since.clone()]);
     }
+    if params.complexity == Some(true) {
+        args.push("--complexity".to_string());
+    }
     if params.file_scores == Some(true) {
         args.push("--file-scores".to_string());
     }
@@ -419,7 +431,7 @@ fn build_health_args(params: &HealthParams) -> Vec<String> {
 #[tool_router]
 impl FallowMcp {
     #[tool(
-        description = "Analyze a JavaScript/TypeScript project for unused code, circular dependencies, and more. Detects unused files, exports, types, dependencies, enum/class members, unresolved imports, unlisted dependencies, duplicate exports, and circular dependencies. Returns structured JSON with all issues found, grouped by issue type.",
+        description = "Analyze a TypeScript/JavaScript project for unused code, circular dependencies, code duplication, complexity hotspots, and more. Detects unused files, exports, types, dependencies, enum/class members, unresolved imports, unlisted dependencies, duplicate exports, and circular dependencies. Returns structured JSON with all issues found, grouped by issue type.",
         annotations(read_only_hint = true, open_world_hint = true)
     )]
     async fn analyze(&self, params: Parameters<AnalyzeParams>) -> Result<CallToolResult, McpError> {
@@ -443,7 +455,7 @@ impl FallowMcp {
     }
 
     #[tool(
-        description = "Find code duplication across the project. Detects clone groups (identical or similar code blocks) with configurable detection modes and thresholds. Returns clone families with refactoring suggestions.",
+        description = "Find code duplication across the project. Detects clone groups (identical or similar code blocks) with configurable detection modes and thresholds. Returns clone families with refactoring suggestions. Set top=N to show only the N largest clone groups.",
         annotations(read_only_hint = true, open_world_hint = true)
     )]
     async fn find_dupes(
@@ -508,10 +520,10 @@ impl ServerHandler for FallowMcp {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(
                 Implementation::new("fallow-mcp", env!("CARGO_PKG_VERSION"))
-                    .with_description("Codebase analysis for JavaScript/TypeScript projects"),
+                    .with_description("Codebase analysis for TypeScript/JavaScript projects"),
             )
             .with_instructions(
-                "Fallow MCP server — codebase analysis for JavaScript/TypeScript projects. \
+                "Fallow MCP server — codebase analysis for TypeScript/JavaScript projects. \
                  Tools: analyze (full analysis), check_changed (incremental/PR analysis), \
                  find_dupes (code duplication), fix_preview/fix_apply (auto-fix), \
                  project_info (plugins, files, entry points), \
@@ -751,7 +763,8 @@ mod tests {
             "min_tokens": 100,
             "min_lines": 10,
             "threshold": 5.5,
-            "skip_local": true
+            "skip_local": true,
+            "top": 5
         }"#;
         let params: FindDupesParams = serde_json::from_str(json).unwrap();
         assert_eq!(params.root.as_deref(), Some("/project"));
@@ -760,6 +773,7 @@ mod tests {
         assert_eq!(params.min_lines, Some(10));
         assert_eq!(params.threshold, Some(5.5));
         assert_eq!(params.skip_local, Some(true));
+        assert_eq!(params.top, Some(5));
     }
 
     // ── Argument building: analyze ────────────────────────────────
@@ -969,6 +983,7 @@ mod tests {
             threshold: None,
             skip_local: None,
             cross_language: None,
+            top: None,
         };
         let args = build_find_dupes_args(&params).unwrap();
         assert_eq!(args, ["dupes", "--format", "json", "--quiet"]);
@@ -984,6 +999,7 @@ mod tests {
             threshold: Some(5.5),
             skip_local: Some(true),
             cross_language: Some(true),
+            top: Some(5),
         };
         let args = build_find_dupes_args(&params).unwrap();
         assert_eq!(
@@ -1005,6 +1021,8 @@ mod tests {
                 "5.5",
                 "--skip-local",
                 "--cross-language",
+                "--top",
+                "5",
             ]
         );
     }
@@ -1020,6 +1038,7 @@ mod tests {
                 threshold: None,
                 skip_local: None,
                 cross_language: None,
+                top: None,
             };
             let args = build_find_dupes_args(&params).unwrap();
             assert!(
@@ -1039,6 +1058,7 @@ mod tests {
             threshold: None,
             skip_local: None,
             cross_language: None,
+            top: None,
         };
         let err = build_find_dupes_args(&params).unwrap_err();
         assert!(err.contains("Invalid mode 'aggressive'"));
@@ -1058,6 +1078,7 @@ mod tests {
             threshold: None,
             skip_local: Some(false),
             cross_language: None,
+            top: None,
         };
         let args = build_find_dupes_args(&params).unwrap();
         assert!(!args.contains(&"--skip-local".to_string()));
@@ -1073,6 +1094,7 @@ mod tests {
             threshold: Some(0.0),
             skip_local: None,
             cross_language: None,
+            top: None,
         };
         let args = build_find_dupes_args(&params).unwrap();
         assert!(args.contains(&"--threshold".to_string()));
@@ -1202,6 +1224,7 @@ mod tests {
             top: None,
             sort: None,
             changed_since: None,
+            complexity: None,
             file_scores: None,
             hotspots: None,
             since: None,
@@ -1222,6 +1245,7 @@ mod tests {
             top: Some(20),
             sort: Some("cognitive".to_string()),
             changed_since: Some("develop".to_string()),
+            complexity: Some(true),
             file_scores: Some(true),
             hotspots: Some(true),
             since: Some("6m".to_string()),
@@ -1249,6 +1273,7 @@ mod tests {
                 "cognitive",
                 "--changed-since",
                 "develop",
+                "--complexity",
                 "--file-scores",
                 "--hotspots",
                 "--since",
@@ -1271,6 +1296,7 @@ mod tests {
             top: None,
             sort: Some("cyclomatic".to_string()),
             changed_since: None,
+            complexity: None,
             file_scores: None,
             hotspots: None,
             since: None,
@@ -1323,6 +1349,7 @@ mod tests {
             threshold: None,
             skip_local: None,
             cross_language: None,
+            top: None,
         })
         .unwrap();
 
@@ -1350,6 +1377,7 @@ mod tests {
             top: None,
             sort: None,
             changed_since: None,
+            complexity: None,
             file_scores: None,
             hotspots: None,
             since: None,
@@ -1410,6 +1438,7 @@ mod tests {
             threshold: None,
             skip_local: None,
             cross_language: None,
+            top: None,
         })
         .unwrap();
         assert_eq!(dupes[0], "dupes");
@@ -1441,6 +1470,7 @@ mod tests {
             top: None,
             sort: None,
             changed_since: None,
+            complexity: None,
             file_scores: None,
             hotspots: None,
             since: None,
@@ -1641,6 +1671,7 @@ mod tests {
             top: Some(0),
             sort: None,
             changed_since: None,
+            complexity: None,
             file_scores: None,
             hotspots: None,
             since: None,
@@ -1662,6 +1693,7 @@ mod tests {
             top: None,
             sort: None,
             changed_since: None,
+            complexity: None,
             file_scores: Some(true),
             hotspots: None,
             since: None,
