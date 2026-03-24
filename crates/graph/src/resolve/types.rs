@@ -7,8 +7,6 @@ use rustc_hash::FxHashMap;
 
 use fallow_types::discover::FileId;
 
-use super::cache::BareSpecifierCache;
-
 /// Result of resolving an import specifier.
 #[derive(Debug, Clone)]
 pub enum ResolveResult {
@@ -78,8 +76,6 @@ pub(super) struct ResolveContext<'a> {
     pub path_to_id: &'a FxHashMap<&'a Path, FileId>,
     /// Raw (non-canonical) path → FileId lookup.
     pub raw_path_to_id: &'a FxHashMap<&'a Path, FileId>,
-    /// Thread-safe cache for bare specifier resolution results.
-    pub bare_cache: &'a BareSpecifierCache,
     /// Workspace name → canonical root path.
     pub workspace_roots: &'a FxHashMap<&'a str, &'a Path>,
     /// Plugin-provided path aliases (prefix, replacement).

@@ -5,14 +5,13 @@
 //! tsconfig path aliases, pnpm virtual store paths, React Native platform extensions,
 //! and dynamic import pattern matching via glob.
 
-mod cache;
 pub(crate) mod fallbacks;
 mod path_info;
 mod react_native;
 mod specifier;
 mod types;
 
-pub use path_info::{extract_package_name, is_path_alias};
+pub use path_info::{extract_package_name, is_bare_specifier, is_path_alias};
 pub use types::{ResolveResult, ResolvedImport, ResolvedModule, ResolvedReExport};
 
 use std::path::{Path, PathBuf};
@@ -23,7 +22,6 @@ use rustc_hash::FxHashMap;
 use fallow_types::discover::{DiscoveredFile, FileId};
 use fallow_types::extract::{ImportInfo, ModuleInfo};
 
-use cache::BareSpecifierCache;
 use fallbacks::make_glob_from_pattern;
 use specifier::{create_resolver, resolve_specifier};
 use types::ResolveContext;
@@ -75,22 +73,21 @@ pub fn resolve_all_imports(
     // Create resolver ONCE and share across threads (oxc_resolver::Resolver is Send + Sync)
     let resolver = create_resolver(active_plugins);
 
-    // Cache for bare specifier resolutions (e.g., `react`, `lodash/merge`)
-    let bare_cache = BareSpecifierCache::new();
-
-    // Shared resolution context — avoids passing 7 arguments to every resolve_specifier call
+    // Shared resolution context — avoids passing 6 arguments to every resolve_specifier call
     let ctx = ResolveContext {
         resolver: &resolver,
         path_to_id: &path_to_id,
         raw_path_to_id: &raw_path_to_id,
-        bare_cache: &bare_cache,
         workspace_roots: &workspace_roots,
         path_aliases,
         root,
     };
 
-    // Resolve in parallel — shared resolver instance
-    modules
+    // Resolve in parallel — shared resolver instance.
+    // Each file resolves its own imports independently (no shared bare specifier cache).
+    // oxc_resolver's internal caches (package.json, tsconfig, directory entries) are
+    // shared across threads for performance.
+    let mut resolved: Vec<ResolvedModule> = modules
         .par_iter()
         .filter_map(|module| {
             let Some(file_path) = file_paths.get(module.file_id.0 as usize) else {
@@ -260,5 +257,75 @@ pub fn resolve_all_imports(
                 unused_import_bindings: module.unused_import_bindings.clone(),
             })
         })
-        .collect()
+        .collect();
+
+    // Post-resolution pass: deterministic specifier upgrade.
+    //
+    // With TsconfigDiscovery::Auto, the same bare specifier (e.g., `preact/hooks`)
+    // may resolve to InternalModule from files under a tsconfig with path aliases
+    // but NpmPackage from files without such aliases. The parallel resolution cache
+    // makes the per-file result depend on which thread resolved first (non-deterministic).
+    //
+    // To fix this: scan all resolved imports/re-exports to find bare specifiers where
+    // ANY file resolved to InternalModule. For those specifiers, upgrade all NpmPackage
+    // results to InternalModule. This is correct because if any tsconfig context maps
+    // a specifier to a project source file, that source file IS the origin of the
+    // package — all imports of that specifier reference the same source.
+    //
+    // Note: if two tsconfigs map the same specifier to different FileIds, the first
+    // one encountered (by module order = FileId order) wins. This is deterministic
+    // but may be imprecise for that edge case — both files get connected regardless.
+    let mut specifier_upgrades: FxHashMap<String, FileId> = FxHashMap::default();
+    for module in &resolved {
+        for imp in module
+            .resolved_imports
+            .iter()
+            .chain(module.resolved_dynamic_imports.iter())
+        {
+            if is_bare_specifier(&imp.info.source)
+                && let ResolveResult::InternalModule(file_id) = &imp.target
+            {
+                specifier_upgrades
+                    .entry(imp.info.source.clone())
+                    .or_insert(*file_id);
+            }
+        }
+        for re in &module.re_exports {
+            if is_bare_specifier(&re.info.source)
+                && let ResolveResult::InternalModule(file_id) = &re.target
+            {
+                specifier_upgrades
+                    .entry(re.info.source.clone())
+                    .or_insert(*file_id);
+            }
+        }
+    }
+
+    if specifier_upgrades.is_empty() {
+        return resolved;
+    }
+
+    // Apply upgrades: replace NpmPackage with InternalModule for matched specifiers
+    for module in &mut resolved {
+        for imp in module
+            .resolved_imports
+            .iter_mut()
+            .chain(module.resolved_dynamic_imports.iter_mut())
+        {
+            if matches!(imp.target, ResolveResult::NpmPackage(_))
+                && let Some(&file_id) = specifier_upgrades.get(&imp.info.source)
+            {
+                imp.target = ResolveResult::InternalModule(file_id);
+            }
+        }
+        for re in &mut module.re_exports {
+            if matches!(re.target, ResolveResult::NpmPackage(_))
+                && let Some(&file_id) = specifier_upgrades.get(&re.info.source)
+            {
+                re.target = ResolveResult::InternalModule(file_id);
+            }
+        }
+    }
+
+    resolved
 }

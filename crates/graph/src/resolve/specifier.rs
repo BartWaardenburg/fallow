@@ -59,42 +59,47 @@ pub(super) fn resolve_specifier(
         return ResolveResult::ExternalFile(PathBuf::from(specifier));
     }
 
-    // Fast path for bare specifiers: check cache first to avoid repeated resolver work.
-    // Path aliases (e.g., `@/components`, `~/lib`) are excluded from caching because
-    // they may resolve differently depending on the importing file's tsconfig context.
+    // Bare specifier classification (used for fallback logic below).
+    // No cache lookup — per-file tsconfig path aliases (TsconfigDiscovery::Auto) can
+    // resolve the same bare specifier to different targets. A deterministic post-resolution
+    // pass in resolve_all_imports upgrades NpmPackage → InternalModule instead.
     let is_bare = is_bare_specifier(specifier);
     let is_alias = is_path_alias(specifier);
-    if is_bare
-        && !is_alias
-        && let Some(cached) = ctx.bare_cache.get(specifier)
-    {
-        return cached;
-    }
 
     // Use resolve_file instead of resolve so that TsconfigDiscovery::Auto works.
     // oxc_resolver's resolve() ignores Auto tsconfig discovery — only resolve_file()
     // walks up from the importing file to find the nearest tsconfig.json and apply
     // its path aliases (e.g., @/ → src/).
     //
-    // Track whether the resolver succeeded to decide caching strategy. When resolution
-    // fails, the specifier might be a tsconfig path alias (e.g., `@bazam/shared-types`)
-    // that `is_path_alias` didn't detect (lowercase scoped package). Caching the
-    // `NpmPackage` fallback would poison the cache — all subsequent files would skip
-    // resolution and use the wrong result, even if their tsconfig context can resolve it.
-    let (result, resolver_succeeded) = match ctx.resolver.resolve_file(from_file, specifier) {
+    match ctx.resolver.resolve_file(from_file, specifier) {
         Ok(resolved) => {
             let resolved_path = resolved.path();
             // Try raw path lookup first (avoids canonicalize syscall in most cases)
             if let Some(&file_id) = ctx.raw_path_to_id.get(resolved_path) {
-                let result = ResolveResult::InternalModule(file_id);
-                // Cache successful resolution for reuse by other files
-                if is_bare && !is_alias {
-                    ctx.bare_cache.insert(specifier.to_string(), result.clone());
-                }
-                return result;
+                return ResolveResult::InternalModule(file_id);
             }
+
+            // Fast path for bare specifiers resolving to node_modules: if the resolved
+            // path is in node_modules (but not pnpm's .pnpm virtual store) and the
+            // package is not a workspace package, skip the expensive canonicalize()
+            // syscall and go directly to NpmPackage. Workspace packages need the full
+            // fallback chain (source fallback, pnpm fallback) to map dist→src.
+            // Note: the byte pattern check handles Unix and Windows separators separately.
+            // Paths with mixed separators fall through to canonicalize() (perf-only cost).
+            if is_bare
+                && !resolved_path
+                    .as_os_str()
+                    .as_encoded_bytes()
+                    .windows(7)
+                    .any(|w| w == b"/.pnpm/" || w == b"\\.pnpm\\")
+                && let Some(pkg_name) = extract_package_name_from_node_modules_path(resolved_path)
+                && !ctx.workspace_roots.contains_key(pkg_name.as_str())
+            {
+                return ResolveResult::NpmPackage(pkg_name);
+            }
+
             // Fall back to canonical path lookup
-            let result = match resolved_path.canonicalize() {
+            match resolved_path.canonicalize() {
                 Ok(canonical) => {
                     if let Some(&file_id) = ctx.path_to_id.get(canonical.as_path()) {
                         ResolveResult::InternalModule(file_id)
@@ -132,11 +137,10 @@ pub(super) fn resolve_specifier(
                         ResolveResult::ExternalFile(resolved_path.to_path_buf())
                     }
                 }
-            };
-            (result, true)
+            }
         }
         Err(_) => {
-            let result = if is_alias {
+            if is_alias {
                 // Try plugin-provided path aliases before giving up.
                 // These substitute import prefixes (e.g., `~/` → `app/`) and re-resolve
                 // as relative imports from the project root.
@@ -152,20 +156,7 @@ pub(super) fn resolve_specifier(
                 ResolveResult::NpmPackage(pkg_name)
             } else {
                 ResolveResult::Unresolvable(specifier.to_string())
-            };
-            (result, false)
+            }
         }
-    };
-
-    // Cache bare specifier results only when the resolver succeeded.
-    // When resolver.resolve_file returned Ok, the result is authoritative — it either
-    // found the file in node_modules (NpmPackage) or via tsconfig paths (InternalModule).
-    // When it returned Err, the NpmPackage fallback is a guess — another file's tsconfig
-    // context might resolve the same specifier to an internal module. Caching that guess
-    // would prevent correct resolution for all subsequent files.
-    if is_bare && !is_alias && resolver_succeeded {
-        ctx.bare_cache.insert(specifier.to_string(), result.clone());
     }
-
-    result
 }

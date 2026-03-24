@@ -22,9 +22,6 @@ oxc_span = { workspace = true }
 # Parallelism
 rayon = { workspace = true }
 
-# Concurrent data structures
-dashmap = { workspace = true }
-
 # File system (glob matching for dynamic import patterns)
 globset = { workspace = true }
 

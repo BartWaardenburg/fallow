@@ -62,6 +62,27 @@ impl ModuleGraph {
                     // named imports other modules make from this barrel and propagate each
                     // to the matching export in the source module.
 
+                    // Entry point barrels with star re-exports: all source exports are
+                    // transitively exposed to external consumers — mark them as used.
+                    if self.modules[barrel_idx].is_entry_point {
+                        let source = &mut self.modules[source_idx];
+                        for export in &mut source.exports {
+                            // `export *` does not re-export the default export per ES spec.
+                            if matches!(export.name, ExportName::Default) {
+                                continue;
+                            }
+                            if export.references.iter().all(|r| r.from_file != barrel_id) {
+                                export.references.push(SymbolReference {
+                                    from_file: barrel_id,
+                                    kind: ReferenceKind::ReExport,
+                                    import_span: oxc_span::Span::new(0, 0),
+                                });
+                                changed = true;
+                            }
+                        }
+                        continue;
+                    }
+
                     // Collect named imports that target the barrel from ALL edges
                     let barrel_file_id = self.modules[barrel_idx].file_id;
                     let named_refs: Vec<(String, SymbolReference)> = self
@@ -160,6 +181,36 @@ impl ModuleGraph {
                     };
 
                     if refs_on_barrel.is_empty() {
+                        // Entry point barrels' re-exports are consumed externally (not
+                        // tracked in the graph). Synthesize a ReExport reference so the
+                        // source export is correctly marked as used.
+                        if self.modules[barrel_idx].is_entry_point {
+                            let synthetic_ref = SymbolReference {
+                                from_file: barrel_id,
+                                kind: ReferenceKind::ReExport,
+                                import_span: oxc_span::Span::new(0, 0),
+                            };
+                            let source = &mut self.modules[source_idx];
+                            let target_exports: Vec<usize> = source
+                                .exports
+                                .iter()
+                                .enumerate()
+                                .filter(|(_, e)| e.name.matches_str(imported_name))
+                                .map(|(i, _)| i)
+                                .collect();
+                            for export_idx in target_exports {
+                                if source.exports[export_idx]
+                                    .references
+                                    .iter()
+                                    .all(|r| r.from_file != barrel_id)
+                                {
+                                    source.exports[export_idx]
+                                        .references
+                                        .push(synthetic_ref.clone());
+                                    changed = true;
+                                }
+                            }
+                        }
                         continue;
                     }
 
@@ -983,6 +1034,444 @@ mod tests {
         assert!(
             !src_foo.references.is_empty(),
             "source's foo should be referenced (propagated through 2-level chain)"
+        );
+    }
+
+    #[test]
+    fn entry_point_named_re_export_propagates_to_source() {
+        // Bug fix: entry point barrels that re-export from a source file should
+        // propagate "used" status to the source, even with zero in-graph consumers.
+        // The entry point's exports are consumed externally.
+        let files = vec![
+            DiscoveredFile {
+                id: FileId(0),
+                path: PathBuf::from("/project/src/index.js"),
+                size_bytes: 100,
+            },
+            DiscoveredFile {
+                id: FileId(1),
+                path: PathBuf::from("/project/src/render.js"),
+                size_bytes: 200,
+            },
+        ];
+
+        let entry_points = vec![EntryPoint {
+            path: PathBuf::from("/project/src/index.js"),
+            source: EntryPointSource::PackageJsonMain,
+        }];
+
+        let resolved_modules = vec![
+            // index.js (entry point) re-exports render and hydrate from ./render
+            ResolvedModule {
+                file_id: FileId(0),
+                path: PathBuf::from("/project/src/index.js"),
+                exports: vec![],
+                re_exports: vec![
+                    ResolvedReExport {
+                        info: fallow_types::extract::ReExportInfo {
+                            source: "./render".to_string(),
+                            imported_name: "render".to_string(),
+                            exported_name: "render".to_string(),
+                            is_type_only: false,
+                        },
+                        target: ResolveResult::InternalModule(FileId(1)),
+                    },
+                    ResolvedReExport {
+                        info: fallow_types::extract::ReExportInfo {
+                            source: "./render".to_string(),
+                            imported_name: "hydrate".to_string(),
+                            exported_name: "hydrate".to_string(),
+                            is_type_only: false,
+                        },
+                        target: ResolveResult::InternalModule(FileId(1)),
+                    },
+                ],
+                resolved_imports: vec![],
+                resolved_dynamic_imports: vec![],
+                resolved_dynamic_patterns: vec![],
+                member_accesses: vec![],
+                whole_object_uses: vec![],
+                has_cjs_exports: false,
+                unused_import_bindings: vec![],
+            },
+            // render.js exports render and hydrate (no one imports them directly)
+            ResolvedModule {
+                file_id: FileId(1),
+                path: PathBuf::from("/project/src/render.js"),
+                exports: vec![
+                    fallow_types::extract::ExportInfo {
+                        name: ExportName::Named("render".to_string()),
+                        local_name: Some("render".to_string()),
+                        is_type_only: false,
+                        is_public: false,
+                        span: oxc_span::Span::new(0, 30),
+                        members: vec![],
+                    },
+                    fallow_types::extract::ExportInfo {
+                        name: ExportName::Named("hydrate".to_string()),
+                        local_name: Some("hydrate".to_string()),
+                        is_type_only: false,
+                        is_public: false,
+                        span: oxc_span::Span::new(35, 65),
+                        members: vec![],
+                    },
+                ],
+                re_exports: vec![],
+                resolved_imports: vec![],
+                resolved_dynamic_imports: vec![],
+                resolved_dynamic_patterns: vec![],
+                member_accesses: vec![],
+                whole_object_uses: vec![],
+                has_cjs_exports: false,
+                unused_import_bindings: vec![],
+            },
+        ];
+
+        let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
+
+        // The entry point itself should be marked as such
+        assert!(graph.modules[0].is_entry_point);
+
+        // render.js exports should have synthetic references from the entry point
+        let render_module = &graph.modules[1];
+        let render_export = render_module
+            .exports
+            .iter()
+            .find(|e| e.name.to_string() == "render")
+            .expect("render.js should have render export");
+        assert!(
+            !render_export.references.is_empty(),
+            "render should be marked as used via entry point re-export"
+        );
+
+        let hydrate_export = render_module
+            .exports
+            .iter()
+            .find(|e| e.name.to_string() == "hydrate")
+            .expect("render.js should have hydrate export");
+        assert!(
+            !hydrate_export.references.is_empty(),
+            "hydrate should be marked as used via entry point re-export"
+        );
+    }
+
+    #[test]
+    fn entry_point_star_re_export_propagates_to_source() {
+        // Entry point with `export * from './source'` should mark all source exports as used.
+        let files = vec![
+            DiscoveredFile {
+                id: FileId(0),
+                path: PathBuf::from("/project/src/index.js"),
+                size_bytes: 100,
+            },
+            DiscoveredFile {
+                id: FileId(1),
+                path: PathBuf::from("/project/src/utils.js"),
+                size_bytes: 200,
+            },
+        ];
+
+        let entry_points = vec![EntryPoint {
+            path: PathBuf::from("/project/src/index.js"),
+            source: EntryPointSource::PackageJsonMain,
+        }];
+
+        let resolved_modules = vec![
+            ResolvedModule {
+                file_id: FileId(0),
+                path: PathBuf::from("/project/src/index.js"),
+                exports: vec![],
+                re_exports: vec![ResolvedReExport {
+                    info: fallow_types::extract::ReExportInfo {
+                        source: "./utils".to_string(),
+                        imported_name: "*".to_string(),
+                        exported_name: "*".to_string(),
+                        is_type_only: false,
+                    },
+                    target: ResolveResult::InternalModule(FileId(1)),
+                }],
+                resolved_imports: vec![],
+                resolved_dynamic_imports: vec![],
+                resolved_dynamic_patterns: vec![],
+                member_accesses: vec![],
+                whole_object_uses: vec![],
+                has_cjs_exports: false,
+                unused_import_bindings: vec![],
+            },
+            ResolvedModule {
+                file_id: FileId(1),
+                path: PathBuf::from("/project/src/utils.js"),
+                exports: vec![
+                    fallow_types::extract::ExportInfo {
+                        name: ExportName::Named("foo".to_string()),
+                        local_name: Some("foo".to_string()),
+                        is_type_only: false,
+                        is_public: false,
+                        span: oxc_span::Span::new(0, 20),
+                        members: vec![],
+                    },
+                    fallow_types::extract::ExportInfo {
+                        name: ExportName::Named("bar".to_string()),
+                        local_name: Some("bar".to_string()),
+                        is_type_only: false,
+                        is_public: false,
+                        span: oxc_span::Span::new(25, 45),
+                        members: vec![],
+                    },
+                ],
+                re_exports: vec![],
+                resolved_imports: vec![],
+                resolved_dynamic_imports: vec![],
+                resolved_dynamic_patterns: vec![],
+                member_accesses: vec![],
+                whole_object_uses: vec![],
+                has_cjs_exports: false,
+                unused_import_bindings: vec![],
+            },
+        ];
+
+        let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
+
+        let utils_module = &graph.modules[1];
+        let foo = utils_module
+            .exports
+            .iter()
+            .find(|e| e.name.to_string() == "foo")
+            .expect("utils should have foo export");
+        assert!(
+            !foo.references.is_empty(),
+            "foo should be marked as used via entry point star re-export"
+        );
+
+        let bar = utils_module
+            .exports
+            .iter()
+            .find(|e| e.name.to_string() == "bar")
+            .expect("utils should have bar export");
+        assert!(
+            !bar.references.is_empty(),
+            "bar should be marked as used via entry point star re-export"
+        );
+    }
+
+    #[test]
+    fn entry_point_star_re_export_does_not_mark_default_as_used() {
+        // `export *` does not re-export the default export per ES spec.
+        let files = vec![
+            DiscoveredFile {
+                id: FileId(0),
+                path: PathBuf::from("/project/src/index.js"),
+                size_bytes: 100,
+            },
+            DiscoveredFile {
+                id: FileId(1),
+                path: PathBuf::from("/project/src/utils.js"),
+                size_bytes: 200,
+            },
+        ];
+
+        let entry_points = vec![EntryPoint {
+            path: PathBuf::from("/project/src/index.js"),
+            source: EntryPointSource::PackageJsonMain,
+        }];
+
+        let resolved_modules = vec![
+            ResolvedModule {
+                file_id: FileId(0),
+                path: PathBuf::from("/project/src/index.js"),
+                exports: vec![],
+                re_exports: vec![ResolvedReExport {
+                    info: fallow_types::extract::ReExportInfo {
+                        source: "./utils".to_string(),
+                        imported_name: "*".to_string(),
+                        exported_name: "*".to_string(),
+                        is_type_only: false,
+                    },
+                    target: ResolveResult::InternalModule(FileId(1)),
+                }],
+                resolved_imports: vec![],
+                resolved_dynamic_imports: vec![],
+                resolved_dynamic_patterns: vec![],
+                member_accesses: vec![],
+                whole_object_uses: vec![],
+                has_cjs_exports: false,
+                unused_import_bindings: vec![],
+            },
+            ResolvedModule {
+                file_id: FileId(1),
+                path: PathBuf::from("/project/src/utils.js"),
+                exports: vec![
+                    fallow_types::extract::ExportInfo {
+                        name: ExportName::Named("foo".to_string()),
+                        local_name: Some("foo".to_string()),
+                        is_type_only: false,
+                        is_public: false,
+                        span: oxc_span::Span::new(0, 20),
+                        members: vec![],
+                    },
+                    fallow_types::extract::ExportInfo {
+                        name: ExportName::Default,
+                        local_name: None,
+                        is_type_only: false,
+                        is_public: false,
+                        span: oxc_span::Span::new(25, 45),
+                        members: vec![],
+                    },
+                ],
+                re_exports: vec![],
+                resolved_imports: vec![],
+                resolved_dynamic_imports: vec![],
+                resolved_dynamic_patterns: vec![],
+                member_accesses: vec![],
+                whole_object_uses: vec![],
+                has_cjs_exports: false,
+                unused_import_bindings: vec![],
+            },
+        ];
+
+        let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
+
+        let utils_module = &graph.modules[1];
+        let foo = utils_module
+            .exports
+            .iter()
+            .find(|e| e.name.to_string() == "foo")
+            .expect("utils should have foo export");
+        assert!(
+            !foo.references.is_empty(),
+            "named export should be marked as used via star re-export"
+        );
+
+        let default_export = utils_module
+            .exports
+            .iter()
+            .find(|e| matches!(e.name, ExportName::Default))
+            .expect("utils should have default export");
+        assert!(
+            default_export.references.is_empty(),
+            "default export should NOT be marked as used — export * does not re-export default"
+        );
+    }
+
+    #[test]
+    fn entry_point_multi_level_named_re_export_chain() {
+        // entry.ts (entry point) re-exports from barrel.ts, which re-exports from source.ts.
+        // No internal consumer imports any of these — only the entry point exposes them.
+        let files = vec![
+            DiscoveredFile {
+                id: FileId(0),
+                path: PathBuf::from("/project/src/index.ts"),
+                size_bytes: 100,
+            },
+            DiscoveredFile {
+                id: FileId(1),
+                path: PathBuf::from("/project/src/barrel.ts"),
+                size_bytes: 50,
+            },
+            DiscoveredFile {
+                id: FileId(2),
+                path: PathBuf::from("/project/src/source.ts"),
+                size_bytes: 50,
+            },
+        ];
+
+        let entry_points = vec![EntryPoint {
+            path: PathBuf::from("/project/src/index.ts"),
+            source: EntryPointSource::PackageJsonMain,
+        }];
+
+        let resolved_modules = vec![
+            // index.ts (entry point) re-exports foo from barrel.ts
+            ResolvedModule {
+                file_id: FileId(0),
+                path: PathBuf::from("/project/src/index.ts"),
+                exports: vec![],
+                re_exports: vec![ResolvedReExport {
+                    info: fallow_types::extract::ReExportInfo {
+                        source: "./barrel".to_string(),
+                        imported_name: "foo".to_string(),
+                        exported_name: "foo".to_string(),
+                        is_type_only: false,
+                    },
+                    target: ResolveResult::InternalModule(FileId(1)),
+                }],
+                resolved_imports: vec![],
+                resolved_dynamic_imports: vec![],
+                resolved_dynamic_patterns: vec![],
+                member_accesses: vec![],
+                whole_object_uses: vec![],
+                has_cjs_exports: false,
+                unused_import_bindings: vec![],
+            },
+            // barrel.ts re-exports foo from source.ts (not an entry point)
+            ResolvedModule {
+                file_id: FileId(1),
+                path: PathBuf::from("/project/src/barrel.ts"),
+                exports: vec![],
+                re_exports: vec![ResolvedReExport {
+                    info: fallow_types::extract::ReExportInfo {
+                        source: "./source".to_string(),
+                        imported_name: "foo".to_string(),
+                        exported_name: "foo".to_string(),
+                        is_type_only: false,
+                    },
+                    target: ResolveResult::InternalModule(FileId(2)),
+                }],
+                resolved_imports: vec![],
+                resolved_dynamic_imports: vec![],
+                resolved_dynamic_patterns: vec![],
+                member_accesses: vec![],
+                whole_object_uses: vec![],
+                has_cjs_exports: false,
+                unused_import_bindings: vec![],
+            },
+            // source.ts has the actual export
+            ResolvedModule {
+                file_id: FileId(2),
+                path: PathBuf::from("/project/src/source.ts"),
+                exports: vec![fallow_types::extract::ExportInfo {
+                    name: ExportName::Named("foo".to_string()),
+                    local_name: Some("foo".to_string()),
+                    is_type_only: false,
+                    is_public: false,
+                    span: oxc_span::Span::new(0, 20),
+                    members: vec![],
+                }],
+                re_exports: vec![],
+                resolved_imports: vec![],
+                resolved_dynamic_imports: vec![],
+                resolved_dynamic_patterns: vec![],
+                member_accesses: vec![],
+                whole_object_uses: vec![],
+                has_cjs_exports: false,
+                unused_import_bindings: vec![],
+            },
+        ];
+
+        let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
+
+        // barrel.ts should have a synthetic ExportSymbol for foo with a reference
+        let barrel = &graph.modules[1];
+        let barrel_foo = barrel
+            .exports
+            .iter()
+            .find(|e| e.name.to_string() == "foo")
+            .expect("barrel should have synthetic ExportSymbol for foo");
+        assert!(
+            !barrel_foo.references.is_empty(),
+            "barrel's foo should be referenced (from entry point synthetic ref)"
+        );
+
+        // source.ts's foo should be referenced through the 2-level chain
+        let source = &graph.modules[2];
+        let source_foo = source
+            .exports
+            .iter()
+            .find(|e| e.name.to_string() == "foo")
+            .expect("source should have foo export");
+        assert!(
+            !source_foo.references.is_empty(),
+            "source's foo should be referenced through entry-point → barrel → source chain"
         );
     }
 }
