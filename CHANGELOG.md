@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-03-24
+
+### Added
+- Hotspot analysis (`fallow health --hotspots`): combines git churn history with complexity data to surface the riskiest files in a codebase. Score formula: `normalized_churn × normalized_complexity × 100` (0-100 scale). Recency-weighted commit count with exponential decay (half-life 90 days). Trend detection labels files as accelerating, stable, or cooling.
+  - `--since` accepts durations (`6m`, `90d`, `1y`, `2w`) and ISO dates (`2025-06-01`), default 6 months
+  - `--min-commits` threshold (default 3) excludes low-activity files from ranking
+  - Fan-in shown as separate "blast radius" column
+  - Shallow clone detection with warning
+  - Available in all output formats (human, JSON, compact, markdown)
+  - MCP `check_health` tool supports `hotspots`, `since`, and `min_commits` parameters
+
+### Changed
+- Health human output uses two-line format for hotspots and file scores: score/MI on first line with path (dimmed directory, bold filename), metrics on indented second line
+- Renamed "lines" to "churn" in hotspot output across all formats to avoid ambiguity with file length
+
+### Fixed
+- MCP tests on Windows: skip `/bin/sh`-dependent tests on non-Unix platforms
+- Typo checker false positive and Windows path separator in list tests
+
 ## [1.6.1] - 2026-03-24
 
 ### Added
@@ -287,6 +306,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
 [Unreleased]: https://github.com/fallow-rs/fallow/compare/v1.6.1...HEAD
+[1.7.0]: https://github.com/fallow-rs/fallow/compare/v1.6.1...v1.7.0
 [1.6.1]: https://github.com/fallow-rs/fallow/compare/v1.6.0...v1.6.1
 [1.6.0]: https://github.com/fallow-rs/fallow/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/fallow-rs/fallow/compare/v1.4.0...v1.5.0
