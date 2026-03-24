@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1774392844952,
+  "lastUpdate": 1774393158006,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
@@ -980,6 +980,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/9cfedd96d8195004b83382bd3cf7f33d664c7c8b"
         },
         "date": 1774392843975,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 90.4,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "5d4e06f89e7bb8da14741c36b1f5490ceb5b30ba",
+          "message": "chore: apply cargo fmt to test code from refactoring agents",
+          "timestamp": "2026-03-24T23:58:24+01:00",
+          "tree_id": "22eb7bda7c26dbb7a4490be0e478e6454a3e7ff9",
+          "url": "https://github.com/fallow-rs/fallow/commit/5d4e06f89e7bb8da14741c36b1f5490ceb5b30ba"
+        },
+        "date": 1774393157064,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
