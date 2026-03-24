@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1774354881460,
+  "lastUpdate": 1774356038079,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
@@ -791,6 +791,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 3982,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "fa929d6334e8c2286869ac75785133bcefc5f500",
+          "message": "fix: typo checker false positive and Windows path separator in list tests\n\n- Rename `fo` variable to `fan_out` in markdown health report to avoid\n  typos CI flagging it as a misspelling\n- Use platform-aware path assertions in list_tests.rs: accept both\n  forward and backslash separators, and Windows UNC/drive-letter paths",
+          "timestamp": "2026-03-24T13:39:11+01:00",
+          "tree_id": "55b16625b9a7a591d2fccabd4a89d5fcdf3f3649",
+          "url": "https://github.com/fallow-rs/fallow/commit/fa929d6334e8c2286869ac75785133bcefc5f500"
+        },
+        "date": 1774356037537,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 3051897,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 12178,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 428146,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 3986,
             "unit": "allocations"
           }
         ]
