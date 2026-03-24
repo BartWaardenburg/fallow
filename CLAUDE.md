@@ -1,8 +1,6 @@
 # Fallow - Rust-native codebase analyzer for TypeScript/JavaScript
 
-## What is this?
-
-Fallow finds unused files, exports, dependencies, types, enum members, class members, unresolved imports, unlisted deps, duplicate exports, and circular dependencies in JS/TS projects. It also detects code duplication. It's a Rust alternative to [knip](https://github.com/webpro-nl/knip) that is 6-46x faster than knip v5 (3-18x faster than knip v6) depending on project size by leveraging the Oxc parser ecosystem.
+Fallow finds unused files, exports, dependencies, types, enum members, class members, unresolved imports, unlisted deps, duplicate exports, circular dependencies, and code duplication in JS/TS projects. Rust alternative to [knip](https://github.com/webpro-nl/knip) built on the Oxc parser ecosystem.
 
 ## Project structure
 
@@ -35,79 +33,6 @@ tests/
 
 Pipeline: Config → File Discovery → Incremental Parallel Parsing (rayon + oxc_parser + oxc_semantic, cache-aware) → Script Analysis → Module Resolution (oxc_resolver) → Graph Construction → Re-export Chain Resolution → Dead Code Detection → Reporting
 
-Key modules in fallow-types:
-- `discover` — `DiscoveredFile`, `FileId`, `EntryPoint`, `EntryPointSource`
-- `extract` — `ModuleInfo`, `ExportInfo`, `ImportInfo`, `ReExportInfo`, `MemberInfo`, `DynamicImportInfo`, `ParseResult`
-- `results` — `AnalysisResults` and all issue types
-- `suppress` — Inline suppression comment types and issue kind definitions
-
-Key modules in fallow-extract:
-- `lib.rs` — Public API: `parse_all_files()` (parallel rayon dispatch, cache-aware), returns `ParseResult` with modules + cache hit/miss statistics
-- `visitor.rs` — Oxc AST visitor extracting imports, exports, re-exports, members, whole-object uses, dynamic import patterns, namespace destructuring (`const { a, b } = ns` → member accesses)
-- `sfc.rs` — Vue/Svelte SFC script extraction (HTML comment filtering, `<script src="...">` support, `lang="ts"`/`lang="tsx"` detection)
-- `astro.rs` — Astro frontmatter extraction between `---` delimiters
-- `mdx.rs` — MDX import/export extraction with multi-line brace tracking
-- `css.rs` — CSS Module class name extraction (`.module.css`/`.module.scss` → named exports)
-- `parse.rs` — File type dispatcher: routes files to the appropriate parser (JS/TS, SFC, Astro, MDX, CSS). Runs `oxc_semantic` after parsing to detect unused import bindings (imports where the binding is never read in the file).
-- `cache.rs` — Incremental bincode cache with xxh3 hashing. Unchanged files skip AST parsing and load from cache; only changed/new files are parsed. Cache is pruned of stale entries (deleted files) on each run.
-- `tests/` — Integration tests split by parser type: `js_ts.rs`, `sfc.rs`, `astro.rs`, `mdx.rs`, `css.rs`
-
-Key modules in fallow-graph:
-- `project.rs` — `ProjectState` struct: owns the file registry (stable FileIds sorted by path) and workspace metadata. Foundation for cross-workspace resolution and future incremental analysis.
-- `resolve.rs` — oxc_resolver-based import resolution + glob-based dynamic import pattern resolution + DashMap-backed bare specifier cache for lock-free parallel lookups. Cross-workspace imports resolve through node_modules symlinks via canonicalize. Pnpm content-addressable store detection: `.pnpm` virtual store paths are mapped back to workspace source files for injected dependencies. React Native platform extensions (`.web`/`.ios`/`.android`/`.native`) resolved via `resolve_file` fallback. Per-file tsconfig path alias resolution (`TsconfigDiscovery::Auto`) finds the nearest tsconfig.json for each file.
-- `graph/` — Module graph, split into focused submodules:
-  - `mod.rs` — `ModuleGraph` struct, `build()` orchestrator, public query methods
-  - `types.rs` — `ModuleNode`, `ReExportEdge`, `ExportSymbol`, `SymbolReference`, `ReferenceKind`
-  - `build.rs` — Phase 1 (edge construction) and Phase 2 (reference population)
-  - `reachability.rs` — Phase 3 (BFS reachability from entry points)
-  - `re_exports.rs` — Phase 4 (re-export chain propagation through barrel files)
-  - `cycles.rs` — Circular dependency detection (Tarjan's SCC + elementary cycle enumeration)
-
-Key modules in fallow-core (re-exports fallow-extract, fallow-graph for backwards compatibility):
-- `discover.rs` — File walking + entry point detection (also workspace-aware). FileIds are assigned deterministically by path sort order (not size) for stability across runs. Hidden directory allowlist (`.storybook`, `.well-known`, `.changeset`, `.github`) — other dotdirs are skipped. Only root-level `build/` is ignored (not nested `test/build/` etc.).
-- `analyze/` — Module split into focused submodules:
-  - `mod.rs` — Orchestration: runs all detectors, collects `AnalysisResults`
-  - `predicates.rs` — Lookup tables and helper predicates for detection logic
-  - `unused_files.rs` — Unused file detection
-  - `unused_exports.rs` — Unused export/type/duplicate export detection
-  - `unused_deps.rs` — Unused dependencies, unlisted dependencies, unresolved imports, type-only dependency detection
-  - `unused_members.rs` — Unused enum/class member detection
-- `scripts.rs` — Shell command parser for package.json scripts: extracts binary names (mapped to package names for dependency usage detection), `--config` args (entry points), and file path args; handles env wrappers, package manager runners, node runners. Shell operators (`&&`, `||`, `;`, `|`, `&`) are split correctly.
-- `suppress.rs` — Inline suppression comment parsing (`fallow-ignore-next-line`, `fallow-ignore-file`); 12 issue kinds including `code-duplication` and `circular-dependency`
-- `duplicates/families.rs` — Clone family grouping (groups by shared file set) and refactoring suggestion generation (extract function/module)
-- `duplicates/normalize.rs` — Configurable token normalization with `ResolvedNormalization`: mode defaults (strict/mild/weak/semantic) merged with user-specified overrides (`ignore_identifiers`, `ignore_string_values`, `ignore_numeric_values`)
-- `duplicates/tokenize.rs` — AST-based tokenizer with optional type annotation stripping (`strip_types` flag) for cross-language clone detection between `.ts` and `.js` files
-- `cross_reference.rs` — Cross-references duplication findings with dead code analysis: identifies clone instances that are also unused (in unused files or overlapping unused exports) as high-priority combined findings
-- `plugins/` — Plugin system: `Plugin` trait, registry (84 built-in plugins, ~33 with AST-based config parsing); `config_parser.rs` provides Oxc-based helpers for extracting imports, string arrays, object keys, require() sources, and string-or-array values from JS/TS/JSON config files; `tooling.rs` contains general tooling dependency detection (`is_known_tooling_dependency`) for dev deps not tied to any single plugin
-- `trace.rs` — Debug & trace tooling: trace export usage (`trace_export`), file edges (`trace_file`), dependency usage (`trace_dependency`), clone location (`trace_clone`), and `PipelineTimings` struct for `--performance` output
-- `progress.rs` — indicatif progress bars
-- `errors.rs` — Error types
-
-Key modules in fallow-cli:
-- `main.rs` — CLI definition (clap) + command dispatch. Each subcommand is in its own module.
-- `check.rs` — `check` command: analysis pipeline, tracing, filtering, output
-- `dupes.rs` — `dupes` command: duplication detection, baseline, cross-reference
-- `watch.rs` — `watch` command: file watcher with debounced re-analysis
-- `fix/` — `fix` command, split into focused submodules:
-  - `mod.rs` — `FixOptions`, `run_fix` orchestrator
-  - `io.rs` — Atomic file write helper (shared by all fix types)
-  - `exports.rs` — Unused export removal
-  - `enum_members.rs` — Unused enum member removal
-  - `deps.rs` — Unused dependency removal from package.json
-- `init.rs` — `init` command: generate config files
-- `list.rs` — `list` command: show plugins, entry points, files
-- `schema.rs` — `schema` + `config-schema` + `plugin-schema` commands
-- `validate.rs` — Input validation (control characters, path sanitization)
-- `report/` — Output formatting: `mod.rs` (format dispatch), `human.rs`, `json.rs`, `sarif.rs`, `compact.rs`, `markdown.rs`
-- `migrate/` — Config migration: `mod.rs` (orchestration), `knip.rs` (knip config), `jscpd.rs` (jscpd config)
-
-Key modules in fallow-lsp:
-- `main.rs` — LSP server setup, `LanguageServer` trait impl, event handling
-- `diagnostics.rs` — Diagnostic generation for all issue types
-- `code_actions.rs` — Quick-fix and refactor code actions
-- `code_lens.rs` — Reference count Code Lens above export declarations
-- `hover.rs` — Hover information showing export usage, unused status, and duplicate block locations
-
 ## Building & Testing
 
 ```bash
@@ -119,253 +44,31 @@ cargo fmt --all -- --check
 cargo run -- check              # Run analysis
 cargo run -- watch              # Watch mode
 cargo run -- fix --dry-run      # Auto-fix preview
-
-# Benchmarks (see BENCHMARKS.md for methodology)
-cargo bench --bench analysis                           # Standard benchmarks
-cargo bench --bench large_analysis                     # 1000+ and 5000+ file benchmarks only
-cd benchmarks && npm run generate && npm run bench     # Comparative benchmarks vs knip
-cd benchmarks && npm run generate:dupes && npm run bench:dupes  # vs jscpd
-cd benchmarks && npm run generate:circular && npm run bench:circular  # vs madge/dpdm
 ```
 
-## Code quality & linting
+## Code conventions
 
-Comprehensive clippy and compiler lint configuration inspired by the Oxc ecosystem:
-
-- **Clippy lint groups**: `all`, `pedantic`, `nursery`, `cargo` (priority -1) with a strategic allow-list for false positives
-- **13 restriction lints**: `dbg_macro`, `todo`, `print_stdout/stderr`, `undocumented_unsafe_blocks`, `unnecessary_safety_comment`, `unused_result_ok`, `infinite_loop`, `self_named_module_files`, `pathbuf_init_then_push`, `empty_drop`, `empty_structs_with_brackets`, `exit`, `get_unwrap`, `rc_buffer`, `rc_mutex`, `clone_on_ref_ptr`
-- **Rust compiler lints**: `unsafe_op_in_unsafe_fn`, `unused_unsafe`, `non_ascii_idents`
-- **`#[expect]` over `#[allow]`**: All clippy suppressions use `#[expect(clippy::...)]` — warns when a suppression becomes unnecessary, preventing dead annotations
-- **Size assertions**: `ModuleNode` (96 bytes), `ModuleInfo` (256 bytes), `ExportInfo`/`ImportInfo` (88 bytes), `Edge` (32 bytes) — prevents accidental struct bloat
-- **Dev profile**: `debug = false` for faster builds, selective `opt-level` for proc-macro crates (`serde_derive`, `clap_derive`) and snapshot test deps (`insta`, `similar`)
-- **CI hardening**: `permissions: {}` deny-all baseline, `git diff --exit-code` to catch uncommitted generated code, `--document-private-items` doc check
-
-## Detection capabilities
-
-1. Unused files, exports, types, dependencies, devDependencies
-2. Unused enum members, class members (structural extraction + whole-object-use heuristics for Object.values/keys/entries, for..in, spread, computed access)
-3. Unresolved imports, unlisted dependencies
-4. Duplicate exports across modules
-5. Re-export chain resolution through barrel files
-6. Vue/Svelte SFC parsing (regex-based `<script>` block extraction, `lang="ts"`/`lang="tsx"` detection, handles `>` in quoted attributes like `generic="T extends Foo<Bar>"`, `<script src="...">` external script support, HTML comment filtering to avoid false matches)
-7. Astro component parsing (frontmatter extraction between `---` delimiters, parsed as TypeScript)
-8. MDX file parsing (line-based import/export statement extraction with multi-line brace tracking, parsed as JSX)
-9. Dynamic import pattern resolution (template literals, string concat, import.meta.glob, require.context → glob matching against discovered files)
-10. Inline suppression comments (`// fallow-ignore-next-line [issue-type]`, `// fallow-ignore-file [issue-type]`) — supports all issue types including `code-duplication`
-11. Script binary analysis (package.json scripts → binary names mapped to packages, `--config` args as entry points, env wrapper/package manager runner handling)
-12. Clone family grouping: groups clone groups sharing the same file set into families with refactoring suggestions (extract function/module)
-13. Duplication baseline support: `--save-baseline` / `--baseline` for incremental CI adoption of duplication thresholds
-14. Production mode (`--production`): excludes test/dev files, only start/build scripts, detects type-only dependencies
-15. Cross-language clone detection (`--cross-language`): strips TypeScript type annotations (parameter types, return types, generics, interfaces, type aliases, `as`/`satisfies` expressions) for `.ts` ↔ `.js` matching
-16. Configurable normalization: fine-grained overrides (`ignore_identifiers`, `ignore_string_values`, `ignore_numeric_values`) on top of detection mode defaults for custom "semantic equivalence" definitions
-17. Dead code × duplication cross-reference (`check --include-dupes`): identifies clone instances in unused files or overlapping unused exports as combined high-priority findings
-18. Debug & trace tooling: `--trace FILE:EXPORT` (trace export usage chain), `--trace-file PATH` (all edges for a file), `--trace-dependency PACKAGE` (where a dep is used), `dupes --trace FILE:LINE` (trace all clones at a location), `--performance` (pipeline timing breakdown). Human and JSON output.
-19. CSS Modules (`.module.css`/`.module.scss`): class names extracted as named exports. Default imports (`import styles from '...'`) resolve member accesses (`styles.className`) to named exports via graph-level narrowing. Handles spread/`Object.values` conservatively.
-20. Package.json `exports` field subpath resolution: cross-workspace imports through exports maps (e.g., `"./utils": "./dist/utils.js"`) resolve correctly. Output directories (`dist/`, `build/`, `out/`, `esm/`, `cjs/`) are mapped back to `src/` equivalents with source extension fallback, including nested output subdirectories (e.g., `dist/esm/utils.mjs` → `src/utils.ts`), since fallow ignores output directories by default.
-21. Pnpm content-addressable store detection: `.pnpm` virtual store paths (e.g., `node_modules/.pnpm/@myorg+ui@1.0.0/node_modules/@myorg/ui/dist/index.js`) are mapped back to workspace source files. Handles injected dependencies, scoped/unscoped packages, and peer dependency suffixes.
-22. Package.json entry point fields: `main`, `module`, `types`, `typings`, `source`, `browser` (string or object), `bin` (string or object), and `exports` (recursive). The `source` field is a common convention for pointing to unbuilt source entry points.
-23. `export *` chain propagation through multi-level barrel files: re-export chains (`a.ts` → `barrel.ts` → `index.ts` via `export *`) are fully resolved so that transitive usage is tracked correctly.
-24. Tsconfig path alias resolution (`TsconfigDiscovery::Auto`): per-file tsconfig discovery resolves path aliases (e.g., `@/utils`) by finding the nearest `tsconfig.json` for each file, supporting monorepos with per-package tsconfig files.
-25. React Native platform extensions: `.web.ts`, `.ios.ts`, `.android.ts`, `.native.ts` variants are resolved alongside standard extensions so platform-specific files are not falsely reported as unused.
-26. Decorated class member skip: class members with decorators (NestJS `@Get()`, Angular `@Input()`, TypeORM `@Column()`, etc.) are not reported as unused, since decorator-driven frameworks consume them via reflection.
-27. Circular dependency detection: Tarjan's SCC algorithm detects import cycles in the module graph. Configurable via `circular-dependencies` rule.
-28. TypeScript project references: workspace discovery from `tsconfig.json` `references` field. Referenced directories are discovered as workspaces (additive with npm/pnpm workspaces), supporting TypeScript composite projects. `oxc_resolver`'s `TsconfigDiscovery::Auto` resolves path aliases through referenced project tsconfigs.
-29. Namespace member detection: `import * as ns from './x'` tracks `ns.foo`, `ns.bar` member accesses to narrow which exports are actually used. Also detects namespace destructuring patterns (`const { foo, bar } = ns`) and rest patterns (`const { foo, ...rest } = ns` → conservative whole-object use). Works with static imports, dynamic imports (`const mod = await import(...)`), and require (`const mod = require(...)`).
-30. Unused import binding detection via `oxc_semantic`: imports where the binding is never read in the importing file (e.g., `import { foo } from './utils'` with `foo` never referenced) are detected via scope-aware symbol analysis. These dead imports don't count as references to the exported symbol, improving unused-export detection precision. Also detects unused namespace imports and unused default imports.
-31. `optionalDependencies` detection: packages listed in `optionalDependencies` are tracked for unused detection (separate from `dependencies`/`devDependencies`). The `unused-optional-dependencies` rule defaults to `error` and is suppressed in production mode.
-32. TypeScript function overload deduplication: `export function foo(): void; export function foo(x: string): string; export function foo(x?: string) {}` is treated as a single export (the implementation), not 3 separate exports. Overload signatures are deduplicated during extraction.
-33. Infrastructure entry point detection: Dockerfiles (`Dockerfile`, `Dockerfile.*`, `*.Dockerfile`), Procfiles, and `fly.toml` are scanned for source file references. `RUN node`, `CMD`, `ENTRYPOINT`, esbuild invocations, `release_command`, and process definitions are parsed to discover entry points for worker processes, migration scripts, and other infrastructure-defined processes. Searches root and common subdirectories (`config/`, `docker/`, `deploy/`).
-34. JSDoc/TSDoc `@public` tag support: exports annotated with `/** @public */` (or `/** @api public */`) are never reported as unused. Designed for library authors whose exports are consumed by external projects. Works with all export types (named, default, class, interface, enum, type alias) and multi-specifier exports (`export { foo, bar }`). Recognized in standard JS/TS files; SFC/Astro/MDX files use text-based suppression instead. Only `/** */` JSDoc block comments are recognized — line comments (`// @public`) are not.
-35. Package.json `imports` field (`#subpath` imports): imports using `#` prefixes (e.g., `import { foo } from '#utils'`) resolve via the `imports` field in the nearest `package.json`. Supports simple mappings (`"#utils": "./src/utils/index.ts"`), wildcard patterns (`"#components/*": "./src/components/*"`), and conditional exports (`"import"`, `"require"`, `"default"`, `"types"`). Resolved via `oxc_resolver`'s native `imports_fields` support. Per-package scoping: each workspace package uses its own `package.json` `imports` field.
-36. Class instance member tracking: `const svc = new MyService(); svc.greet()` correctly tracks `greet` as a used class member. The visitor detects `const x = new Identifier()` patterns and maps subsequent `x.method()` / `x.property` accesses to `Identifier.method` / `Identifier.property`. Also handles whole-object instance patterns (`Object.values(x)`, `{ ...x }`, `for..in`). Scope-unaware (same as namespace binding tracking) — false matches produce false negatives, not false positives.
-
-37. Complexity metrics (`fallow health`): per-function cyclomatic complexity (McCabe, classic variant — counts `if`, `for`, `while`, `do`, `switch case`, `catch`, `?:`, `&&`, `||`, `??`, `&&=`/`||=`/`??=`, `?.`) and cognitive complexity (SonarSource algorithm — structural increments with nesting penalty, boolean operator sequence detection, function scope reset, `?.` NOT counted). Computed in a single-pass `ComplexityVisitor` during the existing parse phase (zero additional parsing cost). Configurable thresholds (default: cyclomatic 20, cognitive 15) via `[health]` config section or `--max-cyclomatic`/`--max-cognitive` CLI flags. Results cached alongside other extraction data.
-
-38. File-level health scores (`fallow health --file-scores`): per-file maintainability index combining complexity density (total cyclomatic / LOC), dead code ratio (fraction of value exports with zero references, excluding type-only exports), and fan-out (logarithmic scaling capped at 15 points). Formula: `100 - (complexity_density × 30) - (dead_code_ratio × 20) - min(ln(fan_out+1) × 4, 15)` clamped to [0, 100]. Zero-function files (barrel/re-export files) are excluded by default. Requires full analysis pipeline (graph + dead code detection). Sorted by maintainability index ascending (worst files first). Available in all output formats (human, JSON, compact, markdown). JSON output includes `file_scores` array and `summary.files_scored`/`summary.average_maintainability`. MCP `check_health` tool supports `file_scores: true` parameter.
-
-## Framework support (84 plugins)
-
-**Frameworks**: Next.js, Nuxt, Remix, SvelteKit, Gatsby, Astro, Angular, React Router, TanStack Router, React Native, Expo, NestJS, Docusaurus, Nitro, VitePress, Sanity, Capacitor, next-intl, Relay, Electron, i18next
-**Bundlers**: Vite, Webpack, Rspack, Rsbuild, Rollup, Rolldown, Tsup, Tsdown, Parcel
-**Testing**: Vitest, Jest, Playwright, Cypress, Mocha, Ava, Storybook, Karma, Cucumber, WebdriverIO
-**Linting & formatting**: ESLint, Biome, Stylelint, Prettier, Oxlint, markdownlint, CSpell, Remark
-**Transpilation & language**: TypeScript, Babel, SWC
-**CSS**: Tailwind, PostCSS
-**Database & ORM**: Prisma, Drizzle, Knex, TypeORM, Kysely
-**Monorepo**: Turborepo, Nx, Changesets, Syncpack
-**CI/CD & release**: Commitlint, Commitizen, semantic-release
-**Deployment**: Wrangler (Cloudflare), Sentry
-**Git hooks**: husky, lint-staged, lefthook, simple-git-hooks
-**Media & assets**: SVGO, SVGR
-**Code generation & docs**: GraphQL Codegen, TypeDoc, openapi-ts, Plop
-**Coverage**: c8, nyc
-**Runtime**: Bun
-**Other**: MSW, nodemon, PM2, dependency-cruiser
-
-- **Plugins** (`crates/core/src/plugins/`) — Single source of truth for all built-in framework support. Each plugin implements the `Plugin` trait with enablers (package.json detection), static patterns (entry points, always-used files, used exports, tooling dependencies), and optional `resolve_config()` for AST-based config parsing via Oxc.
-- **Rich config parsing** — 14 framework plugins have deep `resolve_config()` implementations:
-  - **ESLint**: Legacy plugin/extends/parser short-name resolution, flat config plugin keys, JSON config
-  - **Vite**: rollupOptions.input, lib.entry, optimizeDeps include/exclude, ssr.external/noExternal
-  - **Jest**: preset, setupFiles, globalSetup/Teardown, testMatch, transform, reporters, testEnvironment, watchPlugins, resolver, snapshotSerializers, testRunner, runner, JSON config
-  - **Storybook**: addons, framework (string/object), stories, core.builder, typescript.reactDocgen
-  - **Tailwind**: content globs, plugins (require/strings), presets
-  - **Webpack**: entry (string/array/object), plugins require(), externals, module.rules loader extraction (loader/use/oneOf)
-  - **TypeScript**: extends (string/array TS 5.0+), compilerOptions.types → @types/*, jsxImportSource, compilerOptions.plugins, references[].path, JSONC support
-  - **Babel**: presets/plugins with short-name resolution (e.g. "env" → "@babel/preset-env"), extends, JSON/.babelrc support
-  - **Rollup**: input entries, external deps
-  - **PostCSS**: plugins (object keys, require() calls, string arrays)
-  - **Nuxt**: modules, css, plugins, extends, postcss plugins from `nuxt.config.ts`; path aliases (`~`, `~~`, `#shared`)
-  - **Drizzle**: schema field (string/array/glob/directory → entry points for table/relation/enum exports), out directory, import dependencies
-  - **Angular**: `angular.json` projects.*.architect.build.options.{styles, scripts, main, browser, polyfills} → entry points; peer dependency awareness (rxjs, @angular/common, etc.)
-  - **Nx**: `project.json` targets.*.executor → referenced dependencies (package name extraction from "pkg:executor" format); targets.*.options.{main, tsConfig} → entry points and always-used files
-- **Plugin trait extensions** — `path_aliases()` for framework-specific alias resolution (e.g., Nuxt `~/`, Next.js `@/`); `virtual_module_prefixes()` for framework virtual modules (e.g., Docusaurus `@theme/`, `@docusaurus/`); `TsconfigDiscovery::Auto` for per-file tsconfig path alias resolution across monorepo packages.
-- **External plugins** (`crates/config/src/external_plugin.rs`) — Standalone plugin definitions (JSONC, JSON, TOML) or inline via the `framework` config field. Discovered from: `plugins` config field, `.fallow/plugins/` directory, and `fallow-plugin-*.{jsonc,json,toml}` files in project root. Supports entry points, always-used files, used exports, config patterns, tooling dependencies, and rich `detection` logic (`dependency`, `fileExists`, `all`/`any` combinators). Inline `framework` definitions use the same `ExternalPluginDef` schema and are merged into the plugin pipeline. All formats use camelCase field names. `$schema` field supported for IDE autocomplete in JSONC/JSON. See `docs/plugin-authoring.md` for the full format.
-
-## CLI features
-
-- `check` — analyze with --format (human/json/sarif/compact/markdown), --changed-since, --baseline, --save-baseline, --fail-on-issues, --include-dupes (cross-reference with duplication), issue type filters (--unused-files, --unused-exports, etc.), --trace FILE:EXPORT (trace export usage), --trace-file PATH (trace file edges), --trace-dependency PACKAGE (trace dependency usage)
-- `health` — analyze function complexity (cyclomatic + cognitive), --max-cyclomatic, --max-cognitive, --top N, --sort (cyclomatic/cognitive/lines), --changed-since, --format (human/json/compact/markdown/sarif), --file-scores (per-file maintainability index with fan-in/fan-out/dead-code-ratio/complexity-density). Exit code 1 if any function exceeds thresholds.
-- `dupes` — find code duplication with clone families, refactoring suggestions, --changed-since, --baseline/--save-baseline, --mode (strict/mild/weak/semantic), --min-tokens, --min-lines, --threshold, --skip-local, --cross-language, --trace FILE:LINE (trace all clones at a specific location)
-- `watch` — file watcher with debounced re-analysis, screen clear between runs (--no-clear to disable), shows changed file paths
-- `fix` — auto-remove unused exports, enum members, and deps (--dry-run, --yes/--force for non-TTY confirmation, --format json for structured output)
-- `init` — create .fallowrc.json (default) or fallow.toml (`--toml`), includes `$schema` for IDE autocomplete
-- `migrate` — migrate config from knip and/or jscpd to fallow (--toml, --dry-run, --from PATH; auto-detects knip.json/knip.jsonc/.knip.json/.knip.jsonc/package.json#knip and .jscpd.json/package.json#jscpd)
-- `list` — show active plugins, entry points, files (--format json for structured output)
-- `schema` — dump CLI interface as machine-readable JSON for agent introspection
-- `config-schema` — print JSON Schema for fallow config files (enables IDE validation)
-- `plugin-schema` — print JSON Schema for external plugin files (enables IDE validation)
-- Global `--workspace <name>` / `-w` flag scopes output to a single workspace package while keeping the full cross-workspace graph
-- Global `--performance` flag shows pipeline timing breakdown per stage
-
-- Environment variables: `FALLOW_FORMAT` (default output format), `FALLOW_QUIET` (suppress progress), `FALLOW_BIN` (binary path for MCP)
-- Structured JSON errors on stdout when `--format json` is active (exit code 2 errors include `{"error": true, "message": "...", "exit_code": 2}`)
-- Control character validation on `--changed-since`, `--workspace`, `--config` string inputs
-
-See `AGENTS.md` for AI agent integration guide.
-
-## MCP server
-
-`fallow-mcp` is an MCP (Model Context Protocol) server that exposes fallow's analysis as tools for AI agents. It uses stdio transport and wraps the `fallow` CLI binary via subprocess.
-
-**Tools:**
-- `analyze` — full dead code analysis (wraps `fallow check --format json`)
-- `check_changed` — incremental analysis of changed files (wraps `fallow check --changed-since`)
-- `find_dupes` — code duplication detection (wraps `fallow dupes --format json`)
-- `check_health` — code complexity metrics (wraps `fallow health --format json`)
-- `fix_preview` — dry-run auto-fix preview (wraps `fallow fix --dry-run --format json`)
-- `fix_apply` — apply auto-fixes (wraps `fallow fix --yes --format json`) — destructive
-- `project_info` — project metadata: plugins, files, entry points (wraps `fallow list --format json`)
-
-**Configuration:** Set `FALLOW_BIN` env var to point to the fallow binary (defaults to `fallow` in PATH).
-
-**Architecture:** Built with `rmcp` (official Rust MCP SDK). Thin subprocess wrapper — all analysis logic stays in the CLI, the MCP crate only handles protocol framing and argument mapping.
-
-## VS Code extension
-
-`editors/vscode/` is a VS Code extension that wraps the `fallow-lsp` binary and provides additional UI features.
-
-**Features:**
-- LSP client with auto-detection and auto-download of the `fallow-lsp` binary
-- Real-time diagnostics for all 12 dead code issue types via the LSP
-- Quick-fix code actions (remove unused export, delete unused file)
-- Refactor code action: "Extract duplicate into function" for code duplication (extracts clone instances into shared functions, replaces all instances in the file)
-- Duplication diagnostics with related locations (links to all other instances of the same clone group)
-- Code Lens showing reference counts above each export declaration with click-to-navigate (opens Peek References panel via `editor.action.showReferences`)
-- Tree views in the sidebar: dead code grouped by issue type, duplicates grouped by clone family
-- Status bar showing issue count and duplication percentage
-- Commands: full analysis, auto-fix, dry-run preview, LSP restart
-
-**Settings:** `fallow.lspPath`, `fallow.autoDownload`, `fallow.issueTypes`, `fallow.duplication.threshold`, `fallow.duplication.mode`, `fallow.production`, `fallow.trace.server`
-
-**Development:**
-```bash
-cd editors/vscode
-npm install
-npm run build    # esbuild production bundle
-npm run lint     # tsc --noEmit
-npm run package  # vsce package
-```
-
-## Production mode
-
-`--production` flag (or `production = true` in fallow.toml) for CI pipelines that only care about production code:
-
-- **Excludes test/dev files**: `*.test.*`, `*.spec.*`, `*.stories.*`, `__tests__/**`, `__mocks__/**`, etc.
-- **Only start/build scripts**: Only analyzes production-relevant package.json scripts (`start`, `build`, `serve`, `preview`, `prepare` and their pre/post hooks)
-- **Skips unused devDependencies**: Forces `unused_dev_dependencies` severity to `off`
-- **Reports type-only dependencies**: Detects production dependencies only imported via `import type` (should be devDependencies since types are erased at runtime)
-
-## Configuration format
-
-Supports JSON (with JSONC comment support) and TOML. Config files are searched in priority order:
-`.fallowrc.json` > `fallow.toml` > `.fallow.toml`
-
-- `.fallowrc.json` is the default for `fallow init` — matches the Oxc ecosystem (oxlint's `.oxlintrc.json`)
-- TOML is still fully supported via `fallow init --toml`
-- A `$schema` field in JSON enables IDE autocomplete and validation
-- Run `fallow config-schema` to generate the JSON Schema, or reference it from GitHub
-- The `schema.json` file is checked into the repo root
-- `extends` — inherit from base config files (array of relative paths, deep-merge objects, replace arrays, circular detection, max 10 levels, cross-format JSON↔TOML, string shorthand supported)
-- `overrides` — per-path rule configuration: array of `{ "files": ["*.test.ts"], "rules": { "unused-exports": "off" } }` objects; later overrides take precedence; glob matching against project-relative paths
-- `ignorePatterns` — array of glob patterns to exclude from analysis (replaces the old `ignore` field)
-- No `detect` section — use `rules` with `"off"` severity instead (e.g., `"unused-types": "off"`)
-- No `output` in config — output format is CLI-only via `--format` flag
-
-## Rules system
-
-Per-issue-type severity for incremental CI adoption:
-
-```jsonc
-// .fallowrc.json
-{
-  "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
-  "rules": {
-    "unused-files": "error",       // fail CI (exit 1)
-    "unused-exports": "warn",      // report but don't fail
-    "unused-types": "off",         // ignore entirely
-    "unresolved-imports": "error"
-  }
-}
-```
-
-Or equivalently in TOML:
-
-```toml
-[rules]
-unused-files = "error"       # fail CI (exit 1)
-unused-exports = "warn"      # report but don't fail
-unused-types = "off"         # ignore entirely
-unresolved-imports = "error"
-```
-
-- `error` — report and fail CI (non-zero exit code)
-- `warn` — report but exit 0
-- `off` — don't detect or report
-- All default to `error` when omitted
-- `--fail-on-issues` promotes all `warn` to `error` for that run
-- Human output colors reflect severity; SARIF levels are dynamic
-
-## Inline suppression comments
-
-- `// fallow-ignore-next-line` — suppress any issue on the next line
-- `// fallow-ignore-next-line unused-export` — suppress specific issue type
-- `// fallow-ignore-file` — suppress all issues in a file
-- `// fallow-ignore-file unused-export` — suppress specific issue type file-wide
-- `// fallow-ignore-file code-duplication` — suppress duplication detection for a file
-- `// fallow-ignore-next-line code-duplication` — suppress duplication detection for code on the next line
+- All clippy suppressions use `#[expect(clippy::...)]` not `#[allow]` — warns when suppression becomes unnecessary
+- Const size assertions on hot-path structs (`ModuleNode`, `ModuleInfo`, `ExportInfo`, `ImportInfo`, `Edge`)
+- Config files: `.fallowrc.json` > `fallow.toml` > `.fallow.toml`
+- No `detect` section in config — use `rules` with `"off"` severity
+- No `output` in config — output format is CLI-only via `--format`
+- Rules severity: `error` (fail CI, default) | `warn` (exit 0) | `off` (skip)
+- Inline suppression: `// fallow-ignore-next-line [issue-type]` and `// fallow-ignore-file [issue-type]`
+- Environment variables: `FALLOW_FORMAT`, `FALLOW_QUIET`, `FALLOW_BIN` (binary path for MCP)
 
 ## Key design decisions
 
-- **No TypeScript compiler dependency**: Syntactic analysis via Oxc parser + scope-aware binding analysis via `oxc_semantic`. No type resolution, no tsc. This is the speed advantage.
-- **Plugin system**: Single source of truth for framework support. Rust trait-based plugins with static patterns for common cases and optional AST-based config parsing via Oxc for ~33 plugins (no JavaScript evaluation), many with rich config extraction (entry points, dependencies, setup files from config objects). 84 built-in plugins covering the most popular JS/TS frameworks.
+- **No TypeScript compiler**: Syntactic analysis via Oxc parser + `oxc_semantic` for scope-aware binding analysis. No type resolution, no tsc.
 - **Flat edge storage**: Contiguous `Vec<Edge>` with range indices for cache-friendly traversal.
-- **Lock-free parallel resolution**: Bare specifier cache uses `DashMap` (sharded concurrent map) for contention-free reads under rayon work-stealing.
 - **Re-export chain resolution**: Iterative propagation through barrel files with cycle detection.
-- **Cross-workspace resolution**: Unified module graph across npm/yarn/pnpm workspaces (pnpm-workspace.yaml) and TypeScript project references (tsconfig.json `references`). Cross-package imports resolve through node_modules symlinks via `canonicalize()`. Package.json `exports` field subpath imports resolve via oxc_resolver with output→source fallback (dist/build/out/esm/cjs → src). Pnpm content-addressable store paths (`.pnpm` virtual store) are detected and mapped back to workspace source files, handling injected dependencies where `canonicalize()` resolves through the `.pnpm` directory. TypeScript project references are discovered from root `tsconfig.json` `references` field (additive with npm/pnpm workspaces, deduplicated by canonical path); referenced directories without `package.json` use directory name as workspace name. `--workspace <name>` scopes output to one package while keeping the full graph. `ProjectState` struct owns the file registry with stable FileIds (path-sorted) for future incremental analysis.
-- **Oxc-inspired lint infrastructure**: Workspace-level clippy configuration with 4 lint groups (`all`, `pedantic`, `nursery`, `cargo`) and 13 restriction lints. All lint suppressions use `#[expect]` instead of `#[allow]` to catch dead annotations. Const size assertions on hot-path types prevent accidental struct bloat. Dev profile optimized with `debug = false` and selective `opt-level` for proc-macro crates.
+- **FileIds are path-sorted** (not insertion order) for stable cross-run identity.
+- **Hidden directory allowlist**: `.storybook`, `.well-known`, `.changeset`, `.github` — other dotdirs are skipped. Only root-level `build/` is ignored.
 
 ## Git conventions
 
 - Conventional commits: `feat:`, `fix:`, `chore:`, `refactor:`, `test:`
 - Signed commits (`git commit -S`)
 - No AI attribution in commits
+
+See `AGENTS.md` for AI agent integration guide.

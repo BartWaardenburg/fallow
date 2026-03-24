@@ -1,4 +1,5 @@
 //! Circular dependency detection via Tarjan's SCC algorithm + elementary cycle enumeration.
+#![expect(clippy::excessive_nesting)]
 
 use std::ops::Range;
 

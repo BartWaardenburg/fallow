@@ -1,0 +1,89 @@
+name: Binary Size
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'crates/**/*.rs'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/bloat.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'crates/**/*.rs'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/bloat.yml'
+
+concurrency:
+  group: bloat-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  pull-requests: write
+  deployments: write
+
+env:
+  CARGO_TERM_COLOR: always
+  # Keep debug info for cargo-bloat function name resolution
+  CARGO_PROFILE_RELEASE_STRIP: "none"
+  CARGO_PROFILE_RELEASE_DEBUG: "2"
+
+jobs:
+  bloat:
+    name: Binary size tracking
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          key: bloat
+
+      - name: Install cargo-bloat
+        run: cargo install cargo-bloat --locked
+
+      - name: Report top functions by size
+        run: |
+          echo "## Top 20 functions by size" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cargo bloat --release -p fallow-cli -n 20 >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Report top crates by size
+        run: |
+          echo "## Top 20 crates by size" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cargo bloat --release -p fallow-cli --crates -n 20 >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Track total binary size
+        run: |
+          SIZE=$(stat -c%s target/release/fallow)
+          SIZE="$SIZE" python3 -c "
+          import json, os
+          data = [{'name': 'Binary Size (fallow)', 'unit': 'bytes', 'value': int(os.environ['SIZE'])}]
+          print(json.dumps(data, indent=2))
+          " > bloat-bench.json
+
+      - name: Store binary size metric
+        uses: benchmark-action/github-action-benchmark@a7bc2366eda11037936ea57d811a43b3418d3073 # v1
+        continue-on-error: ${{ github.event_name == 'pull_request' }}
+        with:
+          name: Fallow Binary Size
+          tool: 'customSmallerIsBetter'
+          output-file-path: bloat-bench.json
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          auto-push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          comment-on-alert: true
+          comment-always: ${{ github.event_name == 'pull_request' }}
+          alert-threshold: '115%'
+          fail-on-alert: false
+          save-data-file: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          gh-pages-branch: gh-pages
+          benchmark-data-dir-path: dev/bloat

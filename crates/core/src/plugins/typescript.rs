@@ -3,6 +3,7 @@
 //! Detects TypeScript projects and marks tsconfig files as always used.
 //! Parses tsconfig.json to extract project references, extended configs,
 //! type package dependencies, language service plugins, and array extends (TS 5.0+).
+#![expect(clippy::excessive_nesting)]
 
 use std::path::Path;
 

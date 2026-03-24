@@ -35,14 +35,14 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Install Miri toolchain
         run: |
           rustup toolchain install "$MIRI_TOOLCHAIN" --component miri
           cargo +"$MIRI_TOOLCHAIN" miri setup
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           key: miri
 

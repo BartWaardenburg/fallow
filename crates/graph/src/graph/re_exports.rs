@@ -1,4 +1,5 @@
 //! Phase 4: Re-export chain resolution — propagate references through barrel files.
+#![expect(clippy::excessive_nesting)]
 
 use rustc_hash::FxHashSet;
 

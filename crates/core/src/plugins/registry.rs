@@ -1,4 +1,5 @@
 //! Plugin registry: discovers active plugins, collects patterns, parses configs.
+#![expect(clippy::excessive_nesting)]
 
 use rustc_hash::FxHashSet;
 use std::path::{Path, PathBuf};

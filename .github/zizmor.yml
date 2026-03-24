@@ -1,0 +1,38 @@
+rules:
+  # dtolnay/rust-toolchain is the Rust ecosystem standard for CI toolchain management
+  superfluous-actions:
+    ignore:
+      - allocs.yml
+      - bench.yml
+      - bloat.yml
+      - ci.yml
+      - conformance.yml
+      - coverage.yml
+      - cross-arch.yml
+      - ecosystem-full.yml
+      - ecosystem.yml
+      - release.yml
+  # TODO: scope workflow-level permissions to per-job
+  excessive-permissions:
+    ignore:
+      - release.yml
+      - allocs.yml
+      - bench.yml
+      - bloat.yml
+      - conformance.yml
+      - coverage.yml
+      - cross-arch.yml
+      - ecosystem.yml
+  # Caching in release workflow is acceptable — tags are immutable
+  cache-poisoning:
+    ignore:
+      - release.yml
+  # benchmark-action/gh-release require tokens in with: block (not env-mappable)
+  secrets-outside-env:
+    ignore:
+      - allocs.yml
+      - bench.yml
+      - bloat.yml
+      - conformance.yml
+      - coverage.yml
+      - release.yml

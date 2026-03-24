@@ -43,9 +43,6 @@ schemars = "1"
 # Parallelism
 rayon = "1"
 
-# Concurrent data structures
-dashmap = "6"
-
 # File system
 ignore = "0.4"
 glob = "0.3"
@@ -111,6 +108,7 @@ unused_result_ok = "warn"              # Don't silently ignore Result::ok()
 infinite_loop = "warn"                  # Catch infinite loops without break
 self_named_module_files = "warn"        # Prefer mod.rs style
 pathbuf_init_then_push = "warn"         # Use PathBuf::from() directly
+excessive_nesting = "warn"              # Catch deeply nested control flow (threshold in .clippy.toml)
 
 # Allow common pedantic false positives
 module_name_repetitions = "allow"
