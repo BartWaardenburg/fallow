@@ -9,11 +9,22 @@
 //! runners (`npx`, `pnpm exec`, `yarn dlx`), and Node.js runners (`node`, `tsx`,
 //! `ts-node`). Shell operators (`&&`, `||`, `;`, `|`, `&`) are split correctly.
 
+mod resolve;
+mod shell;
+
 #[expect(clippy::disallowed_types)]
 use std::collections::HashMap;
 use std::path::Path;
 
 use rustc_hash::FxHashSet;
+
+pub use resolve::resolve_binary_to_package;
+
+/// Environment variable wrapper commands to strip before the actual binary.
+const ENV_WRAPPERS: &[&str] = &["cross-env", "dotenv", "env"];
+
+/// Node.js runners whose first non-flag argument is a file path, not a binary name.
+const NODE_RUNNERS: &[&str] = &["node", "ts-node", "tsx", "babel-node", "bun"];
 
 /// Result of analyzing all package.json scripts.
 #[derive(Debug, Default)]
@@ -36,27 +47,6 @@ pub struct ScriptCommand {
     /// File path arguments (positional args that look like file paths).
     pub file_args: Vec<String>,
 }
-
-/// Known binary-name → package-name mappings where they diverge.
-static BINARY_TO_PACKAGE: &[(&str, &str)] = &[
-    ("tsc", "typescript"),
-    ("tsserver", "typescript"),
-    ("ng", "@angular/cli"),
-    ("nuxi", "nuxt"),
-    ("run-s", "npm-run-all"),
-    ("run-p", "npm-run-all"),
-    ("run-s2", "npm-run-all2"),
-    ("run-p2", "npm-run-all2"),
-    ("sb", "storybook"),
-    ("biome", "@biomejs/biome"),
-    ("oxlint", "oxlint"),
-];
-
-/// Environment variable wrapper commands to strip before the actual binary.
-const ENV_WRAPPERS: &[&str] = &["cross-env", "dotenv", "env"];
-
-/// Node.js runners whose first non-flag argument is a file path, not a binary name.
-const NODE_RUNNERS: &[&str] = &["node", "ts-node", "tsx", "babel-node", "bun"];
 
 /// Filter scripts to only production-relevant ones (start, build, and their pre/post hooks).
 ///
@@ -148,7 +138,7 @@ pub fn analyze_scripts(scripts: &HashMap<String, String>, root: &Path) -> Script
 pub fn parse_script(script: &str) -> Vec<ScriptCommand> {
     let mut commands = Vec::new();
 
-    for segment in split_shell_operators(script) {
+    for segment in shell::split_shell_operators(script) {
         let segment = segment.trim();
         if segment.is_empty() {
             continue;
@@ -159,136 +149,6 @@ pub fn parse_script(script: &str) -> Vec<ScriptCommand> {
     }
 
     commands
-}
-
-/// Split a script string on shell operators (`&&`, `||`, `;`, `|`, `&`).
-/// Respects single and double quotes.
-fn split_shell_operators(script: &str) -> Vec<&str> {
-    let mut segments = Vec::new();
-    let mut start = 0;
-    let bytes = script.as_bytes();
-    let len = bytes.len();
-    let mut i = 0;
-    let mut in_single_quote = false;
-    let mut in_double_quote = false;
-
-    while i < len {
-        let b = bytes[i];
-
-        if b == b'\'' && !in_double_quote {
-            in_single_quote = !in_single_quote;
-            i += 1;
-            continue;
-        }
-        if b == b'"' && !in_single_quote {
-            in_double_quote = !in_double_quote;
-            i += 1;
-            continue;
-        }
-        if in_single_quote || in_double_quote {
-            i += 1;
-            continue;
-        }
-
-        // && or ||
-        if i + 1 < len
-            && ((b == b'&' && bytes[i + 1] == b'&') || (b == b'|' && bytes[i + 1] == b'|'))
-        {
-            segments.push(&script[start..i]);
-            i += 2;
-            start = i;
-            continue;
-        }
-
-        // ; or single | (pipe) or single & (background)
-        if b == b';'
-            || (b == b'|' && (i + 1 >= len || bytes[i + 1] != b'|'))
-            || (b == b'&' && (i + 1 >= len || bytes[i + 1] != b'&'))
-        {
-            segments.push(&script[start..i]);
-            i += 1;
-            start = i;
-            continue;
-        }
-
-        i += 1;
-    }
-
-    if start < len {
-        segments.push(&script[start..]);
-    }
-
-    segments
-}
-
-/// Skip env var assignments (`KEY=value`) and env wrapper commands (`cross-env`, `dotenv`, `env`)
-/// at the start of a token list. Returns the index of the first real command token, or `None`
-/// if all tokens were consumed.
-fn skip_initial_wrappers(tokens: &[&str], mut idx: usize) -> Option<usize> {
-    // Skip env var assignments (KEY=value pairs)
-    while idx < tokens.len() && is_env_assignment(tokens[idx]) {
-        idx += 1;
-    }
-    if idx >= tokens.len() {
-        return None;
-    }
-
-    // Skip env wrapper commands (cross-env, dotenv, env)
-    while idx < tokens.len() && ENV_WRAPPERS.contains(&tokens[idx]) {
-        idx += 1;
-        // Skip env var assignments after the wrapper
-        while idx < tokens.len() && is_env_assignment(tokens[idx]) {
-            idx += 1;
-        }
-        // dotenv uses -- as separator
-        if idx < tokens.len() && tokens[idx] == "--" {
-            idx += 1;
-        }
-    }
-    if idx >= tokens.len() {
-        return None;
-    }
-
-    Some(idx)
-}
-
-/// Advance past package manager prefixes (`npx`, `pnpx`, `bunx`, `yarn exec`, `pnpm dlx`, etc.).
-/// Returns the index of the actual binary token, or `None` if the command delegates to a named
-/// script (e.g., `npm run build`, `yarn build`).
-fn advance_past_package_manager(tokens: &[&str], mut idx: usize) -> Option<usize> {
-    let token = tokens[idx];
-    if matches!(token, "npx" | "pnpx" | "bunx") {
-        idx += 1;
-        // Skip npx flags (--yes, --no-install, -p, --package)
-        while idx < tokens.len() && tokens[idx].starts_with('-') {
-            let flag = tokens[idx];
-            idx += 1;
-            // --package <name> consumes the next argument
-            if matches!(flag, "--package" | "-p") && idx < tokens.len() {
-                idx += 1;
-            }
-        }
-    } else if matches!(token, "yarn" | "pnpm" | "npm" | "bun") {
-        if idx + 1 < tokens.len() {
-            let subcmd = tokens[idx + 1];
-            if subcmd == "exec" || subcmd == "dlx" {
-                idx += 2;
-            } else if matches!(subcmd, "run" | "run-script") {
-                // Delegates to a named script, not a binary invocation
-                return None;
-            } else {
-                // Bare `yarn <name>` runs a script — skip
-                return None;
-            }
-        } else {
-            return None;
-        }
-    }
-    if idx >= tokens.len() {
-        return None;
-    }
-
-    Some(idx)
 }
 
 /// Extract file path arguments and `--config`/`-c` arguments from the remaining tokens.
@@ -347,8 +207,8 @@ fn parse_command_segment(segment: &str) -> Option<ScriptCommand> {
         return None;
     }
 
-    let idx = skip_initial_wrappers(&tokens, 0)?;
-    let idx = advance_past_package_manager(&tokens, idx)?;
+    let idx = shell::skip_initial_wrappers(&tokens, 0)?;
+    let idx = shell::advance_past_package_manager(&tokens, idx)?;
 
     let binary = tokens[idx].to_string();
     let is_node_runner = NODE_RUNNERS.contains(&binary.as_str());
@@ -449,54 +309,6 @@ fn is_builtin_command(cmd: &str) -> bool {
             | "bash"
             | "zsh"
     )
-}
-
-/// Resolve a binary name to its npm package name.
-///
-/// Strategy:
-/// 1. Check known binary→package divergence map
-/// 2. Read `node_modules/.bin/<binary>` symlink target
-/// 3. Fall back: binary name = package name
-pub fn resolve_binary_to_package(binary: &str, root: &Path) -> String {
-    // 1. Known divergences
-    if let Some(&(_, pkg)) = BINARY_TO_PACKAGE.iter().find(|(bin, _)| *bin == binary) {
-        return pkg.to_string();
-    }
-
-    // 2. Try reading the symlink in node_modules/.bin/
-    let bin_link = root.join("node_modules/.bin").join(binary);
-    if let Ok(target) = std::fs::read_link(&bin_link)
-        && let Some(pkg_name) = extract_package_from_bin_path(&target)
-    {
-        return pkg_name;
-    }
-
-    // 3. Fallback: binary name = package name
-    binary.to_string()
-}
-
-/// Extract a package name from a `node_modules/.bin` symlink target path.
-///
-/// Typical symlink targets:
-/// - `../webpack/bin/webpack.js` → `webpack`
-/// - `../@babel/cli/bin/babel.js` → `@babel/cli`
-fn extract_package_from_bin_path(target: &std::path::Path) -> Option<String> {
-    let target_str = target.to_string_lossy();
-    let parts: Vec<&str> = target_str.split('/').collect();
-
-    for (i, part) in parts.iter().enumerate() {
-        if *part == ".." {
-            continue;
-        }
-        // Scoped package: @scope/name
-        if part.starts_with('@') && i + 1 < parts.len() {
-            return Some(format!("{}/{}", part, parts[i + 1]));
-        }
-        // Regular package
-        return Some(part.to_string());
-    }
-
-    None
 }
 
 #[cfg(test)]
@@ -708,7 +520,7 @@ mod tests {
         assert_eq!(cmds[0].config_args, vec![".eslintrc.json"]);
     }
 
-    // --- binary → package mapping ---
+    // --- binary -> package mapping ---
 
     #[test]
     fn tsc_maps_to_typescript() {
@@ -746,7 +558,7 @@ mod tests {
     fn bin_path_regular_package() {
         let path = std::path::Path::new("../webpack/bin/webpack.js");
         assert_eq!(
-            extract_package_from_bin_path(path),
+            resolve::extract_package_from_bin_path(path),
             Some("webpack".to_string())
         );
     }
@@ -755,7 +567,7 @@ mod tests {
     fn bin_path_scoped_package() {
         let path = std::path::Path::new("../@babel/cli/bin/babel.js");
         assert_eq!(
-            extract_package_from_bin_path(path),
+            resolve::extract_package_from_bin_path(path),
             Some("@babel/cli".to_string())
         );
     }
@@ -864,14 +676,14 @@ mod tests {
 
     #[test]
     fn split_respects_quotes() {
-        let segments = split_shell_operators("echo 'a && b' && jest");
+        let segments = shell::split_shell_operators("echo 'a && b' && jest");
         assert_eq!(segments.len(), 2);
         assert!(segments[1].trim() == "jest");
     }
 
     #[test]
     fn split_double_quotes() {
-        let segments = split_shell_operators("echo \"a || b\" || jest");
+        let segments = shell::split_shell_operators("echo \"a || b\" || jest");
         assert_eq!(segments.len(), 2);
         assert!(segments[1].trim() == "jest");
     }
@@ -999,7 +811,7 @@ mod tests {
             /// split_shell_operators should never panic on arbitrary input.
             #[test]
             fn split_shell_operators_no_panic(s in "[a-zA-Z0-9 _./@&|;=\"'-]{1,200}") {
-                let _ = split_shell_operators(&s);
+                let _ = shell::split_shell_operators(&s);
             }
 
             /// When parse_script returns commands, binary names should be non-empty.
