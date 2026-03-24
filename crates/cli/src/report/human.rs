@@ -1,3 +1,4 @@
+use std::fmt::Write as _;
 use std::path::Path;
 use std::time::Duration;
 
@@ -8,6 +9,34 @@ use fallow_core::results::{AnalysisResults, UnusedExport, UnusedMember};
 use fallow_core::trace::{CloneTrace, DependencyTrace, ExportTrace, FileTrace, PipelineTimings};
 
 use super::{Level, relative_path, severity_to_level, split_dir_filename};
+
+/// Maximum items shown per flat section (unused files, deps, etc.).
+const MAX_FLAT_ITEMS: usize = 10;
+/// Maximum files shown per grouped section (unused exports, types, etc.).
+const MAX_GROUPED_FILES: usize = 10;
+/// Maximum detail items shown per file within a grouped section.
+const MAX_ITEMS_PER_FILE: usize = 5;
+/// Maximum clone groups shown in duplication output.
+const MAX_CLONE_GROUPS: usize = 10;
+
+/// Format a path with dimmed directory and bold filename.
+fn format_path(path_str: &str) -> String {
+    let (dir, filename) = split_dir_filename(path_str);
+    format!("{}{}", dir.dimmed(), filename.bold())
+}
+
+/// Format a number with thousands separators (e.g., 5433 → "5,433").
+fn thousands(n: usize) -> String {
+    let s = n.to_string();
+    let mut result = String::with_capacity(s.len() + s.len() / 3);
+    for (i, c) in s.chars().enumerate() {
+        if i > 0 && (s.len() - i).is_multiple_of(3) {
+            result.push(',');
+        }
+        result.push(c);
+    }
+    result
+}
 
 pub(super) fn print_human(
     results: &AnalysisResults,
@@ -34,16 +63,12 @@ pub(super) fn print_human(
                     .bold()
             );
         } else {
+            let summary = build_summary_footer(results);
             eprintln!(
                 "{}",
-                format!(
-                    "\u{2717} Found {} issue{} ({:.2}s)",
-                    total,
-                    if total == 1 { "" } else { "s" },
-                    elapsed.as_secs_f64()
-                )
-                .red()
-                .bold()
+                format!("\u{2717} {summary} ({:.2}s)", elapsed.as_secs_f64())
+                    .red()
+                    .bold()
             );
         }
     }
@@ -96,7 +121,10 @@ pub(super) fn build_human_lines(
         &results.unused_files,
         "Unused files",
         severity_to_level(rules.unused_files),
-        |file| vec![format!("  {}", relative_path(&file.path, root).display())],
+        |file| {
+            let path_str = relative_path(&file.path, root).display().to_string();
+            vec![format!("  {}", format_path(&path_str))]
+        },
     );
 
     build_human_grouped_section(
@@ -181,23 +209,11 @@ pub(super) fn build_human_lines(
         |dep| vec![format!("  {}", dep.package_name.bold())],
     );
 
-    build_human_section(
+    build_duplicate_exports_section(
         &mut lines,
         &results.duplicate_exports,
-        "Duplicate exports",
         severity_to_level(rules.duplicate_exports),
-        |dup| {
-            let locations: Vec<String> = dup
-                .locations
-                .iter()
-                .map(|loc| relative_path(&loc.path, root).display().to_string())
-                .collect();
-            vec![format!(
-                "  {}  {}",
-                dup.export_name.bold(),
-                locations.join(", ").dimmed()
-            )]
-        },
+        root,
     );
 
     build_human_section(
@@ -217,21 +233,30 @@ pub(super) fn build_human_lines(
             let chain: Vec<String> = cycle
                 .files
                 .iter()
-                .map(|p| relative_path(p, root).display().to_string())
+                .map(|p| {
+                    let path_str = relative_path(p, root).display().to_string();
+                    format_path(&path_str)
+                })
                 .collect();
             // Repeat the first file at the end to make the cycle visually clear
             let mut display_chain = chain.clone();
             if let Some(first) = chain.first() {
                 display_chain.push(first.clone());
             }
-            vec![format!("  {}", display_chain.join(" \u{2192} "))]
+            // Line 1: first file, Line 2: indented chain for 80-col readability
+            let first = &display_chain[0];
+            let rest = &display_chain[1..];
+            vec![
+                format!("  {first}"),
+                format!("    \u{2192} {}", rest.join(" \u{2192} ")),
+            ]
         },
     );
 
     lines
 }
 
-/// Append a non-empty section with a header and per-item lines.
+/// Append a non-empty section with a header and per-item lines (truncated).
 fn build_human_section<T>(
     lines: &mut Vec<String>,
     items: &[T],
@@ -243,15 +268,26 @@ fn build_human_section<T>(
         return;
     }
     lines.push(build_section_header(title, items.len(), level));
-    for item in items {
+    let shown = items.len().min(MAX_FLAT_ITEMS);
+    for item in &items[..shown] {
         for line in format_lines(item) {
             lines.push(line);
         }
     }
+    if items.len() > MAX_FLAT_ITEMS {
+        lines.push(format!(
+            "  {}",
+            format!("... and {} more", items.len() - MAX_FLAT_ITEMS).dimmed()
+        ));
+    }
     lines.push(String::new());
 }
 
-/// Append a non-empty section whose items are grouped by file path.
+/// Append a non-empty section whose items are grouped by file path (truncated).
+///
+/// Files are sorted by item count descending. Shows `(N exports)` next to each
+/// file header. Truncates to `MAX_GROUPED_FILES` files and `MAX_ITEMS_PER_FILE`
+/// items per file.
 fn build_human_grouped_section<'a, T>(
     lines: &mut Vec<String>,
     items: &'a [T],
@@ -278,9 +314,7 @@ fn build_section_header(title: &str, count: usize, level: Level) -> String {
     }
 }
 
-/// Build items grouped by file path. Items are sorted by path so that
-/// entries from the same file appear together, with the file path printed
-/// once as a dimmed header and each item indented beneath it.
+/// Build items grouped by file path, sorted by count descending, with truncation.
 fn build_grouped_by_file<'a, T>(
     lines: &mut Vec<String>,
     items: &'a [T],
@@ -288,19 +322,190 @@ fn build_grouped_by_file<'a, T>(
     get_path: impl Fn(&'a T) -> &'a Path,
     format_detail: &impl Fn(&T) -> String,
 ) {
-    let mut indices: Vec<usize> = (0..items.len()).collect();
-    indices.sort_by(|&a, &b| get_path(&items[a]).cmp(get_path(&items[b])));
+    // Group items by file path, preserving indices
+    let mut file_groups: Vec<(String, Vec<usize>)> = Vec::new();
+    let mut file_map: rustc_hash::FxHashMap<String, usize> = rustc_hash::FxHashMap::default();
 
-    let mut last_file = String::new();
-    for &i in &indices {
-        let item = &items[i];
+    for (i, item) in items.iter().enumerate() {
         let file_str = relative_path(get_path(item), root).display().to_string();
-        if file_str != last_file {
-            lines.push(format!("  {}", file_str.dimmed()));
-            last_file = file_str;
+        if let Some(&group_idx) = file_map.get(&file_str) {
+            file_groups[group_idx].1.push(i);
+        } else {
+            file_map.insert(file_str.clone(), file_groups.len());
+            file_groups.push((file_str, vec![i]));
         }
-        lines.push(format!("    {}", format_detail(item)));
     }
+
+    // Sort files by item count descending, alphabetical tiebreaker
+    file_groups.sort_by(|a, b| b.1.len().cmp(&a.1.len()).then_with(|| a.0.cmp(&b.0)));
+
+    let total_files = file_groups.len();
+    let shown_files = total_files.min(MAX_GROUPED_FILES);
+
+    for (file_str, indices) in &file_groups[..shown_files] {
+        let count_tag = if indices.len() > 1 {
+            format!(" ({})", indices.len()).dimmed().to_string()
+        } else {
+            String::new()
+        };
+        lines.push(format!("  {}{}", format_path(file_str), count_tag));
+
+        let shown_items = indices.len().min(MAX_ITEMS_PER_FILE);
+        for &i in &indices[..shown_items] {
+            lines.push(format!("    {}", format_detail(&items[i])));
+        }
+        if indices.len() > MAX_ITEMS_PER_FILE {
+            lines.push(format!(
+                "    {}",
+                format!("... and {} more", indices.len() - MAX_ITEMS_PER_FILE).dimmed()
+            ));
+        }
+    }
+
+    if total_files > MAX_GROUPED_FILES {
+        let hidden_files = total_files - MAX_GROUPED_FILES;
+        let hidden_items: usize = file_groups[MAX_GROUPED_FILES..]
+            .iter()
+            .map(|(_, indices)| indices.len())
+            .sum();
+        lines.push(format!(
+            "  {}",
+            format!(
+                "... and {} more in {} file{}",
+                hidden_items,
+                hidden_files,
+                if hidden_files == 1 { "" } else { "s" }
+            )
+            .dimmed()
+        ));
+    }
+}
+
+/// Build duplicate exports grouped by file pair instead of flat list.
+fn build_duplicate_exports_section(
+    lines: &mut Vec<String>,
+    items: &[fallow_core::results::DuplicateExport],
+    level: Level,
+    root: &Path,
+) {
+    if items.is_empty() {
+        return;
+    }
+    lines.push(build_section_header(
+        "Duplicate exports",
+        items.len(),
+        level,
+    ));
+
+    // Group by sorted file-pair key
+    let mut pair_groups: Vec<(String, String, Vec<&str>)> = Vec::new();
+    let mut pair_map: rustc_hash::FxHashMap<(String, String), usize> =
+        rustc_hash::FxHashMap::default();
+
+    for dup in items {
+        if dup.locations.len() < 2 {
+            continue;
+        }
+        let mut paths: Vec<String> = dup
+            .locations
+            .iter()
+            .map(|loc| relative_path(&loc.path, root).display().to_string())
+            .collect();
+        paths.sort();
+        paths.dedup();
+
+        // For multi-file duplicates, pair the first two
+        let key = (paths[0].clone(), paths.get(1).cloned().unwrap_or_default());
+        if let Some(&group_idx) = pair_map.get(&key) {
+            pair_groups[group_idx].2.push(&dup.export_name);
+        } else {
+            pair_map.insert(key, pair_groups.len());
+            pair_groups.push((
+                paths[0].clone(),
+                paths.get(1).cloned().unwrap_or_default(),
+                vec![&dup.export_name],
+            ));
+        }
+    }
+
+    // Sort by count descending
+    pair_groups.sort_by(|a, b| b.2.len().cmp(&a.2.len()));
+
+    let shown = pair_groups.len().min(MAX_FLAT_ITEMS);
+    for (file_a, file_b, exports) in &pair_groups[..shown] {
+        let export_list = if exports.len() <= 5 {
+            exports
+                .iter()
+                .map(|e| e.bold().to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        } else {
+            let mut display: Vec<String> =
+                exports[..5].iter().map(|e| e.bold().to_string()).collect();
+            display.push(format!("... +{}", exports.len() - 5).dimmed().to_string());
+            display.join(", ")
+        };
+
+        lines.push(format!(
+            "  {} \u{2194} {} ({} export{})",
+            format_path(file_a),
+            format_path(file_b),
+            exports.len(),
+            if exports.len() == 1 { "" } else { "s" }
+        ));
+        lines.push(format!("    {export_list}"));
+    }
+
+    if pair_groups.len() > MAX_FLAT_ITEMS {
+        lines.push(format!(
+            "  {}",
+            format!(
+                "... and {} more pair{}",
+                pair_groups.len() - MAX_FLAT_ITEMS,
+                if pair_groups.len() - MAX_FLAT_ITEMS == 1 {
+                    ""
+                } else {
+                    "s"
+                }
+            )
+            .dimmed()
+        ));
+    }
+    lines.push(String::new());
+}
+
+/// Build a one-line summary footer showing counts per issue type.
+fn build_summary_footer(results: &AnalysisResults) -> String {
+    let mut parts = Vec::new();
+    let mut add = |count: usize, label: &str| {
+        if count > 0 {
+            let mut s = String::new();
+            let _ = write!(s, "{count} {label}");
+            if count != 1 && !label.ends_with('s') {
+                s.push('s');
+            }
+            parts.push(s);
+        }
+    };
+
+    add(results.unused_files.len(), "unused file");
+    add(results.unused_exports.len(), "unused export");
+    add(results.unused_types.len(), "unused type");
+    add(
+        results.unused_dependencies.len()
+            + results.unused_dev_dependencies.len()
+            + results.unused_optional_dependencies.len(),
+        "unused dep",
+    );
+    add(results.unused_enum_members.len(), "unused enum member");
+    add(results.unused_class_members.len(), "unused class member");
+    add(results.unresolved_imports.len(), "unresolved import");
+    add(results.unlisted_dependencies.len(), "unlisted dep");
+    add(results.duplicate_exports.len(), "duplicate export");
+    add(results.type_only_dependencies.len(), "type-only dep");
+    add(results.circular_dependencies.len(), "circular dep");
+
+    parts.join(" \u{00b7} ")
 }
 
 // ── Health / complexity human output ──────────────────────────────
@@ -418,31 +623,36 @@ pub(super) fn build_health_human_lines(
     for finding in &report.findings {
         let file_str = relative_path(&finding.path, root).display().to_string();
         if file_str != last_file {
-            lines.push(format!("  {}", file_str.dimmed()));
+            lines.push(format!("  {}", format_path(&file_str)));
             last_file = file_str;
         }
 
-        let cyc_str = format!("cyclomatic: {}", finding.cyclomatic);
-        let cog_str = format!("cognitive: {}", finding.cognitive);
+        let cyc_val = format!("{:>3}", finding.cyclomatic);
+        let cog_val = format!("{:>3}", finding.cognitive);
 
         let cyc_colored = if finding.cyclomatic > report.summary.max_cyclomatic_threshold {
-            cyc_str.red().bold().to_string()
+            cyc_val.red().bold().to_string()
         } else {
-            cyc_str.dimmed().to_string()
+            cyc_val.dimmed().to_string()
         };
         let cog_colored = if finding.cognitive > report.summary.max_cognitive_threshold {
-            cog_str.red().bold().to_string()
+            cog_val.red().bold().to_string()
         } else {
-            cog_str.dimmed().to_string()
+            cog_val.dimmed().to_string()
         };
 
+        // Line 1: function name
         lines.push(format!(
-            "    {} {}  {}  {}  {}",
+            "    {} {}",
             format!(":{}", finding.line).dimmed(),
             finding.name.bold(),
+        ));
+        // Line 2: metrics (indented, aligned like hotspots)
+        lines.push(format!(
+            "         {} cyclomatic  {} cognitive  {} lines",
             cyc_colored,
             cog_colored,
-            format!("{} lines", finding.line_count).dimmed(),
+            format!("{:>3}", finding.line_count).dimmed(),
         ));
     }
     if !report.findings.is_empty() {
@@ -620,25 +830,8 @@ pub(super) fn print_duplication_human(
         eprintln!(
             "{}",
             format!(
-                "Found {} clone group{} with {} instance{} in {} famil{}",
-                stats.clone_groups,
-                if stats.clone_groups == 1 { "" } else { "s" },
-                stats.clone_instances,
-                if stats.clone_instances == 1 { "" } else { "s" },
-                report.clone_families.len(),
-                if report.clone_families.len() == 1 {
-                    "y"
-                } else {
-                    "ies"
-                },
-            )
-            .bold()
-        );
-        eprintln!(
-            "{}",
-            format!(
-                "Duplicated: {} lines ({:.1}%) across {} file{}",
-                stats.duplicated_lines,
+                "{} lines ({:.1}%) duplicated across {} file{} ({:.2}s)",
+                thousands(stats.duplicated_lines),
                 stats.duplication_percentage,
                 stats.files_with_clones,
                 if stats.files_with_clones == 1 {
@@ -646,12 +839,9 @@ pub(super) fn print_duplication_human(
                 } else {
                     "s"
                 },
+                elapsed.as_secs_f64(),
             )
-            .dimmed()
-        );
-        eprintln!(
-            "{}",
-            format!("Completed in {:.2}s", elapsed.as_secs_f64()).dimmed()
+            .bold()
         );
     }
 }
@@ -667,76 +857,115 @@ pub(super) fn build_duplication_human_lines(
         return lines;
     }
 
+    // Sort clone groups by line count descending for most impactful first
+    let mut sorted_groups: Vec<&fallow_core::duplicates::CloneGroup> =
+        report.clone_groups.iter().collect();
+    sorted_groups.sort_by(|a, b| b.line_count.cmp(&a.line_count));
+
+    let total_groups = sorted_groups.len();
+    let shown = total_groups.min(MAX_CLONE_GROUPS);
+
     lines.push(format!(
         "{} {}",
         "\u{25cf}".cyan(),
-        "Duplicates".cyan().bold()
+        format!("Duplicates ({total_groups} clone groups)")
+            .cyan()
+            .bold()
     ));
     lines.push(String::new());
 
-    for (i, group) in report.clone_groups.iter().enumerate() {
+    for group in &sorted_groups[..shown] {
         let instance_count = group.instances.len();
+
+        // Line count: right-aligned, color-coded
+        let lc = group.line_count;
+        let lc_str = format!("{:>5}", thousands(lc));
+        let lc_colored = if lc > 1000 {
+            lc_str.red().bold().to_string()
+        } else if lc > 100 {
+            lc_str.yellow().to_string()
+        } else {
+            lc_str.dimmed().to_string()
+        };
+
         lines.push(format!(
-            "  {} ({} lines, {} instance{})",
-            format!("Clone group {}", i + 1).bold(),
-            group.line_count,
+            "  {} lines  {} instance{}",
+            lc_colored,
             instance_count,
             if instance_count == 1 { "" } else { "s" }
         ));
 
-        for (j, instance) in group.instances.iter().enumerate() {
+        for instance in &group.instances {
             let relative = relative_path(&instance.file, root);
-            let location = format!(
-                "{}:{}-{}",
-                relative.display(),
+            let path_str = relative.display().to_string();
+            let (dir, filename) = split_dir_filename(&path_str);
+            lines.push(format!(
+                "    {}{}:{}-{}",
+                dir.dimmed(),
+                filename,
                 instance.start_line,
                 instance.end_line
-            );
-            let connector = if j == instance_count - 1 {
-                "\u{2514}\u{2500}"
-            } else {
-                "\u{251c}\u{2500}"
-            };
-            lines.push(format!("  {} {}", connector, location.dimmed()));
+            ));
         }
         lines.push(String::new());
     }
 
+    if total_groups > MAX_CLONE_GROUPS {
+        lines.push(format!(
+            "  {}",
+            format!(
+                "... and {} more clone groups",
+                total_groups - MAX_CLONE_GROUPS
+            )
+            .dimmed()
+        ));
+        lines.push(String::new());
+    }
+
     // Print clone families with refactoring suggestions
-    if !report.clone_families.is_empty() {
+    // Suppress single-group families — not actionable
+    let multi_group_families: Vec<_> = report
+        .clone_families
+        .iter()
+        .filter(|f| f.groups.len() > 1)
+        .collect();
+
+    if !multi_group_families.is_empty() {
         lines.push(format!(
             "{} {}",
             "\u{25cf}".yellow(),
-            "Clone Families".yellow().bold()
+            format!(
+                "Clone families ({} with multiple groups)",
+                multi_group_families.len()
+            )
+            .yellow()
+            .bold()
         ));
         lines.push(String::new());
 
-        for (i, family) in report.clone_families.iter().enumerate() {
+        for family in &multi_group_families {
             let file_names: Vec<_> = family
                 .files
                 .iter()
-                .map(|f| relative_path(f, root).display().to_string())
+                .map(|f| {
+                    let path_str = relative_path(f, root).display().to_string();
+                    format_path(&path_str)
+                })
                 .collect();
+
             lines.push(format!(
-                "  {} ({} group{}, {} lines across {})",
-                format!("Family {}", i + 1).bold(),
-                family.groups.len(),
-                if family.groups.len() == 1 { "" } else { "s" },
-                family.total_duplicated_lines,
+                "  {} groups, {} lines across {}",
+                family.groups.len().to_string().bold(),
+                thousands(family.total_duplicated_lines).bold(),
                 file_names.join(", "),
             ));
 
             for suggestion in &family.suggestions {
-                let savings = if suggestion.estimated_savings > 0 {
-                    format!(" (~{} lines saved)", suggestion.estimated_savings)
-                } else {
-                    String::new()
-                };
+                // Drop "lines saved" — misleading
                 lines.push(format!(
-                    "  {} {}{}",
+                    "    {} {}",
                     "\u{2192}".yellow(),
                     suggestion.description.dimmed(),
-                    savings.dimmed(),
                 ));
             }
             lines.push(String::new());
@@ -1615,8 +1844,9 @@ mod tests {
         let rules = RulesConfig::default();
         let lines = build_human_lines(&results, &root, &rules);
         let text = plain(&lines);
-        // The cycle repeats the first file at the end
-        assert!(text.contains("src/a.ts \u{2192} src/b.ts \u{2192} src/c.ts \u{2192} src/a.ts"));
+        // Line 1 shows first file, line 2 shows the rest of the chain with arrows
+        assert!(text.contains("src/a.ts"));
+        assert!(text.contains("\u{2192} src/b.ts \u{2192} src/c.ts \u{2192} src/a.ts"));
     }
 
     // ── Empty sections are omitted ──
@@ -1883,8 +2113,8 @@ mod tests {
         assert!(text.contains("src/parser.ts"));
         assert!(text.contains(":42"));
         assert!(text.contains("parseExpression"));
-        assert!(text.contains("cyclomatic: 25"));
-        assert!(text.contains("cognitive: 30"));
+        assert!(text.contains("25 cyclomatic"));
+        assert!(text.contains("30 cognitive"));
         assert!(text.contains("80 lines"));
     }
 
@@ -1978,7 +2208,7 @@ mod tests {
     }
 
     #[test]
-    fn duplication_groups_show_instances_with_connectors() {
+    fn duplication_groups_show_instances_with_line_count() {
         let root = PathBuf::from("/project");
         let report = DuplicationReport {
             clone_groups: vec![CloneGroup {
@@ -2012,14 +2242,15 @@ mod tests {
         };
         let lines = build_duplication_human_lines(&report, &root);
         let text = plain(&lines);
-        assert!(text.contains("Clone group 1"));
-        assert!(text.contains("10 lines"));
+        // Line-count-led format, no "Clone group N" label
+        assert!(text.contains("10"));
+        assert!(text.contains("lines"));
         assert!(text.contains("2 instances"));
-        assert!(text.contains("src/a.ts:1-10"));
-        assert!(text.contains("src/b.ts:5-14"));
-        // First connector: ├─, last: └─
-        assert!(text.contains("\u{251c}\u{2500}"));
-        assert!(text.contains("\u{2514}\u{2500}"));
+        assert!(text.contains("a.ts:1-10"));
+        assert!(text.contains("b.ts:5-14"));
+        // No tree connectors
+        assert!(!text.contains("\u{251c}\u{2500}"));
+        assert!(!text.contains("\u{2514}\u{2500}"));
     }
 
     #[test]
@@ -2043,13 +2274,18 @@ mod tests {
         };
         let lines = build_duplication_human_lines(&report, &root);
         let text = plain(&lines);
-        assert!(text.contains("1 instance)"));
-        assert!(!text.contains("1 instances)"));
+        assert!(text.contains("1 instance"));
+        assert!(!text.contains("1 instances"));
     }
 
     #[test]
     fn duplication_families_show_suggestions() {
         let root = PathBuf::from("/project");
+        let dummy_group = CloneGroup {
+            instances: vec![],
+            token_count: 30,
+            line_count: 5,
+        };
         let report = DuplicationReport {
             clone_groups: vec![CloneGroup {
                 instances: vec![CloneInstance {
@@ -2065,7 +2301,7 @@ mod tests {
             }],
             clone_families: vec![CloneFamily {
                 files: vec![root.join("src/a.ts"), root.join("src/b.ts")],
-                groups: vec![],
+                groups: vec![dummy_group.clone(), dummy_group],
                 total_duplicated_lines: 20,
                 total_duplicated_tokens: 100,
                 suggestions: vec![RefactoringSuggestion {
@@ -2078,15 +2314,20 @@ mod tests {
         };
         let lines = build_duplication_human_lines(&report, &root);
         let text = plain(&lines);
-        assert!(text.contains("Clone Families"));
-        assert!(text.contains("Family 1"));
+        assert!(text.contains("Clone families"));
         assert!(text.contains("Extract shared utility function"));
-        assert!(text.contains("~15 lines saved"));
+        // "lines saved" is no longer shown
+        assert!(!text.contains("lines saved"));
     }
 
     #[test]
     fn duplication_suggestion_with_zero_savings_omits_savings_text() {
         let root = PathBuf::from("/project");
+        let dummy_group = CloneGroup {
+            instances: vec![],
+            token_count: 30,
+            line_count: 5,
+        };
         let report = DuplicationReport {
             clone_groups: vec![CloneGroup {
                 instances: vec![CloneInstance {
@@ -2102,7 +2343,7 @@ mod tests {
             }],
             clone_families: vec![CloneFamily {
                 files: vec![root.join("src/a.ts")],
-                groups: vec![],
+                groups: vec![dummy_group.clone(), dummy_group],
                 total_duplicated_lines: 10,
                 total_duplicated_tokens: 50,
                 suggestions: vec![RefactoringSuggestion {
@@ -2355,7 +2596,7 @@ mod tests {
     // ── Duplication family pluralization ──
 
     #[test]
-    fn duplication_single_group_family_no_plural() {
+    fn duplication_single_group_family_is_suppressed() {
         let root = PathBuf::from("/project");
         let report = DuplicationReport {
             clone_groups: vec![CloneGroup {
@@ -2385,8 +2626,8 @@ mod tests {
         };
         let lines = build_duplication_human_lines(&report, &root);
         let text = plain(&lines);
-        assert!(text.contains("1 group,"));
-        assert!(!text.contains("1 groups,"));
+        // Single-group families are suppressed from output
+        assert!(!text.contains("Clone families"));
     }
 
     #[test]
@@ -2427,7 +2668,7 @@ mod tests {
     // ── Single instance connector: only └─, no ├─ ──
 
     #[test]
-    fn single_instance_clone_group_uses_only_last_connector() {
+    fn single_instance_clone_group_no_connectors() {
         let root = PathBuf::from("/project");
         let report = DuplicationReport {
             clone_groups: vec![CloneGroup {
@@ -2447,8 +2688,9 @@ mod tests {
         };
         let lines = build_duplication_human_lines(&report, &root);
         let text = plain(&lines);
-        // Single instance: only └─, no ├─
-        assert!(text.contains("\u{2514}\u{2500}"));
+        // No tree connectors — simple indentation
+        assert!(!text.contains("\u{2514}\u{2500}"));
         assert!(!text.contains("\u{251c}\u{2500}"));
+        assert!(text.contains("a.ts:1-10"));
     }
 }

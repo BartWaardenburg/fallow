@@ -33,6 +33,7 @@ pub struct HealthOptions<'a> {
     pub workspace: Option<&'a str>,
     pub baseline: Option<&'a std::path::Path>,
     pub save_baseline: Option<&'a std::path::Path>,
+    pub complexity: bool,
     pub file_scores: bool,
     pub hotspots: bool,
     pub since: Option<&'a str>,
@@ -290,7 +291,11 @@ pub fn run_health(opts: &HealthOptions<'_>) -> ExitCode {
                 None
             },
         },
-        findings,
+        findings: if opts.complexity {
+            findings
+        } else {
+            Vec::new()
+        },
         file_scores,
         hotspots,
         hotspot_summary,
