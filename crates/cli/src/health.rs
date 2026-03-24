@@ -769,4 +769,495 @@ mod tests {
         let result = compute_maintainability_index(0.0, 1.0, 1000);
         assert!((result - 65.0).abs() < f64::EPSILON);
     }
+
+    // --- compute_hotspot_score ---
+
+    #[test]
+    fn hotspot_score_both_maxima_zero() {
+        // When both maxima are zero, avoid division by zero → score 0
+        assert!((compute_hotspot_score(0.0, 0.0, 0.0, 0.0)).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn hotspot_score_max_weighted_zero() {
+        // Churn dimension zero, complexity present → score 0
+        assert!((compute_hotspot_score(5.0, 0.0, 0.5, 1.0)).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn hotspot_score_max_density_zero() {
+        // Complexity dimension zero, churn present → score 0
+        assert!((compute_hotspot_score(5.0, 10.0, 0.0, 0.0)).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn hotspot_score_equal_normalization() {
+        // File equals both maxima → normalized values both 1.0 → score 100
+        let score = compute_hotspot_score(10.0, 10.0, 2.0, 2.0);
+        assert!((score - 100.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn hotspot_score_half_values() {
+        // Half of each maximum → 0.5 * 0.5 * 100 = 25.0
+        let score = compute_hotspot_score(5.0, 10.0, 1.0, 2.0);
+        assert!((score - 25.0).abs() < f64::EPSILON);
+    }
+
+    // --- compute_complexity_density ---
+
+    #[test]
+    fn complexity_density_zero_lines() {
+        assert!((compute_complexity_density(10, 0)).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn complexity_density_normal() {
+        // 10 cyclomatic / 100 lines = 0.1
+        let result = compute_complexity_density(10, 100);
+        assert!((result - 0.1).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn complexity_density_high() {
+        // 50 cyclomatic / 10 lines = 5.0
+        let result = compute_complexity_density(50, 10);
+        assert!((result - 5.0).abs() < f64::EPSILON);
+    }
+
+    // --- compute_dead_code_ratio ---
+
+    #[test]
+    fn dead_code_ratio_no_exports() {
+        let unused_files = rustc_hash::FxHashSet::default();
+        let unused_map = rustc_hash::FxHashMap::default();
+        let path = std::path::Path::new("/src/foo.ts");
+        let exports: Vec<fallow_core::graph::ExportSymbol> = vec![];
+
+        let ratio = compute_dead_code_ratio(path, &exports, &unused_files, &unused_map);
+        assert!((ratio).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn dead_code_ratio_all_unused_file() {
+        let mut unused_files: rustc_hash::FxHashSet<&std::path::Path> =
+            rustc_hash::FxHashSet::default();
+        let path = std::path::Path::new("/src/foo.ts");
+        unused_files.insert(path);
+        let unused_map = rustc_hash::FxHashMap::default();
+        let exports: Vec<fallow_core::graph::ExportSymbol> = vec![];
+
+        let ratio = compute_dead_code_ratio(path, &exports, &unused_files, &unused_map);
+        assert!((ratio - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn dead_code_ratio_mix() {
+        let unused_files = rustc_hash::FxHashSet::default();
+        let path = std::path::Path::new("/src/foo.ts");
+
+        // 3 value exports, 1 type-only export
+        let exports = vec![
+            fallow_core::graph::ExportSymbol {
+                name: fallow_core::extract::ExportName::Named("a".into()),
+                is_type_only: false,
+                is_public: false,
+                span: oxc_span::Span::empty(0),
+                references: vec![],
+                members: vec![],
+            },
+            fallow_core::graph::ExportSymbol {
+                name: fallow_core::extract::ExportName::Named("b".into()),
+                is_type_only: false,
+                is_public: false,
+                span: oxc_span::Span::empty(0),
+                references: vec![],
+                members: vec![],
+            },
+            fallow_core::graph::ExportSymbol {
+                name: fallow_core::extract::ExportName::Named("c".into()),
+                is_type_only: false,
+                is_public: false,
+                span: oxc_span::Span::empty(0),
+                references: vec![],
+                members: vec![],
+            },
+            fallow_core::graph::ExportSymbol {
+                name: fallow_core::extract::ExportName::Named("MyType".into()),
+                is_type_only: true,
+                is_public: false,
+                span: oxc_span::Span::empty(0),
+                references: vec![],
+                members: vec![],
+            },
+        ];
+
+        // 2 of 3 value exports are unused
+        let mut unused_map: rustc_hash::FxHashMap<&std::path::Path, usize> =
+            rustc_hash::FxHashMap::default();
+        unused_map.insert(path, 2);
+
+        let ratio = compute_dead_code_ratio(path, &exports, &unused_files, &unused_map);
+        // 2/3 ≈ 0.6667
+        assert!((ratio - 2.0 / 3.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn dead_code_ratio_all_type_only_exports() {
+        let unused_files = rustc_hash::FxHashSet::default();
+        let path = std::path::Path::new("/src/types.ts");
+
+        // Only type exports → value_exports = 0 → ratio 0.0
+        let exports = vec![fallow_core::graph::ExportSymbol {
+            name: fallow_core::extract::ExportName::Named("Foo".into()),
+            is_type_only: true,
+            is_public: false,
+            span: oxc_span::Span::empty(0),
+            references: vec![],
+            members: vec![],
+        }];
+        let unused_map = rustc_hash::FxHashMap::default();
+
+        let ratio = compute_dead_code_ratio(path, &exports, &unused_files, &unused_map);
+        assert!((ratio).abs() < f64::EPSILON);
+    }
+
+    // --- aggregate_complexity ---
+
+    #[test]
+    fn aggregate_complexity_empty_module() {
+        let module = fallow_core::extract::ModuleInfo {
+            file_id: fallow_core::discover::FileId(0),
+            exports: vec![],
+            imports: vec![],
+            re_exports: vec![],
+            dynamic_imports: vec![],
+            dynamic_import_patterns: vec![],
+            require_calls: vec![],
+            member_accesses: vec![],
+            whole_object_uses: vec![],
+            has_cjs_exports: false,
+            content_hash: 0,
+            suppressions: vec![],
+            unused_import_bindings: vec![],
+            line_offsets: vec![],
+            complexity: vec![],
+        };
+
+        let (cyc, cog, funcs, lines) = aggregate_complexity(&module);
+        assert_eq!(cyc, 0);
+        assert_eq!(cog, 0);
+        assert_eq!(funcs, 0);
+        assert_eq!(lines, 0);
+    }
+
+    #[test]
+    fn aggregate_complexity_single_function() {
+        let module = fallow_core::extract::ModuleInfo {
+            file_id: fallow_core::discover::FileId(0),
+            exports: vec![],
+            imports: vec![],
+            re_exports: vec![],
+            dynamic_imports: vec![],
+            dynamic_import_patterns: vec![],
+            require_calls: vec![],
+            member_accesses: vec![],
+            whole_object_uses: vec![],
+            has_cjs_exports: false,
+            content_hash: 0,
+            suppressions: vec![],
+            unused_import_bindings: vec![],
+            line_offsets: vec![0, 10, 20, 30, 40], // 5 lines
+            complexity: vec![fallow_types::extract::FunctionComplexity {
+                name: "doStuff".into(),
+                line: 1,
+                col: 0,
+                cyclomatic: 7,
+                cognitive: 4,
+                line_count: 5,
+            }],
+        };
+
+        let (cyc, cog, funcs, lines) = aggregate_complexity(&module);
+        assert_eq!(cyc, 7);
+        assert_eq!(cog, 4);
+        assert_eq!(funcs, 1);
+        assert_eq!(lines, 5);
+    }
+
+    #[test]
+    fn aggregate_complexity_multiple_functions() {
+        let module = fallow_core::extract::ModuleInfo {
+            file_id: fallow_core::discover::FileId(0),
+            exports: vec![],
+            imports: vec![],
+            re_exports: vec![],
+            dynamic_imports: vec![],
+            dynamic_import_patterns: vec![],
+            require_calls: vec![],
+            member_accesses: vec![],
+            whole_object_uses: vec![],
+            has_cjs_exports: false,
+            content_hash: 0,
+            suppressions: vec![],
+            unused_import_bindings: vec![],
+            line_offsets: vec![0, 10, 20], // 3 lines
+            complexity: vec![
+                fallow_types::extract::FunctionComplexity {
+                    name: "a".into(),
+                    line: 1,
+                    col: 0,
+                    cyclomatic: 3,
+                    cognitive: 2,
+                    line_count: 1,
+                },
+                fallow_types::extract::FunctionComplexity {
+                    name: "b".into(),
+                    line: 2,
+                    col: 0,
+                    cyclomatic: 5,
+                    cognitive: 8,
+                    line_count: 2,
+                },
+            ],
+        };
+
+        let (cyc, cog, funcs, lines) = aggregate_complexity(&module);
+        assert_eq!(cyc, 8);
+        assert_eq!(cog, 10);
+        assert_eq!(funcs, 2);
+        assert_eq!(lines, 3);
+    }
+
+    // --- is_excluded_from_hotspots ---
+
+    #[test]
+    fn excluded_no_filters() {
+        let path = std::path::Path::new("/project/src/foo.ts");
+        let root = std::path::Path::new("/project");
+        let ignore_set = globset::GlobSet::empty();
+
+        assert!(!is_excluded_from_hotspots(path, root, &ignore_set, None));
+    }
+
+    #[test]
+    fn excluded_workspace_filter_mismatch() {
+        let path = std::path::Path::new("/project/packages/b/src/foo.ts");
+        let root = std::path::Path::new("/project");
+        let ws_root = std::path::Path::new("/project/packages/a");
+        let ignore_set = globset::GlobSet::empty();
+
+        assert!(is_excluded_from_hotspots(
+            path,
+            root,
+            &ignore_set,
+            Some(ws_root)
+        ));
+    }
+
+    #[test]
+    fn excluded_workspace_filter_match() {
+        let path = std::path::Path::new("/project/packages/a/src/foo.ts");
+        let root = std::path::Path::new("/project");
+        let ws_root = std::path::Path::new("/project/packages/a");
+        let ignore_set = globset::GlobSet::empty();
+
+        assert!(!is_excluded_from_hotspots(
+            path,
+            root,
+            &ignore_set,
+            Some(ws_root)
+        ));
+    }
+
+    #[test]
+    fn excluded_matching_glob() {
+        let path = std::path::Path::new("/project/src/generated/types.ts");
+        let root = std::path::Path::new("/project");
+        let mut builder = globset::GlobSetBuilder::new();
+        builder.add(globset::Glob::new("src/generated/**").unwrap());
+        let ignore_set = builder.build().unwrap();
+
+        assert!(is_excluded_from_hotspots(path, root, &ignore_set, None));
+    }
+
+    #[test]
+    fn excluded_non_matching_glob() {
+        let path = std::path::Path::new("/project/src/components/Button.tsx");
+        let root = std::path::Path::new("/project");
+        let mut builder = globset::GlobSetBuilder::new();
+        builder.add(globset::Glob::new("src/generated/**").unwrap());
+        let ignore_set = builder.build().unwrap();
+
+        assert!(!is_excluded_from_hotspots(path, root, &ignore_set, None));
+    }
+
+    // --- compute_normalization_maxima ---
+
+    #[test]
+    fn normalization_maxima_empty_input() {
+        let scores: Vec<FileHealthScore> = vec![];
+        let churn_files = rustc_hash::FxHashMap::default();
+
+        let (max_w, max_d) = compute_normalization_maxima(&scores, &churn_files, 3);
+        assert!((max_w).abs() < f64::EPSILON);
+        assert!((max_d).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn normalization_maxima_single_file() {
+        let scores = vec![FileHealthScore {
+            path: std::path::PathBuf::from("/src/foo.ts"),
+            fan_in: 0,
+            fan_out: 0,
+            dead_code_ratio: 0.0,
+            complexity_density: 0.75,
+            maintainability_index: 80.0,
+            total_cyclomatic: 15,
+            total_cognitive: 10,
+            function_count: 3,
+            lines: 20,
+        }];
+        let mut churn_files: rustc_hash::FxHashMap<
+            std::path::PathBuf,
+            fallow_core::churn::FileChurn,
+        > = rustc_hash::FxHashMap::default();
+        churn_files.insert(
+            std::path::PathBuf::from("/src/foo.ts"),
+            fallow_core::churn::FileChurn {
+                path: std::path::PathBuf::from("/src/foo.ts"),
+                commits: 5,
+                weighted_commits: 4.2,
+                lines_added: 100,
+                lines_deleted: 20,
+                trend: fallow_core::churn::ChurnTrend::Stable,
+            },
+        );
+
+        let (max_w, max_d) = compute_normalization_maxima(&scores, &churn_files, 3);
+        assert!((max_w - 4.2).abs() < f64::EPSILON);
+        assert!((max_d - 0.75).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn normalization_maxima_below_min_commits() {
+        let scores = vec![FileHealthScore {
+            path: std::path::PathBuf::from("/src/foo.ts"),
+            fan_in: 0,
+            fan_out: 0,
+            dead_code_ratio: 0.0,
+            complexity_density: 0.75,
+            maintainability_index: 80.0,
+            total_cyclomatic: 15,
+            total_cognitive: 10,
+            function_count: 3,
+            lines: 20,
+        }];
+        let mut churn_files: rustc_hash::FxHashMap<
+            std::path::PathBuf,
+            fallow_core::churn::FileChurn,
+        > = rustc_hash::FxHashMap::default();
+        churn_files.insert(
+            std::path::PathBuf::from("/src/foo.ts"),
+            fallow_core::churn::FileChurn {
+                path: std::path::PathBuf::from("/src/foo.ts"),
+                commits: 2, // below min_commits=3
+                weighted_commits: 4.2,
+                lines_added: 100,
+                lines_deleted: 20,
+                trend: fallow_core::churn::ChurnTrend::Stable,
+            },
+        );
+
+        // File has only 2 commits, below min_commits=3 → excluded
+        let (max_w, max_d) = compute_normalization_maxima(&scores, &churn_files, 3);
+        assert!((max_w).abs() < f64::EPSILON);
+        assert!((max_d).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn normalization_maxima_all_zeros() {
+        let scores = vec![FileHealthScore {
+            path: std::path::PathBuf::from("/src/foo.ts"),
+            fan_in: 0,
+            fan_out: 0,
+            dead_code_ratio: 0.0,
+            complexity_density: 0.0,
+            maintainability_index: 100.0,
+            total_cyclomatic: 0,
+            total_cognitive: 0,
+            function_count: 1,
+            lines: 10,
+        }];
+        let mut churn_files: rustc_hash::FxHashMap<
+            std::path::PathBuf,
+            fallow_core::churn::FileChurn,
+        > = rustc_hash::FxHashMap::default();
+        churn_files.insert(
+            std::path::PathBuf::from("/src/foo.ts"),
+            fallow_core::churn::FileChurn {
+                path: std::path::PathBuf::from("/src/foo.ts"),
+                commits: 5,
+                weighted_commits: 0.0,
+                lines_added: 0,
+                lines_deleted: 0,
+                trend: fallow_core::churn::ChurnTrend::Stable,
+            },
+        );
+
+        let (max_w, max_d) = compute_normalization_maxima(&scores, &churn_files, 3);
+        assert!((max_w).abs() < f64::EPSILON);
+        assert!((max_d).abs() < f64::EPSILON);
+    }
+
+    // --- count_unused_exports_by_path ---
+
+    #[test]
+    fn count_unused_exports_empty() {
+        let exports: Vec<fallow_core::results::UnusedExport> = vec![];
+        let map = count_unused_exports_by_path(&exports);
+        assert!(map.is_empty());
+    }
+
+    #[test]
+    fn count_unused_exports_groups_by_path() {
+        let exports = vec![
+            fallow_core::results::UnusedExport {
+                path: std::path::PathBuf::from("/src/a.ts"),
+                export_name: "foo".into(),
+                is_type_only: false,
+                line: 1,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            },
+            fallow_core::results::UnusedExport {
+                path: std::path::PathBuf::from("/src/a.ts"),
+                export_name: "bar".into(),
+                is_type_only: false,
+                line: 5,
+                col: 0,
+                span_start: 40,
+                is_re_export: false,
+            },
+            fallow_core::results::UnusedExport {
+                path: std::path::PathBuf::from("/src/b.ts"),
+                export_name: "baz".into(),
+                is_type_only: false,
+                line: 1,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            },
+        ];
+        let map = count_unused_exports_by_path(&exports);
+        assert_eq!(
+            map.get(std::path::Path::new("/src/a.ts")).copied(),
+            Some(2)
+        );
+        assert_eq!(
+            map.get(std::path::Path::new("/src/b.ts")).copied(),
+            Some(1)
+        );
+    }
 }
