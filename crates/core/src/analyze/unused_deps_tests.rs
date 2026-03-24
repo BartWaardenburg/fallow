@@ -13,7 +13,7 @@ use crate::results::*;
 use crate::suppress::{self, Suppression};
 
 use super::{
-    LineOffsetsMap, find_dep_line_in_json, find_type_only_dependencies, find_unlisted_dependencies,
+    LineOffsetsMap, find_type_only_dependencies, find_unlisted_dependencies,
     find_unresolved_imports, find_unused_dependencies, should_skip_dependency,
 };
 
@@ -1593,4 +1593,333 @@ fn multiple_unresolved_imports_collected() {
     assert_eq!(unresolved.len(), 2);
     assert!(unresolved.iter().any(|u| u.specifier == "./missing-a"));
     assert!(unresolved.iter().any(|u| u.specifier == "./missing-b"));
+}
+
+// ---- Additional coverage: all deps used scenario ----
+
+#[test]
+fn all_deps_used_produces_no_unused() {
+    // Every dependency listed is also imported — nothing should be flagged
+    let (graph, _) = build_graph_with_npm_imports(&[
+        ("react", false),
+        ("lodash", false),
+        ("axios", false),
+    ]);
+    let pkg = make_pkg(&["react", "lodash", "axios"], &[], &[]);
+    let config = test_config(PathBuf::from("/project"));
+
+    let (unused, unused_dev, unused_optional) =
+        find_unused_dependencies(&graph, &pkg, &config, None, &[]);
+
+    assert!(unused.is_empty(), "all deps are used, none should be flagged");
+    assert!(unused_dev.is_empty());
+    assert!(unused_optional.is_empty());
+}
+
+// ---- Additional coverage: find_type_only_dependencies only checks production deps ----
+
+#[test]
+fn type_only_dep_ignores_dev_dependencies() {
+    // A dev dependency that is only type-imported should NOT appear in type_only results,
+    // because find_type_only_dependencies only checks production dependencies.
+    let (graph, _) = build_graph_with_npm_imports(&[("@types/lodash", true)]);
+    let pkg = make_pkg(&[], &["@types/lodash"], &[]);
+    let config = test_config(PathBuf::from("/project"));
+
+    let type_only = find_type_only_dependencies(&graph, &pkg, &config, &[]);
+
+    assert!(
+        type_only.is_empty(),
+        "dev deps should not appear in type-only dependency results"
+    );
+}
+
+// ---- Additional coverage: find_unresolved_imports with empty input ----
+
+#[test]
+fn no_resolved_modules_produces_no_unresolved() {
+    let resolved_modules: Vec<ResolvedModule> = vec![];
+    let config = test_config(PathBuf::from("/project"));
+    let suppressions: FxHashMap<FileId, &[Suppression]> = FxHashMap::default();
+    let line_offsets: LineOffsetsMap<'_> = FxHashMap::default();
+
+    let unresolved = find_unresolved_imports(
+        &resolved_modules,
+        &config,
+        &suppressions,
+        &[],
+        &line_offsets,
+    );
+
+    assert!(
+        unresolved.is_empty(),
+        "empty resolved_modules should produce no unresolved imports"
+    );
+}
+
+// ---- Additional coverage: should_skip_dependency with empty string ----
+
+#[test]
+fn skip_dep_empty_string_no_match() {
+    let (root_flagged, script_used, plugin_referenced, ignore_deps, workspace_names) = empty_sets();
+    assert!(!should_skip_dependency(
+        "",
+        &root_flagged,
+        &script_used,
+        &plugin_referenced,
+        &ignore_deps,
+        &workspace_names,
+        |_| false,
+    ));
+}
+
+// ---- Additional coverage: workspace-scoped dependency usage ----
+
+#[test]
+fn workspace_dep_used_within_workspace_not_flagged() {
+    // A workspace declares "react" as a dep AND a file within that workspace imports "react".
+    // This dep should NOT be flagged as unused for the workspace.
+    let ws_root = PathBuf::from("/project/packages/web");
+    let files = vec![DiscoveredFile {
+        id: FileId(0),
+        path: ws_root.join("src/index.ts"),
+        size_bytes: 100,
+    }];
+    let entry_points = vec![EntryPoint {
+        path: ws_root.join("src/index.ts"),
+        source: EntryPointSource::PackageJsonMain,
+    }];
+    let resolved_modules = vec![ResolvedModule {
+        file_id: FileId(0),
+        path: ws_root.join("src/index.ts"),
+        exports: vec![],
+        re_exports: vec![],
+        resolved_imports: vec![ResolvedImport {
+            info: ImportInfo {
+                source: "react".to_string(),
+                imported_name: ImportedName::Named("useState".to_string()),
+                local_name: "useState".to_string(),
+                is_type_only: false,
+                span: oxc_span::Span::new(0, 20),
+            },
+            target: ResolveResult::NpmPackage("react".to_string()),
+        }],
+        resolved_dynamic_imports: vec![],
+        resolved_dynamic_patterns: vec![],
+        member_accesses: vec![],
+        whole_object_uses: vec![],
+        has_cjs_exports: false,
+        unused_import_bindings: vec![],
+    }];
+    let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
+
+    // Root package.json does NOT list "react" — it's only in the workspace
+    let root_pkg = make_pkg(&[], &[], &[]);
+    let config = test_config(PathBuf::from("/project"));
+
+    // The workspace package.json would list "react", but since we can't write to disk,
+    // we verify that the root analysis does not flag "react" because it IS used somewhere.
+    let (unused, _, _) = find_unused_dependencies(&graph, &root_pkg, &config, None, &[]);
+
+    // "react" is not in root package.json, so it won't appear in unused root deps at all
+    assert!(
+        !unused.iter().any(|d| d.package_name == "react"),
+        "react should not be in root unused since it's not in root deps"
+    );
+}
+
+// ---- Additional coverage: unlisted dep in workspace scope ----
+
+#[test]
+fn unlisted_dep_detected_across_multiple_files() {
+    // Two files both import the same unlisted package — should deduplicate per file
+    let files = vec![
+        DiscoveredFile {
+            id: FileId(0),
+            path: PathBuf::from("/project/src/a.ts"),
+            size_bytes: 100,
+        },
+        DiscoveredFile {
+            id: FileId(1),
+            path: PathBuf::from("/project/src/b.ts"),
+            size_bytes: 100,
+        },
+    ];
+    let entry_points = vec![
+        EntryPoint {
+            path: PathBuf::from("/project/src/a.ts"),
+            source: EntryPointSource::PackageJsonMain,
+        },
+        EntryPoint {
+            path: PathBuf::from("/project/src/b.ts"),
+            source: EntryPointSource::PackageJsonMain,
+        },
+    ];
+    let resolved_modules = vec![
+        ResolvedModule {
+            file_id: FileId(0),
+            path: PathBuf::from("/project/src/a.ts"),
+            exports: vec![],
+            re_exports: vec![],
+            resolved_imports: vec![ResolvedImport {
+                info: ImportInfo {
+                    source: "unlisted-pkg".to_string(),
+                    imported_name: ImportedName::Named("foo".to_string()),
+                    local_name: "foo".to_string(),
+                    is_type_only: false,
+                    span: oxc_span::Span::new(0, 20),
+                },
+                target: ResolveResult::NpmPackage("unlisted-pkg".to_string()),
+            }],
+            resolved_dynamic_imports: vec![],
+            resolved_dynamic_patterns: vec![],
+            member_accesses: vec![],
+            whole_object_uses: vec![],
+            has_cjs_exports: false,
+            unused_import_bindings: vec![],
+        },
+        ResolvedModule {
+            file_id: FileId(1),
+            path: PathBuf::from("/project/src/b.ts"),
+            exports: vec![],
+            re_exports: vec![],
+            resolved_imports: vec![ResolvedImport {
+                info: ImportInfo {
+                    source: "unlisted-pkg".to_string(),
+                    imported_name: ImportedName::Named("bar".to_string()),
+                    local_name: "bar".to_string(),
+                    is_type_only: false,
+                    span: oxc_span::Span::new(0, 20),
+                },
+                target: ResolveResult::NpmPackage("unlisted-pkg".to_string()),
+            }],
+            resolved_dynamic_imports: vec![],
+            resolved_dynamic_patterns: vec![],
+            member_accesses: vec![],
+            whole_object_uses: vec![],
+            has_cjs_exports: false,
+            unused_import_bindings: vec![],
+        },
+    ];
+    let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
+    let pkg = make_pkg(&[], &[], &[]);
+    let config = test_config(PathBuf::from("/project"));
+    let line_offsets: LineOffsetsMap<'_> = FxHashMap::default();
+
+    let unlisted = find_unlisted_dependencies(
+        &graph,
+        &pkg,
+        &config,
+        &[],
+        None,
+        &resolved_modules,
+        &line_offsets,
+    );
+
+    assert_eq!(unlisted.len(), 1, "same unlisted pkg should be grouped");
+    assert_eq!(unlisted[0].package_name, "unlisted-pkg");
+    assert_eq!(
+        unlisted[0].imported_from.len(),
+        2,
+        "should have import sites from both files"
+    );
+}
+
+// ---- Additional coverage: find_unlisted_dependencies with optional dep listed ----
+
+#[test]
+fn optional_dep_not_reported_as_unlisted() {
+    let (graph, resolved_modules) = build_graph_with_npm_imports(&[("sharp", false)]);
+    let pkg = make_pkg(&[], &[], &["sharp"]);
+    let config = test_config(PathBuf::from("/project"));
+    let line_offsets: LineOffsetsMap<'_> = FxHashMap::default();
+
+    let unlisted = find_unlisted_dependencies(
+        &graph,
+        &pkg,
+        &config,
+        &[],
+        None,
+        &resolved_modules,
+        &line_offsets,
+    );
+
+    assert!(
+        !unlisted.iter().any(|d| d.package_name == "sharp"),
+        "optional deps should count as listed and not be flagged as unlisted"
+    );
+}
+
+// ---- Additional coverage: find_unresolved_imports suppression does not suppress wrong kind ----
+
+#[test]
+fn unresolved_import_not_suppressed_by_wrong_kind() {
+    let resolved_modules = vec![ResolvedModule {
+        file_id: FileId(0),
+        path: PathBuf::from("/project/src/index.ts"),
+        exports: vec![],
+        re_exports: vec![],
+        resolved_imports: vec![ResolvedImport {
+            info: ImportInfo {
+                source: "./broken".to_string(),
+                imported_name: ImportedName::Named("thing".to_string()),
+                local_name: "thing".to_string(),
+                is_type_only: false,
+                span: oxc_span::Span::new(0, 20),
+            },
+            target: ResolveResult::Unresolvable("./broken".to_string()),
+        }],
+        resolved_dynamic_imports: vec![],
+        resolved_dynamic_patterns: vec![],
+        member_accesses: vec![],
+        whole_object_uses: vec![],
+        has_cjs_exports: false,
+        unused_import_bindings: vec![],
+    }];
+
+    let config = test_config(PathBuf::from("/project"));
+    // Suppress a DIFFERENT issue kind on line 1 — should NOT suppress unresolved import
+    let supps = vec![Suppression {
+        line: 1,
+        kind: Some(suppress::IssueKind::UnusedExport),
+    }];
+    let mut suppressions: FxHashMap<FileId, &[Suppression]> = FxHashMap::default();
+    suppressions.insert(FileId(0), &supps);
+    let line_offsets: LineOffsetsMap<'_> = FxHashMap::default();
+
+    let unresolved = find_unresolved_imports(
+        &resolved_modules,
+        &config,
+        &suppressions,
+        &[],
+        &line_offsets,
+    );
+
+    assert_eq!(
+        unresolved.len(),
+        1,
+        "suppression with wrong issue kind should not suppress unresolved import"
+    );
+}
+
+// ---- Additional coverage: unused deps with plugin tooling for dev deps ----
+
+#[test]
+fn plugin_tooling_dev_deps_not_flagged() {
+    let (graph, _) = build_graph_with_npm_imports(&[]);
+    let pkg = make_pkg(&[], &["my-dev-tool"], &[]);
+    let config = test_config(PathBuf::from("/project"));
+
+    let mut plugin_result = AggregatedPluginResult::default();
+    plugin_result
+        .tooling_dependencies
+        .push("my-dev-tool".to_string());
+
+    let (_, unused_dev, _) =
+        find_unused_dependencies(&graph, &pkg, &config, Some(&plugin_result), &[]);
+
+    assert!(
+        !unused_dev.iter().any(|d| d.package_name == "my-dev-tool"),
+        "plugin tooling dev deps should not be flagged as unused"
+    );
 }

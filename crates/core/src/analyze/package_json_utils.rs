@@ -209,4 +209,57 @@ mod tests {
         // Should find the FIRST occurrence (line 3)
         assert_eq!(find_dep_line_in_json(content, "react"), 3);
     }
+
+    #[test]
+    fn find_dep_line_malformed_content() {
+        // Non-JSON content should not panic and should return 1 (fallback)
+        assert_eq!(find_dep_line_in_json("this is not json at all", "lodash"), 1);
+        assert_eq!(find_dep_line_in_json("{{{", "lodash"), 1);
+        assert_eq!(find_dep_line_in_json("null", "lodash"), 1);
+    }
+
+    #[test]
+    fn read_pkg_json_content_nonexistent_path() {
+        let result = read_pkg_json_content(Path::new("/nonexistent/path/package.json"));
+        assert!(result.is_none(), "nonexistent path should return None");
+    }
+
+    #[test]
+    fn read_pkg_json_content_valid_path() {
+        // Create a temp file and read it back
+        let dir = std::env::temp_dir().join("fallow_test_read_pkg");
+        let _ = std::fs::create_dir_all(&dir);
+        let pkg_path = dir.join("package.json");
+        std::fs::write(&pkg_path, r#"{"name": "test"}"#).expect("write temp file");
+
+        let result = read_pkg_json_content(&pkg_path);
+        assert!(result.is_some(), "valid path should return Some");
+        assert_eq!(result.unwrap(), r#"{"name": "test"}"#);
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn find_dep_line_deeply_nested_scoped_package() {
+        // Scoped package with multiple levels in the path
+        let content = r#"{
+  "dependencies": {
+    "@babel/plugin-transform-runtime": "^7.0.0",
+    "@babel/core": "^7.0.0"
+  }
+}"#;
+        assert_eq!(
+            find_dep_line_in_json(content, "@babel/plugin-transform-runtime"),
+            3
+        );
+        assert_eq!(find_dep_line_in_json(content, "@babel/core"), 4);
+    }
+
+    #[test]
+    fn find_dep_line_with_trailing_comma_jsonc() {
+        // JSONC allows trailing commas — verify the search still works
+        let content = "{\n  \"dependencies\": {\n    \"lodash\": \"^4.17.21\",\n  }\n}";
+        assert_eq!(find_dep_line_in_json(content, "lodash"), 3);
+    }
 }
