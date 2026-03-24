@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1774343811106,
+  "lastUpdate": 1774343974483,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
@@ -659,6 +659,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 3973,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "f2bc1c02ea1a9dc0468addd7df06da9ab4faa30f",
+          "message": "fix: hard error on health baseline I/O failures, capture threshold count before baseline filter\n\n- Baseline read/write/parse failures now return exit code 2 (matching\n  dupes behavior) instead of printing a warning and continuing silently.\n- functions_above_threshold is now captured before baseline filtering,\n  so the summary always reflects the true count of threshold violations\n  regardless of whether --baseline is active.",
+          "timestamp": "2026-03-24T10:18:09+01:00",
+          "tree_id": "000eb1d146e844b5c6a6fd1764d1f49f683b9277",
+          "url": "https://github.com/fallow-rs/fallow/commit/f2bc1c02ea1a9dc0468addd7df06da9ab4faa30f"
+        },
+        "date": 1774343973949,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 3048326,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 12171,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 425514,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 3977,
             "unit": "allocations"
           }
         ]
