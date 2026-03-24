@@ -1,3 +1,4 @@
+mod package_json_utils;
 mod predicates;
 mod unused_deps;
 mod unused_exports;
