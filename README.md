@@ -32,8 +32,8 @@ npx fallow health       # Complexity — find high-complexity functions
 
 ```bash
 npx fallow                           # All analyses — zero config, sub-second
+npx fallow dead-code                 # Dead code only — unused files, exports, deps
 npx fallow dupes                     # Duplication — find copy-paste clones
-npx fallow dupes --mode semantic     # Catch clones with renamed variables
 npx fallow health                    # Complexity — find high-complexity functions
 npx fallow fix --dry-run             # Preview auto-removal of dead exports and deps
 ```
@@ -62,6 +62,26 @@ cargo install fallow-cli     # Or via cargo
 - **Type-only dependencies** — production deps only used via `import type` (could be devDependencies)
 - **Complexity metrics** — cyclomatic and cognitive complexity per function, with configurable thresholds
 - **Function overload deduplication** — multiple overload signatures for the same function are deduplicated to avoid false positives
+
+## Dead code analysis
+
+`fallow dead-code` finds unused files, exports, dependencies, types, enum members, class members, unresolved imports, unlisted dependencies, duplicate exports, and circular dependencies.
+
+```bash
+fallow dead-code                          # Find all dead code (default thresholds)
+fallow dead-code --unused-exports         # Only unused exports
+fallow dead-code --circular-deps          # Only circular dependencies
+fallow dead-code --changed-since main     # Only dead code in changed files
+fallow dead-code --fail-on-issues         # Exit 1 if issues found (CI gate)
+fallow dead-code --production             # Exclude test/dev files
+fallow dead-code --workspace my-package   # Scope to one workspace package
+fallow dead-code --save-baseline b.json   # Save current state as baseline
+fallow dead-code --baseline b.json        # Fail only on new issues vs baseline
+fallow dead-code --format json            # Machine-readable output
+fallow dead-code --ci                     # CI mode: SARIF + quiet + fail-on-issues
+```
+
+`fallow dead-code` is the canonical name. `fallow check` is accepted as an alias.
 
 ## Code duplication
 
