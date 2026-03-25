@@ -307,41 +307,64 @@ impl FallowLspServer {
             .log_message(MessageType::INFO, "Running fallow analysis...")
             .await;
 
-        let root_clone = root.clone();
+        // Discover all project roots: the workspace root itself, plus any
+        // subdirectories with their own package.json (sub-projects, fixtures, etc.)
+        let project_roots = find_project_roots(&root);
+
+        self.client
+            .log_message(
+                MessageType::INFO,
+                format!("Found {} project root(s)", project_roots.len()),
+            )
+            .await;
+
         let join_result = tokio::task::spawn_blocking(move || {
-            let analysis = fallow_core::analyze_project(&root_clone);
+            let mut merged_results = AnalysisResults::default();
+            let mut merged_duplication = DuplicationReport::default();
+            let mut analysis_roots: Vec<std::path::PathBuf> = Vec::new();
 
-            // Load user's duplication config, falling back to defaults
-            let dupes_config = fallow_config::FallowConfig::find_and_load(&root_clone)
-                .ok()
-                .flatten()
-                .map(|(c, _)| c.duplicates)
-                .unwrap_or_default();
+            for project_root in &project_roots {
+                match fallow_core::analyze_project(project_root) {
+                    Ok(results) => {
+                        merge_results(&mut merged_results, results);
+                        analysis_roots.push(project_root.clone());
+                    }
+                    Err(_) => {
+                        // Skip projects that fail to analyze (e.g., no source files)
+                    }
+                }
 
-            let duplication =
-                fallow_core::duplicates::find_duplicates_in_project(&root_clone, &dupes_config);
+                let dupes_config = fallow_config::FallowConfig::find_and_load(project_root)
+                    .ok()
+                    .flatten()
+                    .map(|(c, _)| c.duplicates)
+                    .unwrap_or_default();
 
-            (analysis, duplication)
+                let duplication = fallow_core::duplicates::find_duplicates_in_project(
+                    project_root,
+                    &dupes_config,
+                );
+                merge_duplication(&mut merged_duplication, duplication);
+            }
+
+            (merged_results, merged_duplication, analysis_roots)
         })
         .await;
 
         match join_result {
-            Ok((Ok(results), duplication)) => {
-                self.publish_diagnostics(&results, &duplication, &root)
-                    .await;
+            Ok((results, duplication, roots)) => {
+                // Publish diagnostics using all analysis roots
+                for analysis_root in &roots {
+                    self.publish_diagnostics(&results, &duplication, analysis_root)
+                        .await;
+                }
                 *self.results.write().await = Some(results);
                 *self.duplication.write().await = Some(duplication);
 
-                // Notify the client to re-request Code Lenses with the fresh data
                 let _ = self.client.code_lens_refresh().await;
 
                 self.client
                     .log_message(MessageType::INFO, "Analysis complete")
-                    .await;
-            }
-            Ok((Err(e), _)) => {
-                self.client
-                    .log_message(MessageType::ERROR, format!("Analysis error: {e}"))
                     .await;
             }
             Err(e) => {
@@ -446,4 +469,137 @@ async fn main() {
     .finish();
 
     Server::new(stdin, stdout, socket).serve(service).await;
+}
+
+/// Find all project roots under a workspace directory.
+///
+/// Find all project roots under a workspace directory.
+///
+/// Discovers sub-projects by finding all `package.json` files (excluding
+/// `node_modules`, `.git`, `target`, etc.) and checking if they contain
+/// JS/TS source files worth analyzing.
+fn find_project_roots(workspace_root: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut roots = vec![workspace_root.to_path_buf()];
+
+    // Also include monorepo workspaces from config
+    let workspaces = fallow_config::discover_workspaces(workspace_root);
+    for ws in &workspaces {
+        roots.push(ws.root.clone());
+    }
+
+    // Walk for additional package.json files not covered by workspace config
+    walk_for_package_json(workspace_root, workspace_root, &mut roots);
+
+    roots.sort();
+    roots.dedup();
+    roots
+}
+
+/// Recursively walk directories looking for package.json files that have
+/// JS/TS source files nearby. Skips node_modules, hidden dirs, and
+/// build artifacts.
+fn walk_for_package_json(
+    dir: &std::path::Path,
+    workspace_root: &std::path::Path,
+    roots: &mut Vec<std::path::PathBuf>,
+) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy();
+
+        // Skip irrelevant directories
+        if matches!(
+            name_str.as_ref(),
+            "node_modules" | ".git" | "target" | "dist" | "coverage" | "__pycache__"
+        ) || name_str.starts_with('.')
+        {
+            continue;
+        }
+
+        // If this directory has a package.json and JS/TS source files, it's a project root
+        if path.join("package.json").exists() && path != workspace_root && has_js_ts_sources(&path)
+        {
+            roots.push(path.clone());
+            // Don't recurse into sub-projects — they'll be analyzed from their own root
+            continue;
+        }
+
+        walk_for_package_json(&path, workspace_root, roots);
+    }
+}
+
+/// Check if a directory (or its `src/` subdirectory) contains any JS/TS source files.
+fn has_js_ts_sources(dir: &std::path::Path) -> bool {
+    for check_dir in [dir.to_path_buf(), dir.join("src")] {
+        if let Ok(entries) = std::fs::read_dir(&check_dir) {
+            for entry in entries.flatten() {
+                if let Some(ext) = entry.path().extension() {
+                    let ext = ext.to_string_lossy();
+                    if matches!(
+                        ext.as_ref(),
+                        "ts" | "tsx" | "js" | "jsx" | "mts" | "mjs" | "vue" | "svelte"
+                    ) {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    false
+}
+
+/// Merge analysis results from a sub-project into the accumulated results.
+fn merge_results(target: &mut AnalysisResults, source: AnalysisResults) {
+    target.unused_files.extend(source.unused_files);
+    target.unused_exports.extend(source.unused_exports);
+    target.unused_types.extend(source.unused_types);
+    target
+        .unused_dependencies
+        .extend(source.unused_dependencies);
+    target
+        .unused_dev_dependencies
+        .extend(source.unused_dev_dependencies);
+    target
+        .unused_optional_dependencies
+        .extend(source.unused_optional_dependencies);
+    target
+        .unused_enum_members
+        .extend(source.unused_enum_members);
+    target
+        .unused_class_members
+        .extend(source.unused_class_members);
+    target.unresolved_imports.extend(source.unresolved_imports);
+    target
+        .unlisted_dependencies
+        .extend(source.unlisted_dependencies);
+    target.duplicate_exports.extend(source.duplicate_exports);
+    target
+        .type_only_dependencies
+        .extend(source.type_only_dependencies);
+    target
+        .circular_dependencies
+        .extend(source.circular_dependencies);
+}
+
+/// Merge duplication reports from a sub-project into the accumulated report.
+fn merge_duplication(target: &mut DuplicationReport, source: DuplicationReport) {
+    target.clone_groups.extend(source.clone_groups);
+    target.clone_families.extend(source.clone_families);
+    target.stats.clone_groups += source.stats.clone_groups;
+    target.stats.clone_instances += source.stats.clone_instances;
+    target.stats.total_files += source.stats.total_files;
+    target.stats.files_with_clones += source.stats.files_with_clones;
+    target.stats.total_lines += source.stats.total_lines;
+    target.stats.duplicated_lines += source.stats.duplicated_lines;
+    target.stats.total_tokens += source.stats.total_tokens;
+    target.stats.duplicated_tokens += source.stats.duplicated_tokens;
 }
