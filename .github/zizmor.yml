@@ -1,8 +1,4 @@
 rules:
-  # Dependabot cooldown is a new zizmor rule — our current schedule is fine
-  dependabot-cooldown:
-    ignore:
-      - dependabot.yml
   # dtolnay/rust-toolchain is the Rust ecosystem standard for CI toolchain management
   superfluous-actions:
     ignore:
