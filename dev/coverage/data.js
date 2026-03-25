@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1774456603821,
+  "lastUpdate": 1774457124122,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
@@ -1299,6 +1299,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/2436f291ef4d8bf690d0aec9c4d4d517533888a8"
         },
         "date": 1774456603488,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 90,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "f14114192cd0bdc7872792759291bd2138d70339",
+          "message": "fix: rename GitHub Action to reflect broader codebase health positioning\n\n\"Dead Code Analysis\" cements commodity positioning that the roadmap\nexplicitly aims to move beyond. \"Codebase Health\" aligns with the\nhealth intelligence thesis (hotspots, trends, dependency risk).",
+          "timestamp": "2026-03-25T17:44:35+01:00",
+          "tree_id": "de96067531530c62524bc687788289a8123c962d",
+          "url": "https://github.com/fallow-rs/fallow/commit/f14114192cd0bdc7872792759291bd2138d70339"
+        },
+        "date": 1774457123774,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
