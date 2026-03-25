@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1774461101440,
+  "lastUpdate": 1774461650871,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
@@ -1357,6 +1357,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/36b6d5197bc085ff4c055b75bd15a21f5e4e7620"
         },
         "date": 1774461100869,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 87.5,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "9c2259e68bc01cf07b9aed940e42fd601afebc3d",
+          "message": "docs: add dead-code section to README with flag examples",
+          "timestamp": "2026-03-25T18:59:58+01:00",
+          "tree_id": "65ad7fcfea5e5cba24ae099e4bfb972d27f07f46",
+          "url": "https://github.com/fallow-rs/fallow/commit/9c2259e68bc01cf07b9aed940e42fd601afebc3d"
+        },
+        "date": 1774461650465,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
