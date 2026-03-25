@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.1] - 2026-03-25
+
+### Added
+- LSP pull-model diagnostics (`textDocument/diagnostic`) for Cursor/VSCodium compatibility
+- Multi-root workspace support in LSP: discovers monorepo workspaces via `package.json` workspaces, pnpm-workspace.yaml, and tsconfig references
+- Precise diagnostic ranges for unresolved imports: squiggly underline now covers only the module specifier string literal, not the entire import line
+- `source_span` field on `ImportInfo` for precise source string literal positions
+
+### Fixed
+- LSP `textDocument/diagnostic` errors in Cursor (Method not found -32601)
+- Unused dependency diagnostics now appear on the correct line in package.json (was always line 1)
+- Circular dependency diagnostics now appear on the import statement that starts the cycle
+- File-level diagnostics (unused files, unlisted deps) highlight the entire first line instead of a zero-width marker
+- Stale cached diagnostics cleared when issues are resolved between analysis runs
+- Extract cache version bumped to 16 for new `ImportInfo.source_span` field
+
+### Changed
+- Internal refactoring: split large modules (human.rs, visitor.rs, resolve.rs, registry.rs, etc.) into focused submodules
+- Improved test coverage across graph, extract, core, and LSP crates
+
 ## [1.8.0] - 2026-03-24
 
 ### Added
@@ -332,7 +352,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[Unreleased]: https://github.com/fallow-rs/fallow/compare/v1.8.0...HEAD
+[Unreleased]: https://github.com/fallow-rs/fallow/compare/v1.8.1...HEAD
+[1.8.1]: https://github.com/fallow-rs/fallow/compare/v1.8.0...v1.8.1
 [1.8.0]: https://github.com/fallow-rs/fallow/compare/v1.7.0...v1.8.0
 [1.7.0]: https://github.com/fallow-rs/fallow/compare/v1.6.1...v1.7.0
 [1.6.1]: https://github.com/fallow-rs/fallow/compare/v1.6.0...v1.6.1
