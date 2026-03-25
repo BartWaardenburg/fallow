@@ -243,9 +243,19 @@
         "when": "!fallow.hasAnalyzed"
       },
       {
+        "view": "fallow.deadCode",
+        "contents": "$(check) No unused code found.",
+        "when": "fallow.hasAnalyzed"
+      },
+      {
         "view": "fallow.duplicates",
         "contents": "No duplication results yet.\n[$(search) Run Analysis](command:fallow.analyze)\nFallow detects duplicated code blocks across your project.",
         "when": "!fallow.hasAnalyzed"
+      },
+      {
+        "view": "fallow.duplicates",
+        "contents": "$(check) No code duplication found.",
+        "when": "fallow.hasAnalyzed"
       }
     ],
     "walkthroughs": [
