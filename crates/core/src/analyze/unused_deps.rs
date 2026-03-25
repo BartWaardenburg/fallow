@@ -545,8 +545,9 @@ pub fn find_unresolved_imports(
                 );
 
                 // Compute the column of the source string literal for precise LSP highlighting.
-                // Falls back to the import statement column when source_span is not available.
-                let specifier_col = if import.info.source_span.start > 0 {
+                // Falls back to the import statement column when source_span is not available
+                // (e.g., synthetic CSS/SFC imports that use Span::default()).
+                let specifier_col = if import.info.source_span.end > import.info.source_span.start {
                     let (_, sc) = byte_offset_to_line_col(
                         line_offsets_by_file,
                         module.file_id,

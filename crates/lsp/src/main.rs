@@ -400,11 +400,13 @@ impl FallowLspServer {
         // in the previous run but not in this one
         {
             let previous_uris = self.previous_diagnostic_uris.read().await;
+            let mut cache = self.cached_diagnostics.write().await;
             for old_uri in previous_uris.iter() {
                 if !new_uris.contains(old_uri) {
                     self.client
                         .publish_diagnostics(old_uri.clone(), vec![], None)
                         .await;
+                    cache.remove(old_uri);
                 }
             }
         }
