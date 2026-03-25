@@ -1,4 +1,12 @@
 rules:
+  # Cooldown configured in dependabot.yml but zizmor 1.23.1 doesn't detect it yet
+  dependabot-cooldown:
+    ignore:
+      - "**"
+  # crates.io trusted publishing requires per-crate setup — using CARGO_REGISTRY_TOKEN for now
+  use-trusted-publishing:
+    ignore:
+      - release.yml
   # dtolnay/rust-toolchain is the Rust ecosystem standard for CI toolchain management
   superfluous-actions:
     ignore:
