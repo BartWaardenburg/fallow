@@ -49,6 +49,11 @@ export const activate = async (
           lastCheckResult = check;
           lastDupesResult = dupes;
           updateViews();
+          void vscode.commands.executeCommand(
+            "setContext",
+            "fallow.hasAnalyzed",
+            true
+          );
 
           const issueCount = check
             ? check.unused_files.length +
