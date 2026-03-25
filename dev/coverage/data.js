@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1774428794001,
+  "lastUpdate": 1774429098960,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
@@ -1067,6 +1067,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/c479b3f59c31c6ac203f19e8ac04c956fb27188c"
         },
         "date": 1774428793491,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 90.2,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "5867ace807e61bfa7458df8c94c972a4e9e3225d",
+          "message": "chore: suppress dependabot-cooldown zizmor finding",
+          "timestamp": "2026-03-25T09:57:38+01:00",
+          "tree_id": "fd9a522e6f50cb84953c79b6bee0fe3d027438de",
+          "url": "https://github.com/fallow-rs/fallow/commit/5867ace807e61bfa7458df8c94c972a4e9e3225d"
+        },
+        "date": 1774429098616,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
