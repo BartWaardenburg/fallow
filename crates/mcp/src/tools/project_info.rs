@@ -15,6 +15,12 @@ pub fn build_project_info_args(params: &ProjectInfoParams) -> Vec<String> {
     if let Some(ref config) = params.config {
         args.extend(["--config".to_string(), config.clone()]);
     }
+    if params.no_cache == Some(true) {
+        args.push("--no-cache".to_string());
+    }
+    if let Some(threads) = params.threads {
+        args.extend(["--threads".to_string(), threads.to_string()]);
+    }
 
     args
 }

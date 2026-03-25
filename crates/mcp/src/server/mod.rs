@@ -55,7 +55,7 @@ fn resolve_binary() -> String {
 #[tool_router]
 impl FallowMcp {
     #[tool(
-        description = "Analyze a TypeScript/JavaScript project for unused code, circular dependencies, code duplication, complexity hotspots, and more. Detects unused files, exports, types, dependencies, enum/class members, unresolved imports, unlisted dependencies, duplicate exports, and circular dependencies. Returns structured JSON with all issues found, grouped by issue type.",
+        description = "Analyze a TypeScript/JavaScript project for unused code, circular dependencies, code duplication, complexity hotspots, and more. Detects unused files, exports, types, dependencies, enum/class members, unresolved imports, unlisted dependencies, duplicate exports, and circular dependencies. Returns structured JSON with all issues found, grouped by issue type. Supports baseline comparisons (baseline/save_baseline) and performance tuning (no_cache, threads).",
         annotations(read_only_hint = true, open_world_hint = true)
     )]
     async fn analyze(&self, params: Parameters<AnalyzeParams>) -> Result<CallToolResult, McpError> {
@@ -67,7 +67,7 @@ impl FallowMcp {
     }
 
     #[tool(
-        description = "Analyze only files changed since a git ref. Useful for incremental CI checks on pull requests. Returns the same structured JSON as analyze, but filtered to only include issues in changed files.",
+        description = "Analyze only files changed since a git ref. Useful for incremental CI checks on pull requests. Returns the same structured JSON as analyze, but filtered to only include issues in changed files. Supports baseline comparisons (baseline/save_baseline) and performance tuning (no_cache, threads).",
         annotations(read_only_hint = true, open_world_hint = true)
     )]
     async fn check_changed(
@@ -79,7 +79,7 @@ impl FallowMcp {
     }
 
     #[tool(
-        description = "Find code duplication across the project. Detects clone groups (identical or similar code blocks) with configurable detection modes and thresholds. Returns clone families with refactoring suggestions. Set top=N to show only the N largest clone groups.",
+        description = "Find code duplication across the project. Detects clone groups (identical or similar code blocks) with configurable detection modes and thresholds. Returns clone families with refactoring suggestions. Set top=N to show only the N largest clone groups. Supports config, workspace scoping, baseline comparisons, and performance tuning (no_cache, threads).",
         annotations(read_only_hint = true, open_world_hint = true)
     )]
     async fn find_dupes(
@@ -94,7 +94,7 @@ impl FallowMcp {
     }
 
     #[tool(
-        description = "Preview auto-fixes without modifying any files. Shows what would be changed: which unused exports would be removed and which unused dependencies would be deleted from package.json. Returns a JSON list of planned fixes.",
+        description = "Preview auto-fixes without modifying any files. Shows what would be changed: which unused exports would be removed and which unused dependencies would be deleted from package.json. Returns a JSON list of planned fixes. Supports workspace scoping and performance tuning (no_cache, threads).",
         annotations(read_only_hint = true, open_world_hint = true)
     )]
     async fn fix_preview(&self, params: Parameters<FixParams>) -> Result<CallToolResult, McpError> {
@@ -103,7 +103,7 @@ impl FallowMcp {
     }
 
     #[tool(
-        description = "Apply auto-fixes to the project. Removes unused export keywords from source files and deletes unused dependencies from package.json. This modifies files on disk. Use fix_preview first to review planned changes.",
+        description = "Apply auto-fixes to the project. Removes unused export keywords from source files and deletes unused dependencies from package.json. This modifies files on disk. Use fix_preview first to review planned changes. Supports workspace scoping and performance tuning (no_cache, threads).",
         annotations(destructive_hint = true, read_only_hint = false)
     )]
     async fn fix_apply(&self, params: Parameters<FixParams>) -> Result<CallToolResult, McpError> {
@@ -112,7 +112,7 @@ impl FallowMcp {
     }
 
     #[tool(
-        description = "Get project metadata: active framework plugins, discovered source files, and detected entry points. Useful for understanding how fallow sees the project before running analysis.",
+        description = "Get project metadata: active framework plugins, discovered source files, and detected entry points. Useful for understanding how fallow sees the project before running analysis. Supports performance tuning (no_cache, threads).",
         annotations(read_only_hint = true, open_world_hint = true)
     )]
     async fn project_info(
@@ -124,7 +124,7 @@ impl FallowMcp {
     }
 
     #[tool(
-        description = "Check code health metrics (cyclomatic and cognitive complexity) for functions in the project. Returns structured JSON with complexity scores per function, sorted by severity. Set file_scores=true for per-file maintainability index (fan-in, fan-out, dead code ratio, complexity density). Set hotspots=true to identify files that are both complex and frequently changing (combines git churn with complexity). Set targets=true for ranked refactoring recommendations based on complexity, coupling, churn, and dead code signals. Useful for identifying hard-to-maintain code and prioritizing refactoring.",
+        description = "Check code health metrics (cyclomatic and cognitive complexity) for functions in the project. Returns structured JSON with complexity scores per function, sorted by severity. Set file_scores=true for per-file maintainability index (fan-in, fan-out, dead code ratio, complexity density). Set hotspots=true to identify files that are both complex and frequently changing (combines git churn with complexity). Set targets=true for ranked refactoring recommendations based on complexity, coupling, churn, and dead code signals. Supports config, baseline comparisons, and performance tuning (no_cache, threads). Useful for identifying hard-to-maintain code and prioritizing refactoring.",
         annotations(read_only_hint = true, open_world_hint = true)
     )]
     async fn check_health(

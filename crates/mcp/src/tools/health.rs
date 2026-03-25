@@ -13,6 +13,9 @@ pub fn build_health_args(params: &HealthParams) -> Vec<String> {
     if let Some(ref root) = params.root {
         args.extend(["--root".to_string(), root.clone()]);
     }
+    if let Some(ref config) = params.config {
+        args.extend(["--config".to_string(), config.clone()]);
+    }
     if let Some(max_cyclomatic) = params.max_cyclomatic {
         args.extend(["--max-cyclomatic".to_string(), max_cyclomatic.to_string()]);
     }
@@ -58,6 +61,18 @@ pub fn build_health_args(params: &HealthParams) -> Vec<String> {
         } else {
             args.extend(["--save-snapshot".to_string(), path.clone()]);
         }
+    }
+    if let Some(ref baseline) = params.baseline {
+        args.extend(["--baseline".to_string(), baseline.clone()]);
+    }
+    if let Some(ref save_baseline) = params.save_baseline {
+        args.extend(["--save-baseline".to_string(), save_baseline.clone()]);
+    }
+    if params.no_cache == Some(true) {
+        args.push("--no-cache".to_string());
+    }
+    if let Some(threads) = params.threads {
+        args.extend(["--threads".to_string(), threads.to_string()]);
     }
 
     args

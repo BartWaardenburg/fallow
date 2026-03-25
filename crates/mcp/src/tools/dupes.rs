@@ -16,6 +16,12 @@ pub fn build_find_dupes_args(params: &FindDupesParams) -> Result<Vec<String>, St
     if let Some(ref root) = params.root {
         args.extend(["--root".to_string(), root.clone()]);
     }
+    if let Some(ref config) = params.config {
+        args.extend(["--config".to_string(), config.clone()]);
+    }
+    if let Some(ref workspace) = params.workspace {
+        args.extend(["--workspace".to_string(), workspace.clone()]);
+    }
     if let Some(ref mode) = params.mode {
         if !VALID_DUPES_MODES.contains(&mode.as_str()) {
             return Err(format!(
@@ -41,6 +47,18 @@ pub fn build_find_dupes_args(params: &FindDupesParams) -> Result<Vec<String>, St
     }
     if let Some(top) = params.top {
         args.extend(["--top".to_string(), top.to_string()]);
+    }
+    if let Some(ref baseline) = params.baseline {
+        args.extend(["--baseline".to_string(), baseline.clone()]);
+    }
+    if let Some(ref save_baseline) = params.save_baseline {
+        args.extend(["--save-baseline".to_string(), save_baseline.clone()]);
+    }
+    if params.no_cache == Some(true) {
+        args.push("--no-cache".to_string());
+    }
+    if let Some(threads) = params.threads {
+        args.extend(["--threads".to_string(), threads.to_string()]);
     }
 
     Ok(args)

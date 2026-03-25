@@ -5,18 +5,27 @@ use crate::tools::{
     build_project_info_args,
 };
 
+// ── Helper: minimal CheckChangedParams ────────────────────────────
+
+fn check_changed(since: &str) -> CheckChangedParams {
+    CheckChangedParams {
+        root: None,
+        since: since.to_string(),
+        config: None,
+        production: None,
+        workspace: None,
+        baseline: None,
+        save_baseline: None,
+        no_cache: None,
+        threads: None,
+    }
+}
+
 // ── Argument building: analyze ────────────────────────────────────
 
 #[test]
 fn analyze_args_minimal_produces_base_args() {
-    let params = AnalyzeParams {
-        root: None,
-        config: None,
-        production: None,
-        workspace: None,
-        issue_types: None,
-    };
-    let args = build_analyze_args(&params).unwrap();
+    let args = build_analyze_args(&AnalyzeParams::default()).unwrap();
     assert_eq!(
         args,
         ["dead-code", "--format", "json", "--quiet", "--explain"]
@@ -34,6 +43,10 @@ fn analyze_args_with_all_options() {
             "unused-files".to_string(),
             "unused-exports".to_string(),
         ]),
+        baseline: Some("baseline.json".to_string()),
+        save_baseline: Some("new-baseline.json".to_string()),
+        no_cache: Some(true),
+        threads: Some(4),
     };
     let args = build_analyze_args(&params).unwrap();
     assert_eq!(
@@ -53,6 +66,13 @@ fn analyze_args_with_all_options() {
             "@my/pkg",
             "--unused-files",
             "--unused-exports",
+            "--baseline",
+            "baseline.json",
+            "--save-baseline",
+            "new-baseline.json",
+            "--no-cache",
+            "--threads",
+            "4",
         ]
     );
 }
@@ -60,11 +80,8 @@ fn analyze_args_with_all_options() {
 #[test]
 fn analyze_args_production_false_is_omitted() {
     let params = AnalyzeParams {
-        root: None,
-        config: None,
         production: Some(false),
-        workspace: None,
-        issue_types: None,
+        ..Default::default()
     };
     let args = build_analyze_args(&params).unwrap();
     assert!(!args.contains(&"--production".to_string()));
@@ -73,11 +90,8 @@ fn analyze_args_production_false_is_omitted() {
 #[test]
 fn analyze_args_invalid_issue_type_returns_error() {
     let params = AnalyzeParams {
-        root: None,
-        config: None,
-        production: None,
-        workspace: None,
         issue_types: Some(vec!["nonexistent-type".to_string()]),
+        ..Default::default()
     };
     let err = build_analyze_args(&params).unwrap_err();
     assert!(err.contains("Unknown issue type 'nonexistent-type'"));
@@ -91,11 +105,8 @@ fn analyze_args_all_issue_types_accepted() {
         .map(|&(name, _)| name.to_string())
         .collect();
     let params = AnalyzeParams {
-        root: None,
-        config: None,
-        production: None,
-        workspace: None,
         issue_types: Some(all_types),
+        ..Default::default()
     };
     let args = build_analyze_args(&params).unwrap();
     for &(_, flag) in ISSUE_TYPE_FLAGS {
@@ -109,15 +120,12 @@ fn analyze_args_all_issue_types_accepted() {
 #[test]
 fn analyze_args_mixed_valid_and_invalid_issue_types_fails_on_first_invalid() {
     let params = AnalyzeParams {
-        root: None,
-        config: None,
-        production: None,
-        workspace: None,
         issue_types: Some(vec![
             "unused-files".to_string(),
             "bogus".to_string(),
             "unused-deps".to_string(),
         ]),
+        ..Default::default()
     };
     let err = build_analyze_args(&params).unwrap_err();
     assert!(err.contains("'bogus'"));
@@ -126,11 +134,8 @@ fn analyze_args_mixed_valid_and_invalid_issue_types_fails_on_first_invalid() {
 #[test]
 fn analyze_args_empty_issue_types_vec_produces_no_flags() {
     let params = AnalyzeParams {
-        root: None,
-        config: None,
-        production: None,
-        workspace: None,
         issue_types: Some(vec![]),
+        ..Default::default()
     };
     let args = build_analyze_args(&params).unwrap();
     assert_eq!(
@@ -143,14 +148,7 @@ fn analyze_args_empty_issue_types_vec_produces_no_flags() {
 
 #[test]
 fn check_changed_args_includes_since_ref() {
-    let params = CheckChangedParams {
-        root: None,
-        since: "main".to_string(),
-        config: None,
-        production: None,
-        workspace: None,
-    };
-    let args = build_check_changed_args(params);
+    let args = build_check_changed_args(check_changed("main"));
     assert_eq!(
         args,
         [
@@ -173,6 +171,10 @@ fn check_changed_args_with_all_options() {
         config: Some("custom.json".to_string()),
         production: Some(true),
         workspace: Some("frontend".to_string()),
+        baseline: Some("base.json".to_string()),
+        save_baseline: Some("new.json".to_string()),
+        no_cache: Some(true),
+        threads: Some(2),
     };
     let args = build_check_changed_args(params);
     assert_eq!(
@@ -192,20 +194,20 @@ fn check_changed_args_with_all_options() {
             "--production",
             "--workspace",
             "frontend",
+            "--baseline",
+            "base.json",
+            "--save-baseline",
+            "new.json",
+            "--no-cache",
+            "--threads",
+            "2",
         ]
     );
 }
 
 #[test]
 fn check_changed_args_with_commit_sha() {
-    let params = CheckChangedParams {
-        root: None,
-        since: "abc123def456".to_string(),
-        config: None,
-        production: None,
-        workspace: None,
-    };
-    let args = build_check_changed_args(params);
+    let args = build_check_changed_args(check_changed("abc123def456"));
     assert!(args.contains(&"abc123def456".to_string()));
 }
 
@@ -213,17 +215,7 @@ fn check_changed_args_with_commit_sha() {
 
 #[test]
 fn find_dupes_args_minimal() {
-    let params = FindDupesParams {
-        root: None,
-        mode: None,
-        min_tokens: None,
-        min_lines: None,
-        threshold: None,
-        skip_local: None,
-        cross_language: None,
-        top: None,
-    };
-    let args = build_find_dupes_args(&params).unwrap();
+    let args = build_find_dupes_args(&FindDupesParams::default()).unwrap();
     assert_eq!(args, ["dupes", "--format", "json", "--quiet", "--explain"]);
 }
 
@@ -231,6 +223,8 @@ fn find_dupes_args_minimal() {
 fn find_dupes_args_with_all_options() {
     let params = FindDupesParams {
         root: Some("/repo".to_string()),
+        config: Some("fallow.toml".to_string()),
+        workspace: Some("@my/lib".to_string()),
         mode: Some("semantic".to_string()),
         min_tokens: Some(100),
         min_lines: Some(10),
@@ -238,6 +232,10 @@ fn find_dupes_args_with_all_options() {
         skip_local: Some(true),
         cross_language: Some(true),
         top: Some(5),
+        baseline: Some("base.json".to_string()),
+        save_baseline: Some("new.json".to_string()),
+        no_cache: Some(true),
+        threads: Some(8),
     };
     let args = build_find_dupes_args(&params).unwrap();
     assert_eq!(
@@ -250,6 +248,10 @@ fn find_dupes_args_with_all_options() {
             "--explain",
             "--root",
             "/repo",
+            "--config",
+            "fallow.toml",
+            "--workspace",
+            "@my/lib",
             "--mode",
             "semantic",
             "--min-tokens",
@@ -262,6 +264,13 @@ fn find_dupes_args_with_all_options() {
             "--cross-language",
             "--top",
             "5",
+            "--baseline",
+            "base.json",
+            "--save-baseline",
+            "new.json",
+            "--no-cache",
+            "--threads",
+            "8",
         ]
     );
 }
@@ -270,14 +279,8 @@ fn find_dupes_args_with_all_options() {
 fn find_dupes_args_all_valid_modes_accepted() {
     for mode in VALID_DUPES_MODES {
         let params = FindDupesParams {
-            root: None,
             mode: Some(mode.to_string()),
-            min_tokens: None,
-            min_lines: None,
-            threshold: None,
-            skip_local: None,
-            cross_language: None,
-            top: None,
+            ..Default::default()
         };
         let args = build_find_dupes_args(&params).unwrap();
         assert!(
@@ -290,14 +293,8 @@ fn find_dupes_args_all_valid_modes_accepted() {
 #[test]
 fn find_dupes_args_invalid_mode_returns_error() {
     let params = FindDupesParams {
-        root: None,
         mode: Some("aggressive".to_string()),
-        min_tokens: None,
-        min_lines: None,
-        threshold: None,
-        skip_local: None,
-        cross_language: None,
-        top: None,
+        ..Default::default()
     };
     let err = build_find_dupes_args(&params).unwrap_err();
     assert!(err.contains("Invalid mode 'aggressive'"));
@@ -310,14 +307,8 @@ fn find_dupes_args_invalid_mode_returns_error() {
 #[test]
 fn find_dupes_args_skip_local_false_is_omitted() {
     let params = FindDupesParams {
-        root: None,
-        mode: None,
-        min_tokens: None,
-        min_lines: None,
-        threshold: None,
         skip_local: Some(false),
-        cross_language: None,
-        top: None,
+        ..Default::default()
     };
     let args = build_find_dupes_args(&params).unwrap();
     assert!(!args.contains(&"--skip-local".to_string()));
@@ -326,14 +317,8 @@ fn find_dupes_args_skip_local_false_is_omitted() {
 #[test]
 fn find_dupes_args_threshold_zero() {
     let params = FindDupesParams {
-        root: None,
-        mode: None,
-        min_tokens: None,
-        min_lines: None,
         threshold: Some(0.0),
-        skip_local: None,
-        cross_language: None,
-        top: None,
+        ..Default::default()
     };
     let args = build_find_dupes_args(&params).unwrap();
     assert!(args.contains(&"--threshold".to_string()));
@@ -344,12 +329,7 @@ fn find_dupes_args_threshold_zero() {
 
 #[test]
 fn fix_preview_args_include_dry_run() {
-    let params = FixParams {
-        root: None,
-        config: None,
-        production: None,
-    };
-    let args = build_fix_preview_args(&params);
+    let args = build_fix_preview_args(&FixParams::default());
     assert!(args.contains(&"--dry-run".to_string()));
     assert!(!args.contains(&"--yes".to_string()));
     assert_eq!(args[0], "fix");
@@ -357,12 +337,7 @@ fn fix_preview_args_include_dry_run() {
 
 #[test]
 fn fix_apply_args_include_yes_flag() {
-    let params = FixParams {
-        root: None,
-        config: None,
-        production: None,
-    };
-    let args = build_fix_apply_args(&params);
+    let args = build_fix_apply_args(&FixParams::default());
     assert!(args.contains(&"--yes".to_string()));
     assert!(!args.contains(&"--dry-run".to_string()));
     assert_eq!(args[0], "fix");
@@ -374,6 +349,9 @@ fn fix_preview_args_with_all_options() {
         root: Some("/app".to_string()),
         config: Some("config.json".to_string()),
         production: Some(true),
+        workspace: Some("frontend".to_string()),
+        no_cache: Some(true),
+        threads: Some(4),
     };
     let args = build_fix_preview_args(&params);
     assert_eq!(
@@ -389,6 +367,11 @@ fn fix_preview_args_with_all_options() {
             "--config",
             "config.json",
             "--production",
+            "--workspace",
+            "frontend",
+            "--no-cache",
+            "--threads",
+            "4",
         ]
     );
 }
@@ -399,6 +382,9 @@ fn fix_apply_args_with_all_options() {
         root: Some("/app".to_string()),
         config: Some("config.json".to_string()),
         production: Some(true),
+        workspace: Some("frontend".to_string()),
+        no_cache: Some(true),
+        threads: Some(4),
     };
     let args = build_fix_apply_args(&params);
     assert_eq!(
@@ -414,6 +400,11 @@ fn fix_apply_args_with_all_options() {
             "--config",
             "config.json",
             "--production",
+            "--workspace",
+            "frontend",
+            "--no-cache",
+            "--threads",
+            "4",
         ]
     );
 }
@@ -422,19 +413,17 @@ fn fix_apply_args_with_all_options() {
 
 #[test]
 fn project_info_args_minimal() {
-    let params = ProjectInfoParams {
-        root: None,
-        config: None,
-    };
-    let args = build_project_info_args(&params);
+    let args = build_project_info_args(&ProjectInfoParams::default());
     assert_eq!(args, ["list", "--format", "json", "--quiet"]);
 }
 
 #[test]
-fn project_info_args_with_root_and_config() {
+fn project_info_args_with_all_options() {
     let params = ProjectInfoParams {
         root: Some("/workspace".to_string()),
         config: Some("fallow.toml".to_string()),
+        no_cache: Some(true),
+        threads: Some(2),
     };
     let args = build_project_info_args(&params);
     assert_eq!(
@@ -448,6 +437,9 @@ fn project_info_args_with_root_and_config() {
             "/workspace",
             "--config",
             "fallow.toml",
+            "--no-cache",
+            "--threads",
+            "2",
         ]
     );
 }
@@ -456,24 +448,7 @@ fn project_info_args_with_root_and_config() {
 
 #[test]
 fn health_args_minimal() {
-    let params = HealthParams {
-        root: None,
-        max_cyclomatic: None,
-        max_cognitive: None,
-        top: None,
-        sort: None,
-        changed_since: None,
-        complexity: None,
-        file_scores: None,
-        hotspots: None,
-        targets: None,
-        since: None,
-        min_commits: None,
-        production: None,
-        workspace: None,
-        save_snapshot: None,
-    };
-    let args = build_health_args(&params);
+    let args = build_health_args(&HealthParams::default());
     assert_eq!(args, ["health", "--format", "json", "--quiet", "--explain"]);
 }
 
@@ -481,6 +456,7 @@ fn health_args_minimal() {
 fn health_args_with_all_options() {
     let params = HealthParams {
         root: Some("/src".to_string()),
+        config: Some("fallow.toml".to_string()),
         max_cyclomatic: Some(25),
         max_cognitive: Some(15),
         top: Some(20),
@@ -495,6 +471,10 @@ fn health_args_with_all_options() {
         workspace: Some("packages/ui".to_string()),
         production: Some(true),
         save_snapshot: None,
+        baseline: Some("base.json".to_string()),
+        save_baseline: Some("new.json".to_string()),
+        no_cache: Some(true),
+        threads: Some(4),
     };
     let args = build_health_args(&params);
     assert_eq!(
@@ -507,6 +487,8 @@ fn health_args_with_all_options() {
             "--explain",
             "--root",
             "/src",
+            "--config",
+            "fallow.toml",
             "--max-cyclomatic",
             "25",
             "--max-cognitive",
@@ -527,6 +509,13 @@ fn health_args_with_all_options() {
             "--workspace",
             "packages/ui",
             "--production",
+            "--baseline",
+            "base.json",
+            "--save-baseline",
+            "new.json",
+            "--no-cache",
+            "--threads",
+            "4",
         ]
     );
 }
@@ -534,21 +523,9 @@ fn health_args_with_all_options() {
 #[test]
 fn health_args_partial_options() {
     let params = HealthParams {
-        root: None,
         max_cyclomatic: Some(10),
-        max_cognitive: None,
-        top: None,
         sort: Some("cyclomatic".to_string()),
-        changed_since: None,
-        complexity: None,
-        file_scores: None,
-        hotspots: None,
-        targets: None,
-        since: None,
-        min_commits: None,
-        workspace: None,
-        production: None,
-        save_snapshot: None,
+        ..Default::default()
     };
     let args = build_health_args(&params);
     assert_eq!(
@@ -571,69 +548,13 @@ fn health_args_partial_options() {
 
 #[test]
 fn all_arg_builders_include_format_json_and_quiet() {
-    let analyze = build_analyze_args(&AnalyzeParams {
-        root: None,
-        config: None,
-        production: None,
-        workspace: None,
-        issue_types: None,
-    })
-    .unwrap();
-
-    let check_changed = build_check_changed_args(CheckChangedParams {
-        root: None,
-        since: "main".to_string(),
-        config: None,
-        production: None,
-        workspace: None,
-    });
-
-    let dupes = build_find_dupes_args(&FindDupesParams {
-        root: None,
-        mode: None,
-        min_tokens: None,
-        min_lines: None,
-        threshold: None,
-        skip_local: None,
-        cross_language: None,
-        top: None,
-    })
-    .unwrap();
-
-    let fix_preview = build_fix_preview_args(&FixParams {
-        root: None,
-        config: None,
-        production: None,
-    });
-
-    let fix_apply = build_fix_apply_args(&FixParams {
-        root: None,
-        config: None,
-        production: None,
-    });
-
-    let project_info = build_project_info_args(&ProjectInfoParams {
-        root: None,
-        config: None,
-    });
-
-    let health = build_health_args(&HealthParams {
-        root: None,
-        max_cyclomatic: None,
-        max_cognitive: None,
-        top: None,
-        sort: None,
-        changed_since: None,
-        complexity: None,
-        file_scores: None,
-        hotspots: None,
-        targets: None,
-        since: None,
-        min_commits: None,
-        workspace: None,
-        production: None,
-        save_snapshot: None,
-    });
+    let analyze = build_analyze_args(&AnalyzeParams::default()).unwrap();
+    let check_changed = build_check_changed_args(check_changed("main"));
+    let dupes = build_find_dupes_args(&FindDupesParams::default()).unwrap();
+    let fix_preview = build_fix_preview_args(&FixParams::default());
+    let fix_apply = build_fix_apply_args(&FixParams::default());
+    let project_info = build_project_info_args(&ProjectInfoParams::default());
+    let health = build_health_args(&HealthParams::default());
 
     for (name, args) in [
         ("analyze", &analyze),
@@ -660,140 +581,47 @@ fn all_arg_builders_include_format_json_and_quiet() {
 
 #[test]
 fn each_tool_uses_correct_subcommand() {
-    let analyze = build_analyze_args(&AnalyzeParams {
-        root: None,
-        config: None,
-        production: None,
-        workspace: None,
-        issue_types: None,
-    })
-    .unwrap();
-    assert_eq!(analyze[0], "dead-code");
-
-    let changed = build_check_changed_args(CheckChangedParams {
-        root: None,
-        since: "x".to_string(),
-        config: None,
-        production: None,
-        workspace: None,
-    });
-    assert_eq!(changed[0], "dead-code");
-
-    let dupes = build_find_dupes_args(&FindDupesParams {
-        root: None,
-        mode: None,
-        min_tokens: None,
-        min_lines: None,
-        threshold: None,
-        skip_local: None,
-        cross_language: None,
-        top: None,
-    })
-    .unwrap();
-    assert_eq!(dupes[0], "dupes");
-
-    let preview = build_fix_preview_args(&FixParams {
-        root: None,
-        config: None,
-        production: None,
-    });
-    assert_eq!(preview[0], "fix");
-
-    let apply = build_fix_apply_args(&FixParams {
-        root: None,
-        config: None,
-        production: None,
-    });
-    assert_eq!(apply[0], "fix");
-
-    let info = build_project_info_args(&ProjectInfoParams {
-        root: None,
-        config: None,
-    });
-    assert_eq!(info[0], "list");
-
-    let health = build_health_args(&HealthParams {
-        root: None,
-        max_cyclomatic: None,
-        max_cognitive: None,
-        top: None,
-        sort: None,
-        changed_since: None,
-        complexity: None,
-        file_scores: None,
-        hotspots: None,
-        targets: None,
-        since: None,
-        min_commits: None,
-        workspace: None,
-        production: None,
-        save_snapshot: None,
-    });
-    assert_eq!(health[0], "health");
+    assert_eq!(
+        build_analyze_args(&AnalyzeParams::default()).unwrap()[0],
+        "dead-code"
+    );
+    assert_eq!(build_check_changed_args(check_changed("x"))[0], "dead-code");
+    assert_eq!(
+        build_find_dupes_args(&FindDupesParams::default()).unwrap()[0],
+        "dupes"
+    );
+    assert_eq!(build_fix_preview_args(&FixParams::default())[0], "fix");
+    assert_eq!(build_fix_apply_args(&FixParams::default())[0], "fix");
+    assert_eq!(
+        build_project_info_args(&ProjectInfoParams::default())[0],
+        "list"
+    );
+    assert_eq!(build_health_args(&HealthParams::default())[0], "health");
 }
 
 // ── Explain flag presence ────────────────────────────────────────
 
 #[test]
 fn tools_with_explain_include_flag() {
-    let analyze = build_analyze_args(&AnalyzeParams {
-        root: None,
-        config: None,
-        production: None,
-        workspace: None,
-        issue_types: None,
-    })
-    .unwrap();
+    let analyze = build_analyze_args(&AnalyzeParams::default()).unwrap();
     assert!(
         analyze.contains(&"--explain".to_string()),
         "analyze should include --explain"
     );
 
-    let check_changed = build_check_changed_args(CheckChangedParams {
-        root: None,
-        since: "main".to_string(),
-        config: None,
-        production: None,
-        workspace: None,
-    });
+    let changed = build_check_changed_args(check_changed("main"));
     assert!(
-        check_changed.contains(&"--explain".to_string()),
+        changed.contains(&"--explain".to_string()),
         "check_changed should include --explain"
     );
 
-    let dupes = build_find_dupes_args(&FindDupesParams {
-        root: None,
-        mode: None,
-        min_tokens: None,
-        min_lines: None,
-        threshold: None,
-        skip_local: None,
-        cross_language: None,
-        top: None,
-    })
-    .unwrap();
+    let dupes = build_find_dupes_args(&FindDupesParams::default()).unwrap();
     assert!(
         dupes.contains(&"--explain".to_string()),
         "find_dupes should include --explain"
     );
 
-    let health = build_health_args(&HealthParams {
-        root: None,
-        max_cyclomatic: None,
-        max_cognitive: None,
-        top: None,
-        sort: None,
-        changed_since: None,
-        complexity: None,
-        file_scores: None,
-        hotspots: None,
-        targets: None,
-        since: None,
-        min_commits: None,
-        workspace: None,
-        production: None,
-        save_snapshot: None,
-    });
+    let health = build_health_args(&HealthParams::default());
     assert!(
         health.contains(&"--explain".to_string()),
         "health should include --explain"
@@ -802,21 +630,13 @@ fn tools_with_explain_include_flag() {
 
 #[test]
 fn fix_tools_do_not_include_explain() {
-    let preview = build_fix_preview_args(&FixParams {
-        root: None,
-        config: None,
-        production: None,
-    });
+    let preview = build_fix_preview_args(&FixParams::default());
     assert!(
         !preview.contains(&"--explain".to_string()),
         "fix_preview should not include --explain"
     );
 
-    let apply = build_fix_apply_args(&FixParams {
-        root: None,
-        config: None,
-        production: None,
-    });
+    let apply = build_fix_apply_args(&FixParams::default());
     assert!(
         !apply.contains(&"--explain".to_string()),
         "fix_apply should not include --explain"
@@ -825,12 +645,65 @@ fn fix_tools_do_not_include_explain() {
 
 #[test]
 fn project_info_does_not_include_explain() {
-    let args = build_project_info_args(&ProjectInfoParams {
-        root: None,
-        config: None,
-    });
+    let args = build_project_info_args(&ProjectInfoParams::default());
     assert!(
         !args.contains(&"--explain".to_string()),
         "project_info should not include --explain"
     );
+}
+
+// ── Global flags: no_cache boolean false is omitted ───────────────
+
+#[test]
+fn no_cache_false_is_omitted_across_all_tools() {
+    let analyze = build_analyze_args(&AnalyzeParams {
+        no_cache: Some(false),
+        ..Default::default()
+    })
+    .unwrap();
+    assert!(!analyze.contains(&"--no-cache".to_string()));
+
+    let check_changed = build_check_changed_args(CheckChangedParams {
+        since: "main".to_string(),
+        no_cache: Some(false),
+        root: None,
+        config: None,
+        production: None,
+        workspace: None,
+        baseline: None,
+        save_baseline: None,
+        threads: None,
+    });
+    assert!(!check_changed.contains(&"--no-cache".to_string()));
+
+    let dupes = build_find_dupes_args(&FindDupesParams {
+        no_cache: Some(false),
+        ..Default::default()
+    })
+    .unwrap();
+    assert!(!dupes.contains(&"--no-cache".to_string()));
+
+    let fix = build_fix_preview_args(&FixParams {
+        no_cache: Some(false),
+        ..Default::default()
+    });
+    assert!(!fix.contains(&"--no-cache".to_string()));
+
+    let info = build_project_info_args(&ProjectInfoParams {
+        no_cache: Some(false),
+        ..Default::default()
+    });
+    assert!(!info.contains(&"--no-cache".to_string()));
+
+    let health = build_health_args(&HealthParams {
+        no_cache: Some(false),
+        ..Default::default()
+    });
+    assert!(!health.contains(&"--no-cache".to_string()));
+
+    let fix_apply = build_fix_apply_args(&FixParams {
+        no_cache: Some(false),
+        ..Default::default()
+    });
+    assert!(!fix_apply.contains(&"--no-cache".to_string()));
 }

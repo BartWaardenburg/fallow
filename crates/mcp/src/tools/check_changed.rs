@@ -24,6 +24,18 @@ pub fn build_check_changed_args(params: CheckChangedParams) -> Vec<String> {
     if let Some(ref workspace) = params.workspace {
         args.extend(["--workspace".to_string(), workspace.clone()]);
     }
+    if let Some(ref baseline) = params.baseline {
+        args.extend(["--baseline".to_string(), baseline.clone()]);
+    }
+    if let Some(ref save_baseline) = params.save_baseline {
+        args.extend(["--save-baseline".to_string(), save_baseline.clone()]);
+    }
+    if params.no_cache == Some(true) {
+        args.push("--no-cache".to_string());
+    }
+    if let Some(threads) = params.threads {
+        args.extend(["--threads".to_string(), threads.to_string()]);
+    }
 
     args
 }

@@ -46,6 +46,29 @@ This allows agents to parse errors the same way they parse normal output.
 
 Set `FALLOW_FORMAT=json` and `FALLOW_QUIET=1` in your agent environment to avoid passing `--format json --quiet` on every invocation.
 
+## Global flags
+
+These flags work with any subcommand:
+
+| Flag | Description |
+|------|-------------|
+| `--root <PATH>` / `-r` | Project root directory (default: cwd) |
+| `--config <PATH>` / `-c` | Path to config file (.fallowrc.json / fallow.toml) |
+| `--format <FMT>` / `-f` | Output format: human, json, sarif, compact, markdown |
+| `--quiet` / `-q` | Suppress progress and timing on stderr |
+| `--production` | Exclude test/story/dev files |
+| `--workspace <NAME>` / `-w` | Scope to a workspace package |
+| `--changed-since <REF>` | Only analyze files changed since a git ref |
+| `--baseline <PATH>` | Compare against a saved baseline (report only new issues) |
+| `--save-baseline <PATH>` | Save current results as a baseline file |
+| `--no-cache` | Disable incremental parse cache (force full re-parse) |
+| `--threads <N>` | Number of parser threads (default: available CPU cores) |
+| `--explain` | Include `_meta` with metric definitions in JSON output |
+| `--ci` | CI mode: `--format sarif --fail-on-issues --quiet` |
+| `--fail-on-issues` | Exit 1 if any issues found |
+| `--sarif-file <PATH>` | Write SARIF alongside primary output |
+| `--performance` | Show pipeline timing breakdown |
+
 ## Commands
 
 ### Bare `fallow` (no subcommand)
@@ -64,9 +87,9 @@ fallow --skip health --format json        # check + dupes only
 - `--ci` -- CI mode: sarif + quiet + fail-on-issues
 - `--fail-on-issues` -- exit 1 if any issues are found
 
-### `check` / `dead-code`
+### `dead-code`
 
-Run dead code analysis. Alias: `fallow dead-code`.
+Run dead code analysis. Legacy alias: `fallow check`.
 
 ```bash
 fallow dead-code --format json --quiet

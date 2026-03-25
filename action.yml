@@ -8,7 +8,7 @@ branding:
 
 inputs:
   command:
-    description: 'Command to run: dead-code (unused code), dupes (code duplication), health (complexity), fix (auto-remove unused code). Default runs all analyses.'
+    description: 'Command to run: dead-code (unused code), dupes (code duplication), health (complexity), fix (auto-remove unused code). Default runs all analyses. Legacy alias: check = dead-code.'
     required: false
     default: ''
   root:
@@ -73,6 +73,10 @@ inputs:
     description: 'Only report cross-directory duplicates (dupes command)'
     required: false
     default: 'false'
+  cross-language:
+    description: 'Strip TypeScript type annotations for TS<->JS clone matching (dupes command)'
+    required: false
+    default: 'false'
   # Workspace
   workspace:
     description: 'Scope output to a single workspace package by name (monorepo support)'
@@ -85,16 +89,60 @@ inputs:
     description: 'Maximum cognitive complexity threshold (health command, default: 15)'
     required: false
   top:
-    description: 'Show only the N worst offenders (health command)'
+    description: 'Show only the N worst offenders (health and dupes commands)'
     required: false
   sort:
     description: 'Sort order for health results: cyclomatic, cognitive, or lines (health command)'
+    required: false
+  file-scores:
+    description: 'Compute per-file maintainability index (health command)'
+    required: false
+    default: 'false'
+  hotspots:
+    description: 'Identify files that are both complex and frequently changing (health command)'
+    required: false
+    default: 'false'
+  targets:
+    description: 'Show ranked refactoring recommendations (health command)'
+    required: false
+    default: 'false'
+  complexity:
+    description: 'Show only complexity findings section (health command)'
+    required: false
+    default: 'false'
+  since:
+    description: 'Git history window for hotspot analysis: durations (6m, 90d, 1y) or ISO dates (health command)'
+    required: false
+  min-commits:
+    description: 'Minimum commits for a file to appear in hotspot ranking (health command, default: 3)'
+    required: false
+  save-snapshot:
+    description: 'Save vital signs snapshot for trend tracking. Provide a path or leave empty for default (health command)'
+    required: false
+  # Check-specific inputs
+  issue-types:
+    description: 'Comma-separated issue types to report (dead-code command). Valid: unused-files, unused-exports, unused-types, unused-deps, unused-enum-members, unused-class-members, unresolved-imports, unlisted-deps, duplicate-exports, circular-deps'
     required: false
   # Fix-specific inputs
   dry-run:
     description: 'Preview changes without modifying files (fix command, default: true for CI safety)'
     required: false
     default: 'true'
+  # Global flags
+  no-cache:
+    description: 'Disable incremental parse cache (force full re-parse of all files)'
+    required: false
+    default: 'false'
+  threads:
+    description: 'Number of parser threads (default: available CPU cores)'
+    required: false
+  # Bare invocation selectors
+  only:
+    description: 'Run only these analyses when no command is specified (comma-separated: check,dupes,health)'
+    required: false
+  skip:
+    description: 'Skip these analyses when no command is specified (comma-separated: check,dupes,health)'
+    required: false
 
 outputs:
   results:
@@ -104,7 +152,7 @@ outputs:
     description: 'Path to SARIF results file'
     value: ${{ steps.analyze.outputs.sarif }}
   issues:
-    description: 'Number of issues (check), clone groups (dupes), or fixes proposed/applied (fix)'
+    description: 'Number of issues (dead-code), clone groups (dupes), or fixes proposed/applied (fix)'
     value: ${{ steps.analyze.outputs.issues }}
 
 runs:
@@ -328,23 +376,36 @@ runs:
         INPUT_MIN_LINES: ${{ inputs.min-lines }}
         INPUT_THRESHOLD: ${{ inputs.threshold }}
         INPUT_SKIP_LOCAL: ${{ inputs.skip-local }}
+        INPUT_CROSS_LANGUAGE: ${{ inputs.cross-language }}
         INPUT_DRY_RUN: ${{ inputs.dry-run }}
         INPUT_WORKSPACE: ${{ inputs.workspace }}
         INPUT_MAX_CYCLOMATIC: ${{ inputs.max-cyclomatic }}
         INPUT_MAX_COGNITIVE: ${{ inputs.max-cognitive }}
         INPUT_TOP: ${{ inputs.top }}
         INPUT_SORT: ${{ inputs.sort }}
+        INPUT_FILE_SCORES: ${{ inputs.file-scores }}
+        INPUT_HOTSPOTS: ${{ inputs.hotspots }}
+        INPUT_TARGETS: ${{ inputs.targets }}
+        INPUT_COMPLEXITY: ${{ inputs.complexity }}
+        INPUT_SINCE: ${{ inputs.since }}
+        INPUT_MIN_COMMITS: ${{ inputs.min-commits }}
+        INPUT_SAVE_SNAPSHOT: ${{ inputs.save-snapshot }}
+        INPUT_ISSUE_TYPES: ${{ inputs.issue-types }}
+        INPUT_NO_CACHE: ${{ inputs.no-cache }}
+        INPUT_THREADS: ${{ inputs.threads }}
+        INPUT_ONLY: ${{ inputs.only }}
+        INPUT_SKIP: ${{ inputs.skip }}
       run: |
         # Validate command (empty = bare fallow, runs all analyses)
         case "$INPUT_COMMAND" in
-          ""|check|dead-code|dupes|health|fix) ;;
+          ""|dead-code|check|dupes|health|fix) ;;
           *) echo "::error::Invalid command: ${INPUT_COMMAND}. Must be dead-code, dupes, health, fix, or empty (runs all)."; exit 2 ;;
         esac
 
         # Validate numeric inputs
         for name_val in "min-tokens:$INPUT_MIN_TOKENS" "min-lines:$INPUT_MIN_LINES" \
                        "max-cyclomatic:$INPUT_MAX_CYCLOMATIC" "max-cognitive:$INPUT_MAX_COGNITIVE" \
-                       "top:$INPUT_TOP"; do
+                       "top:$INPUT_TOP" "min-commits:$INPUT_MIN_COMMITS" "threads:$INPUT_THREADS"; do
           name="${name_val%%:*}"; val="${name_val#*:}"
           if [ -n "$val" ] && ! [[ "$val" =~ ^[0-9]+$ ]]; then
             echo "::error::${name} must be a positive integer, got: ${val}"; exit 2
@@ -356,7 +417,8 @@ runs:
 
         # Check for --sarif-file support (global flag since v2, check-only in v1)
         HAS_SARIF_FILE=false
-        if [ "$INPUT_COMMAND" = "check" ] && fallow check --help 2>/dev/null | grep -q -- '--sarif-file'; then
+        if { [ "$INPUT_COMMAND" = "dead-code" ] || [ "$INPUT_COMMAND" = "check" ]; } && \
+           fallow dead-code --help 2>/dev/null | grep -q -- '--sarif-file'; then
           HAS_SARIF_FILE=true
         fi
 
@@ -374,12 +436,28 @@ runs:
         [ -n "$INPUT_BASELINE" ] && ARGS+=(--baseline "$INPUT_BASELINE")
         [ -n "$INPUT_SAVE_BASELINE" ] && ARGS+=(--save-baseline "$INPUT_SAVE_BASELINE")
         [ -n "$INPUT_WORKSPACE" ] && ARGS+=(--workspace "$INPUT_WORKSPACE")
+        [ "$INPUT_NO_CACHE" = "true" ] && ARGS+=(--no-cache)
+        [ -n "$INPUT_THREADS" ] && ARGS+=(--threads "$INPUT_THREADS")
+
+        # Bare invocation selectors (only/skip apply when no command is given)
+        if [ -z "$INPUT_COMMAND" ]; then
+          [ -n "$INPUT_ONLY" ] && ARGS+=(--only "$INPUT_ONLY")
+          [ -n "$INPUT_SKIP" ] && ARGS+=(--skip "$INPUT_SKIP")
+        fi
 
         # Command-specific arguments
         case "$INPUT_COMMAND" in
-          check)
+          dead-code|check)
             if [ "$INPUT_FORMAT" = "sarif" ] && [ "$HAS_SARIF_FILE" = "true" ]; then
               ARGS+=(--sarif-file fallow-results.sarif)
+            fi
+            # Issue type filters
+            if [ -n "$INPUT_ISSUE_TYPES" ]; then
+              IFS=',' read -ra TYPES <<< "$INPUT_ISSUE_TYPES"
+              for t in "${TYPES[@]}"; do
+                t="$(echo "$t" | xargs)"  # trim whitespace
+                ARGS+=("--${t}")
+              done
             fi
             ;;
           dupes)
@@ -388,15 +466,34 @@ runs:
             [ -n "$INPUT_MIN_LINES" ] && ARGS+=(--min-lines "$INPUT_MIN_LINES")
             [ -n "$INPUT_THRESHOLD" ] && ARGS+=(--threshold "$INPUT_THRESHOLD")
             [ "$INPUT_SKIP_LOCAL" = "true" ] && ARGS+=(--skip-local)
+            [ "$INPUT_CROSS_LANGUAGE" = "true" ] && ARGS+=(--cross-language)
+            [ -n "$INPUT_TOP" ] && ARGS+=(--top "$INPUT_TOP")
             ;;
           health)
             [ -n "$INPUT_MAX_CYCLOMATIC" ] && ARGS+=(--max-cyclomatic "$INPUT_MAX_CYCLOMATIC")
             [ -n "$INPUT_MAX_COGNITIVE" ] && ARGS+=(--max-cognitive "$INPUT_MAX_COGNITIVE")
             [ -n "$INPUT_TOP" ] && ARGS+=(--top "$INPUT_TOP")
             [ -n "$INPUT_SORT" ] && ARGS+=(--sort "$INPUT_SORT")
+            [ "$INPUT_FILE_SCORES" = "true" ] && ARGS+=(--file-scores)
+            [ "$INPUT_HOTSPOTS" = "true" ] && ARGS+=(--hotspots)
+            [ "$INPUT_TARGETS" = "true" ] && ARGS+=(--targets)
+            [ "$INPUT_COMPLEXITY" = "true" ] && ARGS+=(--complexity)
+            [ -n "$INPUT_SINCE" ] && ARGS+=(--since "$INPUT_SINCE")
+            [ -n "$INPUT_MIN_COMMITS" ] && ARGS+=(--min-commits "$INPUT_MIN_COMMITS")
+            if [ -n "$INPUT_SAVE_SNAPSHOT" ]; then
+              if [ "$INPUT_SAVE_SNAPSHOT" = "true" ]; then
+                ARGS+=(--save-snapshot)
+              else
+                ARGS+=(--save-snapshot "$INPUT_SAVE_SNAPSHOT")
+              fi
+            fi
             ;;
           fix)
-            [ "$INPUT_DRY_RUN" = "true" ] && ARGS+=(--dry-run)
+            if [ "$INPUT_DRY_RUN" = "true" ]; then
+              ARGS+=(--dry-run)
+            else
+              ARGS+=(--yes)
+            fi
             ;;
         esac
 
@@ -427,6 +524,8 @@ runs:
           [ -n "$INPUT_BASELINE" ] && SARIF_ARGS+=(--baseline "$INPUT_BASELINE")
           [ -n "$INPUT_SAVE_BASELINE" ] && SARIF_ARGS+=(--save-baseline "$INPUT_SAVE_BASELINE")
           [ -n "$INPUT_WORKSPACE" ] && SARIF_ARGS+=(--workspace "$INPUT_WORKSPACE")
+          [ "$INPUT_NO_CACHE" = "true" ] && SARIF_ARGS+=(--no-cache)
+          [ -n "$INPUT_THREADS" ] && SARIF_ARGS+=(--threads "$INPUT_THREADS")
 
           # Carry over command-specific args for SARIF run
           if [ "$INPUT_COMMAND" = "dupes" ]; then
@@ -435,10 +534,25 @@ runs:
             [ -n "$INPUT_MIN_LINES" ] && SARIF_ARGS+=(--min-lines "$INPUT_MIN_LINES")
             [ -n "$INPUT_THRESHOLD" ] && SARIF_ARGS+=(--threshold "$INPUT_THRESHOLD")
             [ "$INPUT_SKIP_LOCAL" = "true" ] && SARIF_ARGS+=(--skip-local)
+            [ "$INPUT_CROSS_LANGUAGE" = "true" ] && SARIF_ARGS+=(--cross-language)
           elif [ "$INPUT_COMMAND" = "health" ]; then
             [ -n "$INPUT_MAX_CYCLOMATIC" ] && SARIF_ARGS+=(--max-cyclomatic "$INPUT_MAX_CYCLOMATIC")
             [ -n "$INPUT_MAX_COGNITIVE" ] && SARIF_ARGS+=(--max-cognitive "$INPUT_MAX_COGNITIVE")
             # --top intentionally omitted: SARIF should contain all findings for Code Scanning
+            [ "$INPUT_FILE_SCORES" = "true" ] && SARIF_ARGS+=(--file-scores)
+            [ "$INPUT_HOTSPOTS" = "true" ] && SARIF_ARGS+=(--hotspots)
+            [ "$INPUT_TARGETS" = "true" ] && SARIF_ARGS+=(--targets)
+            [ "$INPUT_COMPLEXITY" = "true" ] && SARIF_ARGS+=(--complexity)
+            [ -n "$INPUT_SINCE" ] && SARIF_ARGS+=(--since "$INPUT_SINCE")
+            [ -n "$INPUT_MIN_COMMITS" ] && SARIF_ARGS+=(--min-commits "$INPUT_MIN_COMMITS")
+          elif [ "$INPUT_COMMAND" = "dead-code" ] || [ "$INPUT_COMMAND" = "check" ]; then
+            if [ -n "$INPUT_ISSUE_TYPES" ]; then
+              IFS=',' read -ra TYPES <<< "$INPUT_ISSUE_TYPES"
+              for t in "${TYPES[@]}"; do
+                t="$(echo "$t" | xargs)"
+                SARIF_ARGS+=("--${t}")
+              done
+            fi
           fi
 
           if ! fallow "${SARIF_ARGS[@]}" "${EXTRA_ARGS[@]}" > fallow-results.sarif 2>/dev/null; then
@@ -455,10 +569,11 @@ runs:
 
         # Extract issue count based on command
         case "$INPUT_COMMAND" in
-          check)  ISSUES=$(jq -r '.total_issues' fallow-results.json) ;;
-          dupes)  ISSUES=$(jq -r '.stats.clone_groups' fallow-results.json) ;;
-          health) ISSUES=$(jq -r '.summary.functions_above_threshold' fallow-results.json) ;;
-          fix)    ISSUES=$(jq -r '(.fixes | length)' fallow-results.json) ;;
+          dead-code|check) ISSUES=$(jq -r '.total_issues' fallow-results.json) ;;
+          dupes)           ISSUES=$(jq -r '.stats.clone_groups' fallow-results.json) ;;
+          health)          ISSUES=$(jq -r '.summary.functions_above_threshold' fallow-results.json) ;;
+          fix)             ISSUES=$(jq -r '(.fixes | length)' fallow-results.json) ;;
+          "")              ISSUES=$(jq -r '((.check.total_issues // 0) + (.dupes.stats.clone_groups // 0) + (.health.summary.functions_above_threshold // 0))' fallow-results.json) ;;
         esac
 
         if ! [[ "$ISSUES" =~ ^[0-9]+$ ]]; then
@@ -476,10 +591,11 @@ runs:
 
         if [ "$ISSUES" -gt 0 ]; then
           case "$INPUT_COMMAND" in
-            check)  echo "::warning::Fallow found ${ISSUES} unused code issues" ;;
-            dupes)  echo "::warning::Fallow found ${ISSUES} clone groups" ;;
-            health) echo "::warning::Fallow found ${ISSUES} high complexity functions" ;;
-            fix)    echo "::warning::Fallow proposed ${ISSUES} fixes" ;;
+            dead-code|check) echo "::warning::Fallow found ${ISSUES} unused code issues" ;;
+            dupes)           echo "::warning::Fallow found ${ISSUES} clone groups" ;;
+            health)          echo "::warning::Fallow found ${ISSUES} high complexity functions" ;;
+            fix)             echo "::warning::Fallow proposed ${ISSUES} fixes" ;;
+            "")              echo "::warning::Fallow found ${ISSUES} issues" ;;
           esac
         fi
 
@@ -490,13 +606,19 @@ runs:
         FALLOW_COMMAND: ${{ steps.analyze.outputs.command }}
       run: |
         case "$FALLOW_COMMAND" in
-          check)  JQ_FILE="$FALLOW_TMP/summary-check.jq" ;;
-          dupes)  JQ_FILE="$FALLOW_TMP/summary-dupes.jq" ;;
-          health) JQ_FILE="$FALLOW_TMP/summary-health.jq" ;;
-          fix)    JQ_FILE="$FALLOW_TMP/summary-fix.jq" ;;
-          *)      echo "::error::Unexpected command: ${FALLOW_COMMAND}"; exit 2 ;;
+          dead-code|check) JQ_FILE="$FALLOW_TMP/summary-check.jq" ;;
+          dupes)           JQ_FILE="$FALLOW_TMP/summary-dupes.jq" ;;
+          health)          JQ_FILE="$FALLOW_TMP/summary-health.jq" ;;
+          fix)             JQ_FILE="$FALLOW_TMP/summary-fix.jq" ;;
+          "")              JQ_FILE="$FALLOW_TMP/summary-check.jq" ;;  # bare invocation: summarize the check portion
+          *)               echo "::error::Unexpected command: ${FALLOW_COMMAND}"; exit 2 ;;
         esac
-        jq -r -f "$JQ_FILE" fallow-results.json >> "$GITHUB_STEP_SUMMARY"
+        # Bare invocation nests results under .check — extract for the jq script
+        if [ -z "$FALLOW_COMMAND" ]; then
+          jq -r '.check' fallow-results.json | jq -r -f "$JQ_FILE" >> "$GITHUB_STEP_SUMMARY"
+        else
+          jq -r -f "$JQ_FILE" fallow-results.json >> "$GITHUB_STEP_SUMMARY"
+        fi
 
     - name: Check Code Scanning availability
       id: ghas-check
@@ -545,15 +667,21 @@ runs:
       run: |
         # Select jq script safely
         case "$FALLOW_COMMAND" in
-          check)  JQ_FILE="$FALLOW_TMP/summary-check.jq" ;;
-          dupes)  JQ_FILE="$FALLOW_TMP/summary-dupes.jq" ;;
-          health) JQ_FILE="$FALLOW_TMP/summary-health.jq" ;;
-          fix)    JQ_FILE="$FALLOW_TMP/summary-fix.jq" ;;
-          *)      echo "::error::Unexpected command: ${FALLOW_COMMAND}"; exit 2 ;;
+          dead-code|check) JQ_FILE="$FALLOW_TMP/summary-check.jq" ;;
+          dupes)           JQ_FILE="$FALLOW_TMP/summary-dupes.jq" ;;
+          health)          JQ_FILE="$FALLOW_TMP/summary-health.jq" ;;
+          fix)             JQ_FILE="$FALLOW_TMP/summary-fix.jq" ;;
+          "")              JQ_FILE="$FALLOW_TMP/summary-check.jq" ;;
+          *)               echo "::error::Unexpected command: ${FALLOW_COMMAND}"; exit 2 ;;
         esac
 
-        # Generate comment body
-        if ! COMMENT_BODY="$(jq -r -f "$JQ_FILE" fallow-results.json)
+        # Generate comment body (bare invocation: extract .check sub-object for the jq script)
+        if [ -z "$FALLOW_COMMAND" ]; then
+          JQ_INPUT=$(jq -r '.check' fallow-results.json)
+        else
+          JQ_INPUT=$(cat fallow-results.json)
+        fi
+        if ! COMMENT_BODY="$(echo "$JQ_INPUT" | jq -r -f "$JQ_FILE")
 
         <!-- fallow-results -->"; then
           echo "::warning::Failed to generate PR comment body"
@@ -599,10 +727,11 @@ runs:
       run: |
         if [ "$INPUT_FAIL_ON_ISSUES" = "true" ] && [ "$ISSUES" -gt 0 ]; then
           case "$INPUT_COMMAND" in
-            check)  echo "::error::Fallow found ${ISSUES} unused code issues" ;;
-            dupes)  echo "::error::Fallow found ${ISSUES} clone groups" ;;
-            health) echo "::error::Fallow found ${ISSUES} high complexity functions" ;;
-            fix)    echo "::error::Fallow found ${ISSUES} fixable issues" ;;
+            dead-code|check) echo "::error::Fallow found ${ISSUES} unused code issues" ;;
+            dupes)           echo "::error::Fallow found ${ISSUES} clone groups" ;;
+            health)          echo "::error::Fallow found ${ISSUES} high complexity functions" ;;
+            fix)             echo "::error::Fallow found ${ISSUES} fixable issues" ;;
+            "")              echo "::error::Fallow found ${ISSUES} issues" ;;
           esac
           exit 1
         fi

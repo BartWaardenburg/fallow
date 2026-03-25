@@ -40,6 +40,18 @@ pub fn build_analyze_args(params: &AnalyzeParams) -> Result<Vec<String>, String>
             }
         }
     }
+    if let Some(ref baseline) = params.baseline {
+        args.extend(["--baseline".to_string(), baseline.clone()]);
+    }
+    if let Some(ref save_baseline) = params.save_baseline {
+        args.extend(["--save-baseline".to_string(), save_baseline.clone()]);
+    }
+    if params.no_cache == Some(true) {
+        args.push("--no-cache".to_string());
+    }
+    if let Some(threads) = params.threads {
+        args.extend(["--threads".to_string(), threads.to_string()]);
+    }
 
     Ok(args)
 }

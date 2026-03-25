@@ -55,7 +55,6 @@ Identify exports and files with no test file dependency — without running test
 - **Incremental analysis** — finer-grained caching beyond file-level, to make watch mode and CI even faster on large monorepos
 - **Plugin ecosystem** — more framework coverage, better external plugin authoring experience, community contributions
 - **Cross-workspace resolution** — custom export conditions, unbuilt workspace fallback for monorepos without build artifacts
-- **MCP server completeness** — expose remaining global CLI flags (`--config`, `--baseline`, `--save-baseline`, `--no-cache`, `--threads`) across all MCP tools to complete the API surface
 
 ---
 

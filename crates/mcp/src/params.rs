@@ -1,7 +1,7 @@
 use schemars::JsonSchema;
 use serde::Deserialize;
 
-#[derive(Deserialize, JsonSchema)]
+#[derive(Default, Deserialize, JsonSchema)]
 pub struct AnalyzeParams {
     /// Root directory of the project to analyze. Defaults to current working directory.
     pub root: Option<String>,
@@ -20,6 +20,18 @@ pub struct AnalyzeParams {
     /// unused-enum-members, unused-class-members, unresolved-imports,
     /// unlisted-deps, duplicate-exports, circular-deps.
     pub issue_types: Option<Vec<String>>,
+
+    /// Compare results against a saved baseline file. Only new issues (not in the baseline) are reported.
+    pub baseline: Option<String>,
+
+    /// Save current results as a baseline file for future comparisons.
+    pub save_baseline: Option<String>,
+
+    /// Disable the incremental parse cache. Forces a full re-parse of all files.
+    pub no_cache: Option<bool>,
+
+    /// Number of parser threads. Defaults to available CPU cores.
+    pub threads: Option<usize>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -39,12 +51,30 @@ pub struct CheckChangedParams {
 
     /// Scope analysis to a specific workspace package name.
     pub workspace: Option<String>,
+
+    /// Compare results against a saved baseline file. Only new issues (not in the baseline) are reported.
+    pub baseline: Option<String>,
+
+    /// Save current results as a baseline file for future comparisons.
+    pub save_baseline: Option<String>,
+
+    /// Disable the incremental parse cache. Forces a full re-parse of all files.
+    pub no_cache: Option<bool>,
+
+    /// Number of parser threads. Defaults to available CPU cores.
+    pub threads: Option<usize>,
 }
 
-#[derive(Deserialize, JsonSchema)]
+#[derive(Default, Deserialize, JsonSchema)]
 pub struct FindDupesParams {
     /// Root directory of the project to analyze. Defaults to current working directory.
     pub root: Option<String>,
+
+    /// Path to fallow config file (.fallowrc.json or fallow.toml).
+    pub config: Option<String>,
+
+    /// Scope analysis to a specific workspace package name.
+    pub workspace: Option<String>,
 
     /// Detection mode: "strict" (exact tokens), "mild" (normalized identifiers),
     /// "weak" (structural only), or "semantic" (type-aware). Defaults to "mild".
@@ -67,9 +97,21 @@ pub struct FindDupesParams {
 
     /// Show only the N largest clone groups.
     pub top: Option<usize>,
+
+    /// Compare results against a saved baseline file. Only new issues (not in the baseline) are reported.
+    pub baseline: Option<String>,
+
+    /// Save current results as a baseline file for future comparisons.
+    pub save_baseline: Option<String>,
+
+    /// Disable the incremental parse cache. Forces a full re-parse of all files.
+    pub no_cache: Option<bool>,
+
+    /// Number of parser threads. Defaults to available CPU cores.
+    pub threads: Option<usize>,
 }
 
-#[derive(Deserialize, JsonSchema)]
+#[derive(Default, Deserialize, JsonSchema)]
 pub struct FixParams {
     /// Root directory of the project. Defaults to current working directory.
     pub root: Option<String>,
@@ -79,21 +121,39 @@ pub struct FixParams {
 
     /// Only analyze production code (excludes tests, stories, dev files).
     pub production: Option<bool>,
+
+    /// Scope analysis to a specific workspace package name.
+    pub workspace: Option<String>,
+
+    /// Disable the incremental parse cache. Forces a full re-parse of all files.
+    pub no_cache: Option<bool>,
+
+    /// Number of parser threads. Defaults to available CPU cores.
+    pub threads: Option<usize>,
 }
 
-#[derive(Deserialize, JsonSchema)]
+#[derive(Default, Deserialize, JsonSchema)]
 pub struct ProjectInfoParams {
     /// Root directory of the project. Defaults to current working directory.
     pub root: Option<String>,
 
     /// Path to fallow config file.
     pub config: Option<String>,
+
+    /// Disable the incremental parse cache. Forces a full re-parse of all files.
+    pub no_cache: Option<bool>,
+
+    /// Number of parser threads. Defaults to available CPU cores.
+    pub threads: Option<usize>,
 }
 
-#[derive(Deserialize, JsonSchema)]
+#[derive(Default, Deserialize, JsonSchema)]
 pub struct HealthParams {
     /// Root directory of the project to analyze. Defaults to current working directory.
     pub root: Option<String>,
+
+    /// Path to fallow config file (.fallowrc.json or fallow.toml).
+    pub config: Option<String>,
 
     /// Maximum cyclomatic complexity threshold. Functions exceeding this are reported.
     pub max_cyclomatic: Option<u16>,
@@ -136,4 +196,16 @@ pub struct HealthParams {
 
     /// Save a vital signs snapshot. Provide a file path, or omit value for default (`.fallow/snapshots/{timestamp}.json`).
     pub save_snapshot: Option<String>,
+
+    /// Compare results against a saved baseline file. Only new issues (not in the baseline) are reported.
+    pub baseline: Option<String>,
+
+    /// Save current results as a baseline file for future comparisons.
+    pub save_baseline: Option<String>,
+
+    /// Disable the incremental parse cache. Forces a full re-parse of all files.
+    pub no_cache: Option<bool>,
+
+    /// Number of parser threads. Defaults to available CPU cores.
+    pub threads: Option<usize>,
 }

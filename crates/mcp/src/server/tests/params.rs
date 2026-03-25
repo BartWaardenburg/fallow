@@ -23,11 +23,29 @@ fn analyze_params_deserialize() {
 
 #[test]
 fn analyze_params_minimal() {
-    let json = "{}";
-    let params: AnalyzeParams = serde_json::from_str(json).unwrap();
+    let params: AnalyzeParams = serde_json::from_str("{}").unwrap();
     assert!(params.root.is_none());
     assert!(params.production.is_none());
     assert!(params.issue_types.is_none());
+    assert!(params.baseline.is_none());
+    assert!(params.save_baseline.is_none());
+    assert!(params.no_cache.is_none());
+    assert!(params.threads.is_none());
+}
+
+#[test]
+fn analyze_params_with_global_flags() {
+    let json = r#"{
+        "baseline": "base.json",
+        "save_baseline": "new.json",
+        "no_cache": true,
+        "threads": 4
+    }"#;
+    let params: AnalyzeParams = serde_json::from_str(json).unwrap();
+    assert_eq!(params.baseline.as_deref(), Some("base.json"));
+    assert_eq!(params.save_baseline.as_deref(), Some("new.json"));
+    assert_eq!(params.no_cache, Some(true));
+    assert_eq!(params.threads, Some(4));
 }
 
 #[test]
@@ -43,11 +61,15 @@ fn check_changed_params_require_since() {
 
 #[test]
 fn find_dupes_params_defaults() {
-    let json = "{}";
-    let params: FindDupesParams = serde_json::from_str(json).unwrap();
+    let params: FindDupesParams = serde_json::from_str("{}").unwrap();
     assert!(params.mode.is_none());
     assert!(params.min_tokens.is_none());
     assert!(params.skip_local.is_none());
+    assert!(params.config.is_none());
+    assert!(params.workspace.is_none());
+    assert!(params.baseline.is_none());
+    assert!(params.no_cache.is_none());
+    assert!(params.threads.is_none());
 }
 
 #[test]
@@ -58,33 +80,56 @@ fn fix_params_with_production() {
 }
 
 #[test]
+fn fix_params_with_global_flags() {
+    let json = r#"{"workspace":"frontend","no_cache":true,"threads":2}"#;
+    let params: FixParams = serde_json::from_str(json).unwrap();
+    assert_eq!(params.workspace.as_deref(), Some("frontend"));
+    assert_eq!(params.no_cache, Some(true));
+    assert_eq!(params.threads, Some(2));
+}
+
+#[test]
 fn health_params_all_fields_deserialize() {
     let json = r#"{
         "root": "/project",
+        "config": "fallow.toml",
         "max_cyclomatic": 25,
         "max_cognitive": 30,
         "top": 10,
         "sort": "cognitive",
-        "changed_since": "HEAD~3"
+        "changed_since": "HEAD~3",
+        "baseline": "base.json",
+        "save_baseline": "new.json",
+        "no_cache": true,
+        "threads": 8
     }"#;
     let params: HealthParams = serde_json::from_str(json).unwrap();
     assert_eq!(params.root.as_deref(), Some("/project"));
+    assert_eq!(params.config.as_deref(), Some("fallow.toml"));
     assert_eq!(params.max_cyclomatic, Some(25));
     assert_eq!(params.max_cognitive, Some(30));
     assert_eq!(params.top, Some(10));
     assert_eq!(params.sort.as_deref(), Some("cognitive"));
     assert_eq!(params.changed_since.as_deref(), Some("HEAD~3"));
+    assert_eq!(params.baseline.as_deref(), Some("base.json"));
+    assert_eq!(params.save_baseline.as_deref(), Some("new.json"));
+    assert_eq!(params.no_cache, Some(true));
+    assert_eq!(params.threads, Some(8));
 }
 
 #[test]
 fn health_params_minimal() {
     let params: HealthParams = serde_json::from_str("{}").unwrap();
     assert!(params.root.is_none());
+    assert!(params.config.is_none());
     assert!(params.max_cyclomatic.is_none());
     assert!(params.max_cognitive.is_none());
     assert!(params.top.is_none());
     assert!(params.sort.is_none());
     assert!(params.changed_since.is_none());
+    assert!(params.baseline.is_none());
+    assert!(params.no_cache.is_none());
+    assert!(params.threads.is_none());
 }
 
 #[test]
@@ -96,24 +141,44 @@ fn project_info_params_deserialize() {
 }
 
 #[test]
+fn project_info_params_with_global_flags() {
+    let json = r#"{"no_cache": true, "threads": 4}"#;
+    let params: ProjectInfoParams = serde_json::from_str(json).unwrap();
+    assert_eq!(params.no_cache, Some(true));
+    assert_eq!(params.threads, Some(4));
+}
+
+#[test]
 fn find_dupes_params_all_fields_deserialize() {
     let json = r#"{
         "root": "/project",
+        "config": "fallow.toml",
+        "workspace": "@my/lib",
         "mode": "strict",
         "min_tokens": 100,
         "min_lines": 10,
         "threshold": 5.5,
         "skip_local": true,
-        "top": 5
+        "top": 5,
+        "baseline": "base.json",
+        "save_baseline": "new.json",
+        "no_cache": true,
+        "threads": 4
     }"#;
     let params: FindDupesParams = serde_json::from_str(json).unwrap();
     assert_eq!(params.root.as_deref(), Some("/project"));
+    assert_eq!(params.config.as_deref(), Some("fallow.toml"));
+    assert_eq!(params.workspace.as_deref(), Some("@my/lib"));
     assert_eq!(params.mode.as_deref(), Some("strict"));
     assert_eq!(params.min_tokens, Some(100));
     assert_eq!(params.min_lines, Some(10));
     assert_eq!(params.threshold, Some(5.5));
     assert_eq!(params.skip_local, Some(true));
     assert_eq!(params.top, Some(5));
+    assert_eq!(params.baseline.as_deref(), Some("base.json"));
+    assert_eq!(params.save_baseline.as_deref(), Some("new.json"));
+    assert_eq!(params.no_cache, Some(true));
+    assert_eq!(params.threads, Some(4));
 }
 
 #[test]
@@ -123,7 +188,11 @@ fn check_changed_params_all_fields_deserialize() {
         "since": "develop",
         "config": "custom.toml",
         "production": true,
-        "workspace": "frontend"
+        "workspace": "frontend",
+        "baseline": "base.json",
+        "save_baseline": "new.json",
+        "no_cache": true,
+        "threads": 2
     }"#;
     let params: CheckChangedParams = serde_json::from_str(json).unwrap();
     assert_eq!(params.root.as_deref(), Some("/app"));
@@ -131,6 +200,10 @@ fn check_changed_params_all_fields_deserialize() {
     assert_eq!(params.config.as_deref(), Some("custom.toml"));
     assert_eq!(params.production, Some(true));
     assert_eq!(params.workspace.as_deref(), Some("frontend"));
+    assert_eq!(params.baseline.as_deref(), Some("base.json"));
+    assert_eq!(params.save_baseline.as_deref(), Some("new.json"));
+    assert_eq!(params.no_cache, Some(true));
+    assert_eq!(params.threads, Some(2));
 }
 
 #[test]
@@ -139,6 +212,9 @@ fn fix_params_minimal_deserialize() {
     assert!(params.root.is_none());
     assert!(params.config.is_none());
     assert!(params.production.is_none());
+    assert!(params.workspace.is_none());
+    assert!(params.no_cache.is_none());
+    assert!(params.threads.is_none());
 }
 
 #[test]
@@ -146,6 +222,8 @@ fn project_info_params_minimal_deserialize() {
     let params: ProjectInfoParams = serde_json::from_str("{}").unwrap();
     assert!(params.root.is_none());
     assert!(params.config.is_none());
+    assert!(params.no_cache.is_none());
+    assert!(params.threads.is_none());
 }
 
 #[test]
