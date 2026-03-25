@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1774428708092,
+  "lastUpdate": 1774428944041,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Binary Size": [
@@ -284,6 +284,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/851e9a2ec31f34155064750d2be1fd1c94a21fd3"
         },
         "date": 1774428707177,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Binary Size (fallow)",
+            "value": 116273800,
+            "unit": "bytes"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "c479b3f59c31c6ac203f19e8ac04c956fb27188c",
+          "message": "fix: qualify Span in benchmark to resolve ambiguous import",
+          "timestamp": "2026-03-25T09:51:51+01:00",
+          "tree_id": "2bf39f35c8b234f291084a777104795c11dd36df",
+          "url": "https://github.com/fallow-rs/fallow/commit/c479b3f59c31c6ac203f19e8ac04c956fb27188c"
+        },
+        "date": 1774428943563,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
