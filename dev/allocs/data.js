@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1774461400665,
+  "lastUpdate": 1774464738676,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
@@ -1529,6 +1529,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Total Allocations",
             "value": 12058,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 420346,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 5168,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "b5355ff0299f405dfc0b12da19fc641528562b95",
+          "message": "docs: escape angle brackets in doc comments for rustdoc compatibility",
+          "timestamp": "2026-03-25T19:50:41+01:00",
+          "tree_id": "8c4b2d0f8360f5d56f7a7408058337c3ac75b855",
+          "url": "https://github.com/fallow-rs/fallow/commit/b5355ff0299f405dfc0b12da19fc641528562b95"
+        },
+        "date": 1774464737742,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 3043593,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 12056,
             "unit": "allocations"
           },
           {
