@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1774429532254,
+  "lastUpdate": 1774429673709,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
@@ -1154,6 +1154,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/e7b1a130d03aa4624ef82fd16de8387171d542f6"
         },
         "date": 1774429531277,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 90.2,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "b37b3bf35624f5ca2a13d62eafdff381752a858f",
+          "message": "chore: fix zizmor dependabot-cooldown with recommended 7-day cooldown\n\nUse default-days: 7 (zizmor recommended value) instead of 3.\nRemove broken glob ignore pattern — zizmor expects filenames not globs.",
+          "timestamp": "2026-03-25T10:07:07+01:00",
+          "tree_id": "38d203c8482e1af63485a5f961156380ec34666c",
+          "url": "https://github.com/fallow-rs/fallow/commit/b37b3bf35624f5ca2a13d62eafdff381752a858f"
+        },
+        "date": 1774429672735,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
