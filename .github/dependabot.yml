@@ -5,7 +5,7 @@ updates:
     schedule:
       interval: weekly
     cooldown:
-      default-days: 3
+      default-days: 7
     ignore:
       - dependency-name: bincode
         update-types: ["version-update:semver-major"]
@@ -19,4 +19,4 @@ updates:
     schedule:
       interval: weekly
     cooldown:
-      default-days: 3
+      default-days: 7
