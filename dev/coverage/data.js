@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1774461650871,
+  "lastUpdate": 1774461973937,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
@@ -1386,6 +1386,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/9c2259e68bc01cf07b9aed940e42fd601afebc3d"
         },
         "date": 1774461650465,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 87.5,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "3e8568d2d21782f0a8f25619495d5dc34f669d6d",
+          "message": "docs: add clear benchmark section headers for dead code vs duplication",
+          "timestamp": "2026-03-25T19:05:22+01:00",
+          "tree_id": "cabab3ea0edfe7c268467fcb49535205517bcaad",
+          "url": "https://github.com/fallow-rs/fallow/commit/3e8568d2d21782f0a8f25619495d5dc34f669d6d"
+        },
+        "date": 1774461973546,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
