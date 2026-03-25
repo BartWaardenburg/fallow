@@ -181,7 +181,7 @@ pub const DUPES_RULES: &[RuleDef] = &[RuleDef {
 
 // ── JSON _meta builders ─────────────────────────────────────────
 
-/// Build the `_meta` object for `fallow check --format json --explain`.
+/// Build the `_meta` object for `fallow dead-code --format json --explain`.
 pub fn check_meta() -> Value {
     let rules: Value = CHECK_RULES
         .iter()

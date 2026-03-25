@@ -19,7 +19,7 @@ body:
       placeholder: |
         1. Create a file `src/index.ts` with `export const foo = 1`
         2. Create a file `src/bar.ts` with `import { foo } from './index'`
-        3. Run `fallow check`
+        3. Run `fallow dead-code`
         4. `foo` is incorrectly reported as unused
     validations:
       required: true

@@ -1,9 +1,10 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Fallow JSON Output Schemas",
-  "description": "Schemas for the JSON output of fallow commands: `fallow check --format json`, `fallow health --format json`, and `fallow dupes --format json`. Each command produces a distinct top-level structure sharing the metadata envelope (schema_version, version, elapsed_ms).",
+  "description": "Schemas for the JSON output of fallow commands. Bare `fallow --format json` produces a combined envelope with `check`, `dupes`, and `health` keys. Individual commands (`fallow dead-code --format json`, `fallow health --format json`, `fallow dupes --format json`) produce their own top-level structure.",
 
   "oneOf": [
+    { "$ref": "#/definitions/CombinedOutput" },
     { "$ref": "#/definitions/CheckOutput" },
     { "$ref": "#/definitions/HealthOutput" },
     { "$ref": "#/definitions/DupesOutput" }
@@ -11,8 +12,23 @@
 
   "definitions": {
 
+    "CombinedOutput": {
+      "title": "fallow --format json (bare, combined)",
+      "description": "Combined output from bare `fallow` invocation. Contains results from all enabled analyses (check, dupes, health). Use --only/--skip to select.",
+      "type": "object",
+      "required": ["schema_version", "version", "elapsed_ms"],
+      "properties": {
+        "schema_version": { "$ref": "#/definitions/SchemaVersion" },
+        "version": { "$ref": "#/definitions/ToolVersion" },
+        "elapsed_ms": { "$ref": "#/definitions/ElapsedMs" },
+        "check": { "$ref": "#/definitions/CheckOutput", "description": "Dead code analysis results (omitted if --skip check)" },
+        "dupes": { "$ref": "#/definitions/DupesOutput", "description": "Duplication analysis results (omitted if --skip dupes)" },
+        "health": { "$ref": "#/definitions/HealthOutput", "description": "Health/complexity analysis results (omitted if --skip health)" }
+      }
+    },
+
     "CheckOutput": {
-      "title": "fallow check --format json",
+      "title": "fallow dead-code --format json",
       "type": "object",
       "required": ["schema_version", "version", "elapsed_ms", "total_issues", "unused_files", "unused_exports", "unused_types", "unused_dependencies", "unused_dev_dependencies", "unused_optional_dependencies", "unused_enum_members", "unused_class_members", "unresolved_imports", "unlisted_dependencies", "duplicate_exports", "type_only_dependencies", "circular_dependencies"],
       "properties": {
@@ -106,6 +122,10 @@
         "hotspot_summary": {
           "$ref": "#/definitions/HotspotSummary",
           "description": "Hotspot analysis summary. Only present when --hotspots is used."
+        },
+        "vital_signs": {
+          "$ref": "#/definitions/VitalSigns",
+          "description": "Project-wide vital signs metrics. Always present when computed."
         },
         "_meta": { "$ref": "#/definitions/Meta" }
       }
@@ -348,6 +368,23 @@
           "type": "boolean",
           "description": "Whether the repository is a shallow clone."
         }
+      }
+    },
+
+    "VitalSigns": {
+      "type": "object",
+      "description": "Project-wide vital signs metrics. Optional fields are null when the corresponding analysis was not run.",
+      "required": ["avg_cyclomatic", "p90_cyclomatic"],
+      "properties": {
+        "dead_file_pct": { "type": ["number", "null"], "description": "Percentage of unreachable files." },
+        "dead_export_pct": { "type": ["number", "null"], "description": "Percentage of unused exports." },
+        "avg_cyclomatic": { "type": "number", "description": "Average cyclomatic complexity." },
+        "p90_cyclomatic": { "type": "integer", "description": "90th percentile cyclomatic complexity." },
+        "duplication_pct": { "type": ["number", "null"], "description": "Code duplication percentage. Null if duplication pipeline was not run." },
+        "hotspot_count": { "type": ["integer", "null"], "description": "Files with hotspot score >= 50. Null if git history unavailable." },
+        "maintainability_avg": { "type": ["number", "null"], "description": "Average maintainability index (0-100)." },
+        "unused_dep_count": { "type": ["integer", "null"], "description": "Number of unused dependencies." },
+        "circular_dep_count": { "type": ["integer", "null"], "description": "Number of circular dependency chains." }
       }
     },
 

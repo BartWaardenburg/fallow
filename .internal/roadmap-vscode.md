@@ -24,7 +24,7 @@ The extension provides:
 
 **Not surfaced at all:** complexity per function, maintainability index per file, hotspot scores, churn data, fan-in/fan-out, duplication statistics, clone families, refactoring suggestions, health baselines, trend data.
 
-**Not using these VS Code APIs:** FileDecorationProvider, WebviewViewProvider, inlay hints, text decorations, progress API, walkthroughs, Testing API, Quick Pick (beyond basic), Timeline provider, Comments API.
+**Not using these VS Code APIs:** FileDecorationProvider, WebviewViewProvider, inlay hints, text decorations, Testing API, Timeline provider, Comments API. *(Now using: progress API, walkthroughs, Quick Pick with navigate-on-click.)*
 
 ---
 
@@ -50,16 +50,16 @@ The plan was reviewed by a panel of 6 experts (VS Code extension developer, UX d
 
 Ordered by: **what drives daily adoption, what surfaces the health differentiation, what justifies itself through user demand.**
 
-### Phase 0: Data architecture (prerequisite)
+### Phase 0: Data architecture (prerequisite) — SHIPPED
 
 Every feature in this roadmap depends on analysis data being available and current. Without a freshness strategy, features will show stale data or nothing — both erode trust.
 
 **Caching architecture:**
 
-- **Cold start:** Graceful "no data yet" state for every surface. Tree views show welcome content with "Run Analysis" button. Code lens absent (not "loading..."). File decorations absent (not zero badges). Status bar shows `$(search) Fallow` with no counts.
+- **Cold start:** Graceful "no data yet" state for every surface. Tree views show welcome content with "Run Analysis" button. Code lens absent (not "loading..."). File decorations absent (not zero badges). Status bar shows `$(search) Fallow` with no counts. **SHIPPED** (welcome views, no decorations until analysis)
 - **Warm cache:** Last analysis results stored in LSP server memory as pre-computed indexes. File → issues map for O(1) lookups. Export → usage map for instant code lens/hover.
 - **Incremental invalidation:** On file save, mark that file's data as stale. Full re-analysis debounced (500ms, already implemented). Between re-analyses, serve last-known data with no staleness indicator (analysis is fast enough that brief staleness is acceptable).
-- **Pre-computed indexes:** Build on analysis completion, not on provider calls. Providers do lookups only.
+- **Pre-computed indexes:** Build on analysis completion, not on provider calls. Providers do lookups only. **SHIPPED** (implemented as cached_diagnostics + fallow/analysisComplete notification)
 
 ```
 Analysis completes
@@ -76,7 +76,7 @@ Analysis completes
 
 | Custom notification/request | Data | Consumer |
 |---|---|---|
-| `fallow/analysisComplete` | Summary stats (issue count, health score, duplication %) | Status bar, sidebar widget |
+| `fallow/analysisComplete` | Summary stats (issue count, health score, duplication %) | Status bar, sidebar widget | **SHIPPED** |
 | `fallow/fileMetrics` (request) | Per-file: fan-in, fan-out, maintainability index, complexity density | Health tree view, hover |
 | `fallow/healthSummary` (request) | Project-wide: health score, hotspot count, top offenders | Sidebar widget, dashboard |
 
@@ -86,11 +86,11 @@ Analysis completes
 
 ---
 
-### Phase 1: Foundation + onboarding
+### Phase 1: Foundation + onboarding — SHIPPED
 
 **Goal:** Make the existing extension trustworthy, discoverable, and immediately useful. This phase ships no new surfaces — it polishes the ones that exist and adds onboarding.
 
-**1a. Walkthrough (Getting Started)** (effort: S, days)
+**1a. Walkthrough (Getting Started)** (effort: S, days) — **SHIPPED**
 
 Task-oriented, not feature-oriented:
 
@@ -102,24 +102,26 @@ Task-oriented, not feature-oriented:
 
 Implementation: JSON contribution in `package.json` + markdown content. Simplest API in VS Code — one day of work, 40% retention improvement.
 
-**1b. Diagnostic polish** (effort: S, days)
+**1b. Diagnostic polish** (effort: S, days) — **SHIPPED**
 
-- `DiagnosticTag.Unnecessary` on all unused items (exports, types, members, files) → standard VS Code fade styling. Single highest-impact visual change — universally understood, zero noise.
-- `code` with `target` URL → every diagnostic code becomes a clickable link to documentation. `unused-export` → `https://fallow.dev/rules/unused-export`. Invaluable for onboarding.
-- `relatedInformation` for circular dependencies → shows full cycle path as clickable location links. Circular deps are inherently non-local; related info gives context without navigation.
-- `relatedInformation` for duplicate exports → links to the other files containing the same export name.
+- `DiagnosticTag.Unnecessary` on all unused items (exports, types, members, files) → standard VS Code fade styling. Single highest-impact visual change — universally understood, zero noise. **Was already present.**
+- `code` with `target` URL → every diagnostic code becomes a clickable link to documentation. `unused-export` → `https://fallow.dev/rules/unused-export`. Invaluable for onboarding. **SHIPPED** (code_description)
+- `relatedInformation` for circular dependencies → shows full cycle path as clickable location links. Circular deps are inherently non-local; related info gives context without navigation. **SHIPPED**
+- `relatedInformation` for duplicate exports → links to the other files containing the same export name. **SHIPPED**
+- Duplication severity changed from HINT to INFORMATION. **SHIPPED**
+- Duplication diagnostic range extended to end of line. **SHIPPED**
 - **Drop** `DiagnosticTag.Deprecated` for type-only deps — wrong semantics. "Deprecated" means API is being phased out, not "this should be a devDependency." Use `Unnecessary` or plain `Warning`.
 
 Changes: `crates/lsp/src/diagnostics.rs` only. No extension-side changes needed — LSP protocol handles everything.
 
-**1c. Status bar** (effort: S, days)
+**1c. Status bar** (effort: S, days) — **SHIPPED**
 
 Current: `$(search) Fallow: 9 issues | 0.0% duplication`
 
 Revised:
-- Single item (not two). Status bar real estate is precious.
-- Background color: `statusBarItem.warningBackground` when issues > 0, `statusBarItem.errorBackground` when errors (unresolved imports) exist, default when clean.
-- Rich markdown tooltip (supported since VS Code 1.78):
+- Single item (not two). Status bar real estate is precious. **SHIPPED**
+- Background color: `statusBarItem.warningBackground` when issues > 0, `statusBarItem.errorBackground` when errors (unresolved imports) exist, default when clean. **SHIPPED** (color-coded background)
+- Rich markdown tooltip (supported since VS Code 1.78): **SHIPPED** (breakdown + command links)
 
 ```markdown
 **Fallow** — Project Health
@@ -139,19 +141,32 @@ Revised:
 
 Changes: `editors/vscode/src/statusBar.ts` only.
 
-**1d. Progress API** (effort: S, days)
+**1d. Progress API** (effort: S, days) — **SHIPPED**
 
 - `ProgressLocation.Window` for quick re-analyses on save (<2s) — subtle spinner, no notification popup.
-- `ProgressLocation.Notification` with cancellation for full workspace analysis — shows "Fallow: Analyzing... (Parsing files)" with cancel button.
+- `ProgressLocation.Notification` with cancellation for full workspace analysis — shows "Fallow: Analyzing... (Parsing files)" with cancel button. **SHIPPED** (progress notification during CLI analysis)
+- Result notification with "Open Sidebar" action. **SHIPPED**
 - Debounce: don't fire progress notification if analysis completes within 500ms.
 
 Changes: `editors/vscode/src/commands.ts`.
 
-**1e. Settings & config** (effort: S, days)
+**1e. Settings & config** (effort: S, days) — **SHIPPED**
 
 - All visual features independently toggleable with sensible defaults (off for power-user features).
-- JSON Schema for `.fallowrc.json` via `jsonValidation` contribution in `package.json` — provides autocomplete, validation, and hover docs in the config file for free. No custom editor needed.
+- JSON Schema for `.fallowrc.json` via `jsonValidation` contribution in `package.json` — provides autocomplete, validation, and hover docs in the config file for free. No custom editor needed. **SHIPPED**
 - Structured settings categories in VS Code Settings UI (`fallow.diagnostics.*`, `fallow.display.*`, `fallow.health.*`).
+
+**Additional items shipped (not originally in roadmap):**
+
+- Tree view path resolution fix (relative paths now work)
+- Per-category icons in tree view
+- TreeView.badge with issue count
+- Welcome views for empty state
+- Fix preview Quick Pick with navigate-on-click
+- Post-fix flow: save → fix → restart LSP → re-analyze
+- Sidebar icon viewBox fix
+- `fallow.openSidebar` and `fallow.openSettings` commands
+- Extension version synced to 1.8.1
 
 ---
 
@@ -216,9 +231,11 @@ This is the #1 requested workflow: select 15 unused exports across 8 files, clic
 
 **2d. Enhanced code actions** (effort: S, days)
 
+- Remove unused dependency: removes the dependency line from package.json (JSON-aware edit, handles trailing commas) — as QuickFix in hover popup
+- Extract duplicate into function: re-implement as QuickFix (was REFACTOR_EXTRACT, removed due to buggy code generation — syntax errors in extracted function). Must handle: indentation, function signature, return types, parameter extraction.
 - Suppress issue: inserts `// fallow-ignore-next-line <issue-type>` comment (new)
 - Suppress file: inserts `// fallow-ignore-file <issue-type>` at top (new)
-- Existing: remove unused export, delete unused file, extract duplicate
+- Existing: remove unused export (QuickFix), delete unused file (QuickFix)
 
 ---
 
@@ -422,13 +439,13 @@ Scored on **Adoption impact** (does this drive daily usage?), **Health surfacing
 
 | # | Feature | Adoption | Health | Effort (lower=easier) | Risk | Phase | Status |
 |---|---------|----------|--------|----------------------|------|-------|--------|
-| 1 | Walkthrough (Getting Started) | **10** | 2 | **2** | 1 | 1a | Open |
-| 2 | DiagnosticTag.Unnecessary | **9** | 3 | **1** | 1 | 1b | Open |
-| 3 | Diagnostic doc links | **8** | 2 | **1** | 1 | 1b | Open |
-| 4 | relatedInformation for cycles | 6 | 4 | **2** | 1 | 1b | Open |
-| 5 | Status bar polish + tooltip | 7 | 5 | **2** | 1 | 1c | Open |
-| 6 | Progress API | 5 | 1 | **2** | 1 | 1d | Open |
-| 7 | JSON Schema for config | 6 | 1 | **1** | 1 | 1e | Open |
+| 1 | Walkthrough (Getting Started) | **10** | 2 | **2** | 1 | 1a | Shipped |
+| 2 | DiagnosticTag.Unnecessary | **9** | 3 | **1** | 1 | 1b | Shipped |
+| 3 | Diagnostic doc links | **8** | 2 | **1** | 1 | 1b | Shipped |
+| 4 | relatedInformation for cycles | 6 | 4 | **2** | 1 | 1b | Shipped |
+| 5 | Status bar polish + tooltip | 7 | 5 | **2** | 1 | 1c | Shipped |
+| 6 | Progress API | 5 | 1 | **2** | 1 | 1d | Shipped |
+| 7 | JSON Schema for config | 6 | 1 | **1** | 1 | 1e | Shipped |
 | 8 | Consolidated tree view | **8** | **8** | 5 | 2 | 2a | Open |
 | 9 | **Batch operations** | **9** | 3 | 5 | 3 | 2b | Open |
 | 10 | Quick Pick navigator | **8** | 5 | **3** | 1 | 2c | Open |

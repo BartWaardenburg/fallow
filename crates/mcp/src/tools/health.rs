@@ -52,6 +52,13 @@ pub fn build_health_args(params: &HealthParams) -> Vec<String> {
     if params.production == Some(true) {
         args.push("--production".to_string());
     }
+    if let Some(ref path) = params.save_snapshot {
+        if path.is_empty() {
+            args.push("--save-snapshot".to_string());
+        } else {
+            args.extend(["--save-snapshot".to_string(), path.clone()]);
+        }
+    }
 
     args
 }

@@ -1,7 +1,8 @@
 use std::process::ExitCode;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
-use fallow_config::OutputFormat;
+use fallow_config::{OutputFormat, ResolvedConfig};
+use fallow_core::results::AnalysisResults;
 
 use crate::baseline::{BaselineData, filter_new_issues};
 use crate::report;
@@ -16,6 +17,7 @@ pub use filtering::resolve_workspace_filter;
 
 // ── Issue type filters ──────────────────────────────────────────
 
+#[derive(Default)]
 pub struct IssueFilters {
     pub unused_files: bool,
     pub unused_exports: bool,
@@ -124,11 +126,19 @@ pub struct CheckOptions<'a> {
     pub explain: bool,
 }
 
-pub fn run_check(opts: &CheckOptions<'_>) -> ExitCode {
+/// Result of executing check analysis without printing.
+pub struct CheckResult {
+    pub results: AnalysisResults,
+    pub config: ResolvedConfig,
+    pub elapsed: Duration,
+    pub fail_on_issues: bool,
+}
+
+/// Run analysis, filtering, and baseline handling. Returns results without printing.
+pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
     let start = Instant::now();
 
-    // Config loading
-    let config = match load_config(
+    let config = load_config(
         opts.root,
         opts.config_path,
         opts.output.clone(),
@@ -136,17 +146,15 @@ pub fn run_check(opts: &CheckOptions<'_>) -> ExitCode {
         opts.threads,
         opts.production,
         opts.quiet,
-    ) {
-        Ok(c) => c,
-        Err(code) => return code,
-    };
+    )?;
 
     // Workspace filter resolution
     let ws_root = if let Some(ws_name) = opts.workspace {
-        match filtering::resolve_workspace_filter(opts.root, ws_name, &opts.output) {
-            Ok(root) => Some(root),
-            Err(code) => return code,
-        }
+        Some(filtering::resolve_workspace_filter(
+            opts.root,
+            ws_name,
+            &opts.output,
+        )?)
     } else {
         None
     };
@@ -166,14 +174,14 @@ pub fn run_check(opts: &CheckOptions<'_>) -> ExitCode {
                 trace_output.timings,
             ),
             Err(e) => {
-                return emit_error(&format!("Analysis error: {e}"), 2, &opts.output);
+                return Err(emit_error(&format!("Analysis error: {e}"), 2, &opts.output));
             }
         }
     } else {
         match fallow_core::analyze(&config) {
             Ok(r) => (r, None, None),
             Err(e) => {
-                return emit_error(&format!("Analysis error: {e}"), 2, &opts.output);
+                return Err(emit_error(&format!("Analysis error: {e}"), 2, &opts.output));
             }
         }
     };
@@ -191,7 +199,7 @@ pub fn run_check(opts: &CheckOptions<'_>) -> ExitCode {
         && let Some(code) =
             output::handle_trace_output(graph, opts.trace_opts, &config.root, &config.output)
     {
-        return code;
+        return Err(code);
     }
 
     // Workspace scoping
@@ -207,20 +215,13 @@ pub fn run_check(opts: &CheckOptions<'_>) -> ExitCode {
     // Rules application
     rules::apply_rules(&mut results, &config);
 
-    // Pre-filter snapshot for cross-reference
-    let unfiltered_results = if opts.include_dupes && config.duplicates.enabled {
-        Some(results.clone())
-    } else {
-        None
-    };
-
     // CLI issue-type filters
     opts.filters.apply(&mut results);
 
     // Baseline handling
     if let Some(exit) = handle_baseline(&mut results, opts.save_baseline, opts.baseline, opts.quiet)
     {
-        return exit;
+        return Err(exit);
     }
 
     // SARIF file write
@@ -228,29 +229,57 @@ pub fn run_check(opts: &CheckOptions<'_>) -> ExitCode {
         output::write_sarif_file(&results, &config, sarif_path, opts.quiet);
     }
 
-    // Effective rules + report + cross-reference + exit code
-    let effective_rules = if opts.fail_on_issues {
-        let mut r = config.rules.clone();
+    Ok(CheckResult {
+        results,
+        config,
+        elapsed,
+        fail_on_issues: opts.fail_on_issues,
+    })
+}
+
+/// Print check results and return appropriate exit code.
+pub fn print_check_result(result: &CheckResult, quiet: bool, explain: bool) -> ExitCode {
+    let effective_rules = if result.fail_on_issues {
+        let mut r = result.config.rules.clone();
         rules::promote_warns_to_errors(&mut r);
         r
     } else {
-        config.rules.clone()
+        result.config.rules.clone()
     };
 
-    let report_code = report::print_results(&results, &config, elapsed, opts.quiet, opts.explain);
+    let report_code = report::print_results(
+        &result.results,
+        &result.config,
+        result.elapsed,
+        quiet,
+        explain,
+    );
     if report_code != ExitCode::SUCCESS {
         return report_code;
     }
 
-    if let Some(ref unfiltered) = unfiltered_results {
-        output::run_cross_reference(&config, unfiltered, opts.quiet);
-    }
-
-    if rules::has_error_severity_issues(&results, &effective_rules, Some(&config)) {
+    if rules::has_error_severity_issues(&result.results, &effective_rules, Some(&result.config)) {
         ExitCode::from(1)
     } else {
         ExitCode::SUCCESS
     }
+}
+
+pub fn run_check(opts: &CheckOptions<'_>) -> ExitCode {
+    let result = match execute_check(opts) {
+        Ok(r) => r,
+        Err(code) => return code,
+    };
+
+    let exit = print_check_result(&result, opts.quiet, opts.explain);
+
+    // Cross-reference: run duplication analysis on the full results
+    // (the combined command handles this separately)
+    if opts.include_dupes && result.config.duplicates.enabled {
+        output::run_cross_reference(&result.config, &result.results, opts.quiet);
+    }
+
+    exit
 }
 
 // ── Baseline helpers ────────────────────────────────────────────

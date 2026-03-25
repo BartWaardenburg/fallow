@@ -48,15 +48,31 @@ Set `FALLOW_FORMAT=json` and `FALLOW_QUIET=1` in your agent environment to avoid
 
 ## Commands
 
-### `check` (default)
+### Bare `fallow` (no subcommand)
 
-Run codebase analysis.
+Runs all analyses: check + dupes + health. Use `--only`/`--skip` to select.
 
 ```bash
-fallow check --format json --quiet
-fallow check --format json --quiet --unused-exports
-fallow check --format json --quiet --fail-on-issues
-fallow check --format json --quiet --changed-since main
+fallow --format json --quiet              # all three analyses
+fallow --only check --format json --quiet # just dead code
+fallow --skip health --format json        # check + dupes only
+```
+
+**Flags:**
+- `--only <check,dupes,health>` -- run only these analyses (comma-separated)
+- `--skip <check,dupes,health>` -- skip these analyses (comma-separated)
+- `--ci` -- CI mode: sarif + quiet + fail-on-issues
+- `--fail-on-issues` -- exit 1 if any issues are found
+
+### `check` / `dead-code`
+
+Run dead code analysis. Alias: `fallow dead-code`.
+
+```bash
+fallow dead-code --format json --quiet
+fallow dead-code --format json --quiet --unused-exports
+fallow dead-code --format json --quiet --fail-on-issues
+fallow dead-code --format json --quiet --changed-since main
 ```
 
 **Flags:**
@@ -123,11 +139,14 @@ fallow health --format json --quiet --targets
 - `--targets` -- ranked refactoring recommendations based on complexity, coupling, churn, and dead code signals. Categories: churn+complexity, circular dep, high impact, dead code, complexity, coupling.
 - `--since <DURATION>` -- git history window for hotspot analysis (default: 6m). Accepts durations (6m, 90d, 1y, 2w) or ISO dates (2025-06-01).
 - `--min-commits <N>` -- minimum commits for a file to appear in hotspot ranking (default: 3)
+- `--save-snapshot [PATH]` -- save vital signs snapshot for trend tracking. Defaults to `.fallow/snapshots/<timestamp>.json`. Forces file-scores + hotspot computation.
 - `--format human|json|compact|markdown|sarif` -- output format (default: human)
 
 **Exit codes:** 0 = no functions exceed thresholds, 1 = findings exist.
 
-**JSON output** includes a `findings` array and a `summary` object. With `--file-scores`, also includes a `file_scores` array with per-file metrics and `summary.files_scored` / `summary.average_maintainability`. With `--targets`, includes a `targets` array with `path`, `priority`, `recommendation`, `category`, `effort` (low/medium/high), `factors` (with raw `value`/`threshold`), and `evidence` (unused export names, complex function names+lines, cycle paths). Target baselines are supported via `--save-baseline` / `--baseline`.
+**JSON output** includes a `findings` array, a `summary` object, and a `vital_signs` object (project-wide metrics: `dead_file_pct`, `dead_export_pct`, `avg_cyclomatic`, `p90_cyclomatic`, `maintainability_avg`, `hotspot_count`, `circular_dep_count`, `unused_dep_count`; null when data source not available). With `--file-scores`, also includes a `file_scores` array with per-file metrics and `summary.files_scored` / `summary.average_maintainability`. With `--targets`, includes a `targets` array with `path`, `priority`, `recommendation`, `category`, `effort` (low/medium/high), `factors` (with raw `value`/`threshold`), and `evidence` (unused export names, complex function names+lines, cycle paths). Target baselines are supported via `--save-baseline` / `--baseline`.
+
+**Vital signs snapshots:** `--save-snapshot` persists a `VitalSignsSnapshot` JSON file containing `vital_signs` (metrics), `counts` (raw numerators/denominators), and git metadata (`git_sha`, `git_branch`, `shallow_clone`). Snapshot schema version is independent of the report schema_version.
 
 ### `fix`
 
@@ -214,34 +233,40 @@ JSON output includes `schema_version`, `version`, `elapsed_ms`, and `total_issue
 
 ## Common agent workflows
 
-### Audit a project for all unused code
+### Full codebase analysis (all three: dead code + duplication + complexity)
 
 ```bash
-fallow check --format json --quiet
+fallow --format json --quiet
+```
+
+### Audit a project for unused code only
+
+```bash
+fallow dead-code --format json --quiet
 ```
 
 ### Check only unused exports (smaller output)
 
 ```bash
-fallow check --format json --quiet --unused-exports
+fallow dead-code --format json --quiet --unused-exports
 ```
 
 ### Check if a PR introduces unused code
 
 ```bash
-fallow check --format json --quiet --changed-since main --fail-on-issues
+fallow dead-code --format json --quiet --changed-since main --fail-on-issues
 ```
 
 ### Production-only analysis (skip test/dev files)
 
 ```bash
-fallow check --format json --quiet --production
+fallow dead-code --format json --quiet --production
 ```
 
 ### Analyze a single workspace package (monorepo)
 
 ```bash
-fallow check --format json --quiet --workspace my-package
+fallow dead-code --format json --quiet --workspace my-package
 ```
 
 ### Find code duplication
@@ -267,7 +292,7 @@ fallow health --format json --quiet --targets       # ranked refactoring recomme
 fallow fix --dry-run --format json --quiet   # 1. preview
 # agent reviews output
 fallow fix --yes --format json --quiet       # 2. apply (--yes required for non-TTY)
-fallow check --format json --quiet           # 3. verify
+fallow dead-code --format json --quiet       # 3. verify
 ```
 
 ### Discover project structure

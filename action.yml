@@ -8,9 +8,9 @@ branding:
 
 inputs:
   command:
-    description: 'Command to run: check (unused code), dupes (code duplication), health (complexity), fix (auto-remove unused code)'
+    description: 'Command to run: dead-code (unused code), dupes (code duplication), health (complexity), fix (auto-remove unused code). Default runs all analyses.'
     required: false
-    default: 'check'
+    default: ''
   root:
     description: 'Project root directory'
     required: false
@@ -129,7 +129,7 @@ runs:
             "\n<details><summary><strong>\(name) (\($n))</strong></summary>\n\n" +
             header +
             ([.[key][:25][] | fmt] | join("\n")) +
-            (if $n > 25 then "\n\n> \($n - 25) more \u2014 run `fallow check` locally for the full list" else "" end) +
+            (if $n > 25 then "\n\n> \($n - 25) more \u2014 run `fallow` locally for the full list" else "" end) +
             "\n\n</details>\n"
           else "" end;
 
@@ -335,10 +335,10 @@ runs:
         INPUT_TOP: ${{ inputs.top }}
         INPUT_SORT: ${{ inputs.sort }}
       run: |
-        # Validate command
+        # Validate command (empty = bare fallow, runs all analyses)
         case "$INPUT_COMMAND" in
-          check|dupes|health|fix) ;;
-          *) echo "::error::Invalid command: ${INPUT_COMMAND}. Must be check, dupes, health, or fix."; exit 2 ;;
+          ""|check|dead-code|dupes|health|fix) ;;
+          *) echo "::error::Invalid command: ${INPUT_COMMAND}. Must be dead-code, dupes, health, fix, or empty (runs all)."; exit 2 ;;
         esac
 
         # Validate numeric inputs
@@ -354,7 +354,7 @@ runs:
           echo "::error::threshold must be a number, got: ${INPUT_THRESHOLD}"; exit 2
         fi
 
-        # Check for --sarif-file support (check command only)
+        # Check for --sarif-file support (global flag since v2, check-only in v1)
         HAS_SARIF_FILE=false
         if [ "$INPUT_COMMAND" = "check" ] && fallow check --help 2>/dev/null | grep -q -- '--sarif-file'; then
           HAS_SARIF_FILE=true

@@ -18,19 +18,20 @@
 Unused code, circular dependencies, code duplication, and complexity hotspots. Found in seconds, not minutes. fallow analyzes your entire codebase for unused files, exports, dependencies, and types, detects circular dependencies, finds duplicated code blocks, and surfaces high-complexity functions and risky hotspots. 3-36x faster than [knip](https://knip.dev) v5 (2-14x faster than knip v6) for unused code analysis, 20-33x faster than [jscpd](https://github.com/kucherenko/jscpd) for duplication detection, with no Node.js runtime dependency.
 
 ```bash
-npx fallow check    # Unused code analysis
-npx fallow dupes    # Duplication detection
-npx fallow health   # Complexity — find high-complexity functions
+npx fallow              # Run all analyses — unused code, duplication, complexity
+npx fallow dead-code    # Unused code only
+npx fallow dupes        # Duplication detection
+npx fallow health       # Complexity — find high-complexity functions
 ```
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/fallow-rs/fallow/main/assets/screenshots/fallow-demo.gif" alt="Example fallow check output" width="820">
+  <img src="https://raw.githubusercontent.com/fallow-rs/fallow/main/assets/screenshots/fallow-demo.gif" alt="Example fallow output" width="820">
 </p>
 
 ## Quick start
 
 ```bash
-npx fallow check                     # Unused code — zero config, sub-second
+npx fallow                           # All analyses — zero config, sub-second
 npx fallow dupes                     # Duplication — find copy-paste clones
 npx fallow dupes --mode semantic     # Catch clones with renamed variables
 npx fallow health                    # Complexity — find high-complexity functions
@@ -193,7 +194,7 @@ knip is a good tool with broader framework coverage. fallow covers the most popu
 | Speed (real-world) | **20-33x faster** | Baseline |
 | Detection modes | 4 (strict, mild, weak, semantic) | 1 (token-based) |
 | Algorithm | Suffix array with LCP | Rabin-Karp rolling hash |
-| Dead code integration | Built-in (`fallow check`) | Not included |
+| Dead code integration | Built-in (`fallow dead-code`) | Not included |
 | Runtime dependency | None (standalone binary) | Node.js |
 | Config format | JSONC, JSON, TOML | JSON |
 
@@ -288,10 +289,10 @@ This reads your knip.json/knip.jsonc/.knip.json/.knip.jsonc and/or .jscpd.json (
     format: sarif
 
 # Or run directly
-- run: npx fallow check --format sarif > results.sarif
+- run: npx fallow --format sarif > results.sarif
 
 # Or run directly with CI mode
-- run: npx fallow check --ci
+- run: npx fallow --ci
 ```
 
 Supports `--changed-since main` for PR-only analysis, `--baseline` for failing only on new issues, `--format json` for machine-readable output, `--format markdown` for PR comment workflows, and per-issue-type severity rules (`error`/`warn`/`off`) for incremental adoption. See the [CI guide](https://docs.fallow.tools/integrations/ci) for full workflow examples.

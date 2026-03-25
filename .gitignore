@@ -1,4 +1,5 @@
 target/
+.cargo/
 node_modules/
 .DS_Store
 

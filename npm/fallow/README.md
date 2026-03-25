@@ -17,7 +17,8 @@ npm install -g fallow
 ## Usage
 
 ```bash
-fallow check                     # Unused code analysis -- zero config, sub-second
+fallow                           # All analyses -- zero config, sub-second
+fallow dead-code                 # Unused code only
 fallow dupes                     # Duplication detection -- find copy-paste clones
 fallow dupes --mode semantic     # Catch clones with renamed variables
 fallow health                    # Complexity metrics -- cyclomatic + cognitive

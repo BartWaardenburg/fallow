@@ -104,3 +104,130 @@ pub(in crate::report) fn build_performance_human_lines(t: &PipelineTimings) -> V
 
     lines
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Strip ANSI escape sequences from a string, leaving only the printable text.
+    fn strip_ansi(s: &str) -> String {
+        let mut result = String::with_capacity(s.len());
+        let mut chars = s.chars();
+        while let Some(c) = chars.next() {
+            if c == '\x1b' {
+                for inner in chars.by_ref() {
+                    if inner == 'm' {
+                        break;
+                    }
+                }
+            } else {
+                result.push(c);
+            }
+        }
+        result
+    }
+
+    fn plain(lines: &[String]) -> String {
+        lines
+            .iter()
+            .map(|l| strip_ansi(l))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn performance_output_contains_all_pipeline_stages() {
+        let timings = PipelineTimings {
+            discover_files_ms: 12.5,
+            file_count: 100,
+            workspaces_ms: 3.2,
+            workspace_count: 3,
+            plugins_ms: 1.0,
+            script_analysis_ms: 2.5,
+            parse_extract_ms: 45.0,
+            module_count: 80,
+            cache_hits: 0,
+            cache_misses: 80,
+            cache_update_ms: 5.0,
+            entry_points_ms: 0.5,
+            entry_point_count: 10,
+            resolve_imports_ms: 8.0,
+            build_graph_ms: 15.0,
+            analyze_ms: 10.0,
+            total_ms: 102.7,
+        };
+        let lines = build_performance_human_lines(&timings);
+        let text = plain(&lines);
+        assert!(text.contains("Pipeline Performance"));
+        assert!(text.contains("discover files"));
+        assert!(text.contains("100 files"));
+        assert!(text.contains("workspaces"));
+        assert!(text.contains("3 workspaces"));
+        assert!(text.contains("plugins"));
+        assert!(text.contains("script analysis"));
+        assert!(text.contains("parse/extract"));
+        assert!(text.contains("80 modules"));
+        assert!(text.contains("cache update"));
+        assert!(text.contains("entry points"));
+        assert!(text.contains("10 entries"));
+        assert!(text.contains("resolve imports"));
+        assert!(text.contains("build graph"));
+        assert!(text.contains("analyze"));
+        assert!(text.contains("TOTAL"));
+        assert!(text.contains("102.7"));
+    }
+
+    #[test]
+    fn performance_output_shows_cache_detail_when_cache_hits_nonzero() {
+        let timings = PipelineTimings {
+            discover_files_ms: 10.0,
+            file_count: 50,
+            workspaces_ms: 1.0,
+            workspace_count: 1,
+            plugins_ms: 0.5,
+            script_analysis_ms: 1.0,
+            parse_extract_ms: 20.0,
+            module_count: 40,
+            cache_hits: 30,
+            cache_misses: 10,
+            cache_update_ms: 2.0,
+            entry_points_ms: 0.3,
+            entry_point_count: 5,
+            resolve_imports_ms: 3.0,
+            build_graph_ms: 5.0,
+            analyze_ms: 4.0,
+            total_ms: 46.8,
+        };
+        let lines = build_performance_human_lines(&timings);
+        let text = plain(&lines);
+        assert!(text.contains("30 cached"));
+        assert!(text.contains("10 parsed"));
+    }
+
+    #[test]
+    fn performance_output_omits_cache_detail_when_no_cache_hits() {
+        let timings = PipelineTimings {
+            discover_files_ms: 10.0,
+            file_count: 50,
+            workspaces_ms: 1.0,
+            workspace_count: 1,
+            plugins_ms: 0.5,
+            script_analysis_ms: 1.0,
+            parse_extract_ms: 20.0,
+            module_count: 40,
+            cache_hits: 0,
+            cache_misses: 40,
+            cache_update_ms: 2.0,
+            entry_points_ms: 0.3,
+            entry_point_count: 5,
+            resolve_imports_ms: 3.0,
+            build_graph_ms: 5.0,
+            analyze_ms: 4.0,
+            total_ms: 46.8,
+        };
+        let lines = build_performance_human_lines(&timings);
+        let text = plain(&lines);
+        assert!(!text.contains("cached"));
+        assert!(!text.contains("parsed"));
+    }
+}

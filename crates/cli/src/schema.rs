@@ -53,7 +53,8 @@ pub fn build_cli_schema(cmd: &clap::Command) -> serde_json::Value {
         "description": cmd.get_about().map(|s| s.to_string()),
         "global_flags": global_flags,
         "commands": commands,
-        "default_command": "check",
+        "default_command": null,
+        "default_behavior": "Runs all analyses (check + dupes + health). Use --only/--skip to select.",
         "issue_types": [
             {
                 "id": "unused-file",

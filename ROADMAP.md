@@ -80,9 +80,10 @@ See the [README](README.md) for the full list.
 ---
 
 ```bash
-npx fallow check    # Unused code — zero config, sub-second
-npx fallow dupes    # Duplication — find copy-paste clones
-npx fallow health   # Complexity — find functions that need refactoring
+npx fallow              # Run all analyses — zero config, sub-second
+npx fallow dead-code    # Unused code only
+npx fallow dupes        # Duplication — find copy-paste clones
+npx fallow health       # Complexity — find functions that need refactoring
 ```
 
 [Open an issue](https://github.com/fallow-rs/fallow/issues) if your use case isn't covered.

@@ -133,4 +133,7 @@ pub struct HealthParams {
 
     /// Only analyze production code (excludes tests, stories, dev files).
     pub production: Option<bool>,
+
+    /// Save a vital signs snapshot. Provide a file path, or omit value for default (.fallow/snapshots/<timestamp>.json).
+    pub save_snapshot: Option<String>,
 }

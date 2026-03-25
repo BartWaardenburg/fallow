@@ -362,19 +362,49 @@ pub fn build_health_markdown(report: &crate::health_types::HealthReport, root: &
 
     let mut out = String::new();
 
+    // Vital signs summary table
+    if let Some(ref vs) = report.vital_signs {
+        out.push_str("## Vital Signs\n\n");
+        out.push_str("| Metric | Value |\n");
+        out.push_str("|:-------|------:|\n");
+        let _ = writeln!(out, "| Avg Cyclomatic | {:.1} |", vs.avg_cyclomatic);
+        let _ = writeln!(out, "| P90 Cyclomatic | {} |", vs.p90_cyclomatic);
+        if let Some(v) = vs.dead_file_pct {
+            let _ = writeln!(out, "| Dead Files | {v:.1}% |");
+        }
+        if let Some(v) = vs.dead_export_pct {
+            let _ = writeln!(out, "| Dead Exports | {v:.1}% |");
+        }
+        if let Some(v) = vs.maintainability_avg {
+            let _ = writeln!(out, "| Maintainability (avg) | {v:.1} |");
+        }
+        if let Some(v) = vs.hotspot_count {
+            let _ = writeln!(out, "| Hotspots | {v} |");
+        }
+        if let Some(v) = vs.circular_dep_count {
+            let _ = writeln!(out, "| Circular Deps | {v} |");
+        }
+        if let Some(v) = vs.unused_dep_count {
+            let _ = writeln!(out, "| Unused Deps | {v} |");
+        }
+        out.push('\n');
+    }
+
     if report.findings.is_empty()
         && report.file_scores.is_empty()
         && report.hotspots.is_empty()
         && report.targets.is_empty()
     {
-        let _ = write!(
-            out,
-            "## Fallow: no functions exceed complexity thresholds\n\n\
-             **{}** functions analyzed (max cyclomatic: {}, max cognitive: {})\n",
-            report.summary.functions_analyzed,
-            report.summary.max_cyclomatic_threshold,
-            report.summary.max_cognitive_threshold,
-        );
+        if report.vital_signs.is_none() {
+            let _ = write!(
+                out,
+                "## Fallow: no functions exceed complexity thresholds\n\n\
+                 **{}** functions analyzed (max cyclomatic: {}, max cognitive: {})\n",
+                report.summary.functions_analyzed,
+                report.summary.max_cyclomatic_threshold,
+                report.summary.max_cognitive_threshold,
+            );
+        }
         return out;
     }
 
@@ -964,6 +994,7 @@ mod tests {
                 files_scored: None,
                 average_maintainability: None,
             },
+            vital_signs: None,
             file_scores: vec![],
             hotspots: vec![],
             hotspot_summary: None,
@@ -997,6 +1028,7 @@ mod tests {
                 files_scored: None,
                 average_maintainability: None,
             },
+            vital_signs: None,
             file_scores: vec![],
             hotspots: vec![],
             hotspot_summary: None,
@@ -1035,6 +1067,7 @@ mod tests {
                 files_scored: None,
                 average_maintainability: None,
             },
+            vital_signs: None,
             file_scores: vec![],
             hotspots: vec![],
             hotspot_summary: None,
@@ -1063,6 +1096,7 @@ mod tests {
                 files_scored: None,
                 average_maintainability: None,
             },
+            vital_signs: None,
             file_scores: vec![],
             hotspots: vec![],
             hotspot_summary: None,

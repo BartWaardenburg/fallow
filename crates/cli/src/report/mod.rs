@@ -14,13 +14,13 @@ use fallow_core::results::AnalysisResults;
 use fallow_core::trace::{CloneTrace, DependencyTrace, ExportTrace, FileTrace, PipelineTimings};
 
 /// Strip the project root prefix from a path for display, falling back to the full path.
-fn relative_path<'a>(path: &'a Path, root: &Path) -> &'a Path {
+pub fn relative_path<'a>(path: &'a Path, root: &Path) -> &'a Path {
     path.strip_prefix(root).unwrap_or(path)
 }
 
 /// Split a path string into (directory, filename) for display.
 /// Directory includes the trailing `/`. If no directory, returns `("", filename)`.
-fn split_dir_filename(path: &str) -> (&str, &str) {
+pub fn split_dir_filename(path: &str) -> (&str, &str) {
     match path.rfind('/') {
         Some(pos) => (&path[..=pos], &path[pos + 1..]),
         None => ("", path),
@@ -32,7 +32,7 @@ fn split_dir_filename(path: &str) -> (&str, &str) {
 /// Returns the remaining suffix of `target`.
 ///
 /// Example: `elide_common_prefix("a/b/c/foo.ts", "a/b/d/bar.ts")` → `"d/bar.ts"`
-fn elide_common_prefix<'a>(base: &str, target: &'a str) -> &'a str {
+pub fn elide_common_prefix<'a>(base: &str, target: &'a str) -> &'a str {
     let mut last_sep = 0;
     for (i, (a, b)) in base.bytes().zip(target.bytes()).enumerate() {
         if a != b {
@@ -67,13 +67,13 @@ pub fn normalize_uri(path_str: &str) -> String {
 
 /// Severity level for human-readable output.
 #[derive(Clone, Copy, Debug)]
-enum Level {
+pub enum Level {
     Warn,
     Info,
     Error,
 }
 
-const fn severity_to_level(s: Severity) -> Level {
+pub const fn severity_to_level(s: Severity) -> Level {
     match s {
         Severity::Error => Level::Error,
         Severity::Warn => Level::Warn,

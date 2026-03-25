@@ -118,7 +118,7 @@ export const runAnalysis = async (
   let dupes: FallowDupesResult | null = null;
 
   try {
-    const checkArgs = ["check", "--format", "json", "--quiet"];
+    const checkArgs = ["dead-code", "--format", "json", "--quiet"];
     if (getProduction()) {
       checkArgs.push("--production");
     }

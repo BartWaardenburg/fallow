@@ -4,7 +4,7 @@ Tests fallow against real-world open-source TypeScript/JavaScript projects to ca
 
 ## What this tests
 
-The script clones popular JS/TS projects (shallow, depth=1), optionally installs their dependencies, and runs `fallow check --format json` against each one. It distinguishes between:
+The script clones popular JS/TS projects (shallow, depth=1), optionally installs their dependencies, and runs `fallow dead-code --format json` against each one. It distinguishes between:
 
 - **Exit 0** — fallow ran successfully, no issues found (rare for large projects)
 - **Exit 1** — fallow ran successfully, issues found (expected and normal)

@@ -362,8 +362,295 @@ pub(super) fn detect_mirrored_families<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fallow_core::duplicates::{CloneFamily, CloneGroup};
+    use fallow_core::duplicates::{
+        CloneFamily, CloneGroup, CloneInstance, DuplicationStats, RefactoringKind,
+        RefactoringSuggestion,
+    };
     use std::path::PathBuf;
+
+    /// Strip ANSI escape sequences from a string, leaving only the printable text.
+    fn strip_ansi(s: &str) -> String {
+        let mut result = String::with_capacity(s.len());
+        let mut chars = s.chars();
+        while let Some(c) = chars.next() {
+            if c == '\x1b' {
+                for inner in chars.by_ref() {
+                    if inner == 'm' {
+                        break;
+                    }
+                }
+            } else {
+                result.push(c);
+            }
+        }
+        result
+    }
+
+    fn plain(lines: &[String]) -> String {
+        lines
+            .iter()
+            .map(|l| strip_ansi(l))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn duplication_empty_report_produces_no_output() {
+        let root = PathBuf::from("/project");
+        let report = DuplicationReport::default();
+        let lines = build_duplication_human_lines(&report, &root);
+        assert!(lines.is_empty(), "Empty report should produce no lines");
+    }
+
+    #[test]
+    fn duplication_groups_show_instances_with_line_count() {
+        let root = PathBuf::from("/project");
+        let report = DuplicationReport {
+            clone_groups: vec![CloneGroup {
+                instances: vec![
+                    CloneInstance {
+                        file: root.join("src/a.ts"),
+                        start_line: 1,
+                        end_line: 10,
+                        start_col: 0,
+                        end_col: 0,
+                        fragment: String::new(),
+                    },
+                    CloneInstance {
+                        file: root.join("src/b.ts"),
+                        start_line: 5,
+                        end_line: 14,
+                        start_col: 0,
+                        end_col: 0,
+                        fragment: String::new(),
+                    },
+                ],
+                token_count: 50,
+                line_count: 10,
+            }],
+            clone_families: vec![],
+            stats: DuplicationStats {
+                clone_groups: 1,
+                clone_instances: 2,
+                ..Default::default()
+            },
+        };
+        let lines = build_duplication_human_lines(&report, &root);
+        let text = plain(&lines);
+        // Line-count-led format, no "Clone group N" label
+        assert!(text.contains("10"));
+        assert!(text.contains("lines"));
+        assert!(text.contains("2 instances"));
+        assert!(text.contains("a.ts:1-10"));
+        assert!(text.contains("b.ts:5-14"));
+        // No tree connectors
+        assert!(!text.contains("\u{251c}\u{2500}"));
+        assert!(!text.contains("\u{2514}\u{2500}"));
+    }
+
+    #[test]
+    fn duplication_single_instance_no_plural() {
+        let root = PathBuf::from("/project");
+        let report = DuplicationReport {
+            clone_groups: vec![CloneGroup {
+                instances: vec![CloneInstance {
+                    file: root.join("src/a.ts"),
+                    start_line: 1,
+                    end_line: 10,
+                    start_col: 0,
+                    end_col: 0,
+                    fragment: String::new(),
+                }],
+                token_count: 50,
+                line_count: 10,
+            }],
+            clone_families: vec![],
+            stats: DuplicationStats::default(),
+        };
+        let lines = build_duplication_human_lines(&report, &root);
+        let text = plain(&lines);
+        assert!(text.contains("1 instance"));
+        assert!(!text.contains("1 instances"));
+    }
+
+    #[test]
+    fn duplication_families_show_suggestions() {
+        let root = PathBuf::from("/project");
+        let dummy_group = CloneGroup {
+            instances: vec![],
+            token_count: 30,
+            line_count: 5,
+        };
+        let report = DuplicationReport {
+            clone_groups: vec![CloneGroup {
+                instances: vec![CloneInstance {
+                    file: root.join("src/a.ts"),
+                    start_line: 1,
+                    end_line: 5,
+                    start_col: 0,
+                    end_col: 0,
+                    fragment: String::new(),
+                }],
+                token_count: 30,
+                line_count: 5,
+            }],
+            clone_families: vec![CloneFamily {
+                files: vec![root.join("src/a.ts"), root.join("src/b.ts")],
+                groups: vec![dummy_group.clone(), dummy_group],
+                total_duplicated_lines: 20,
+                total_duplicated_tokens: 100,
+                suggestions: vec![RefactoringSuggestion {
+                    kind: RefactoringKind::ExtractFunction,
+                    description: "Extract shared utility function".to_string(),
+                    estimated_savings: 15,
+                }],
+            }],
+            stats: DuplicationStats::default(),
+        };
+        let lines = build_duplication_human_lines(&report, &root);
+        let text = plain(&lines);
+        assert!(text.contains("Clone families"));
+        assert!(text.contains("Extract shared utility function"));
+        // "lines saved" is no longer shown
+        assert!(!text.contains("lines saved"));
+    }
+
+    #[test]
+    fn duplication_suggestion_with_zero_savings_omits_savings_text() {
+        let root = PathBuf::from("/project");
+        let dummy_group = CloneGroup {
+            instances: vec![],
+            token_count: 30,
+            line_count: 5,
+        };
+        let report = DuplicationReport {
+            clone_groups: vec![CloneGroup {
+                instances: vec![CloneInstance {
+                    file: root.join("src/a.ts"),
+                    start_line: 1,
+                    end_line: 5,
+                    start_col: 0,
+                    end_col: 0,
+                    fragment: String::new(),
+                }],
+                token_count: 30,
+                line_count: 5,
+            }],
+            clone_families: vec![CloneFamily {
+                files: vec![root.join("src/a.ts")],
+                groups: vec![dummy_group.clone(), dummy_group],
+                total_duplicated_lines: 10,
+                total_duplicated_tokens: 50,
+                suggestions: vec![RefactoringSuggestion {
+                    kind: RefactoringKind::ExtractModule,
+                    description: "Extract to shared module".to_string(),
+                    estimated_savings: 0,
+                }],
+            }],
+            stats: DuplicationStats::default(),
+        };
+        let lines = build_duplication_human_lines(&report, &root);
+        let text = plain(&lines);
+        assert!(text.contains("Extract to shared module"));
+        assert!(!text.contains("lines saved"));
+    }
+
+    #[test]
+    fn duplication_single_group_family_is_suppressed() {
+        let root = PathBuf::from("/project");
+        let report = DuplicationReport {
+            clone_groups: vec![CloneGroup {
+                instances: vec![CloneInstance {
+                    file: root.join("src/a.ts"),
+                    start_line: 1,
+                    end_line: 5,
+                    start_col: 0,
+                    end_col: 0,
+                    fragment: String::new(),
+                }],
+                token_count: 30,
+                line_count: 5,
+            }],
+            clone_families: vec![CloneFamily {
+                files: vec![root.join("src/a.ts")],
+                groups: vec![CloneGroup {
+                    instances: vec![],
+                    token_count: 30,
+                    line_count: 5,
+                }],
+                total_duplicated_lines: 5,
+                total_duplicated_tokens: 30,
+                suggestions: vec![],
+            }],
+            stats: DuplicationStats::default(),
+        };
+        let lines = build_duplication_human_lines(&report, &root);
+        let text = plain(&lines);
+        // Single-group families are suppressed from output
+        assert!(!text.contains("Clone families"));
+    }
+
+    #[test]
+    fn duplication_multiple_groups_plural() {
+        let root = PathBuf::from("/project");
+        let dummy_group = CloneGroup {
+            instances: vec![],
+            token_count: 30,
+            line_count: 5,
+        };
+        let report = DuplicationReport {
+            clone_groups: vec![CloneGroup {
+                instances: vec![CloneInstance {
+                    file: root.join("src/a.ts"),
+                    start_line: 1,
+                    end_line: 5,
+                    start_col: 0,
+                    end_col: 0,
+                    fragment: String::new(),
+                }],
+                token_count: 30,
+                line_count: 5,
+            }],
+            clone_families: vec![CloneFamily {
+                files: vec![root.join("src/a.ts")],
+                groups: vec![dummy_group.clone(), dummy_group],
+                total_duplicated_lines: 10,
+                total_duplicated_tokens: 60,
+                suggestions: vec![],
+            }],
+            stats: DuplicationStats::default(),
+        };
+        let lines = build_duplication_human_lines(&report, &root);
+        let text = plain(&lines);
+        assert!(text.contains("2 groups,"));
+    }
+
+    #[test]
+    fn single_instance_clone_group_no_connectors() {
+        let root = PathBuf::from("/project");
+        let report = DuplicationReport {
+            clone_groups: vec![CloneGroup {
+                instances: vec![CloneInstance {
+                    file: root.join("src/a.ts"),
+                    start_line: 1,
+                    end_line: 10,
+                    start_col: 0,
+                    end_col: 0,
+                    fragment: String::new(),
+                }],
+                token_count: 50,
+                line_count: 10,
+            }],
+            clone_families: vec![],
+            stats: DuplicationStats::default(),
+        };
+        let lines = build_duplication_human_lines(&report, &root);
+        let text = plain(&lines);
+        // No tree connectors -- simple indentation
+        assert!(!text.contains("\u{2514}\u{2500}"));
+        assert!(!text.contains("\u{251c}\u{2500}"));
+        assert!(text.contains("a.ts:1-10"));
+    }
 
     #[test]
     fn mirrored_dirs_detected() {

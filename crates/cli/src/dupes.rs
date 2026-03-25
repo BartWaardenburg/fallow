@@ -1,7 +1,8 @@
 use std::process::ExitCode;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
-use fallow_config::OutputFormat;
+use fallow_config::{OutputFormat, ResolvedConfig};
+use fallow_core::duplicates::DuplicationReport;
 
 use crate::baseline::{DuplicationBaselineData, filter_new_clone_groups, recompute_stats};
 use crate::check::get_changed_files;
@@ -97,10 +98,19 @@ fn filter_by_changed_files(
     report.stats = recompute_stats(report);
 }
 
-pub fn run_dupes(opts: &DupesOptions<'_>) -> ExitCode {
+/// Result of executing duplication analysis without printing.
+pub struct DupesResult {
+    pub report: DuplicationReport,
+    pub config: ResolvedConfig,
+    pub elapsed: Duration,
+    pub threshold: f64,
+}
+
+/// Run duplication analysis, filtering, and baseline handling. Returns results without printing.
+pub fn execute_dupes(opts: &DupesOptions<'_>) -> Result<DupesResult, ExitCode> {
     let start = Instant::now();
 
-    let config = match load_config(
+    let config = load_config(
         opts.root,
         opts.config_path,
         opts.output.clone(),
@@ -108,65 +118,57 @@ pub fn run_dupes(opts: &DupesOptions<'_>) -> ExitCode {
         opts.threads,
         opts.production,
         opts.quiet,
-    ) {
-        Ok(c) => c,
-        Err(code) => return code,
-    };
+    )?;
 
-    // Build duplication config: start from fallow.toml, override with CLI args
     let dupes_config = build_dupes_config(opts, &config.duplicates);
-
-    // Discover files
     let files = fallow_core::discover::discover_files(&config);
-
-    // Run duplication detection
     let mut report = fallow_core::duplicates::find_duplicates(&config.root, &files, &dupes_config);
 
     // Handle trace (diagnostic mode — early return)
     if let Some(trace_spec) = opts.trace {
         let (file_path, line) = match parse_trace_spec(trace_spec) {
             Ok(parsed) => parsed,
-            Err(msg) => return emit_error(msg, 2, &opts.output),
+            Err(msg) => return Err(emit_error(msg, 2, &opts.output)),
         };
         let trace_result = fallow_core::trace::trace_clone(&report, &config.root, file_path, line);
         if trace_result.matched_instance.is_none() {
-            return emit_error(
+            return Err(emit_error(
                 &format!("no clone found at {file_path}:{line}"),
                 2,
                 &opts.output,
-            );
+            ));
         }
-        report::print_clone_trace(&trace_result, &config.root, &opts.output);
-        return ExitCode::SUCCESS;
+        crate::report::print_clone_trace(&trace_result, &config.root, &opts.output);
+        return Err(ExitCode::SUCCESS);
     }
 
-    // Save baseline if requested (before filtering)
+    // Save baseline
     if let Some(path) = opts.save_baseline_path {
         let baseline_data = DuplicationBaselineData::from_report(&report, &config.root);
         match serde_json::to_string_pretty(&baseline_data) {
             Ok(json) => {
                 if let Err(e) = std::fs::write(path, json) {
-                    return emit_error(
+                    return Err(emit_error(
                         &format!("failed to write duplication baseline: {e}"),
                         2,
                         &opts.output,
-                    );
+                    ));
                 }
                 if !opts.quiet {
                     eprintln!("Saved duplication baseline to {}", path.display());
                 }
             }
             Err(e) => {
-                return emit_error(
+                return Err(emit_error(
                     &format!("failed to serialize duplication baseline: {e}"),
                     2,
                     &opts.output,
-                );
+                ));
             }
         }
     }
 
-    // Filter against baseline if provided
+    // Filter against baseline
     if let Some(path) = opts.baseline_path {
         match std::fs::read_to_string(path) {
             Ok(json) => match serde_json::from_str::<DuplicationBaselineData>(&json) {
@@ -174,31 +176,31 @@ pub fn run_dupes(opts: &DupesOptions<'_>) -> ExitCode {
                     report = filter_new_clone_groups(report, &baseline_data, &config.root);
                 }
                 Err(e) => {
-                    return emit_error(
+                    return Err(emit_error(
                         &format!("failed to parse duplication baseline: {e}"),
                         2,
                         &opts.output,
-                    );
+                    ));
                 }
             },
             Err(e) => {
-                return emit_error(
+                return Err(emit_error(
                     &format!("failed to read duplication baseline: {e}"),
                     2,
                     &opts.output,
-                );
+                ));
             }
         }
     }
 
-    // Filter to only changed files if requested
+    // Filter to only changed files
     if let Some(git_ref) = opts.changed_since
         && let Some(changed) = get_changed_files(opts.root, git_ref)
     {
         filter_by_changed_files(&mut report, &changed);
     }
 
-    // Apply --top: truncate display to N largest groups but keep stats over the full set
+    // Apply --top
     if let Some(n) = opts.top {
         report.clone_groups.truncate(n);
         report.clone_families =
@@ -207,29 +209,44 @@ pub fn run_dupes(opts: &DupesOptions<'_>) -> ExitCode {
 
     let elapsed = start.elapsed();
 
-    // Print results
-    let result = report::print_duplication_report(
-        &report,
-        &config,
+    Ok(DupesResult {
+        report,
+        config,
         elapsed,
-        opts.quiet,
-        &opts.output,
-        opts.explain,
+        threshold: opts.threshold,
+    })
+}
+
+/// Print duplication results and return appropriate exit code.
+pub fn print_dupes_result(result: &DupesResult, quiet: bool, explain: bool) -> ExitCode {
+    let report_code = report::print_duplication_report(
+        &result.report,
+        &result.config,
+        result.elapsed,
+        quiet,
+        &result.config.output,
+        explain,
     );
-    if result != ExitCode::SUCCESS {
-        return result;
+    if report_code != ExitCode::SUCCESS {
+        return report_code;
     }
 
-    // Check threshold
-    if exceeds_threshold(opts.threshold, report.stats.duplication_percentage) {
+    if exceeds_threshold(result.threshold, result.report.stats.duplication_percentage) {
         eprintln!(
             "Duplication ({:.1}%) exceeds threshold ({:.1}%)",
-            report.stats.duplication_percentage, opts.threshold
+            result.report.stats.duplication_percentage, result.threshold
         );
         return ExitCode::from(1);
     }
 
     ExitCode::SUCCESS
+}
+
+pub fn run_dupes(opts: &DupesOptions<'_>) -> ExitCode {
+    match execute_dupes(opts) {
+        Ok(result) => print_dupes_result(&result, opts.quiet, opts.explain),
+        Err(code) => code,
+    }
 }
 
 #[cfg(test)]

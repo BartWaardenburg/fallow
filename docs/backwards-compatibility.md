@@ -23,9 +23,12 @@ These interfaces are covered by semver — breaking changes only happen in major
 
 ### CLI interface
 
-- **Subcommands**: `check`, `dupes`, `health`, `fix`, `watch`, `init`, `migrate`, `list`, `schema`, `config-schema`, `plugin-schema`
+- **Subcommands**: `check` (alias: `dead-code`), `dupes`, `health`, `fix`, `watch`, `init`, `migrate`, `list`, `schema`, `config-schema`, `plugin-schema`
+- **Default behavior**: bare `fallow` (no subcommand) runs check + dupes + health combined
 - **Exit codes**: 0 (success/no errors), 1 (issues with error severity found), 2 (runtime error)
-- **Global flags**: `--format`, `--config`, `--workspace`, `--performance`, `--explain`
+- **Global flags**: `--format`, `--config`, `--workspace`, `--performance`, `--explain`, `--ci`, `--fail-on-issues`, `--sarif-file`
+- **Bare command flags**: `--only`, `--skip` (select which analyses to run)
+- **Health flags**: `--save-snapshot` (saves vital signs snapshot for trend tracking)
 - **Environment variables**: `FALLOW_FORMAT`, `FALLOW_QUIET`, `FALLOW_BIN`
 
 ### External plugin format

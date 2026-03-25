@@ -38,7 +38,7 @@ const rustVersion = spawnSync('rustc', ['--version'], { stdio: 'pipe' }).stdout?
 console.log(`\n=== Fallow vs madge/dpdm — Circular Dependency Detection ===\n`);
 printEnvironment();
 console.log(`Tools:`);
-console.log(`  fallow check --circular-deps  ${fallowVersion}`);
+console.log(`  fallow dead-code --circular-deps  ${fallowVersion}`);
 if (hasMadge) console.log(`  madge --circular              ${madgeVersion}`);
 if (hasDpdm) console.log(`  dpdm                          ${dpdmVersion}`);
 console.log(`Config: ${RUNS} runs, ${WARMUP} warmup\n`);
@@ -138,7 +138,7 @@ function benchmarkProject(name, dir) {
   console.log(`### ${name} (${files} source files)\n`);
 
   // fallow: JSON output, only circular deps, no cache
-  const fallowArgs = ['check', '--format', 'json', '--quiet', '--no-cache', '--circular-deps'];
+  const fallowArgs = ['dead-code', '--format', 'json', '--quiet', '--no-cache', '--circular-deps'];
 
   // madge: circular detection with JSON output
   const madgeArgs = ['--circular', '--json', '--extensions', 'ts,tsx,js,jsx,mjs,cjs', '--no-spinner'];

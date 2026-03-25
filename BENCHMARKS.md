@@ -133,7 +133,7 @@ When publishing results, always include the environment info printed by the benc
 
 Environment: Apple M5 (10 cores), 32 GB RAM, macOS 25.3.0, Node v22.21.1, rustc 1.93.0. fallow 1.2.0, knip 5.87.0, knip 6.0.0, jscpd 4.0.8, madge 8.0.0. Median of 5 runs, 2 warmup.
 
-### Dead code: fallow check vs knip
+### Dead code: fallow dead-code vs knip
 
 | Project | Files | fallow | knip v5 | knip v6 | vs v5 | vs v6 | fallow RSS | knip v5 RSS | knip v6 RSS |
 |:--------|------:|-------:|--------:|--------:|------:|------:|-----------:|------------:|------------:|
@@ -162,7 +162,7 @@ Environment: Apple M5 (10 cores), 32 GB RAM, macOS 25.3.0, Node v22.21.1, rustc 
 | svelte | 3,337 | 400ms | 3.63s | 9.1x | 155 MB | 470 MB |
 | next.js | 20,416 | 3.16s | 24.64s | 7.8x | 834 MB | 1.52 GB |
 
-### Circular dependencies: fallow check --circular-deps vs madge/dpdm
+### Circular dependencies: fallow dead-code --circular-deps vs madge/dpdm
 
 | Project | Files | fallow | madge | dpdm | vs madge | vs dpdm | fallow RSS |
 |:--------|------:|-------:|------:|-----:|---------:|--------:|-----------:|

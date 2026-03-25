@@ -104,6 +104,30 @@ pub fn build_compact_lines(results: &AnalysisResults, root: &Path) -> Vec<String
 }
 
 pub(super) fn print_health_compact(report: &crate::health_types::HealthReport, root: &Path) {
+    if let Some(ref vs) = report.vital_signs {
+        let mut parts = Vec::new();
+        parts.push(format!("avg_cyclomatic={:.1}", vs.avg_cyclomatic));
+        parts.push(format!("p90_cyclomatic={}", vs.p90_cyclomatic));
+        if let Some(v) = vs.dead_file_pct {
+            parts.push(format!("dead_file_pct={v:.1}"));
+        }
+        if let Some(v) = vs.dead_export_pct {
+            parts.push(format!("dead_export_pct={v:.1}"));
+        }
+        if let Some(v) = vs.maintainability_avg {
+            parts.push(format!("maintainability_avg={v:.1}"));
+        }
+        if let Some(v) = vs.hotspot_count {
+            parts.push(format!("hotspot_count={v}"));
+        }
+        if let Some(v) = vs.circular_dep_count {
+            parts.push(format!("circular_dep_count={v}"));
+        }
+        if let Some(v) = vs.unused_dep_count {
+            parts.push(format!("unused_dep_count={v}"));
+        }
+        println!("vital-signs:{}", parts.join(","));
+    }
     for finding in &report.findings {
         let relative = normalize_uri(&relative_path(&finding.path, root).display().to_string());
         println!(

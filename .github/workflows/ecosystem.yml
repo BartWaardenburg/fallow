@@ -91,7 +91,7 @@ jobs:
               ecosystem-project
           fi
 
-      - name: Run fallow check
+      - name: Run fallow dead-code
         # Never fail the workflow — this is for monitoring, not gating
         continue-on-error: true
         env:
@@ -99,7 +99,7 @@ jobs:
           PROJECT_PATH: ${{ matrix.project.path }}
         run: |
           cd "ecosystem-project/$PROJECT_PATH"
-          "$GITHUB_WORKSPACE/target/release/fallow" check --format json \
+          "$GITHUB_WORKSPACE/target/release/fallow" dead-code --format json \
             > "$GITHUB_WORKSPACE/ecosystem-$PROJECT_NAME.json" 2>&1 || true
 
       - name: Upload results

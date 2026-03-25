@@ -1,6 +1,6 @@
 # Fallow — Internal Roadmap & Business Strategy
 
-> Last updated: 2026-03-24
+> Last updated: 2026-03-25
 
 ---
 
@@ -41,7 +41,7 @@ Per-seat punishes the champion who adopts it (they pay, teammates benefit for fr
 ### Conversion funnel
 
 ```
-npx fallow check (free, zero-config)
+npx fallow (free, zero-config)
   → User sees value, adds to CI
     → Team notices, enables rules system
       → Tech lead wants trends → needs cloud (Team tier)
@@ -142,9 +142,24 @@ fallow health --hotspots --since 3months
 
 **Graceful degradation:** If not in a git repo (tarball, CI shallow clone), skip hotspot analysis and print a clear message. `--hotspots` without git = error with helpful message. All other health features work without git.
 
-**1c. Refactoring targets** (effort: S, days — builds on 1b)
+**1c. Refactoring targets** (effort: S, days — builds on 1b) — **SHIPPED (v1.9.0)**
 
-Ranked list with one-line actionable recommendations per file. This is presentation, not new analysis.
+Ranked list with one-line actionable recommendations per file. Seven rules evaluated in priority order. Priority formula avoids MI to prevent double-counting. Shipped with:
+- Effort estimation (low/medium/high) based on file size, function count, fan-in
+- Evidence linking (unused export names, complex function names+lines, cycle paths) for AI agent consumption
+- Baseline support for targets (`--save-baseline` / `--baseline` with `path:category` keys)
+- All 5 output formats, MCP integration, explain metadata
+
+**Expert panel follow-ups for Phase 1d (targets iteration):**
+
+| Feature | Value | Effort | Source |
+|---------|-------|--------|--------|
+| Effort-weighted priority (`priority / effort` as default sort) | High — surfaces quick wins first | S | EM panel |
+| `--group-by directory` | High for orgs >50 — enables per-team sprint planning | M | EM panel |
+| Confidence scores per recommendation (High/Medium/Low based on data source reliability) | Medium — calibrates expectations | S | Static analysis expert |
+| Percentile-based thresholds (fan_in top 5% vs ≥20) | Medium — adapts to codebase size | S | Senior dev + analysis expert |
+| Cluster IDs for related targets (circular dep chains, co-located files) | Medium — prevents local optimizations that miss global picture | M | AI agent expert |
+| Evidence for split_high_impact (top importers) and extract_dependencies (import list) | Low — fan_in/out counts are sufficient for now | S | Dropped by pragmatic assessment |
 
 **Why Phase 1 is first:** Hotspots are the feature that makes engineering managers care. Engineering managers are the ones who approve tool purchases. Without this, fallow is a developer utility that never reaches the buying decision-maker.
 
@@ -205,7 +220,7 @@ After critical analysis, this feature doesn't hold up:
 - **Bundled apps already exclude unused deps.** For webpack/vite apps, the bundler is the source of truth for what's in production.
 - **Standard SBOM tools are mature.** Syft, cdxgen, and built-in GitHub/GitLab SBOM export cover this space adequately.
 
-Fallow's real SBOM contribution is indirect: unused dep cleanup via `fallow check` reduces the SBOM surface area at the source. That's the existing `check` command, not a new feature.
+Fallow's real SBOM contribution is indirect: unused dep cleanup via `fallow` reduces the SBOM surface area at the source. That's the existing `check` command, not a new feature.
 
 **3c. Transitive risk mapping** (effort: M, weeks)
 
@@ -304,7 +319,7 @@ Scored on **Revenue potential** (does this drive paid conversions?), **User acqu
 | 2   | Complexity metrics                 | —       | —           | 5          | 9           | —     | M      | **SHIPPED** |
 | 3   | File-level health scores           | —       | —           | 8          | 9           | 1a    | S      | **SHIPPED** |
 | 4   | **Hotspot analysis**               | **—**   | **—**       | **10**     | **8**       | 1b    | M      | **SHIPPED** |
-| 5   | Refactoring targets                | 7       | 6           | 9          | 9           | 1c    | S      | Open        |
+| 5   | Refactoring targets                | 7       | 6           | 9          | 9           | 1c    | S      | **SHIPPED** |
 | 6   | Vital signs snapshots              | 8       | 5           | 7          | 9           | 2a    | S      | Open        |
 | 7   | Trend reporting                    | 9       | 6           | 8          | 8           | 2b    | S-M    | Open        |
 | 8   | **Regression detection (CI gate)** | **8**   | **8**       | **7**      | **9**       | 2c    | S      | Open        |
@@ -319,8 +334,8 @@ Scored on **Revenue potential** (does this drive paid conversions?), **User acqu
 | 17  | Treeshakeability lint              | 4       | 6           | 10         | 7           | 5c    | M      | Open        |
 | 18  | API surface diff                   | 5       | 5           | 9          | 6           | 6a    | L      | Open        |
 | 19  | Monorepo health                    | 4       | 5           | 8          | 9           | 6b    | M      | Open        |
-| 20  | **Human output polish**            | **3**   | **7**       | **6**      | **9**       | —     | M      | Open        |
-| 21  | Metric explainability (docs + JSON)| 4       | 6           | 7          | 8           | —     | S-M    | Open        |
+| 20  | **Human output polish**            | **3**   | **7**       | **6**      | **9**       | —     | M      | **SHIPPED** |
+| 21  | Metric explainability (docs + JSON)| 4       | 6           | 7          | 8           | —     | S-M    | **SHIPPED** |
 
 
 Effort: **S** = days, **M** = weeks, **L** = months.
@@ -375,11 +390,11 @@ After Phase 1-3 + Cloud MVP, fallow answers:
 
 | Question                         | Command / Feature                     | Who asks     | Tier                  |
 | -------------------------------- | ------------------------------------- | ------------ | --------------------- |
-| What code is dead?               | `fallow check`                        | Developer    | Free                  |
+| What code is dead?               | `fallow`                        | Developer    | Free                  |
 | What code is duplicated?         | `fallow dupes`                        | Developer    | Free                  |
 | What's too complex?              | `fallow health`                       | Developer    | Free                  |
 | Which files are riskiest?        | `fallow health --hotspots`            | Tech lead    | Free                  |
-| Where should we refactor?        | `fallow health --refactoring-targets` | Eng manager  | Free                  |
+| Where should we refactor?        | `fallow health --targets`             | Eng manager  | Free                  |
 | Is our codebase improving?       | `fallow health --trend`               | Eng manager  | Free (limited) / Team |
 | Did this PR make things worse?   | PR annotation                         | Tech lead    | Team                  |
 | How do our teams compare?        | Dashboard                             | Eng director | Team / Enterprise     |

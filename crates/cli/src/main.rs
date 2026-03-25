@@ -9,6 +9,7 @@ use fallow_config::FallowConfig;
 
 mod baseline;
 mod check;
+mod combined;
 mod dupes;
 mod explain;
 mod fix;
@@ -20,6 +21,7 @@ mod migrate;
 mod report;
 mod schema;
 mod validate;
+mod vital_signs;
 mod watch;
 
 use check::{CheckOptions, IssueFilters, TraceOptions};
@@ -33,7 +35,8 @@ use list::ListOptions;
 #[command(
     name = "fallow",
     about = "Find unused code, circular dependencies, code duplication, and complexity hotspots in TypeScript/JavaScript projects",
-    version
+    version,
+    after_help = "When no command is given, runs check + dupes + health together.\nUse --only/--skip to select specific analyses."
 )]
 struct Cli {
     #[command(subcommand)]
@@ -101,24 +104,33 @@ struct Cli {
     /// Always enabled for MCP server responses.
     #[arg(long, global = true)]
     explain: bool,
+
+    /// CI mode: equivalent to --format sarif --fail-on-issues --quiet
+    #[arg(long, global = true)]
+    ci: bool,
+
+    /// Exit with code 1 if issues are found
+    #[arg(long, global = true)]
+    fail_on_issues: bool,
+
+    /// Write SARIF output to a file (in addition to the primary --format output)
+    #[arg(long, global = true, value_name = "PATH")]
+    sarif_file: Option<PathBuf>,
+
+    /// Run only specific analyses when no subcommand is given (comma-separated: check,dupes,health)
+    #[arg(long, value_delimiter = ',')]
+    only: Vec<AnalysisKind>,
+
+    /// Skip specific analyses when no subcommand is given (comma-separated: check,dupes,health)
+    #[arg(long, value_delimiter = ',')]
+    skip: Vec<AnalysisKind>,
 }
 
 #[derive(Subcommand)]
 enum Command {
-    /// Analyze project for unused code, circular dependencies, and code duplication \[default\]
+    /// Analyze project for unused code, circular dependencies, and code duplication
+    #[command(visible_alias = "dead-code")]
     Check {
-        /// CI mode: equivalent to --format sarif --fail-on-issues --quiet
-        #[arg(long)]
-        ci: bool,
-
-        /// Exit with code 1 if issues are found
-        #[arg(long)]
-        fail_on_issues: bool,
-
-        /// Write SARIF output to a file (in addition to the primary --format output)
-        #[arg(long, value_name = "PATH")]
-        sarif_file: Option<PathBuf>,
-
         /// Only report unused files
         #[arg(long)]
         unused_files: bool,
@@ -308,6 +320,16 @@ enum Command {
         /// Minimum number of commits for a file to be included in hotspot ranking (default: 3)
         #[arg(long, value_name = "N")]
         min_commits: Option<u32>,
+
+        /// Save a vital signs snapshot for trend tracking.
+        /// Defaults to .fallow/snapshots/<timestamp>.json if no path is given.
+        /// Forces file-scores and hotspot computation for complete metrics.
+        #[expect(
+            clippy::option_option,
+            reason = "clap pattern: None=not passed, Some(None)=flag only, Some(Some(path))=with value"
+        )]
+        #[arg(long, value_name = "PATH", num_args = 0..=1, default_missing_value = "")]
+        save_snapshot: Option<Option<String>>,
     },
 
     /// Dump the CLI interface as machine-readable JSON for agent introspection
@@ -348,6 +370,14 @@ impl From<Format> for fallow_config::OutputFormat {
             Format::Markdown => Self::Markdown,
         }
     }
+}
+
+/// Analysis types for --only/--skip selection.
+#[derive(Clone, PartialEq, Eq, clap::ValueEnum)]
+pub enum AnalysisKind {
+    Check,
+    Dupes,
+    Health,
 }
 
 // ── Structured error output ──────────────────────────────────────
@@ -568,6 +598,28 @@ fn validate_inputs(
     Ok((root, threads))
 }
 
+/// Apply CI defaults: if `--ci` is set, override format to SARIF (unless explicit),
+/// enable fail-on-issues, and set quiet. Returns (output, quiet, fail_on_issues).
+fn apply_ci_defaults(
+    ci: bool,
+    mut fail_on_issues: bool,
+    output: fallow_config::OutputFormat,
+    quiet: bool,
+    cli_format_was_explicit: bool,
+) -> (fallow_config::OutputFormat, bool, bool) {
+    if ci {
+        let ci_output = if !cli_format_was_explicit && format_from_env().is_none() {
+            fallow_config::OutputFormat::Sarif
+        } else {
+            output
+        };
+        fail_on_issues = true;
+        (ci_output, true, fail_on_issues)
+    } else {
+        (output, quiet, fail_on_issues)
+    }
+}
+
 // ── Main ─────────────────────────────────────────────────────────
 
 fn main() -> ExitCode {
@@ -601,58 +653,74 @@ fn main() -> ExitCode {
         cli_format_was_explicit,
     } = fmt;
 
-    match cli.command.unwrap_or(Command::Check {
-        ci: false,
-        fail_on_issues: false,
-        sarif_file: None,
-        unused_files: false,
-        unused_exports: false,
-        unused_deps: false,
-        unused_types: false,
-        unused_enum_members: false,
-        unused_class_members: false,
-        unresolved_imports: false,
-        unlisted_deps: false,
-        duplicate_exports: false,
-        circular_deps: false,
-        include_dupes: false,
-        trace: None,
-        trace_file: None,
-        trace_dependency: None,
-    }) {
-        Command::Check {
-            ci,
-            mut fail_on_issues,
-            sarif_file,
-            unused_files,
-            unused_exports,
-            unused_deps,
-            unused_types,
-            unused_enum_members,
-            unused_class_members,
-            unresolved_imports,
-            unlisted_deps,
-            duplicate_exports,
-            circular_deps,
-            include_dupes,
-            trace,
-            trace_file,
-            trace_dependency,
-        } => {
-            // Apply CI defaults: --format sarif, --fail-on-issues, --quiet
-            // Only override format if user didn't explicitly pass --format
-            let (output, quiet) = if ci {
-                let ci_output = if !cli_format_was_explicit && format_from_env().is_none() {
-                    fallow_config::OutputFormat::Sarif
-                } else {
-                    output
-                };
-                fail_on_issues = true;
-                (ci_output, true)
-            } else {
-                (output, quiet)
-            };
-            let filters = IssueFilters {
+    // Validate --ci/--fail-on-issues/--sarif-file are not used with irrelevant commands
+    if (cli.ci || cli.fail_on_issues || cli.sarif_file.is_some())
+        && matches!(
+            cli.command,
+            Some(
+                Command::Init { .. }
+                    | Command::ConfigSchema
+                    | Command::PluginSchema
+                    | Command::Schema
+                    | Command::List { .. }
+                    | Command::Migrate { .. }
+            )
+        )
+    {
+        return emit_error(
+            "--ci, --fail-on-issues, and --sarif-file are only valid with check, dupes, health, or bare invocation",
+            2,
+            &output,
+        );
+    }
+
+    // Validate --only/--skip are not used with a subcommand
+    if (!cli.only.is_empty() || !cli.skip.is_empty()) && cli.command.is_some() {
+        return emit_error(
+            "--only and --skip can only be used without a subcommand",
+            2,
+            &output,
+        );
+    }
+    if !cli.only.is_empty() && !cli.skip.is_empty() {
+        return emit_error("--only and --skip are mutually exclusive", 2, &output);
+    }
+
+    match cli.command {
+        // Bare `fallow` — run all analyses (check + dupes + health)
+        None => {
+            let (output, quiet, fail_on_issues) = apply_ci_defaults(
+                cli.ci,
+                cli.fail_on_issues,
+                output,
+                quiet,
+                cli_format_was_explicit,
+            );
+            let (run_check, run_dupes, run_health) =
+                combined::resolve_analyses(&cli.only, &cli.skip);
+            combined::run_combined(&combined::CombinedOptions {
+                root: &root,
+                config_path: &cli.config,
+                output,
+                no_cache: cli.no_cache,
+                threads,
+                quiet,
+                fail_on_issues,
+                sarif_file: cli.sarif_file.as_deref(),
+                changed_since: cli.changed_since.as_deref(),
+                baseline: cli.baseline.as_deref(),
+                save_baseline: cli.save_baseline.as_deref(),
+                production: cli.production,
+                workspace: cli.workspace.as_deref(),
+                explain: cli.explain,
+                performance: cli.performance,
+                run_check,
+                run_dupes,
+                run_health,
+            })
+        }
+        Some(command) => match command {
+            Command::Check {
                 unused_files,
                 unused_exports,
                 unused_deps,
@@ -663,151 +731,197 @@ fn main() -> ExitCode {
                 unlisted_deps,
                 duplicate_exports,
                 circular_deps,
-            };
-            let trace_opts = TraceOptions {
-                trace_export: trace,
+                include_dupes,
+                trace,
                 trace_file,
                 trace_dependency,
-                performance: cli.performance,
-            };
-            check::run_check(&CheckOptions {
+            } => {
+                let (output, quiet, fail_on_issues) = apply_ci_defaults(
+                    cli.ci,
+                    cli.fail_on_issues,
+                    output,
+                    quiet,
+                    cli_format_was_explicit,
+                );
+                let filters = IssueFilters {
+                    unused_files,
+                    unused_exports,
+                    unused_deps,
+                    unused_types,
+                    unused_enum_members,
+                    unused_class_members,
+                    unresolved_imports,
+                    unlisted_deps,
+                    duplicate_exports,
+                    circular_deps,
+                };
+                let trace_opts = TraceOptions {
+                    trace_export: trace,
+                    trace_file,
+                    trace_dependency,
+                    performance: cli.performance,
+                };
+                check::run_check(&CheckOptions {
+                    root: &root,
+                    config_path: &cli.config,
+                    output,
+                    no_cache: cli.no_cache,
+                    threads,
+                    quiet,
+                    fail_on_issues,
+                    filters: &filters,
+                    changed_since: cli.changed_since.as_deref(),
+                    baseline: cli.baseline.as_deref(),
+                    save_baseline: cli.save_baseline.as_deref(),
+                    sarif_file: cli.sarif_file.as_deref(),
+                    production: cli.production,
+                    workspace: cli.workspace.as_deref(),
+                    include_dupes,
+                    trace_opts: &trace_opts,
+                    explain: cli.explain,
+                })
+            }
+            Command::Watch { no_clear } => watch::run_watch(&watch::WatchOptions {
                 root: &root,
                 config_path: &cli.config,
                 output,
                 no_cache: cli.no_cache,
                 threads,
                 quiet,
-                fail_on_issues,
-                filters: &filters,
-                changed_since: cli.changed_since.as_deref(),
-                baseline: cli.baseline.as_deref(),
-                save_baseline: cli.save_baseline.as_deref(),
-                sarif_file: sarif_file.as_deref(),
                 production: cli.production,
-                workspace: cli.workspace.as_deref(),
-                include_dupes,
-                trace_opts: &trace_opts,
+                clear_screen: !no_clear,
                 explain: cli.explain,
-            })
-        }
-        Command::Watch { no_clear } => watch::run_watch(&watch::WatchOptions {
-            root: &root,
-            config_path: &cli.config,
-            output,
-            no_cache: cli.no_cache,
-            threads,
-            quiet,
-            production: cli.production,
-            clear_screen: !no_clear,
-            explain: cli.explain,
-        }),
-        Command::Fix { dry_run, yes } => fix::run_fix(&fix::FixOptions {
-            root: &root,
-            config_path: &cli.config,
-            output,
-            no_cache: cli.no_cache,
-            threads,
-            quiet,
-            dry_run,
-            yes,
-            production: cli.production,
-        }),
-        Command::Init { toml } => init::run_init(&root, toml),
-        Command::ConfigSchema => init::run_config_schema(),
-        Command::PluginSchema => init::run_plugin_schema(),
-        Command::List {
-            entry_points,
-            files,
-            plugins,
-        } => list::run_list(&ListOptions {
-            root: &root,
-            config_path: &cli.config,
-            output,
-            threads,
-            entry_points,
-            files,
-            plugins,
-            production: cli.production,
-        }),
-        Command::Dupes {
-            mode,
-            min_tokens,
-            min_lines,
-            threshold,
-            skip_local,
-            cross_language,
-            top,
-            trace,
-        } => dupes::run_dupes(&DupesOptions {
-            root: &root,
-            config_path: &cli.config,
-            output,
-            no_cache: cli.no_cache,
-            threads,
-            quiet,
-            mode,
-            min_tokens,
-            min_lines,
-            threshold,
-            skip_local,
-            cross_language,
-            top,
-            baseline_path: cli.baseline.as_deref(),
-            save_baseline_path: cli.save_baseline.as_deref(),
-            production: cli.production,
-            trace: trace.as_deref(),
-            changed_since: cli.changed_since.as_deref(),
-            explain: cli.explain,
-        }),
-        Command::Health {
-            max_cyclomatic,
-            max_cognitive,
-            top,
-            sort,
-            complexity,
-            file_scores,
-            hotspots,
-            targets,
-            since,
-            min_commits,
-        } => {
-            // No section flags = show all. Any flag set = show only those.
-            let any_section = complexity || file_scores || hotspots || targets;
-            let eff_file_scores = if any_section { file_scores } else { true };
-            let eff_hotspots = if any_section { hotspots } else { true };
-            let eff_complexity = if any_section { complexity } else { true };
-            let eff_targets = if any_section { targets } else { true };
-            health::run_health(&HealthOptions {
+            }),
+            Command::Fix { dry_run, yes } => fix::run_fix(&fix::FixOptions {
                 root: &root,
                 config_path: &cli.config,
                 output,
                 no_cache: cli.no_cache,
                 threads,
                 quiet,
+                dry_run,
+                yes,
+                production: cli.production,
+            }),
+            Command::Init { toml } => init::run_init(&root, toml),
+            Command::ConfigSchema => init::run_config_schema(),
+            Command::PluginSchema => init::run_plugin_schema(),
+            Command::List {
+                entry_points,
+                files,
+                plugins,
+            } => list::run_list(&ListOptions {
+                root: &root,
+                config_path: &cli.config,
+                output,
+                threads,
+                entry_points,
+                files,
+                plugins,
+                production: cli.production,
+            }),
+            Command::Dupes {
+                mode,
+                min_tokens,
+                min_lines,
+                threshold,
+                skip_local,
+                cross_language,
+                top,
+                trace,
+            } => {
+                let (output, quiet, _fail_on_issues) = apply_ci_defaults(
+                    cli.ci,
+                    cli.fail_on_issues,
+                    output,
+                    quiet,
+                    cli_format_was_explicit,
+                );
+                dupes::run_dupes(&DupesOptions {
+                    root: &root,
+                    config_path: &cli.config,
+                    output,
+                    no_cache: cli.no_cache,
+                    threads,
+                    quiet,
+                    mode,
+                    min_tokens,
+                    min_lines,
+                    threshold,
+                    skip_local,
+                    cross_language,
+                    top,
+                    baseline_path: cli.baseline.as_deref(),
+                    save_baseline_path: cli.save_baseline.as_deref(),
+                    production: cli.production,
+                    trace: trace.as_deref(),
+                    changed_since: cli.changed_since.as_deref(),
+                    explain: cli.explain,
+                })
+            }
+            Command::Health {
                 max_cyclomatic,
                 max_cognitive,
                 top,
                 sort,
-                production: cli.production,
-                changed_since: cli.changed_since.as_deref(),
-                workspace: cli.workspace.as_deref(),
-                baseline: cli.baseline.as_deref(),
-                save_baseline: cli.save_baseline.as_deref(),
-                complexity: eff_complexity,
-                file_scores: eff_file_scores,
-                hotspots: eff_hotspots,
-                targets: eff_targets,
-                since: since.as_deref(),
+                complexity,
+                file_scores,
+                hotspots,
+                targets,
+                since,
                 min_commits,
-                explain: cli.explain,
-            })
-        }
-        Command::Schema => unreachable!("handled above"),
-        Command::Migrate {
-            toml,
-            dry_run,
-            from,
-        } => migrate::run_migrate(&root, toml, dry_run, from.as_deref()),
+                save_snapshot,
+            } => {
+                let (output, quiet, _fail_on_issues) = apply_ci_defaults(
+                    cli.ci,
+                    cli.fail_on_issues,
+                    output,
+                    quiet,
+                    cli_format_was_explicit,
+                );
+                // --save-snapshot forces file_scores + hotspots for complete vital signs
+                let snapshot_requested = save_snapshot.is_some();
+                // No section flags = show all. Any flag set = show only those.
+                // --save-snapshot is orthogonal (not a section flag).
+                let any_section = complexity || file_scores || hotspots || targets;
+                let eff_file_scores =
+                    if any_section { file_scores } else { true } || snapshot_requested;
+                let eff_hotspots = if any_section { hotspots } else { true } || snapshot_requested;
+                let eff_complexity = if any_section { complexity } else { true };
+                let eff_targets = if any_section { targets } else { true };
+                health::run_health(&HealthOptions {
+                    root: &root,
+                    config_path: &cli.config,
+                    output,
+                    no_cache: cli.no_cache,
+                    threads,
+                    quiet,
+                    max_cyclomatic,
+                    max_cognitive,
+                    top,
+                    sort,
+                    production: cli.production,
+                    changed_since: cli.changed_since.as_deref(),
+                    workspace: cli.workspace.as_deref(),
+                    baseline: cli.baseline.as_deref(),
+                    save_baseline: cli.save_baseline.as_deref(),
+                    complexity: eff_complexity,
+                    file_scores: eff_file_scores,
+                    hotspots: eff_hotspots,
+                    targets: eff_targets,
+                    since: since.as_deref(),
+                    min_commits,
+                    explain: cli.explain,
+                    save_snapshot: save_snapshot.map(|opt| PathBuf::from(opt.unwrap_or_default())),
+                })
+            }
+            Command::Schema => unreachable!("handled above"),
+            Command::Migrate {
+                toml,
+                dry_run,
+                from,
+            } => migrate::run_migrate(&root, toml, dry_run, from.as_deref()),
+        },
     }
 }
 

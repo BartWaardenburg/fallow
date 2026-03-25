@@ -11,6 +11,9 @@ pub struct HealthReport {
     pub findings: Vec<HealthFinding>,
     /// Summary statistics.
     pub summary: HealthSummary,
+    /// Project-wide vital signs (always computed from available data).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vital_signs: Option<VitalSigns>,
     /// Per-file health scores (only populated with `--file-scores` or `--hotspots`).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub file_scores: Vec<FileHealthScore>,
@@ -24,6 +27,89 @@ pub struct HealthReport {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub targets: Vec<RefactoringTarget>,
 }
+
+/// Project-wide vital signs — a fixed set of metrics for trend tracking.
+///
+/// Metrics are `Option` when the data source was not available in the current run
+/// (e.g., `duplication_pct` is `None` unless the duplication pipeline was run,
+/// `hotspot_count` is `None` without git history).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct VitalSigns {
+    /// Percentage of files not reachable from any entry point.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dead_file_pct: Option<f64>,
+    /// Percentage of exports never imported by other modules.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dead_export_pct: Option<f64>,
+    /// Average cyclomatic complexity across all functions.
+    pub avg_cyclomatic: f64,
+    /// 90th percentile cyclomatic complexity.
+    pub p90_cyclomatic: u32,
+    /// Code duplication percentage (None if duplication pipeline was not run).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duplication_pct: Option<f64>,
+    /// Number of hotspot files (score >= 50). None if git history unavailable.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hotspot_count: Option<u32>,
+    /// Average maintainability index across all scored files (0–100).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub maintainability_avg: Option<f64>,
+    /// Number of unused dependencies (dependencies + devDependencies + optional).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unused_dep_count: Option<u32>,
+    /// Number of circular dependency chains.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub circular_dep_count: Option<u32>,
+}
+
+/// Raw counts backing the vital signs percentages.
+///
+/// Stored alongside `VitalSigns` in snapshots so that Phase 2b trend reporting
+/// can decompose percentage changes into numerator vs denominator shifts.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct VitalSignsCounts {
+    pub total_files: usize,
+    pub total_exports: usize,
+    pub dead_files: usize,
+    pub dead_exports: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duplicated_lines: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_lines: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub files_scored: Option<usize>,
+    pub total_deps: usize,
+}
+
+/// A point-in-time snapshot of project vital signs, persisted to disk.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct VitalSignsSnapshot {
+    /// Schema version for snapshot format (independent of report schema_version).
+    pub snapshot_schema_version: u32,
+    /// Fallow version that produced this snapshot.
+    pub version: String,
+    /// ISO 8601 timestamp.
+    pub timestamp: String,
+    /// Git commit SHA at time of snapshot (None if not in a git repo).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub git_sha: Option<String>,
+    /// Git branch name (None if not in a git repo or detached HEAD).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub git_branch: Option<String>,
+    /// Whether the repository is a shallow clone.
+    #[serde(default)]
+    pub shallow_clone: bool,
+    /// The vital signs metrics.
+    pub vital_signs: VitalSigns,
+    /// Raw counts for trend decomposition.
+    pub counts: VitalSignsCounts,
+}
+
+/// Current snapshot schema version. Independent of the report's SCHEMA_VERSION.
+pub const SNAPSHOT_SCHEMA_VERSION: u32 = 1;
+
+/// Hotspot score threshold for counting a file as a hotspot in vital signs.
+pub const HOTSPOT_SCORE_THRESHOLD: f64 = 50.0;
 
 /// A single function that exceeds a complexity threshold.
 #[derive(Debug, serde::Serialize)]
@@ -373,6 +459,7 @@ mod tests {
                 files_scored: None,
                 average_maintainability: None,
             },
+            vital_signs: None,
             file_scores: vec![],
             hotspots: vec![],
             hotspot_summary: None,
@@ -384,6 +471,69 @@ mod tests {
         assert!(!json.contains("hotspots"));
         assert!(!json.contains("hotspot_summary"));
         assert!(!json.contains("targets"));
+        assert!(!json.contains("vital_signs"));
+    }
+
+    #[test]
+    fn vital_signs_serialization_roundtrip() {
+        let vs = VitalSigns {
+            dead_file_pct: Some(3.2),
+            dead_export_pct: Some(8.1),
+            avg_cyclomatic: 4.7,
+            p90_cyclomatic: 12,
+            duplication_pct: None,
+            hotspot_count: Some(5),
+            maintainability_avg: Some(72.4),
+            unused_dep_count: Some(4),
+            circular_dep_count: Some(2),
+        };
+        let json = serde_json::to_string(&vs).unwrap();
+        let deserialized: VitalSigns = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.avg_cyclomatic, 4.7);
+        assert_eq!(deserialized.p90_cyclomatic, 12);
+        assert_eq!(deserialized.hotspot_count, Some(5));
+        // duplication_pct should be absent in JSON and None after deser
+        assert!(!json.contains("duplication_pct"));
+        assert!(deserialized.duplication_pct.is_none());
+    }
+
+    #[test]
+    fn vital_signs_snapshot_roundtrip() {
+        let snapshot = VitalSignsSnapshot {
+            snapshot_schema_version: SNAPSHOT_SCHEMA_VERSION,
+            version: "1.8.1".into(),
+            timestamp: "2026-03-25T14:30:00Z".into(),
+            git_sha: Some("abc1234".into()),
+            git_branch: Some("main".into()),
+            shallow_clone: false,
+            vital_signs: VitalSigns {
+                dead_file_pct: Some(3.2),
+                dead_export_pct: Some(8.1),
+                avg_cyclomatic: 4.7,
+                p90_cyclomatic: 12,
+                duplication_pct: None,
+                hotspot_count: None,
+                maintainability_avg: Some(72.4),
+                unused_dep_count: Some(4),
+                circular_dep_count: Some(2),
+            },
+            counts: VitalSignsCounts {
+                total_files: 1200,
+                total_exports: 5400,
+                dead_files: 38,
+                dead_exports: 437,
+                duplicated_lines: None,
+                total_lines: None,
+                files_scored: Some(1150),
+                total_deps: 42,
+            },
+        };
+        let json = serde_json::to_string_pretty(&snapshot).unwrap();
+        let rt: VitalSignsSnapshot = serde_json::from_str(&json).unwrap();
+        assert_eq!(rt.snapshot_schema_version, SNAPSHOT_SCHEMA_VERSION);
+        assert_eq!(rt.git_sha.as_deref(), Some("abc1234"));
+        assert_eq!(rt.counts.total_files, 1200);
+        assert_eq!(rt.counts.dead_exports, 437);
     }
 
     #[test]
