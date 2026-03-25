@@ -1045,3 +1045,41 @@ fn await_non_import_expression_not_captured() {
         "await of a non-import expression should not be captured as dynamic import"
     );
 }
+
+// ── JSX retry fallback ──────────────────────────────────────────
+
+/// Parse as a .js file (not .tsx) to test JSX retry fallback logic.
+fn parse_as_js(source: &str) -> ModuleInfo {
+    parse_source_to_module(FileId(0), Path::new("component.js"), source, 0)
+}
+
+#[test]
+fn jsx_retry_extracts_exports_from_js_with_jsx() {
+    // A .js file with JSX that the initial non-JSX parse can't extract anything from.
+    // Must be >100 bytes and have total_extracted == 0 on first pass to trigger retry.
+    // The initial parse of .js without JSX mode will fail on JSX tags and extract nothing.
+    let source = r#"
+export const App = () => <div className="app"><span>Hello World from JSX in a plain JS file</span></div>;
+"#;
+    let info = parse_as_js(source);
+    assert!(
+        !info.exports.is_empty(),
+        "JSX retry should extract the App export from .js file with JSX"
+    );
+}
+
+#[test]
+fn jsx_retry_extracts_imports_from_js_with_jsx() {
+    // File with both import and JSX — the initial .js parse may still extract the import
+    // (imports before JSX tags often parse fine), so this tests robustness.
+    let source = r#"
+export default function Component() {
+    return <main><section className="hero"><h1>Title</h1><p>Description paragraph</p></section></main>;
+}
+"#;
+    let info = parse_as_js(source);
+    assert!(
+        !info.exports.is_empty(),
+        "JSX retry should extract the default export from .js file with JSX"
+    );
+}

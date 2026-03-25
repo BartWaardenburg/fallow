@@ -168,3 +168,206 @@ impl std::str::FromStr for DetectionMode {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── DuplicatesConfig defaults ────────────────────────────────────
+
+    #[test]
+    fn duplicates_config_defaults() {
+        let config = DuplicatesConfig::default();
+        assert!(config.enabled);
+        assert_eq!(config.mode, DetectionMode::Mild);
+        assert_eq!(config.min_tokens, 50);
+        assert_eq!(config.min_lines, 5);
+        assert_eq!(config.threshold, 0.0);
+        assert!(config.ignore.is_empty());
+        assert!(!config.skip_local);
+        assert!(!config.cross_language);
+    }
+
+    // ── DetectionMode FromStr ────────────────────────────────────────
+
+    #[test]
+    fn detection_mode_from_str_all_variants() {
+        assert_eq!(
+            "strict".parse::<DetectionMode>().unwrap(),
+            DetectionMode::Strict
+        );
+        assert_eq!(
+            "mild".parse::<DetectionMode>().unwrap(),
+            DetectionMode::Mild
+        );
+        assert_eq!(
+            "weak".parse::<DetectionMode>().unwrap(),
+            DetectionMode::Weak
+        );
+        assert_eq!(
+            "semantic".parse::<DetectionMode>().unwrap(),
+            DetectionMode::Semantic
+        );
+    }
+
+    #[test]
+    fn detection_mode_from_str_case_insensitive() {
+        assert_eq!(
+            "STRICT".parse::<DetectionMode>().unwrap(),
+            DetectionMode::Strict
+        );
+        assert_eq!(
+            "Weak".parse::<DetectionMode>().unwrap(),
+            DetectionMode::Weak
+        );
+        assert_eq!(
+            "SEMANTIC".parse::<DetectionMode>().unwrap(),
+            DetectionMode::Semantic
+        );
+    }
+
+    #[test]
+    fn detection_mode_from_str_unknown() {
+        let err = "foobar".parse::<DetectionMode>().unwrap_err();
+        assert!(err.contains("unknown detection mode"));
+        assert!(err.contains("foobar"));
+    }
+
+    // ── DetectionMode Display ────────────────────────────────────────
+
+    #[test]
+    fn detection_mode_display() {
+        assert_eq!(DetectionMode::Strict.to_string(), "strict");
+        assert_eq!(DetectionMode::Mild.to_string(), "mild");
+        assert_eq!(DetectionMode::Weak.to_string(), "weak");
+        assert_eq!(DetectionMode::Semantic.to_string(), "semantic");
+    }
+
+    // ── ResolvedNormalization::resolve ────────────────────────────────
+
+    #[test]
+    fn resolve_strict_mode_all_false() {
+        let resolved =
+            ResolvedNormalization::resolve(DetectionMode::Strict, &NormalizationConfig::default());
+        assert!(!resolved.ignore_identifiers);
+        assert!(!resolved.ignore_string_values);
+        assert!(!resolved.ignore_numeric_values);
+    }
+
+    #[test]
+    fn resolve_mild_mode_all_false() {
+        let resolved =
+            ResolvedNormalization::resolve(DetectionMode::Mild, &NormalizationConfig::default());
+        assert!(!resolved.ignore_identifiers);
+        assert!(!resolved.ignore_string_values);
+        assert!(!resolved.ignore_numeric_values);
+    }
+
+    #[test]
+    fn resolve_weak_mode_only_strings_true() {
+        let resolved =
+            ResolvedNormalization::resolve(DetectionMode::Weak, &NormalizationConfig::default());
+        assert!(!resolved.ignore_identifiers);
+        assert!(resolved.ignore_string_values);
+        assert!(!resolved.ignore_numeric_values);
+    }
+
+    #[test]
+    fn resolve_semantic_mode_all_true() {
+        let resolved = ResolvedNormalization::resolve(
+            DetectionMode::Semantic,
+            &NormalizationConfig::default(),
+        );
+        assert!(resolved.ignore_identifiers);
+        assert!(resolved.ignore_string_values);
+        assert!(resolved.ignore_numeric_values);
+    }
+
+    #[test]
+    fn resolve_override_forces_true() {
+        // Strict mode defaults to all false, but override forces ignore_identifiers to true
+        let overrides = NormalizationConfig {
+            ignore_identifiers: Some(true),
+            ignore_string_values: None,
+            ignore_numeric_values: None,
+        };
+        let resolved = ResolvedNormalization::resolve(DetectionMode::Strict, &overrides);
+        assert!(resolved.ignore_identifiers);
+        assert!(!resolved.ignore_string_values);
+        assert!(!resolved.ignore_numeric_values);
+    }
+
+    #[test]
+    fn resolve_override_forces_false() {
+        // Semantic mode defaults to all true, but override forces ignore_identifiers to false
+        let overrides = NormalizationConfig {
+            ignore_identifiers: Some(false),
+            ignore_string_values: Some(false),
+            ignore_numeric_values: None,
+        };
+        let resolved = ResolvedNormalization::resolve(DetectionMode::Semantic, &overrides);
+        assert!(!resolved.ignore_identifiers);
+        assert!(!resolved.ignore_string_values);
+        assert!(resolved.ignore_numeric_values); // not overridden
+    }
+
+    #[test]
+    fn resolve_all_overrides_on_weak() {
+        let overrides = NormalizationConfig {
+            ignore_identifiers: Some(true),
+            ignore_string_values: Some(false), // override weak default (true -> false)
+            ignore_numeric_values: Some(true),
+        };
+        let resolved = ResolvedNormalization::resolve(DetectionMode::Weak, &overrides);
+        assert!(resolved.ignore_identifiers);
+        assert!(!resolved.ignore_string_values); // overridden from true to false
+        assert!(resolved.ignore_numeric_values);
+    }
+
+    // ── DuplicatesConfig deserialization ──────────────────────────────
+
+    #[test]
+    fn duplicates_config_json_all_fields() {
+        let json = r#"{
+            "enabled": false,
+            "mode": "semantic",
+            "minTokens": 100,
+            "minLines": 10,
+            "threshold": 5.0,
+            "ignore": ["**/vendor/**"],
+            "skipLocal": true,
+            "crossLanguage": true
+        }"#;
+        let config: DuplicatesConfig = serde_json::from_str(json).unwrap();
+        assert!(!config.enabled);
+        assert_eq!(config.mode, DetectionMode::Semantic);
+        assert_eq!(config.min_tokens, 100);
+        assert_eq!(config.min_lines, 10);
+        assert_eq!(config.threshold, 5.0);
+        assert_eq!(config.ignore, vec!["**/vendor/**"]);
+        assert!(config.skip_local);
+        assert!(config.cross_language);
+    }
+
+    #[test]
+    fn duplicates_config_json_partial_uses_defaults() {
+        let json = r#"{"mode": "weak"}"#;
+        let config: DuplicatesConfig = serde_json::from_str(json).unwrap();
+        assert!(config.enabled); // default
+        assert_eq!(config.mode, DetectionMode::Weak);
+        assert_eq!(config.min_tokens, 50); // default
+        assert_eq!(config.min_lines, 5); // default
+    }
+
+    #[test]
+    fn normalization_config_json_overrides() {
+        let json = r#"{
+            "ignoreIdentifiers": true,
+            "ignoreStringValues": false
+        }"#;
+        let config: NormalizationConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(config.ignore_identifiers, Some(true));
+        assert_eq!(config.ignore_string_values, Some(false));
+        assert_eq!(config.ignore_numeric_values, None);
+    }
+}

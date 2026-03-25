@@ -37,3 +37,55 @@ impl Default for HealthConfig {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn health_config_defaults() {
+        let config = HealthConfig::default();
+        assert_eq!(config.max_cyclomatic, 20);
+        assert_eq!(config.max_cognitive, 15);
+        assert!(config.ignore.is_empty());
+    }
+
+    #[test]
+    fn health_config_json_all_fields() {
+        let json = r#"{
+            "maxCyclomatic": 30,
+            "maxCognitive": 25,
+            "ignore": ["**/generated/**", "vendor/**"]
+        }"#;
+        let config: HealthConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(config.max_cyclomatic, 30);
+        assert_eq!(config.max_cognitive, 25);
+        assert_eq!(config.ignore, vec!["**/generated/**", "vendor/**"]);
+    }
+
+    #[test]
+    fn health_config_json_partial_uses_defaults() {
+        let json = r#"{"maxCyclomatic": 10}"#;
+        let config: HealthConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(config.max_cyclomatic, 10);
+        assert_eq!(config.max_cognitive, 15); // default
+        assert!(config.ignore.is_empty()); // default
+    }
+
+    #[test]
+    fn health_config_json_empty_object_uses_all_defaults() {
+        let config: HealthConfig = serde_json::from_str("{}").unwrap();
+        assert_eq!(config.max_cyclomatic, 20);
+        assert_eq!(config.max_cognitive, 15);
+        assert!(config.ignore.is_empty());
+    }
+
+    #[test]
+    fn health_config_json_only_ignore() {
+        let json = r#"{"ignore": ["test/**"]}"#;
+        let config: HealthConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(config.max_cyclomatic, 20); // default
+        assert_eq!(config.max_cognitive, 15); // default
+        assert_eq!(config.ignore, vec!["test/**"]);
+    }
+}

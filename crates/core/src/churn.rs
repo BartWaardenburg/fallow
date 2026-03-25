@@ -522,4 +522,96 @@ mod tests {
         assert_eq!(ChurnTrend::Stable.to_string(), "stable");
         assert_eq!(ChurnTrend::Cooling.to_string(), "cooling");
     }
+
+    // ── parse_git_log ───────────────────────────────────────────
+
+    #[test]
+    fn parse_git_log_single_commit() {
+        let root = Path::new("/project");
+        let output = "1700000000\n10\t5\tsrc/index.ts\n";
+        let result = parse_git_log(output, root);
+        assert_eq!(result.len(), 1);
+        let churn = result.get(&PathBuf::from("/project/src/index.ts")).unwrap();
+        assert_eq!(churn.commits, 1);
+        assert_eq!(churn.lines_added, 10);
+        assert_eq!(churn.lines_deleted, 5);
+    }
+
+    #[test]
+    fn parse_git_log_multiple_commits_same_file() {
+        let root = Path::new("/project");
+        let output = "1700000000\n10\t5\tsrc/index.ts\n\n1700100000\n3\t2\tsrc/index.ts\n";
+        let result = parse_git_log(output, root);
+        assert_eq!(result.len(), 1);
+        let churn = result.get(&PathBuf::from("/project/src/index.ts")).unwrap();
+        assert_eq!(churn.commits, 2);
+        assert_eq!(churn.lines_added, 13);
+        assert_eq!(churn.lines_deleted, 7);
+    }
+
+    #[test]
+    fn parse_git_log_multiple_files() {
+        let root = Path::new("/project");
+        let output = "1700000000\n10\t5\tsrc/a.ts\n3\t1\tsrc/b.ts\n";
+        let result = parse_git_log(output, root);
+        assert_eq!(result.len(), 2);
+        assert!(result.contains_key(&PathBuf::from("/project/src/a.ts")));
+        assert!(result.contains_key(&PathBuf::from("/project/src/b.ts")));
+    }
+
+    #[test]
+    fn parse_git_log_empty_output() {
+        let root = Path::new("/project");
+        let result = parse_git_log("", root);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn parse_git_log_skips_binary_files() {
+        let root = Path::new("/project");
+        let output = "1700000000\n-\t-\timage.png\n10\t5\tsrc/a.ts\n";
+        let result = parse_git_log(output, root);
+        assert_eq!(result.len(), 1);
+        assert!(!result.contains_key(&PathBuf::from("/project/image.png")));
+    }
+
+    #[test]
+    fn parse_git_log_weighted_commits_are_positive() {
+        let root = Path::new("/project");
+        // Use a timestamp near "now" to ensure weight doesn't decay to zero
+        let now_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let output = format!("{now_secs}\n10\t5\tsrc/a.ts\n");
+        let result = parse_git_log(&output, root);
+        let churn = result.get(&PathBuf::from("/project/src/a.ts")).unwrap();
+        assert!(
+            churn.weighted_commits > 0.0,
+            "weighted_commits should be positive for recent commits"
+        );
+    }
+
+    // ── compute_trend edge cases ─────────────────────────────────
+
+    #[test]
+    fn trend_boundary_1_5x_ratio() {
+        // Exactly 1.5x ratio (3 recent : 2 old) → boundary between stable and accelerating
+        // midpoint = 100 + (1000-100)/2 = 550
+        // old: 100, 200 (2 timestamps <= 550)
+        // recent: 600, 800, 1000 (3 timestamps > 550)
+        // ratio = 3/2 = 1.5 — NOT > 1.5, so stable
+        let timestamps = vec![100, 200, 600, 800, 1000];
+        assert_eq!(compute_trend(&timestamps), ChurnTrend::Stable);
+    }
+
+    #[test]
+    fn trend_just_above_1_5x() {
+        // midpoint = 100 + (1000-100)/2 = 550
+        // old: 100 (1 timestamp <= 550)
+        // recent: 600, 800, 1000 (3 timestamps > 550)
+        // ratio = 3/1 = 3.0 → accelerating
+        let timestamps = vec![100, 600, 800, 1000];
+        assert_eq!(compute_trend(&timestamps), ChurnTrend::Accelerating);
+    }
 }

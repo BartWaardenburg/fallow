@@ -244,4 +244,55 @@ mod tests {
         assert_eq!(rules.unused_types, Severity::Error);
         assert_eq!(rules.unresolved_imports, Severity::Error);
     }
+
+    #[test]
+    fn severity_display() {
+        assert_eq!(Severity::Error.to_string(), "error");
+        assert_eq!(Severity::Warn.to_string(), "warn");
+        assert_eq!(Severity::Off.to_string(), "off");
+    }
+
+    #[test]
+    fn apply_partial_all_none_changes_nothing() {
+        let mut rules = RulesConfig::default();
+        let original = rules.clone();
+        let partial = PartialRulesConfig::default(); // all None
+        rules.apply_partial(&partial);
+        assert_eq!(rules.unused_files, original.unused_files);
+        assert_eq!(rules.unused_exports, original.unused_exports);
+        assert_eq!(
+            rules.type_only_dependencies,
+            original.type_only_dependencies
+        );
+    }
+
+    #[test]
+    fn apply_partial_all_fields_set() {
+        let mut rules = RulesConfig::default();
+        let partial = PartialRulesConfig {
+            unused_files: Some(Severity::Off),
+            unused_exports: Some(Severity::Off),
+            unused_types: Some(Severity::Off),
+            unused_dependencies: Some(Severity::Off),
+            unused_dev_dependencies: Some(Severity::Off),
+            unused_optional_dependencies: Some(Severity::Off),
+            unused_enum_members: Some(Severity::Off),
+            unused_class_members: Some(Severity::Off),
+            unresolved_imports: Some(Severity::Off),
+            unlisted_dependencies: Some(Severity::Off),
+            duplicate_exports: Some(Severity::Off),
+            type_only_dependencies: Some(Severity::Off),
+            circular_dependencies: Some(Severity::Off),
+        };
+        rules.apply_partial(&partial);
+        assert_eq!(rules.unused_files, Severity::Off);
+        assert_eq!(rules.circular_dependencies, Severity::Off);
+        assert_eq!(rules.type_only_dependencies, Severity::Off);
+    }
+
+    #[test]
+    fn rules_config_defaults_include_optional_deps() {
+        let rules = RulesConfig::default();
+        assert_eq!(rules.unused_optional_dependencies, Severity::Error);
+    }
 }

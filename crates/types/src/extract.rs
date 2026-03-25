@@ -304,3 +304,146 @@ pub struct ParseResult {
     /// Number of files that required a full parse (new or changed).
     pub cache_misses: usize,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── compute_line_offsets ──────────────────────────────────────────
+
+    #[test]
+    fn line_offsets_empty_string() {
+        assert_eq!(compute_line_offsets(""), vec![0]);
+    }
+
+    #[test]
+    fn line_offsets_single_line_no_newline() {
+        assert_eq!(compute_line_offsets("hello"), vec![0]);
+    }
+
+    #[test]
+    fn line_offsets_single_line_with_newline() {
+        // "hello\n" => line 0 starts at 0, line 1 starts at 6
+        assert_eq!(compute_line_offsets("hello\n"), vec![0, 6]);
+    }
+
+    #[test]
+    fn line_offsets_multiple_lines() {
+        // "abc\ndef\nghi"
+        // line 0: offset 0 ("abc")
+        // line 1: offset 4 ("def")
+        // line 2: offset 8 ("ghi")
+        assert_eq!(compute_line_offsets("abc\ndef\nghi"), vec![0, 4, 8]);
+    }
+
+    #[test]
+    fn line_offsets_trailing_newline() {
+        // "abc\ndef\n"
+        // line 0: offset 0, line 1: offset 4, line 2: offset 8 (empty line after trailing \n)
+        assert_eq!(compute_line_offsets("abc\ndef\n"), vec![0, 4, 8]);
+    }
+
+    #[test]
+    fn line_offsets_consecutive_newlines() {
+        // "\n\n\n" = 3 newlines => 4 lines
+        assert_eq!(compute_line_offsets("\n\n\n"), vec![0, 1, 2, 3]);
+    }
+
+    #[test]
+    fn line_offsets_multibyte_utf8() {
+        // "á\n" => 'á' is 2 bytes (0xC3 0xA1), '\n' at byte 2 => next line at byte 3
+        assert_eq!(compute_line_offsets("á\n"), vec![0, 3]);
+    }
+
+    // ── byte_offset_to_line_col ──────────────────────────────────────
+
+    #[test]
+    fn line_col_offset_zero() {
+        let offsets = compute_line_offsets("abc\ndef\nghi");
+        let (line, col) = byte_offset_to_line_col(&offsets, 0);
+        assert_eq!((line, col), (1, 0)); // line 1, col 0
+    }
+
+    #[test]
+    fn line_col_middle_of_first_line() {
+        let offsets = compute_line_offsets("abc\ndef\nghi");
+        let (line, col) = byte_offset_to_line_col(&offsets, 2);
+        assert_eq!((line, col), (1, 2)); // 'c' in "abc"
+    }
+
+    #[test]
+    fn line_col_start_of_second_line() {
+        let offsets = compute_line_offsets("abc\ndef\nghi");
+        // byte 4 = start of "def"
+        let (line, col) = byte_offset_to_line_col(&offsets, 4);
+        assert_eq!((line, col), (2, 0));
+    }
+
+    #[test]
+    fn line_col_middle_of_second_line() {
+        let offsets = compute_line_offsets("abc\ndef\nghi");
+        // byte 5 = 'e' in "def"
+        let (line, col) = byte_offset_to_line_col(&offsets, 5);
+        assert_eq!((line, col), (2, 1));
+    }
+
+    #[test]
+    fn line_col_start_of_third_line() {
+        let offsets = compute_line_offsets("abc\ndef\nghi");
+        // byte 8 = start of "ghi"
+        let (line, col) = byte_offset_to_line_col(&offsets, 8);
+        assert_eq!((line, col), (3, 0));
+    }
+
+    #[test]
+    fn line_col_end_of_file() {
+        let offsets = compute_line_offsets("abc\ndef\nghi");
+        // byte 10 = 'i' (last char)
+        let (line, col) = byte_offset_to_line_col(&offsets, 10);
+        assert_eq!((line, col), (3, 2));
+    }
+
+    #[test]
+    fn line_col_single_line() {
+        let offsets = compute_line_offsets("hello");
+        let (line, col) = byte_offset_to_line_col(&offsets, 3);
+        assert_eq!((line, col), (1, 3));
+    }
+
+    #[test]
+    fn line_col_at_newline_byte() {
+        let offsets = compute_line_offsets("abc\ndef");
+        // byte 3 = the '\n' character itself, still part of line 1
+        let (line, col) = byte_offset_to_line_col(&offsets, 3);
+        assert_eq!((line, col), (1, 3));
+    }
+
+    // ── ExportName ───────────────────────────────────────────────────
+
+    #[test]
+    fn export_name_matches_str_named() {
+        let name = ExportName::Named("foo".to_string());
+        assert!(name.matches_str("foo"));
+        assert!(!name.matches_str("bar"));
+        assert!(!name.matches_str("default"));
+    }
+
+    #[test]
+    fn export_name_matches_str_default() {
+        let name = ExportName::Default;
+        assert!(name.matches_str("default"));
+        assert!(!name.matches_str("foo"));
+    }
+
+    #[test]
+    fn export_name_display_named() {
+        let name = ExportName::Named("myExport".to_string());
+        assert_eq!(name.to_string(), "myExport");
+    }
+
+    #[test]
+    fn export_name_display_default() {
+        let name = ExportName::Default;
+        assert_eq!(name.to_string(), "default");
+    }
+}

@@ -498,4 +498,131 @@ mod tests {
         // Other fields are default (Error) but have no issues
         assert!(!has_error_severity_issues(&results, &rules, None));
     }
+
+    // ── Override-aware tests ─────────────────────────────────────
+
+    /// Build a ResolvedConfig with overrides that turn off unused_exports for test files.
+    fn config_with_test_override() -> ResolvedConfig {
+        fallow_config::FallowConfig {
+            schema: None,
+            extends: vec![],
+            entry: vec![],
+            ignore_patterns: vec![],
+            framework: vec![],
+            workspaces: None,
+            ignore_dependencies: vec![],
+            ignore_exports: vec![],
+            duplicates: fallow_config::DuplicatesConfig::default(),
+            health: fallow_config::HealthConfig::default(),
+            rules: RulesConfig::default(), // all Error
+            production: false,
+            plugins: vec![],
+            overrides: vec![fallow_config::ConfigOverride {
+                files: vec!["**/*.test.ts".to_string()],
+                rules: fallow_config::PartialRulesConfig {
+                    unused_exports: Some(Severity::Off),
+                    ..Default::default()
+                },
+            }],
+        }
+        .resolve(
+            PathBuf::from("/project"),
+            fallow_config::OutputFormat::Human,
+            1,
+            true,
+            true,
+        )
+    }
+
+    #[test]
+    fn apply_rules_with_override_filters_matching_files() {
+        let mut results = AnalysisResults::default();
+        // Test file export — should be removed by override
+        results.unused_exports.push(UnusedExport {
+            path: PathBuf::from("/project/src/utils.test.ts"),
+            export_name: "testHelper".into(),
+            is_type_only: false,
+            line: 1,
+            col: 0,
+            span_start: 0,
+            is_re_export: false,
+        });
+        // Non-test file export — should be preserved
+        results.unused_exports.push(UnusedExport {
+            path: PathBuf::from("/project/src/utils.ts"),
+            export_name: "realExport".into(),
+            is_type_only: false,
+            line: 5,
+            col: 0,
+            span_start: 0,
+            is_re_export: false,
+        });
+
+        let config = config_with_test_override();
+        apply_rules(&mut results, &config);
+
+        assert_eq!(results.unused_exports.len(), 1);
+        assert_eq!(results.unused_exports[0].export_name, "realExport");
+    }
+
+    #[test]
+    fn apply_rules_with_override_preserves_non_matching_files() {
+        let mut results = AnalysisResults::default();
+        results.unused_files.push(UnusedFile {
+            path: PathBuf::from("/project/src/dead.ts"),
+        });
+
+        let config = config_with_test_override();
+        apply_rules(&mut results, &config);
+
+        // Override only affects unused_exports, unused_files should be untouched
+        assert_eq!(results.unused_files.len(), 1);
+    }
+
+    #[test]
+    fn has_error_with_override_per_file_resolution() {
+        let mut results = AnalysisResults::default();
+        // Only a test file has unused exports — override turns that off
+        results.unused_exports.push(UnusedExport {
+            path: PathBuf::from("/project/src/utils.test.ts"),
+            export_name: "testHelper".into(),
+            is_type_only: false,
+            line: 1,
+            col: 0,
+            span_start: 0,
+            is_re_export: false,
+        });
+
+        let config = config_with_test_override();
+        let rules = &config.rules;
+
+        // With overrides: the test file's effective severity is Off, so no Error issues
+        assert!(
+            !has_error_severity_issues(&results, rules, Some(&config)),
+            "test file override should suppress error"
+        );
+    }
+
+    #[test]
+    fn has_error_with_override_non_matching_file_still_error() {
+        let mut results = AnalysisResults::default();
+        // Non-test file — override doesn't match, base rules (Error) apply
+        results.unused_exports.push(UnusedExport {
+            path: PathBuf::from("/project/src/utils.ts"),
+            export_name: "realExport".into(),
+            is_type_only: false,
+            line: 1,
+            col: 0,
+            span_start: 0,
+            is_re_export: false,
+        });
+
+        let config = config_with_test_override();
+        let rules = &config.rules;
+
+        assert!(
+            has_error_severity_issues(&results, rules, Some(&config)),
+            "non-test file should still have Error severity"
+        );
+    }
 }

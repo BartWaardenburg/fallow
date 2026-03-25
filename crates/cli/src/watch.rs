@@ -81,6 +81,150 @@ fn print_waiting() {
     );
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use notify_debouncer_mini::{DebouncedEvent, DebouncedEventKind};
+
+    // ── is_relevant_source ───────────────────────────────────────────
+
+    #[test]
+    fn relevant_source_ts_extensions() {
+        assert!(is_relevant_source(Path::new("src/index.ts")));
+        assert!(is_relevant_source(Path::new("app.tsx")));
+        assert!(is_relevant_source(Path::new("lib/utils.mts")));
+        assert!(is_relevant_source(Path::new("lib/utils.cts")));
+    }
+
+    #[test]
+    fn relevant_source_js_extensions() {
+        assert!(is_relevant_source(Path::new("src/index.js")));
+        assert!(is_relevant_source(Path::new("app.jsx")));
+        assert!(is_relevant_source(Path::new("lib/utils.mjs")));
+        assert!(is_relevant_source(Path::new("lib/utils.cjs")));
+    }
+
+    #[test]
+    fn relevant_source_framework_extensions() {
+        assert!(is_relevant_source(Path::new("App.vue")));
+        assert!(is_relevant_source(Path::new("Page.svelte")));
+        assert!(is_relevant_source(Path::new("page.astro")));
+        assert!(is_relevant_source(Path::new("doc.mdx")));
+    }
+
+    #[test]
+    fn relevant_source_style_extensions() {
+        assert!(is_relevant_source(Path::new("styles.css")));
+        assert!(is_relevant_source(Path::new("theme.scss")));
+    }
+
+    #[test]
+    fn not_relevant_source() {
+        assert!(!is_relevant_source(Path::new("README.md")));
+        assert!(!is_relevant_source(Path::new("image.png")));
+        assert!(!is_relevant_source(Path::new("data.json")));
+        assert!(!is_relevant_source(Path::new("script.py")));
+        assert!(!is_relevant_source(Path::new("Cargo.toml")));
+        assert!(!is_relevant_source(Path::new("no_extension")));
+    }
+
+    // ── is_relevant_config ───────────────────────────────────────────
+
+    #[test]
+    fn relevant_config_files() {
+        assert!(is_relevant_config(Path::new("package.json")));
+        assert!(is_relevant_config(Path::new("/project/package.json")));
+        assert!(is_relevant_config(Path::new(".fallowrc.json")));
+        assert!(is_relevant_config(Path::new("fallow.toml")));
+        assert!(is_relevant_config(Path::new(".fallow.toml")));
+        assert!(is_relevant_config(Path::new("tsconfig.json")));
+    }
+
+    #[test]
+    fn not_relevant_config() {
+        assert!(!is_relevant_config(Path::new("eslint.config.js")));
+        assert!(!is_relevant_config(Path::new("jest.config.ts")));
+        assert!(!is_relevant_config(Path::new("package-lock.json")));
+        assert!(!is_relevant_config(Path::new("tsconfig.build.json")));
+        assert!(!is_relevant_config(Path::new("README.md")));
+    }
+
+    // ── collect_changed_paths ────────────────────────────────────────
+
+    fn make_event(path: &str, kind: DebouncedEventKind) -> DebouncedEvent {
+        DebouncedEvent {
+            path: PathBuf::from(path),
+            kind,
+        }
+    }
+
+    #[test]
+    fn collect_changed_paths_filters_non_source() {
+        let root = PathBuf::from("/project");
+        let events = vec![
+            make_event("/project/src/index.ts", DebouncedEventKind::Any),
+            make_event("/project/README.md", DebouncedEventKind::Any),
+            make_event("/project/image.png", DebouncedEventKind::Any),
+        ];
+        let paths = collect_changed_paths(&events, &root);
+        assert_eq!(paths, vec!["src/index.ts"]);
+    }
+
+    #[test]
+    fn collect_changed_paths_includes_config() {
+        let root = PathBuf::from("/project");
+        let events = vec![
+            make_event("/project/package.json", DebouncedEventKind::Any),
+            make_event("/project/.fallowrc.json", DebouncedEventKind::Any),
+        ];
+        let paths = collect_changed_paths(&events, &root);
+        assert_eq!(paths.len(), 2);
+        assert!(paths.contains(&"package.json".to_string()));
+        assert!(paths.contains(&".fallowrc.json".to_string()));
+    }
+
+    #[test]
+    fn collect_changed_paths_deduplicates() {
+        let root = PathBuf::from("/project");
+        let events = vec![
+            make_event("/project/src/index.ts", DebouncedEventKind::Any),
+            make_event("/project/src/index.ts", DebouncedEventKind::Any),
+            make_event("/project/src/index.ts", DebouncedEventKind::Any),
+        ];
+        let paths = collect_changed_paths(&events, &root);
+        assert_eq!(paths, vec!["src/index.ts"]);
+    }
+
+    #[test]
+    fn collect_changed_paths_ignores_non_any_events() {
+        let root = PathBuf::from("/project");
+        let events = vec![make_event(
+            "/project/src/index.ts",
+            DebouncedEventKind::AnyContinuous,
+        )];
+        let paths = collect_changed_paths(&events, &root);
+        assert!(paths.is_empty());
+    }
+
+    #[test]
+    fn collect_changed_paths_empty_events() {
+        let root = PathBuf::from("/project");
+        let paths = collect_changed_paths(&[], &root);
+        assert!(paths.is_empty());
+    }
+
+    #[test]
+    fn collect_changed_paths_strips_root_prefix() {
+        let root = PathBuf::from("/project");
+        let events = vec![make_event(
+            "/project/src/deep/nested/file.tsx",
+            DebouncedEventKind::Any,
+        )];
+        let paths = collect_changed_paths(&events, &root);
+        assert_eq!(paths, vec!["src/deep/nested/file.tsx"]);
+    }
+}
+
 pub fn run_watch(opts: &WatchOptions<'_>) -> ExitCode {
     use std::sync::mpsc;
     use std::time::Duration;

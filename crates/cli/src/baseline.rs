@@ -705,4 +705,81 @@ mod tests {
         let filtered = filter_new_health_findings(findings, &baseline, &root);
         assert_eq!(filtered.len(), 1);
     }
+
+    // ── circular_dep_key sort stability ─────────────────────────
+
+    #[test]
+    fn circular_dep_key_is_order_independent() {
+        use fallow_core::results::CircularDependency;
+
+        let dep_ab = CircularDependency {
+            files: vec![PathBuf::from("src/a.ts"), PathBuf::from("src/b.ts")],
+            length: 2,
+            line: 1,
+            col: 0,
+        };
+        let dep_ba = CircularDependency {
+            files: vec![PathBuf::from("src/b.ts"), PathBuf::from("src/a.ts")],
+            length: 2,
+            line: 1,
+            col: 0,
+        };
+        assert_eq!(
+            super::circular_dep_key(&dep_ab),
+            super::circular_dep_key(&dep_ba),
+            "same files in different order should produce identical keys"
+        );
+    }
+
+    #[test]
+    fn circular_dep_key_different_files_different_keys() {
+        use fallow_core::results::CircularDependency;
+
+        let dep1 = CircularDependency {
+            files: vec![PathBuf::from("src/a.ts"), PathBuf::from("src/b.ts")],
+            length: 2,
+            line: 1,
+            col: 0,
+        };
+        let dep2 = CircularDependency {
+            files: vec![PathBuf::from("src/a.ts"), PathBuf::from("src/c.ts")],
+            length: 2,
+            line: 1,
+            col: 0,
+        };
+        assert_ne!(
+            super::circular_dep_key(&dep1),
+            super::circular_dep_key(&dep2),
+        );
+    }
+
+    #[test]
+    fn circular_dep_key_three_files_order_independent() {
+        use fallow_core::results::CircularDependency;
+
+        let dep_abc = CircularDependency {
+            files: vec![
+                PathBuf::from("src/a.ts"),
+                PathBuf::from("src/b.ts"),
+                PathBuf::from("src/c.ts"),
+            ],
+            length: 3,
+            line: 1,
+            col: 0,
+        };
+        let dep_cab = CircularDependency {
+            files: vec![
+                PathBuf::from("src/c.ts"),
+                PathBuf::from("src/a.ts"),
+                PathBuf::from("src/b.ts"),
+            ],
+            length: 3,
+            line: 1,
+            col: 0,
+        };
+        assert_eq!(
+            super::circular_dep_key(&dep_abc),
+            super::circular_dep_key(&dep_cab),
+        );
+    }
 }

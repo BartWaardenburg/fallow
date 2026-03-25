@@ -612,6 +612,56 @@ mod tests {
     }
 
     #[test]
+    fn do_while_adds_1() {
+        let results = analyze("function foo() { do { } while (true); }");
+        let f = find_fn(&results, "foo");
+        assert_eq!(f.cyclomatic, 2);
+    }
+
+    #[test]
+    fn for_of_adds_1() {
+        let results = analyze("function foo(arr) { for (const x of arr) { } }");
+        let f = find_fn(&results, "foo");
+        assert_eq!(f.cyclomatic, 2);
+    }
+
+    #[test]
+    fn for_in_adds_1() {
+        let results = analyze("function foo(obj) { for (const k in obj) { } }");
+        let f = find_fn(&results, "foo");
+        assert_eq!(f.cyclomatic, 2);
+    }
+
+    #[test]
+    fn optional_chaining_adds_1() {
+        let results = analyze("function foo(obj) { return obj?.value; }");
+        let f = find_fn(&results, "foo");
+        assert_eq!(f.cyclomatic, 2); // 1 + ?.
+    }
+
+    #[test]
+    fn optional_chaining_computed_member_adds_1() {
+        let results = analyze("function foo(obj) { return obj?.[0]; }");
+        let f = find_fn(&results, "foo");
+        assert_eq!(f.cyclomatic, 2); // 1 + ?.[]
+    }
+
+    #[test]
+    fn optional_chaining_not_cognitive() {
+        // Optional chaining increments cyclomatic but NOT cognitive (Principle 3)
+        let results = analyze("function foo(obj) { return obj?.a?.b?.c; }");
+        let f = find_fn(&results, "foo");
+        assert!(
+            f.cyclomatic > 1,
+            "optional chaining should increment cyclomatic"
+        );
+        assert_eq!(
+            f.cognitive, 0,
+            "optional chaining should NOT increment cognitive"
+        );
+    }
+
+    #[test]
     fn complex_function_cyclomatic() {
         let results = analyze(
             r#"function complex(x, y) {

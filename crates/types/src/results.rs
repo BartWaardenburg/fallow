@@ -381,6 +381,17 @@ mod tests {
                 },
             ],
         });
+        results.unused_optional_dependencies.push(UnusedDependency {
+            package_name: "optional".to_string(),
+            location: DependencyLocation::OptionalDependencies,
+            path: PathBuf::from("package.json"),
+            line: 5,
+        });
+        results.type_only_dependencies.push(TypeOnlyDependency {
+            package_name: "type-only".to_string(),
+            path: PathBuf::from("package.json"),
+            line: 8,
+        });
         results.circular_dependencies.push(CircularDependency {
             files: vec![PathBuf::from("a.ts"), PathBuf::from("b.ts")],
             length: 2,
@@ -388,7 +399,8 @@ mod tests {
             col: 0,
         });
 
-        assert_eq!(results.total_issues(), 11);
+        // 13 categories, one of each
+        assert_eq!(results.total_issues(), 13);
         assert!(results.has_issues());
     }
 }

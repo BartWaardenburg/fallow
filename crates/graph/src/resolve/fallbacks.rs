@@ -631,4 +631,67 @@ mod tests {
             ".pnpm path with peer dep suffix should still resolve"
         );
     }
+
+    // ── make_glob_from_pattern ───────────────────────────────────────
+
+    #[test]
+    fn make_glob_prefix_only_no_suffix() {
+        let pattern = fallow_types::extract::DynamicImportPattern {
+            prefix: "./locales/".to_string(),
+            suffix: None,
+            span: oxc_span::Span::default(),
+        };
+        assert_eq!(make_glob_from_pattern(&pattern), "./locales/*");
+    }
+
+    #[test]
+    fn make_glob_prefix_with_suffix() {
+        let pattern = fallow_types::extract::DynamicImportPattern {
+            prefix: "./locales/".to_string(),
+            suffix: Some(".json".to_string()),
+            span: oxc_span::Span::default(),
+        };
+        assert_eq!(make_glob_from_pattern(&pattern), "./locales/*.json");
+    }
+
+    #[test]
+    fn make_glob_passthrough_star() {
+        // Prefix already contains glob characters — use as-is
+        let pattern = fallow_types::extract::DynamicImportPattern {
+            prefix: "./pages/**/*.tsx".to_string(),
+            suffix: None,
+            span: oxc_span::Span::default(),
+        };
+        assert_eq!(make_glob_from_pattern(&pattern), "./pages/**/*.tsx");
+    }
+
+    #[test]
+    fn make_glob_passthrough_brace() {
+        let pattern = fallow_types::extract::DynamicImportPattern {
+            prefix: "./i18n/{en,de,fr}.json".to_string(),
+            suffix: None,
+            span: oxc_span::Span::default(),
+        };
+        assert_eq!(make_glob_from_pattern(&pattern), "./i18n/{en,de,fr}.json");
+    }
+
+    #[test]
+    fn make_glob_empty_prefix_no_suffix() {
+        let pattern = fallow_types::extract::DynamicImportPattern {
+            prefix: String::new(),
+            suffix: None,
+            span: oxc_span::Span::default(),
+        };
+        assert_eq!(make_glob_from_pattern(&pattern), "*");
+    }
+
+    #[test]
+    fn make_glob_empty_prefix_with_suffix() {
+        let pattern = fallow_types::extract::DynamicImportPattern {
+            prefix: String::new(),
+            suffix: Some(".ts".to_string()),
+            span: oxc_span::Span::default(),
+        };
+        assert_eq!(make_glob_from_pattern(&pattern), "*.ts");
+    }
 }

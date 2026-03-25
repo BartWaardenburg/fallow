@@ -272,6 +272,146 @@ pub fn health_meta() -> Value {
     })
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── rule_by_id ───────────────────────────────────────────────────
+
+    #[test]
+    fn rule_by_id_finds_check_rule() {
+        let rule = rule_by_id("fallow/unused-file").unwrap();
+        assert_eq!(rule.name, "Unused Files");
+    }
+
+    #[test]
+    fn rule_by_id_finds_health_rule() {
+        let rule = rule_by_id("fallow/high-cyclomatic-complexity").unwrap();
+        assert_eq!(rule.name, "High Cyclomatic Complexity");
+    }
+
+    #[test]
+    fn rule_by_id_finds_dupes_rule() {
+        let rule = rule_by_id("fallow/code-duplication").unwrap();
+        assert_eq!(rule.name, "Code Duplication");
+    }
+
+    #[test]
+    fn rule_by_id_returns_none_for_unknown() {
+        assert!(rule_by_id("fallow/nonexistent").is_none());
+        assert!(rule_by_id("").is_none());
+    }
+
+    // ── rule_docs_url ────────────────────────────────────────────────
+
+    #[test]
+    fn rule_docs_url_format() {
+        let rule = rule_by_id("fallow/unused-export").unwrap();
+        let url = rule_docs_url(rule);
+        assert!(url.starts_with("https://docs.fallow.tools/"));
+        assert!(url.contains("unused-exports"));
+    }
+
+    // ── CHECK_RULES completeness ─────────────────────────────────────
+
+    #[test]
+    fn check_rules_all_have_fallow_prefix() {
+        for rule in CHECK_RULES {
+            assert!(
+                rule.id.starts_with("fallow/"),
+                "rule {} should start with fallow/",
+                rule.id
+            );
+        }
+    }
+
+    #[test]
+    fn check_rules_all_have_docs_path() {
+        for rule in CHECK_RULES {
+            assert!(
+                !rule.docs_path.is_empty(),
+                "rule {} should have a docs_path",
+                rule.id
+            );
+        }
+    }
+
+    #[test]
+    fn check_rules_no_duplicate_ids() {
+        let mut seen = std::collections::HashSet::new();
+        for rule in CHECK_RULES.iter().chain(HEALTH_RULES).chain(DUPES_RULES) {
+            assert!(seen.insert(rule.id), "duplicate rule id: {}", rule.id);
+        }
+    }
+
+    // ── check_meta ───────────────────────────────────────────────────
+
+    #[test]
+    fn check_meta_has_docs_and_rules() {
+        let meta = check_meta();
+        assert!(meta.get("docs").is_some());
+        assert!(meta.get("rules").is_some());
+        let rules = meta["rules"].as_object().unwrap();
+        // Verify all 13 rule categories are present (stripped fallow/ prefix)
+        assert_eq!(rules.len(), CHECK_RULES.len());
+        assert!(rules.contains_key("unused-file"));
+        assert!(rules.contains_key("unused-export"));
+        assert!(rules.contains_key("unused-type"));
+        assert!(rules.contains_key("unused-dependency"));
+        assert!(rules.contains_key("unused-dev-dependency"));
+        assert!(rules.contains_key("unused-optional-dependency"));
+        assert!(rules.contains_key("unused-enum-member"));
+        assert!(rules.contains_key("unused-class-member"));
+        assert!(rules.contains_key("unresolved-import"));
+        assert!(rules.contains_key("unlisted-dependency"));
+        assert!(rules.contains_key("duplicate-export"));
+        assert!(rules.contains_key("type-only-dependency"));
+        assert!(rules.contains_key("circular-dependency"));
+    }
+
+    #[test]
+    fn check_meta_rule_has_required_fields() {
+        let meta = check_meta();
+        let rules = meta["rules"].as_object().unwrap();
+        for (key, value) in rules {
+            assert!(value.get("name").is_some(), "rule {key} missing 'name'");
+            assert!(
+                value.get("description").is_some(),
+                "rule {key} missing 'description'"
+            );
+            assert!(value.get("docs").is_some(), "rule {key} missing 'docs'");
+        }
+    }
+
+    // ── health_meta ──────────────────────────────────────────────────
+
+    #[test]
+    fn health_meta_has_metrics() {
+        let meta = health_meta();
+        assert!(meta.get("docs").is_some());
+        let metrics = meta["metrics"].as_object().unwrap();
+        assert!(metrics.contains_key("cyclomatic"));
+        assert!(metrics.contains_key("cognitive"));
+        assert!(metrics.contains_key("maintainability_index"));
+        assert!(metrics.contains_key("complexity_density"));
+        assert!(metrics.contains_key("fan_in"));
+        assert!(metrics.contains_key("fan_out"));
+    }
+
+    // ── dupes_meta ───────────────────────────────────────────────────
+
+    #[test]
+    fn dupes_meta_has_metrics() {
+        let meta = dupes_meta();
+        assert!(meta.get("docs").is_some());
+        let metrics = meta["metrics"].as_object().unwrap();
+        assert!(metrics.contains_key("duplication_percentage"));
+        assert!(metrics.contains_key("token_count"));
+        assert!(metrics.contains_key("clone_groups"));
+        assert!(metrics.contains_key("clone_families"));
+    }
+}
+
 /// Build the `_meta` object for `fallow dupes --format json --explain`.
 pub fn dupes_meta() -> Value {
     json!({

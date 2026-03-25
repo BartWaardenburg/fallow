@@ -142,6 +142,10 @@ mod tests {
             Some(IssueKind::DuplicateExport)
         );
         assert_eq!(
+            IssueKind::parse("code-duplication"),
+            Some(IssueKind::CodeDuplication)
+        );
+        assert_eq!(
             IssueKind::parse("circular-dependency"),
             Some(IssueKind::CircularDependency)
         );
@@ -151,6 +155,23 @@ mod tests {
     fn issue_kind_from_str_unknown() {
         assert_eq!(IssueKind::parse("foo"), None);
         assert_eq!(IssueKind::parse(""), None);
+    }
+
+    #[test]
+    fn issue_kind_from_str_near_misses() {
+        // Case sensitivity — these should NOT match
+        assert_eq!(IssueKind::parse("Unused-File"), None);
+        assert_eq!(IssueKind::parse("UNUSED-EXPORT"), None);
+        // Typos / near-misses
+        assert_eq!(IssueKind::parse("unused_file"), None);
+        assert_eq!(IssueKind::parse("unused-files"), None);
+    }
+
+    #[test]
+    fn discriminant_out_of_range() {
+        assert_eq!(IssueKind::from_discriminant(0), None);
+        assert_eq!(IssueKind::from_discriminant(13), None);
+        assert_eq!(IssueKind::from_discriminant(u8::MAX), None);
     }
 
     #[test]
