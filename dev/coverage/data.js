@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1774429098960,
+  "lastUpdate": 1774429199017,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
@@ -1096,6 +1096,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/5867ace807e61bfa7458df8c94c972a4e9e3225d"
         },
         "date": 1774429098616,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 90.2,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "ecd5de1c2245b2d5bb187159a8ae81ae940bfc8b",
+          "message": "chore: add dependabot cooldown to fix zizmor security audit",
+          "timestamp": "2026-03-25T09:59:16+01:00",
+          "tree_id": "1c09236c1f4735c7aae68aba811d84f1be61daec",
+          "url": "https://github.com/fallow-rs/fallow/commit/ecd5de1c2245b2d5bb187159a8ae81ae940bfc8b"
+        },
+        "date": 1774429198437,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
