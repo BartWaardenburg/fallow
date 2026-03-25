@@ -1,6 +1,6 @@
 {
   "name": "fallow",
-  "version": "1.9.0",
+  "version": "2.0.0",
   "description": "Find unused code, circular dependencies, code duplication, and complexity hotspots in TypeScript/JavaScript projects",
   "license": "MIT",
   "repository": {
@@ -39,12 +39,12 @@
     "detect-libc": "^2.0.0"
   },
   "optionalDependencies": {
-    "@fallow-cli/darwin-arm64": "1.9.0",
-    "@fallow-cli/darwin-x64": "1.9.0",
-    "@fallow-cli/linux-x64-gnu": "1.9.0",
-    "@fallow-cli/linux-arm64-gnu": "1.9.0",
-    "@fallow-cli/linux-x64-musl": "1.9.0",
-    "@fallow-cli/linux-arm64-musl": "1.9.0",
-    "@fallow-cli/win32-x64-msvc": "1.9.0"
+    "@fallow-cli/darwin-arm64": "2.0.0",
+    "@fallow-cli/darwin-x64": "2.0.0",
+    "@fallow-cli/linux-x64-gnu": "2.0.0",
+    "@fallow-cli/linux-arm64-gnu": "2.0.0",
+    "@fallow-cli/linux-x64-musl": "2.0.0",
+    "@fallow-cli/linux-arm64-musl": "2.0.0",
+    "@fallow-cli/win32-x64-msvc": "2.0.0"
   }
 }

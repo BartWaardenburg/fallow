@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-03-25
+
+### Breaking
+
+- **Bare `fallow` now runs all analyses** (check + dupes + health). Previously it ran only dead code analysis. Use `fallow dead-code` or `fallow --only check` for the old behavior.
+- **`check` renamed to `dead-code`**: `fallow dead-code` is now the canonical name for dead code analysis. `fallow check` remains as a hidden alias for backwards compatibility.
+- **`--ci`, `--fail-on-issues`, `--sarif-file` are now global flags**: work with all commands (check, dupes, health, bare). Previously check-only.
+- **Combined JSON output**: bare `fallow --format json` produces `{ "check": {...}, "dupes": {...}, "health": {...} }` instead of a flat check-only object.
+- **Combined SARIF output**: bare `fallow --format sarif` produces a multi-run SARIF document with one run per analysis.
+- **MCP server tools** now use `dead-code` subcommand internally.
+
+### Added
+
+- **Combined analysis command**: bare `fallow` runs dead code + duplication + complexity in a single invocation with combined output across all 5 formats
+- **`--only` / `--skip` flags**: select which analyses to run when using bare `fallow` (e.g., `fallow --only check,dupes`, `fallow --skip health`)
+- **`dead-code` command alias**: `fallow dead-code` as the canonical name for dead code analysis (replaces `check`)
+- **`--ci` on all commands**: `fallow dupes --ci` and `fallow health --ci` now work (SARIF + quiet + fail-on-issues)
+- **Vital signs snapshots** (`fallow health --save-snapshot`): save codebase health metrics for trend tracking
+- **Execute/run split**: internal refactor enabling combined mode — `execute_check`, `execute_dupes`, `execute_health` return results without printing
+
+### Changed
+
+- Codebase refactored: 10 large files split into focused submodules for maintainability
+
 ## [1.9.0] - 2026-03-25
 
 ### Added
@@ -375,7 +399,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[Unreleased]: https://github.com/fallow-rs/fallow/compare/v1.9.0...HEAD
+[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.0.0...HEAD
+[2.0.0]: https://github.com/fallow-rs/fallow/compare/v1.9.0...v2.0.0
 [1.9.0]: https://github.com/fallow-rs/fallow/compare/v1.8.1...v1.9.0
 [1.8.1]: https://github.com/fallow-rs/fallow/compare/v1.8.0...v1.8.1
 [1.8.0]: https://github.com/fallow-rs/fallow/compare/v1.7.0...v1.8.0

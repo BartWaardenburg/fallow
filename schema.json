@@ -1,3 +1,11 @@
+   Compiling fallow-types v2.0.0 (/Users/bartwaardenburg/Sites/fallow/crates/types)
+   Compiling fallow-config v2.0.0 (/Users/bartwaardenburg/Sites/fallow/crates/config)
+   Compiling fallow-extract v2.0.0 (/Users/bartwaardenburg/Sites/fallow/crates/extract)
+   Compiling fallow-graph v2.0.0 (/Users/bartwaardenburg/Sites/fallow/crates/graph)
+   Compiling fallow-core v2.0.0 (/Users/bartwaardenburg/Sites/fallow/crates/core)
+   Compiling fallow-cli v2.0.0 (/Users/bartwaardenburg/Sites/fallow/crates/cli)
+    Finished `dev` profile [unoptimized] target(s) in 7.12s
+     Running `target/debug/fallow config-schema`
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "FallowConfig",
