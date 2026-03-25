@@ -1,5 +1,5 @@
-name: 'Fallow - Dead Code Analysis'
-description: 'Find unused files, exports, dependencies, code duplication, and complexity hotspots in TypeScript/JavaScript projects.'
+name: 'Fallow - Codebase Health'
+description: 'Find unused code, code duplication, circular dependencies, and complexity hotspots in TypeScript/JavaScript projects.'
 author: 'Bart Waardenburg'
 
 branding:
