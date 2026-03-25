@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1774451289106,
+  "lastUpdate": 1774455609545,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
@@ -1241,6 +1241,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/46742ccb2fcbbf94530539da650b33b871a43acb"
         },
         "date": 1774451288096,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 90,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "e2532d0dcdf3aee2e9a0db9763978cc4a3fd4e3a",
+          "message": "chore: run conformance suite daily instead of weekly",
+          "timestamp": "2026-03-25T17:17:11+01:00",
+          "tree_id": "b1e0d46c40d9e2e8d46de4c9ac8d4d87187be688",
+          "url": "https://github.com/fallow-rs/fallow/commit/e2532d0dcdf3aee2e9a0db9763978cc4a3fd4e3a"
+        },
+        "date": 1774455609130,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
