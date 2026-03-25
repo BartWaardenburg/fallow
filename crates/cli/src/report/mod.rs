@@ -225,7 +225,9 @@ pub fn print_performance(timings: &PipelineTimings, format: &OutputFormat) {
     }
 }
 
-// Re-exported for snapshot testing via the lib target
+// Re-exported for snapshot testing via the lib target.
+// Uses #[allow] instead of #[expect] because unused_imports is target-dependent
+// (used in lib target, unused in bin target — #[expect] would be unfulfilled in one).
 #[allow(unused_imports)]
 pub use compact::build_compact_lines;
 #[allow(unused_imports)]

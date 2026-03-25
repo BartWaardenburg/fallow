@@ -349,4 +349,90 @@ mod tests {
         assert!(!affected.contains(&0)); // Group 0 not affected
         assert!(affected.contains(&1)); // Group 1 has clone in unused file
     }
+
+    #[test]
+    fn unused_file_takes_priority_over_export() {
+        // If a file is unused AND has unused exports, we should only get the
+        // UnusedFile finding (not both), because the continue skips export checks.
+        let duplication = DuplicationReport {
+            clone_groups: vec![make_group(vec![
+                make_instance("src/a.ts", 5, 15),
+                make_instance("src/b.ts", 5, 15),
+            ])],
+            clone_families: vec![],
+            stats: crate::duplicates::types::DuplicationStats {
+                total_files: 2,
+                files_with_clones: 2,
+                total_lines: 20,
+                duplicated_lines: 10,
+                total_tokens: 100,
+                duplicated_tokens: 50,
+                clone_groups: 1,
+                clone_instances: 2,
+                duplication_percentage: 50.0,
+            },
+        };
+        let mut dead_code = AnalysisResults::default();
+        dead_code.unused_files.push(UnusedFile {
+            path: PathBuf::from("src/a.ts"),
+        });
+        dead_code.unused_exports.push(UnusedExport {
+            path: PathBuf::from("src/a.ts"),
+            export_name: "foo".to_string(),
+            is_type_only: false,
+            line: 10,
+            col: 0,
+            span_start: 0,
+            is_re_export: false,
+        });
+
+        let result = cross_reference(&duplication, &dead_code);
+        // Only 1 finding for src/a.ts (the unused file), not 2
+        let a_findings: Vec<_> = result
+            .combined_findings
+            .iter()
+            .filter(|f| f.clone_instance.file == PathBuf::from("src/a.ts"))
+            .collect();
+        assert_eq!(a_findings.len(), 1);
+        assert_eq!(a_findings[0].dead_code_kind, DeadCodeKind::UnusedFile);
+    }
+
+    #[test]
+    fn detects_clone_overlapping_unused_type() {
+        let duplication = DuplicationReport {
+            clone_groups: vec![make_group(vec![
+                make_instance("src/types.ts", 1, 20),
+                make_instance("src/other.ts", 1, 20),
+            ])],
+            clone_families: vec![],
+            stats: crate::duplicates::types::DuplicationStats {
+                total_files: 2,
+                files_with_clones: 2,
+                total_lines: 40,
+                duplicated_lines: 20,
+                total_tokens: 100,
+                duplicated_tokens: 50,
+                clone_groups: 1,
+                clone_instances: 2,
+                duplication_percentage: 50.0,
+            },
+        };
+        let mut dead_code = AnalysisResults::default();
+        dead_code.unused_types.push(UnusedExport {
+            path: PathBuf::from("src/types.ts"),
+            export_name: "OldInterface".to_string(),
+            is_type_only: true,
+            line: 10,
+            col: 0,
+            span_start: 0,
+            is_re_export: false,
+        });
+
+        let result = cross_reference(&duplication, &dead_code);
+        assert!(result.has_findings());
+        assert!(matches!(
+            &result.combined_findings[0].dead_code_kind,
+            DeadCodeKind::UnusedType { type_name } if type_name == "OldInterface"
+        ));
+    }
 }

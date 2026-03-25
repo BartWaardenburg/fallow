@@ -18,7 +18,7 @@ pub struct HashedToken {
 /// Tokens that should be skipped (based on mode) are excluded from the output.
 pub fn normalize_and_hash(tokens: &[SourceToken], mode: DetectionMode) -> Vec<HashedToken> {
     let resolved = ResolvedNormalization::resolve(mode, &NormalizationConfig::default());
-    normalize_and_hash_resolved(tokens, &resolved)
+    normalize_and_hash_resolved(tokens, resolved)
 }
 
 /// Normalize and hash with explicit resolved normalization flags.
@@ -26,12 +26,12 @@ pub fn normalize_and_hash(tokens: &[SourceToken], mode: DetectionMode) -> Vec<Ha
 /// This is the primary normalization entry point when using configurable overrides.
 pub fn normalize_and_hash_resolved(
     tokens: &[SourceToken],
-    normalization: &ResolvedNormalization,
+    normalization: ResolvedNormalization,
 ) -> Vec<HashedToken> {
     let mut result = Vec::with_capacity(tokens.len());
 
     for (i, token) in tokens.iter().enumerate() {
-        let hash = hash_token_resolved(&token.kind, *normalization);
+        let hash = hash_token_resolved(&token.kind, normalization);
         result.push(HashedToken {
             hash,
             original_index: i,
@@ -232,7 +232,7 @@ mod tests {
             make_token(TokenKind::Identifier("bar".to_string())),
         ];
 
-        let hashed = normalize_and_hash_resolved(&tokens, &norm);
+        let hashed = normalize_and_hash_resolved(&tokens, norm);
         assert_eq!(hashed.len(), 2);
         // Identifiers should be blinded
         assert_eq!(hashed[0].hash, hashed[1].hash);
@@ -250,7 +250,7 @@ mod tests {
             make_token(TokenKind::StringLiteral("world".to_string())),
         ];
 
-        let hashed = normalize_and_hash_resolved(&tokens, &norm);
+        let hashed = normalize_and_hash_resolved(&tokens, norm);
         assert_eq!(hashed[0].hash, hashed[1].hash);
     }
 
@@ -266,7 +266,7 @@ mod tests {
             make_token(TokenKind::NumericLiteral("99".to_string())),
         ];
 
-        let hashed = normalize_and_hash_resolved(&tokens, &norm);
+        let hashed = normalize_and_hash_resolved(&tokens, norm);
         assert_eq!(hashed[0].hash, hashed[1].hash);
     }
 
@@ -283,7 +283,7 @@ mod tests {
             make_token(TokenKind::Identifier("bar".to_string())),
         ];
 
-        let hashed = normalize_and_hash_resolved(&tokens, &norm);
+        let hashed = normalize_and_hash_resolved(&tokens, norm);
         // Identifiers should be preserved (different hashes)
         assert_ne!(hashed[0].hash, hashed[1].hash);
     }
@@ -391,10 +391,10 @@ mod tests {
                 norm in arb_normalization(),
             ) {
                 let token = make_token(kind);
-                let first = normalize_and_hash_resolved(&[token.clone()], &norm);
+                let first = normalize_and_hash_resolved(&[token.clone()], norm);
                 // The hash is computed directly from the token kind + normalization flags.
                 // Running it again on the same input must yield the same hash.
-                let second = normalize_and_hash_resolved(&[token], &norm);
+                let second = normalize_and_hash_resolved(&[token], norm);
                 prop_assert_eq!(first.len(), second.len());
                 for (a, b) in first.iter().zip(second.iter()) {
                     prop_assert_eq!(a.hash, b.hash, "Normalization should be idempotent");
@@ -438,7 +438,7 @@ mod tests {
                 norm in arb_normalization(),
             ) {
                 let tokens: Vec<SourceToken> = kinds.into_iter().map(make_token).collect();
-                let result = normalize_and_hash_resolved(&tokens, &norm);
+                let result = normalize_and_hash_resolved(&tokens, norm);
                 for (i, hashed) in result.iter().enumerate() {
                     prop_assert_eq!(hashed.original_index, i);
                 }

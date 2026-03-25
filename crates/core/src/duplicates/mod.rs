@@ -93,7 +93,7 @@ pub fn find_duplicates(
             }
 
             // Normalize and hash using resolved normalization flags
-            let hashed = normalize_and_hash_resolved(&file_tokens.tokens, &normalization);
+            let hashed = normalize_and_hash_resolved(&file_tokens.tokens, normalization);
             if hashed.len() < config.min_tokens {
                 return None;
             }

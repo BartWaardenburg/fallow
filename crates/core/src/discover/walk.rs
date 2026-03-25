@@ -173,4 +173,84 @@ mod tests {
         assert!(!is_allowed_hidden_dir(OsStr::new("src")));
         assert!(!is_allowed_hidden_dir(OsStr::new("node_modules")));
     }
+
+    // SOURCE_EXTENSIONS tests
+    #[test]
+    fn source_extensions_include_typescript() {
+        assert!(SOURCE_EXTENSIONS.contains(&"ts"));
+        assert!(SOURCE_EXTENSIONS.contains(&"tsx"));
+        assert!(SOURCE_EXTENSIONS.contains(&"mts"));
+        assert!(SOURCE_EXTENSIONS.contains(&"cts"));
+    }
+
+    #[test]
+    fn source_extensions_include_javascript() {
+        assert!(SOURCE_EXTENSIONS.contains(&"js"));
+        assert!(SOURCE_EXTENSIONS.contains(&"jsx"));
+        assert!(SOURCE_EXTENSIONS.contains(&"mjs"));
+        assert!(SOURCE_EXTENSIONS.contains(&"cjs"));
+    }
+
+    #[test]
+    fn source_extensions_include_sfc_formats() {
+        assert!(SOURCE_EXTENSIONS.contains(&"vue"));
+        assert!(SOURCE_EXTENSIONS.contains(&"svelte"));
+        assert!(SOURCE_EXTENSIONS.contains(&"astro"));
+    }
+
+    #[test]
+    fn source_extensions_include_styles() {
+        assert!(SOURCE_EXTENSIONS.contains(&"css"));
+        assert!(SOURCE_EXTENSIONS.contains(&"scss"));
+    }
+
+    #[test]
+    fn source_extensions_exclude_non_source() {
+        assert!(!SOURCE_EXTENSIONS.contains(&"json"));
+        assert!(!SOURCE_EXTENSIONS.contains(&"html"));
+        assert!(!SOURCE_EXTENSIONS.contains(&"yaml"));
+        assert!(!SOURCE_EXTENSIONS.contains(&"md"));
+        assert!(!SOURCE_EXTENSIONS.contains(&"png"));
+    }
+
+    // PRODUCTION_EXCLUDE_PATTERNS tests
+    #[test]
+    fn production_excludes_test_patterns() {
+        let has_test_pattern = PRODUCTION_EXCLUDE_PATTERNS
+            .iter()
+            .any(|p| p.contains("test") || p.contains("spec"));
+        assert!(has_test_pattern, "should exclude test files in production");
+    }
+
+    #[test]
+    fn production_excludes_story_patterns() {
+        let has_story_pattern = PRODUCTION_EXCLUDE_PATTERNS
+            .iter()
+            .any(|p| p.contains("stories") || p.contains("story"));
+        assert!(
+            has_story_pattern,
+            "should exclude story files in production"
+        );
+    }
+
+    #[test]
+    fn production_excludes_config_patterns() {
+        let has_config_pattern = PRODUCTION_EXCLUDE_PATTERNS
+            .iter()
+            .any(|p| p.contains("config"));
+        assert!(
+            has_config_pattern,
+            "should exclude config files in production"
+        );
+    }
+
+    #[test]
+    fn production_patterns_are_valid_globs() {
+        for pattern in PRODUCTION_EXCLUDE_PATTERNS {
+            assert!(
+                globset::Glob::new(pattern).is_ok(),
+                "pattern '{pattern}' should be a valid glob"
+            );
+        }
+    }
 }

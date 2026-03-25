@@ -350,4 +350,49 @@ mod tests {
         let err = FallowError::resolve("a.ts", "./b");
         assert!(err.help().unwrap().contains("installed"));
     }
+
+    // ── std::error::Error trait ─────────────────────────────────
+
+    #[test]
+    fn file_read_error_has_source() {
+        let err = FallowError::file_read(
+            "a.ts",
+            std::io::Error::new(std::io::ErrorKind::NotFound, "missing"),
+        );
+        assert!(
+            std::error::Error::source(&err).is_some(),
+            "FileReadError should expose the underlying io::Error"
+        );
+    }
+
+    #[test]
+    fn non_io_errors_have_no_source() {
+        let err = FallowError::config("bad");
+        assert!(std::error::Error::source(&err).is_none());
+
+        let err = FallowError::resolve("a.ts", "./b");
+        assert!(std::error::Error::source(&err).is_none());
+
+        let err = FallowError::parse("a.ts", vec!["err".into()]);
+        assert!(std::error::Error::source(&err).is_none());
+    }
+
+    // ── Parse error edge cases ──────────────────────────────────
+
+    #[test]
+    fn parse_single_error_no_count() {
+        let err = FallowError::parse("bad.ts", vec!["unexpected token".into()]);
+        let msg = format!("{err}");
+        // Single error: no "(N errors)" suffix
+        assert!(!msg.contains("errors)"));
+        assert!(msg.contains("Parse error in"));
+    }
+
+    #[test]
+    fn parse_zero_errors_no_count() {
+        let err = FallowError::parse("bad.ts", vec![]);
+        let msg = format!("{err}");
+        assert!(!msg.contains("errors)"));
+        assert!(msg.contains("Parse error in"));
+    }
 }

@@ -146,6 +146,7 @@ unsafe_code = "warn"
 unsafe_op_in_unsafe_fn = "warn"         # Require unsafe blocks even inside unsafe fn
 unused_unsafe = "warn"                  # Catch unnecessary unsafe blocks
 non_ascii_idents = "warn"              # Prevent non-ASCII identifiers
+unit_bindings = "warn"                 # Catch useless `let _ = expr` bindings
 
 # Dev profile: disable debug info for faster builds
 [profile.dev]
