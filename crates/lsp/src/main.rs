@@ -44,6 +44,8 @@ struct FallowLspServer {
     documents: Arc<RwLock<FxHashMap<Url, String>>>,
     /// Diagnostic codes to suppress (parsed from initializationOptions.issueTypes)
     disabled_diagnostic_codes: Arc<RwLock<FxHashSet<String>>>,
+    /// Cached diagnostics for pull-model support (textDocument/diagnostic)
+    cached_diagnostics: Arc<RwLock<FxHashMap<Url, Vec<Diagnostic>>>>,
 }
 
 #[tower_lsp::async_trait]
@@ -269,6 +271,30 @@ impl LanguageServer for FallowLspServer {
 }
 
 impl FallowLspServer {
+    /// Pull-model diagnostic handler (textDocument/diagnostic, LSP 3.17).
+    /// Returns cached diagnostics for the requested document.
+    async fn diagnostic(
+        &self,
+        params: DocumentDiagnosticParams,
+    ) -> Result<DocumentDiagnosticReportResult> {
+        let uri = params.text_document.uri;
+        let items = self
+            .cached_diagnostics
+            .read()
+            .await
+            .get(&uri)
+            .cloned()
+            .unwrap_or_default();
+        Ok(DocumentDiagnosticReportResult::Report(
+            DocumentDiagnosticReport::Full(RelatedFullDocumentDiagnosticReport {
+                related_documents: None,
+                full_document_diagnostic_report: FullDocumentDiagnosticReport {
+                    result_id: None,
+                    items,
+                },
+            }),
+        ))
+    }
     async fn run_analysis(&self) {
         let root = self.root.read().await.clone();
         let Some(root) = root else { return };
@@ -360,8 +386,14 @@ impl FallowLspServer {
             // only fires for URIs that truly disappeared from results
             new_uris.insert(uri.clone());
             self.client
-                .publish_diagnostics(uri.clone(), filtered, None)
+                .publish_diagnostics(uri.clone(), filtered.clone(), None)
                 .await;
+
+            // Cache for pull-model requests (textDocument/diagnostic)
+            self.cached_diagnostics
+                .write()
+                .await
+                .insert(uri.clone(), filtered);
         }
 
         // Clear stale diagnostics: send empty arrays for URIs that had diagnostics
@@ -392,7 +424,7 @@ async fn main() {
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
 
-    let (service, socket) = LspService::new(|client| FallowLspServer {
+    let (service, socket) = LspService::build(|client| FallowLspServer {
         client,
         root: Arc::new(RwLock::new(None)),
         results: Arc::new(RwLock::new(None)),
@@ -406,7 +438,10 @@ async fn main() {
         analysis_guard: Arc::new(tokio::sync::Mutex::new(())),
         documents: Arc::new(RwLock::new(FxHashMap::default())),
         disabled_diagnostic_codes: Arc::new(RwLock::new(FxHashSet::default())),
-    });
+        cached_diagnostics: Arc::new(RwLock::new(FxHashMap::default())),
+    })
+    .custom_method("textDocument/diagnostic", FallowLspServer::diagnostic)
+    .finish();
 
     Server::new(stdin, stdout, socket).serve(service).await;
 }
