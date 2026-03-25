@@ -101,12 +101,15 @@ fallow health --changed-since main     # Only analyze changed files
 fallow health --file-scores            # Per-file maintainability index (0–100)
 fallow health --hotspots               # Identify riskiest files (churn × complexity)
 fallow health --hotspots --since 3m    # Hotspots from the last 3 months
+fallow health --targets                # Ranked refactoring recommendations
 fallow health --format json            # Machine-readable output
 ```
 
 `--file-scores` computes a per-file maintainability index combining complexity density, dead code ratio (value exports only, excluding types), and coupling (fan-out with logarithmic scaling). Barrel files are excluded by default. Formula: `100 - (complexity_density × 30) - (dead_code_ratio × 20) - min(ln(fan_out+1) × 4, 15)`, clamped to 0–100. Higher is better.
 
 `--hotspots` combines git churn with complexity to answer "where should we spend refactoring budget?" Score: `normalized_churn × normalized_complexity × 100` (0–100, higher = riskier). Churn uses recency-weighted commit count (half-life 90 days). Fan-in shown as "blast radius" column. Accepts `--since` (durations like `6m`/`90d`/`1y` or ISO dates, default 6 months) and `--min-commits` (default 3). Trend detection labels files as accelerating, stable, or cooling.
+
+`--targets` produces ranked refactoring recommendations by combining complexity, coupling, churn, and dead code signals. Each target has a priority score (0–100) and a one-line actionable recommendation. Categories: split high-impact files, remove dead code, extract complex functions, reduce coupling, break circular dependencies, and urgent churn+complexity. Priority formula: `min(density, 1) × 30 + hotspot_boost × 25 + dead_code_ratio × 20 + fan_in_norm × 15 + fan_out_norm × 10` — avoids double-counting with the maintainability index.
 
 ## Benchmarks
 
@@ -175,13 +178,13 @@ node bench-circular.mjs              # Run circular dep benchmarks (fallow vs ma
 | Speed vs knip v6 | **3-18x faster** | Baseline |
 | Memory usage | **3-11x less** | Baseline |
 | Dead code detection | 13 issue types | Comparable |
-| Complexity analysis | Built-in (cyclomatic + cognitive, file scores, hotspots) | Not included |
+| Complexity analysis | Built-in (cyclomatic + cognitive, file scores, hotspots, refactoring targets) | Not included |
 | Duplication detection | Built-in | Not included |
 | Framework plugins | 84 (31 with config parsing) | 140+ (runtime config loading) |
 | Runtime dependency | None (standalone binary) | Node.js |
 | Config format | JSONC, JSON, TOML | JSON |
 
-knip is a good tool with broader framework coverage. fallow covers the most popular frameworks and adds speed, duplication detection, complexity analysis with hotspot detection, git-aware analysis (`--changed-since`), baseline comparison (`--baseline`), and SARIF output for GitHub Code Scanning.
+knip is a good tool with broader framework coverage. fallow covers the most popular frameworks and adds speed, duplication detection, complexity analysis with hotspot detection and refactoring targets, git-aware analysis (`--changed-since`), baseline comparison (`--baseline`), and SARIF output for GitHub Code Scanning.
 
 ## Comparison with jscpd
 

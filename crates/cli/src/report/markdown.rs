@@ -362,7 +362,11 @@ pub fn build_health_markdown(report: &crate::health_types::HealthReport, root: &
 
     let mut out = String::new();
 
-    if report.findings.is_empty() && report.file_scores.is_empty() && report.hotspots.is_empty() {
+    if report.findings.is_empty()
+        && report.file_scores.is_empty()
+        && report.hotspots.is_empty()
+        && report.targets.is_empty()
+    {
         let _ = write!(
             out,
             "## Fallow: no functions exceed complexity thresholds\n\n\
@@ -501,10 +505,31 @@ pub fn build_health_markdown(report: &crate::health_types::HealthReport, root: &
         }
     }
 
+    // Refactoring targets
+    if !report.targets.is_empty() {
+        let _ = write!(
+            out,
+            "\n### Refactoring Targets ({})\n\n",
+            report.targets.len()
+        );
+        out.push_str("| Priority | Category | File | Recommendation |\n");
+        out.push_str("|----------|----------|------|----------------|\n");
+        for target in &report.targets {
+            let file_str = normalize_uri(&relative_path(&target.path, root).display().to_string());
+            let category = target.category.label();
+            let _ = writeln!(
+                out,
+                "| {:.1} | {category} | `{file_str}` | {} |",
+                target.priority, target.recommendation,
+            );
+        }
+    }
+
     // Metric legend — explains abbreviations used in the tables above
     let has_scores = !report.file_scores.is_empty();
     let has_hotspots = !report.hotspots.is_empty();
-    if has_scores || has_hotspots {
+    let has_targets = !report.targets.is_empty();
+    if has_scores || has_hotspots || has_targets {
         out.push_str("\n---\n\n<details><summary>Metric definitions</summary>\n\n");
         if has_scores {
             out.push_str("- **MI** — Maintainability Index (0\u{2013}100, higher is better)\n");
@@ -520,6 +545,10 @@ pub fn build_health_markdown(report: &crate::health_types::HealthReport, root: &
             out.push_str("- **Commits** — commits in the analysis window\n");
             out.push_str("- **Churn** — total lines added + deleted\n");
             out.push_str("- **Trend** — accelerating / stable / cooling\n");
+        }
+        if has_targets {
+            out.push_str("- **Priority** — weighted refactoring urgency (0\u{2013}100, higher = more urgent)\n");
+            out.push_str("- **Category** — recommendation type (churn+complexity, high impact, dead code, complexity, coupling, circular dep)\n");
         }
         out.push_str("\n[Full metric reference](https://docs.fallow.tools/explanations/metrics)\n\n</details>\n");
     }
@@ -936,6 +965,7 @@ mod tests {
             file_scores: vec![],
             hotspots: vec![],
             hotspot_summary: None,
+            targets: vec![],
         };
         let md = build_health_markdown(&report, &root);
         assert!(md.contains("no functions exceed complexity thresholds"));
@@ -968,6 +998,7 @@ mod tests {
             file_scores: vec![],
             hotspots: vec![],
             hotspot_summary: None,
+            targets: vec![],
         };
         let md = build_health_markdown(&report, &root);
         assert!(md.contains("## Fallow: 1 high complexity function\n"));
@@ -1005,11 +1036,72 @@ mod tests {
             file_scores: vec![],
             hotspots: vec![],
             hotspot_summary: None,
+            targets: vec![],
         };
         let md = build_health_markdown(&report, &root);
         // Cyclomatic 15 is below threshold 20, no marker
         assert!(md.contains("| 15 |"));
         // Cognitive 20 exceeds threshold 15, has marker
         assert!(md.contains("20 **!**"));
+    }
+
+    #[test]
+    fn health_markdown_with_targets() {
+        use crate::health_types::*;
+
+        let root = PathBuf::from("/project");
+        let report = HealthReport {
+            findings: vec![],
+            summary: HealthSummary {
+                files_analyzed: 10,
+                functions_analyzed: 50,
+                functions_above_threshold: 0,
+                max_cyclomatic_threshold: 20,
+                max_cognitive_threshold: 15,
+                files_scored: None,
+                average_maintainability: None,
+            },
+            file_scores: vec![],
+            hotspots: vec![],
+            hotspot_summary: None,
+            targets: vec![
+                RefactoringTarget {
+                    path: PathBuf::from("/project/src/complex.ts"),
+                    priority: 82.5,
+                    recommendation: "Split high-impact file".into(),
+                    category: RecommendationCategory::SplitHighImpact,
+                    factors: vec![ContributingFactor {
+                        metric: "fan_in",
+                        value: 25.0,
+                        threshold: 10.0,
+                        detail: "25 files depend on this".into(),
+                    }],
+                },
+                RefactoringTarget {
+                    path: PathBuf::from("/project/src/legacy.ts"),
+                    priority: 45.0,
+                    recommendation: "Remove 5 unused exports".into(),
+                    category: RecommendationCategory::RemoveDeadCode,
+                    factors: vec![],
+                },
+            ],
+        };
+        let md = build_health_markdown(&report, &root);
+
+        // Should have refactoring targets section
+        assert!(
+            md.contains("Refactoring Targets"),
+            "should contain targets heading"
+        );
+        assert!(
+            md.contains("src/complex.ts"),
+            "should contain target file path"
+        );
+        assert!(md.contains("82.5"), "should contain priority score");
+        assert!(
+            md.contains("Split high-impact file"),
+            "should contain recommendation"
+        );
+        assert!(md.contains("src/legacy.ts"), "should contain second target");
     }
 }

@@ -136,6 +136,14 @@ pub(super) fn print_health_compact(report: &crate::health_types::HealthReport, r
             entry.trend,
         );
     }
+    for target in &report.targets {
+        let relative = normalize_uri(&relative_path(&target.path, root).display().to_string());
+        let category = target.category.label();
+        println!(
+            "refactoring-target:{}:priority={:.1},category={}:{}",
+            relative, target.priority, category, target.recommendation,
+        );
+    }
 }
 
 pub(super) fn print_duplication_compact(report: &DuplicationReport, root: &Path) {

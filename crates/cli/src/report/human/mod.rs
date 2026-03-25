@@ -1400,6 +1400,7 @@ mod tests {
             file_scores: vec![],
             hotspots: vec![],
             hotspot_summary: None,
+            targets: vec![],
         };
         let lines = build_health_human_lines(&report, &root);
         let text = plain(&lines);
@@ -1433,6 +1434,7 @@ mod tests {
             file_scores: vec![],
             hotspots: vec![],
             hotspot_summary: None,
+            targets: vec![],
         };
         let lines = build_health_human_lines(&report, &root);
         let text = plain(&lines);
@@ -1471,6 +1473,7 @@ mod tests {
             file_scores: vec![],
             hotspots: vec![],
             hotspot_summary: None,
+            targets: vec![],
         };
         let lines = build_health_human_lines(&report, &root);
         let text = plain(&lines);
@@ -1516,6 +1519,7 @@ mod tests {
             file_scores: vec![],
             hotspots: vec![],
             hotspot_summary: None,
+            targets: vec![],
         };
         let lines = build_health_human_lines(&report, &root);
         let text = plain(&lines);

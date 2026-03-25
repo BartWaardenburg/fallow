@@ -536,6 +536,18 @@ pub fn build_health_sarif(
         ));
     }
 
+    // Refactoring targets as SARIF results (warning level — advisory recommendations)
+    for target in &report.targets {
+        let uri = relative_uri(&target.path, root);
+        sarif_results.push(sarif_result(
+            "fallow/refactoring-target",
+            "warning",
+            &target.recommendation,
+            &uri,
+            None,
+        ));
+    }
+
     let health_rules = vec![
         sarif_rule(
             "fallow/high-cyclomatic-complexity",
@@ -550,6 +562,11 @@ pub fn build_health_sarif(
         sarif_rule(
             "fallow/high-complexity",
             "Function exceeds both complexity thresholds",
+            "warning",
+        ),
+        sarif_rule(
+            "fallow/refactoring-target",
+            "File identified as a high-priority refactoring candidate",
             "warning",
         ),
     ];
@@ -1003,6 +1020,7 @@ mod tests {
             file_scores: vec![],
             hotspots: vec![],
             hotspot_summary: None,
+            targets: vec![],
         };
         let sarif = build_health_sarif(&report, &root);
         assert_eq!(sarif["version"], "2.1.0");
@@ -1011,7 +1029,7 @@ mod tests {
         let rules = sarif["runs"][0]["tool"]["driver"]["rules"]
             .as_array()
             .unwrap();
-        assert_eq!(rules.len(), 3);
+        assert_eq!(rules.len(), 4);
     }
 
     #[test]
@@ -1040,6 +1058,7 @@ mod tests {
             file_scores: vec![],
             hotspots: vec![],
             hotspot_summary: None,
+            targets: vec![],
         };
         let sarif = build_health_sarif(&report, &root);
         let entry = &sarif["runs"][0]["results"][0];
@@ -1086,6 +1105,7 @@ mod tests {
             file_scores: vec![],
             hotspots: vec![],
             hotspot_summary: None,
+            targets: vec![],
         };
         let sarif = build_health_sarif(&report, &root);
         let entry = &sarif["runs"][0]["results"][0];
@@ -1126,6 +1146,7 @@ mod tests {
             file_scores: vec![],
             hotspots: vec![],
             hotspot_summary: None,
+            targets: vec![],
         };
         let sarif = build_health_sarif(&report, &root);
         let entry = &sarif["runs"][0]["results"][0];

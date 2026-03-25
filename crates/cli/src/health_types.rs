@@ -20,6 +20,9 @@ pub struct HealthReport {
     /// Hotspot analysis summary (only set with `--hotspots`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hotspot_summary: Option<HotspotSummary>,
+    /// Ranked refactoring recommendations (only populated with `--targets`).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub targets: Vec<RefactoringTarget>,
 }
 
 /// A single function that exceeds a complexity threshold.
@@ -168,4 +171,190 @@ pub struct HotspotSummary {
     pub files_excluded: usize,
     /// Whether the repository is a shallow clone.
     pub shallow_clone: bool,
+}
+
+/// Category of refactoring recommendation.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RecommendationCategory {
+    /// Actively-changing file with growing complexity — highest urgency.
+    UrgentChurnComplexity,
+    /// File participates in an import cycle with significant blast radius.
+    BreakCircularDependency,
+    /// High fan-in + high complexity — changes here ripple widely.
+    SplitHighImpact,
+    /// Majority of exports are unused — reduce surface area.
+    RemoveDeadCode,
+    /// Contains functions with very high cognitive complexity.
+    ExtractComplexFunctions,
+    /// Excessive imports reduce testability and increase coupling.
+    ExtractDependencies,
+}
+
+impl RecommendationCategory {
+    /// Human-readable label for terminal and compact output.
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::UrgentChurnComplexity => "churn+complexity",
+            Self::BreakCircularDependency => "circular dep",
+            Self::SplitHighImpact => "high impact",
+            Self::RemoveDeadCode => "dead code",
+            Self::ExtractComplexFunctions => "complexity",
+            Self::ExtractDependencies => "coupling",
+        }
+    }
+}
+
+/// A contributing factor that triggered or strengthened a recommendation.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ContributingFactor {
+    /// Metric name (matches JSON field names: `"fan_in"`, `"dead_code_ratio"`, etc.).
+    pub metric: &'static str,
+    /// Raw metric value for programmatic use.
+    pub value: f64,
+    /// Threshold that was exceeded.
+    pub threshold: f64,
+    /// Human-readable explanation.
+    pub detail: String,
+}
+
+/// A ranked refactoring recommendation for a file.
+///
+/// ## Priority Formula
+///
+/// ```text
+/// priority = min(complexity_density, 1) × 30
+///          + hotspot_boost × 25            (hotspot_score / 100 if in hotspots, else 0)
+///          + dead_code_ratio × 20
+///          + fan_in_norm × 15              (min(fan_in / 20, 1.0))
+///          + fan_out_norm × 10             (min(fan_out / 30, 1.0))
+/// ```
+///
+/// All inputs clamped to \[0, 1\] so each weight is a true percentage share.
+/// Clamped to \[0, 100\]. Higher is more urgent. Does not use the maintainability
+/// index to avoid double-counting (MI already incorporates density and dead code).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct RefactoringTarget {
+    /// Absolute file path (stripped to relative in output).
+    pub path: std::path::PathBuf,
+    /// Priority score (0–100, higher = more urgent).
+    pub priority: f64,
+    /// One-line actionable recommendation.
+    pub recommendation: String,
+    /// Recommendation category for tooling/filtering.
+    pub category: RecommendationCategory,
+    /// Which metric values contributed to this recommendation.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub factors: Vec<ContributingFactor>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- RecommendationCategory ---
+
+    #[test]
+    fn category_labels_are_non_empty() {
+        let categories = [
+            RecommendationCategory::UrgentChurnComplexity,
+            RecommendationCategory::BreakCircularDependency,
+            RecommendationCategory::SplitHighImpact,
+            RecommendationCategory::RemoveDeadCode,
+            RecommendationCategory::ExtractComplexFunctions,
+            RecommendationCategory::ExtractDependencies,
+        ];
+        for cat in &categories {
+            assert!(!cat.label().is_empty(), "{cat:?} should have a label");
+        }
+    }
+
+    #[test]
+    fn category_labels_are_unique() {
+        let categories = [
+            RecommendationCategory::UrgentChurnComplexity,
+            RecommendationCategory::BreakCircularDependency,
+            RecommendationCategory::SplitHighImpact,
+            RecommendationCategory::RemoveDeadCode,
+            RecommendationCategory::ExtractComplexFunctions,
+            RecommendationCategory::ExtractDependencies,
+        ];
+        let labels: Vec<&str> = categories.iter().map(|c| c.label()).collect();
+        let unique: std::collections::HashSet<&&str> = labels.iter().collect();
+        assert_eq!(labels.len(), unique.len(), "category labels must be unique");
+    }
+
+    // --- Serde serialization ---
+
+    #[test]
+    fn category_serializes_as_snake_case() {
+        let json = serde_json::to_string(&RecommendationCategory::UrgentChurnComplexity).unwrap();
+        assert_eq!(json, r#""urgent_churn_complexity""#);
+
+        let json = serde_json::to_string(&RecommendationCategory::BreakCircularDependency).unwrap();
+        assert_eq!(json, r#""break_circular_dependency""#);
+    }
+
+    #[test]
+    fn exceeded_threshold_serializes_as_snake_case() {
+        let json = serde_json::to_string(&ExceededThreshold::Both).unwrap();
+        assert_eq!(json, r#""both""#);
+
+        let json = serde_json::to_string(&ExceededThreshold::Cyclomatic).unwrap();
+        assert_eq!(json, r#""cyclomatic""#);
+    }
+
+    #[test]
+    fn health_report_skips_empty_collections() {
+        let report = HealthReport {
+            findings: vec![],
+            summary: HealthSummary {
+                files_analyzed: 0,
+                functions_analyzed: 0,
+                functions_above_threshold: 0,
+                max_cyclomatic_threshold: 20,
+                max_cognitive_threshold: 15,
+                files_scored: None,
+                average_maintainability: None,
+            },
+            file_scores: vec![],
+            hotspots: vec![],
+            hotspot_summary: None,
+            targets: vec![],
+        };
+        let json = serde_json::to_string(&report).unwrap();
+        // Empty vecs should be omitted due to skip_serializing_if
+        assert!(!json.contains("file_scores"));
+        assert!(!json.contains("hotspots"));
+        assert!(!json.contains("hotspot_summary"));
+        assert!(!json.contains("targets"));
+    }
+
+    #[test]
+    fn refactoring_target_skips_empty_factors() {
+        let target = RefactoringTarget {
+            path: std::path::PathBuf::from("/src/foo.ts"),
+            priority: 75.0,
+            recommendation: "Test recommendation".into(),
+            category: RecommendationCategory::RemoveDeadCode,
+            factors: vec![],
+        };
+        let json = serde_json::to_string(&target).unwrap();
+        assert!(!json.contains("factors"));
+    }
+
+    #[test]
+    fn contributing_factor_serializes_correctly() {
+        let factor = ContributingFactor {
+            metric: "fan_in",
+            value: 15.0,
+            threshold: 10.0,
+            detail: "15 files depend on this".into(),
+        };
+        let json = serde_json::to_string(&factor).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["metric"], "fan_in");
+        assert_eq!(parsed["value"], 15.0);
+        assert_eq!(parsed["threshold"], 10.0);
+    }
 }

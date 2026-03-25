@@ -36,6 +36,7 @@ pub struct HealthOptions<'a> {
     pub complexity: bool,
     pub file_scores: bool,
     pub hotspots: bool,
+    pub targets: bool,
     pub since: Option<&'a str>,
     pub min_commits: Option<u32>,
     pub explain: bool,
@@ -216,67 +217,109 @@ pub fn run_health(opts: &HealthOptions<'_>) -> ExitCode {
         findings.truncate(top);
     }
 
-    // Compute file-level health scores when requested or when hotspots need them.
+    // Compute file-level health scores when requested, when hotspots need them,
+    // or when targets need them.
     // NOTE: This runs the full analysis pipeline (discovery, parsing, graph, dead code detection)
     // a second time because there is no API to inject pre-parsed modules into the analysis
     // pipeline. The cache mitigates re-parsing cost but the discovery and graph construction
     // are repeated. Future optimization: expose a lower-level API that accepts ParseResult.
-    let needs_file_scores = opts.file_scores || opts.hotspots;
-    let (mut file_scores, files_scored, average_maintainability) = if needs_file_scores {
+    let needs_file_scores = opts.file_scores || opts.hotspots || opts.targets;
+    let (mut file_scores, files_scored, average_maintainability, score_aux) = if needs_file_scores {
         match compute_file_scores(
             &config,
             &parse_result.modules,
             &file_paths,
             changed_files.as_ref(),
         ) {
-            Ok(mut scores) => {
+            Ok(mut output) => {
                 // Apply the same filters that findings get: workspace, ignore globs
                 if let Some(ref ws) = ws_root {
-                    scores.retain(|s| s.path.starts_with(ws));
+                    output.scores.retain(|s| s.path.starts_with(ws));
                 }
                 if !ignore_set.is_empty() {
-                    scores.retain(|s| {
+                    output.scores.retain(|s| {
                         let relative = s.path.strip_prefix(&config.root).unwrap_or(&s.path);
                         !ignore_set.is_match(relative)
                     });
                 }
                 // Compute average BEFORE --top truncation so it reflects the full project
-                let total_scored = scores.len();
+                let total_scored = output.scores.len();
                 let avg = if total_scored > 0 {
-                    let sum: f64 = scores.iter().map(|s| s.maintainability_index).sum();
+                    let sum: f64 = output.scores.iter().map(|s| s.maintainability_index).sum();
                     Some((sum / total_scored as f64 * 10.0).round() / 10.0)
                 } else {
                     None
                 };
-                (scores, Some(total_scored), avg)
+                let aux = (
+                    output.circular_files,
+                    output.top_complex_fns,
+                    output.entry_points,
+                    output.value_export_counts,
+                );
+                (output.scores, Some(total_scored), avg, Some(aux))
             }
             Err(e) => {
                 eprintln!("Warning: failed to compute file scores: {e}");
                 // Use Some(0) so JSON consumers can distinguish "flag not set" (field absent)
                 // from "flag set but failed" (files_scored: 0).
-                (Vec::new(), Some(0), None)
+                (Vec::new(), Some(0), None, None)
             }
         }
     } else {
-        (Vec::new(), None, None)
+        (Vec::new(), None, None, None)
     };
 
-    // Compute hotspot analysis when requested.
-    let (hotspots, hotspot_summary) = if opts.hotspots {
+    // Compute hotspot analysis when requested (or when targets need churn data).
+    let (hotspots, hotspot_summary) = if opts.hotspots || opts.targets {
         compute_hotspots(opts, &config, &file_scores, &ignore_set, ws_root.as_deref())
     } else {
         (Vec::new(), None)
     };
 
-    // Apply --top to file scores (after hotspot computation which uses the full list)
+    // Compute refactoring targets when requested.
+    let targets = if opts.targets {
+        if let Some((
+            ref circular_files,
+            ref top_complex_fns,
+            ref entry_points,
+            ref value_export_counts,
+        )) = score_aux
+        {
+            let mut tgts = compute_refactoring_targets(
+                &file_scores,
+                circular_files,
+                top_complex_fns,
+                entry_points,
+                value_export_counts,
+                &hotspots,
+            );
+            if let Some(top) = opts.top {
+                tgts.truncate(top);
+            }
+            tgts
+        } else {
+            Vec::new()
+        }
+    } else {
+        Vec::new()
+    };
+
+    // Apply --top to file scores (after hotspot and target computation which use the full list)
     if opts.file_scores {
         if let Some(top) = opts.top {
             file_scores.truncate(top);
         }
     } else {
-        // If file_scores was only computed for hotspots, don't include it in the report
+        // If file_scores was only computed for hotspots/targets, don't include it in the report
         file_scores.clear();
     }
+
+    // If hotspots were only computed for targets, don't include them in the report
+    let (report_hotspots, report_hotspot_summary) = if opts.hotspots {
+        (hotspots, hotspot_summary)
+    } else {
+        (Vec::new(), None)
+    };
 
     let report = HealthReport {
         summary: HealthSummary {
@@ -298,8 +341,9 @@ pub fn run_health(opts: &HealthOptions<'_>) -> ExitCode {
             Vec::new()
         },
         file_scores,
-        hotspots,
-        hotspot_summary,
+        hotspots: report_hotspots,
+        hotspot_summary: report_hotspot_summary,
+        targets,
     };
 
     let elapsed = start.elapsed();
@@ -579,6 +623,19 @@ fn count_unused_exports_by_path(
     map
 }
 
+/// Output from `compute_file_scores`, including auxiliary data for refactoring targets.
+struct FileScoreOutput {
+    scores: Vec<FileHealthScore>,
+    /// Files participating in circular dependencies (absolute paths).
+    circular_files: rustc_hash::FxHashSet<std::path::PathBuf>,
+    /// Top 3 functions by cognitive complexity per file (name, cognitive score).
+    top_complex_fns: rustc_hash::FxHashMap<std::path::PathBuf, Vec<(String, u16)>>,
+    /// Files that are configured entry points.
+    entry_points: rustc_hash::FxHashSet<std::path::PathBuf>,
+    /// Total number of value exports per file (for dead code gate: total_value_exports ≥ 3).
+    value_export_counts: rustc_hash::FxHashMap<std::path::PathBuf, usize>,
+}
+
 /// Compute per-file health scores by running the full analysis pipeline.
 ///
 /// This builds the module graph and runs dead code detection to obtain
@@ -589,11 +646,44 @@ fn compute_file_scores(
     modules: &[fallow_core::extract::ModuleInfo],
     file_paths: &rustc_hash::FxHashMap<fallow_core::discover::FileId, &std::path::PathBuf>,
     changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
-) -> Result<Vec<FileHealthScore>, String> {
+) -> Result<FileScoreOutput, String> {
     // Run full analysis to get the graph and dead code results
     let output = fallow_core::analyze_with_trace(config).map_err(|e| format!("{e}"))?;
     let graph = output.graph.ok_or("graph not available")?;
     let results = &output.results;
+
+    // Build auxiliary data for refactoring targets
+    let circular_files: rustc_hash::FxHashSet<std::path::PathBuf> = results
+        .circular_dependencies
+        .iter()
+        .flat_map(|c| c.files.iter().cloned())
+        .collect();
+
+    let mut top_complex_fns: rustc_hash::FxHashMap<std::path::PathBuf, Vec<(String, u16)>> =
+        rustc_hash::FxHashMap::default();
+    for module in modules {
+        if module.complexity.is_empty() {
+            continue;
+        }
+        let Some(path) = file_paths.get(&module.file_id) else {
+            continue;
+        };
+        let mut funcs: Vec<(String, u16)> = module
+            .complexity
+            .iter()
+            .map(|f| (f.name.clone(), f.cognitive))
+            .collect();
+        funcs.sort_by(|a, b| b.1.cmp(&a.1));
+        funcs.truncate(3);
+        if funcs[0].1 > 0 {
+            top_complex_fns.insert((*path).clone(), funcs);
+        }
+    }
+
+    let mut entry_points: rustc_hash::FxHashSet<std::path::PathBuf> =
+        rustc_hash::FxHashSet::default();
+    let mut value_export_counts: rustc_hash::FxHashMap<std::path::PathBuf, usize> =
+        rustc_hash::FxHashMap::default();
 
     // Build a set of unused file paths for O(1) lookup
     let unused_files: rustc_hash::FxHashSet<&std::path::Path> = results
@@ -617,6 +707,11 @@ fn compute_file_scores(
             continue;
         };
 
+        // Track entry points for refactoring target exclusion
+        if node.is_entry_point {
+            entry_points.insert((*path).clone());
+        }
+
         // Fan-in: number of files that import this file
         let fan_in = graph
             .reverse_deps
@@ -631,6 +726,10 @@ fn compute_file_scores(
                 Some(module) => aggregate_complexity(module),
                 None => (0, 0, 0, 0),
             };
+
+        // Track value export count for dead code gate
+        let value_exports = node.exports.iter().filter(|e| !e.is_type_only).count();
+        value_export_counts.insert((*path).clone(), value_exports);
 
         let dead_code_ratio = compute_dead_code_ratio(
             (*path).as_path(),
@@ -683,7 +782,288 @@ fn compute_file_scores(
             .unwrap_or(std::cmp::Ordering::Equal)
     });
 
-    Ok(scores)
+    Ok(FileScoreOutput {
+        scores,
+        circular_files,
+        top_complex_fns,
+        entry_points,
+        value_export_counts,
+    })
+}
+
+/// Compute the refactoring priority score for a file.
+///
+/// Formula (avoids double-counting with MI):
+/// ```text
+/// priority = min(density, 1) × 30 + hotspot_boost × 25 + dead_code × 20 + fan_in_norm × 15 + fan_out_norm × 10
+/// ```
+/// All inputs are clamped to \[0, 1\] so each weight is a true percentage share.
+fn compute_target_priority(score: &FileHealthScore, hotspot_score: Option<f64>) -> f64 {
+    // Normalize all inputs to [0, 1] so each weight is a true percentage share.
+    let density_norm = score.complexity_density.min(1.0);
+    let fan_in_norm = (score.fan_in as f64 / 20.0).min(1.0);
+    let fan_out_norm = (score.fan_out as f64 / 30.0).min(1.0);
+    let hotspot_boost = hotspot_score.map_or(0.0, |s| s / 100.0);
+
+    // Keep the formula readable — it matches the documented specification.
+    #[expect(clippy::suboptimal_flops)]
+    let priority = density_norm * 30.0
+        + hotspot_boost * 25.0
+        + score.dead_code_ratio * 20.0
+        + fan_in_norm * 15.0
+        + fan_out_norm * 10.0;
+
+    (priority.clamp(0.0, 100.0) * 10.0).round() / 10.0
+}
+
+/// Compute refactoring targets by applying rules to file scores and auxiliary data.
+///
+/// Rules are evaluated in priority order; first match determines the category and
+/// recommendation. All contributing factors are collected regardless of which rule wins.
+/// Files matching no rule are skipped.
+fn compute_refactoring_targets(
+    file_scores: &[FileHealthScore],
+    circular_files: &rustc_hash::FxHashSet<std::path::PathBuf>,
+    top_complex_fns: &rustc_hash::FxHashMap<std::path::PathBuf, Vec<(String, u16)>>,
+    entry_points: &rustc_hash::FxHashSet<std::path::PathBuf>,
+    value_export_counts: &rustc_hash::FxHashMap<std::path::PathBuf, usize>,
+    hotspots: &[HotspotEntry],
+) -> Vec<RefactoringTarget> {
+    // Build hotspot lookup by path for O(1) access
+    let hotspot_map: rustc_hash::FxHashMap<&std::path::Path, &HotspotEntry> =
+        hotspots.iter().map(|h| (h.path.as_path(), h)).collect();
+
+    let mut targets = Vec::new();
+
+    for score in file_scores {
+        let hotspot = hotspot_map.get(score.path.as_path());
+        let hotspot_score = hotspot.map(|h| h.score);
+        let is_circular = circular_files.contains(&score.path);
+        let is_entry = entry_points.contains(&score.path);
+        let top_fns = top_complex_fns.get(&score.path);
+        let value_exports = value_export_counts.get(&score.path).copied().unwrap_or(0);
+
+        // Collect all contributing factors
+        let mut factors = Vec::new();
+
+        if score.complexity_density > 0.3 {
+            factors.push(ContributingFactor {
+                metric: "complexity_density",
+                value: score.complexity_density,
+                threshold: 0.3,
+                detail: format!("density {:.2} exceeds 0.3", score.complexity_density),
+            });
+        }
+        if score.fan_in >= 10 {
+            factors.push(ContributingFactor {
+                metric: "fan_in",
+                value: score.fan_in as f64,
+                threshold: 10.0,
+                detail: format!("{} files depend on this", score.fan_in),
+            });
+        }
+        if score.dead_code_ratio >= 0.5 && value_exports >= 3 {
+            let unused_count = (score.dead_code_ratio * value_exports as f64)
+                .round()
+                .min(value_exports as f64) as usize;
+            factors.push(ContributingFactor {
+                metric: "dead_code_ratio",
+                value: score.dead_code_ratio,
+                threshold: 0.5,
+                detail: format!(
+                    "{} unused of {} value exports ({:.0}%)",
+                    unused_count,
+                    value_exports,
+                    score.dead_code_ratio * 100.0
+                ),
+            });
+        }
+        if score.fan_out >= 15 {
+            factors.push(ContributingFactor {
+                metric: "fan_out",
+                value: score.fan_out as f64,
+                threshold: 15.0,
+                detail: format!("imports {} modules", score.fan_out),
+            });
+        }
+        if is_circular {
+            factors.push(ContributingFactor {
+                metric: "circular_dependency",
+                value: 1.0,
+                threshold: 1.0,
+                detail: "participates in an import cycle".into(),
+            });
+        }
+        if let Some(h) = hotspot
+            && h.score >= 30.0
+        {
+            factors.push(ContributingFactor {
+                metric: "hotspot_score",
+                value: h.score,
+                threshold: 30.0,
+                detail: format!(
+                    "hotspot score {:.0} ({} commits, {} trend)",
+                    h.score,
+                    h.commits,
+                    match h.trend {
+                        fallow_core::churn::ChurnTrend::Accelerating => "accelerating",
+                        fallow_core::churn::ChurnTrend::Cooling => "cooling",
+                        fallow_core::churn::ChurnTrend::Stable => "stable",
+                    }
+                ),
+            });
+        }
+        if let Some(fns) = top_fns
+            && let Some((name, cog)) = fns.first()
+            && *cog >= 30
+        {
+            factors.push(ContributingFactor {
+                metric: "cognitive_complexity",
+                value: f64::from(*cog),
+                threshold: 30.0,
+                detail: format!("{name} has cognitive complexity {cog}"),
+            });
+        }
+
+        // Skip if no factors triggered
+        if factors.is_empty() {
+            continue;
+        }
+
+        // Evaluate rules in priority order — first match determines category + recommendation
+        let matched = try_match_rules(
+            score,
+            hotspot.copied(),
+            is_circular,
+            is_entry,
+            top_fns,
+            value_exports,
+        );
+
+        let Some((category, recommendation)) = matched else {
+            continue;
+        };
+
+        let priority = compute_target_priority(score, hotspot_score);
+
+        targets.push(RefactoringTarget {
+            path: score.path.clone(),
+            priority,
+            recommendation,
+            category,
+            factors,
+        });
+    }
+
+    // Sort by priority descending, break ties by path for determinism
+    targets.sort_by(|a, b| {
+        b.priority
+            .partial_cmp(&a.priority)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.path.cmp(&b.path))
+    });
+
+    targets
+}
+
+/// Try to match a file against refactoring rules in priority order.
+///
+/// Returns the first matching `(category, recommendation)`, or `None` if no rule matches.
+fn try_match_rules(
+    score: &FileHealthScore,
+    hotspot: Option<&HotspotEntry>,
+    is_circular: bool,
+    is_entry: bool,
+    top_fns: Option<&Vec<(String, u16)>>,
+    value_exports: usize,
+) -> Option<(RecommendationCategory, String)> {
+    // Rule 1: Urgent churn + complexity
+    if let Some(h) = hotspot
+        && h.score >= 50.0
+        && matches!(h.trend, fallow_core::churn::ChurnTrend::Accelerating)
+        && score.complexity_density > 0.5
+    {
+        return Some((
+            RecommendationCategory::UrgentChurnComplexity,
+            "Actively-changing file with growing complexity \u{2014} stabilize before adding features".into(),
+        ));
+    }
+
+    // Rule 2: Circular dependency with high fan-in
+    if is_circular && score.fan_in >= 5 {
+        return Some((
+            RecommendationCategory::BreakCircularDependency,
+            format!(
+                "Break import cycle \u{2014} {} files depend on this, changes cascade through the cycle",
+                score.fan_in
+            ),
+        ));
+    }
+
+    // Rule 3: Split high-impact file
+    if score.complexity_density > 0.3
+        && (score.fan_in >= 20 || (score.fan_in >= 10 && score.function_count >= 5))
+    {
+        return Some((
+            RecommendationCategory::SplitHighImpact,
+            format!(
+                "Split high-impact file \u{2014} {} dependents amplify every change",
+                score.fan_in
+            ),
+        ));
+    }
+
+    // Rule 4: Remove dead code (gate: ≥3 value exports)
+    if score.dead_code_ratio >= 0.5 && value_exports >= 3 {
+        let unused_count = (score.dead_code_ratio * value_exports as f64).round() as usize;
+        return Some((
+            RecommendationCategory::RemoveDeadCode,
+            format!(
+                "Remove {} unused exports to reduce surface area ({:.0}% dead)",
+                unused_count,
+                score.dead_code_ratio * 100.0
+            ),
+        ));
+    }
+
+    // Rule 5: Extract complex functions (cognitive ≥ 30)
+    if let Some(fns) = top_fns {
+        let high: Vec<&(String, u16)> = fns.iter().filter(|(_, cog)| *cog >= 30).collect();
+        if !high.is_empty() {
+            let desc = match high.len() {
+                1 => format!(
+                    "Extract {} (cognitive: {}) into smaller functions",
+                    high[0].0, high[0].1
+                ),
+                _ => format!(
+                    "Extract {} (cognitive: {}) and {} (cognitive: {}) into smaller functions",
+                    high[0].0, high[0].1, high[1].0, high[1].1
+                ),
+            };
+            return Some((RecommendationCategory::ExtractComplexFunctions, desc));
+        }
+    }
+
+    // Rule 6: Extract dependencies (not for entry points)
+    if !is_entry && score.fan_out >= 15 && score.maintainability_index < 60.0 {
+        return Some((
+            RecommendationCategory::ExtractDependencies,
+            format!(
+                "Reduce coupling \u{2014} this file imports {} modules, limiting testability",
+                score.fan_out
+            ),
+        ));
+    }
+
+    // Rule 7: Circular dependency (low fan-in fallback)
+    if is_circular {
+        return Some((
+            RecommendationCategory::BreakCircularDependency,
+            "Break import cycle to reduce change cascade risk".into(),
+        ));
+    }
+
+    None
 }
 
 /// Compute the maintainability index for a single file.
@@ -1253,5 +1633,203 @@ mod tests {
         let map = count_unused_exports_by_path(&exports);
         assert_eq!(map.get(std::path::Path::new("/src/a.ts")).copied(), Some(2));
         assert_eq!(map.get(std::path::Path::new("/src/b.ts")).copied(), Some(1));
+    }
+
+    // --- compute_target_priority ---
+
+    fn make_score(overrides: impl FnOnce(&mut FileHealthScore)) -> FileHealthScore {
+        let mut s = FileHealthScore {
+            path: std::path::PathBuf::from("/src/foo.ts"),
+            fan_in: 0,
+            fan_out: 0,
+            dead_code_ratio: 0.0,
+            complexity_density: 0.0,
+            maintainability_index: 100.0,
+            total_cyclomatic: 0,
+            total_cognitive: 0,
+            function_count: 1,
+            lines: 100,
+        };
+        overrides(&mut s);
+        s
+    }
+
+    #[test]
+    fn target_priority_all_zero() {
+        let score = make_score(|_| {});
+        let priority = compute_target_priority(&score, None);
+        assert!((priority).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn target_priority_max_all_inputs() {
+        let score = make_score(|s| {
+            s.complexity_density = 2.0; // clamped to 1.0
+            s.fan_in = 40; // clamped to 1.0
+            s.fan_out = 60; // clamped to 1.0
+            s.dead_code_ratio = 1.0;
+        });
+        let priority = compute_target_priority(&score, Some(100.0));
+        assert!((priority - 100.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn target_priority_complexity_density_weight() {
+        // density=1.0, all else zero → 30 points
+        let score = make_score(|s| s.complexity_density = 1.0);
+        let priority = compute_target_priority(&score, None);
+        assert!((priority - 30.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn target_priority_hotspot_weight() {
+        // hotspot_score=100 → boost=1.0 → 25 points
+        let score = make_score(|_| {});
+        let priority = compute_target_priority(&score, Some(100.0));
+        assert!((priority - 25.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn target_priority_dead_code_weight() {
+        // dead_code_ratio=1.0 → 20 points
+        let score = make_score(|s| s.dead_code_ratio = 1.0);
+        let priority = compute_target_priority(&score, None);
+        assert!((priority - 20.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn target_priority_fan_in_weight() {
+        // fan_in=20 → norm=1.0 → 15 points
+        let score = make_score(|s| s.fan_in = 20);
+        let priority = compute_target_priority(&score, None);
+        assert!((priority - 15.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn target_priority_fan_out_weight() {
+        // fan_out=30 → norm=1.0 → 10 points
+        let score = make_score(|s| s.fan_out = 30);
+        let priority = compute_target_priority(&score, None);
+        assert!((priority - 10.0).abs() < f64::EPSILON);
+    }
+
+    // --- try_match_rules ---
+
+    #[test]
+    fn rule_no_match_clean_file() {
+        let score = make_score(|_| {});
+        let result = try_match_rules(&score, None, false, false, None, 0);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn rule_circular_dep_high_fan_in() {
+        let score = make_score(|s| s.fan_in = 5);
+        let result = try_match_rules(&score, None, true, false, None, 0);
+        assert!(result.is_some());
+        let (cat, _) = result.unwrap();
+        assert!(matches!(
+            cat,
+            RecommendationCategory::BreakCircularDependency
+        ));
+    }
+
+    #[test]
+    fn rule_circular_dep_low_fan_in_fallback() {
+        let score = make_score(|s| s.fan_in = 1);
+        let result = try_match_rules(&score, None, true, false, None, 0);
+        assert!(result.is_some());
+        let (cat, _) = result.unwrap();
+        assert!(matches!(
+            cat,
+            RecommendationCategory::BreakCircularDependency
+        ));
+    }
+
+    #[test]
+    fn rule_split_high_impact() {
+        let score = make_score(|s| {
+            s.complexity_density = 0.5;
+            s.fan_in = 20;
+        });
+        let result = try_match_rules(&score, None, false, false, None, 0);
+        assert!(result.is_some());
+        let (cat, _) = result.unwrap();
+        assert!(matches!(cat, RecommendationCategory::SplitHighImpact));
+    }
+
+    #[test]
+    fn rule_remove_dead_code() {
+        let score = make_score(|s| s.dead_code_ratio = 0.6);
+        let result = try_match_rules(&score, None, false, false, None, 5);
+        assert!(result.is_some());
+        let (cat, _) = result.unwrap();
+        assert!(matches!(cat, RecommendationCategory::RemoveDeadCode));
+    }
+
+    #[test]
+    fn rule_dead_code_gate_too_few_exports() {
+        // dead_code_ratio high but only 2 value exports — below gate of 3
+        let score = make_score(|s| s.dead_code_ratio = 0.8);
+        let result = try_match_rules(&score, None, false, false, None, 2);
+        // Should NOT match dead code rule
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn rule_extract_complex_functions() {
+        let score = make_score(|_| {});
+        let fns = vec![("handleSubmit".to_string(), 35u16)];
+        let result = try_match_rules(&score, None, false, false, Some(&fns), 0);
+        assert!(result.is_some());
+        let (cat, rec) = result.unwrap();
+        assert!(matches!(
+            cat,
+            RecommendationCategory::ExtractComplexFunctions
+        ));
+        assert!(rec.contains("handleSubmit"));
+    }
+
+    #[test]
+    fn rule_extract_dependencies_not_entry() {
+        let score = make_score(|s| {
+            s.fan_out = 20;
+            s.maintainability_index = 50.0;
+        });
+        let result = try_match_rules(&score, None, false, false, None, 0);
+        assert!(result.is_some());
+        let (cat, _) = result.unwrap();
+        assert!(matches!(cat, RecommendationCategory::ExtractDependencies));
+    }
+
+    #[test]
+    fn rule_extract_dependencies_skipped_for_entry() {
+        let score = make_score(|s| {
+            s.fan_out = 20;
+            s.maintainability_index = 50.0;
+        });
+        // is_entry=true → rule 6 should not match
+        let result = try_match_rules(&score, None, false, true, None, 0);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn rule_urgent_churn_complexity() {
+        let score = make_score(|s| s.complexity_density = 0.8);
+        let hotspot = HotspotEntry {
+            path: std::path::PathBuf::from("/src/foo.ts"),
+            score: 60.0,
+            commits: 20,
+            weighted_commits: 15.0,
+            lines_added: 500,
+            lines_deleted: 100,
+            complexity_density: 0.8,
+            fan_in: 5,
+            trend: fallow_core::churn::ChurnTrend::Accelerating,
+        };
+        let result = try_match_rules(&score, Some(&hotspot), false, false, None, 0);
+        assert!(result.is_some());
+        let (cat, _) = result.unwrap();
+        assert!(matches!(cat, RecommendationCategory::UrgentChurnComplexity));
     }
 }

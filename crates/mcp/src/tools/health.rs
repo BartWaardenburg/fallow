@@ -37,6 +37,9 @@ pub fn build_health_args(params: &HealthParams) -> Vec<String> {
     if params.hotspots == Some(true) {
         args.push("--hotspots".to_string());
     }
+    if params.targets == Some(true) {
+        args.push("--targets".to_string());
+    }
     if let Some(ref since) = params.since {
         args.extend(["--since".to_string(), since.clone()]);
     }

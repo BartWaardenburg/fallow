@@ -162,6 +162,13 @@ pub const HEALTH_RULES: &[RuleDef] = &[
         full: "Function exceeds both cyclomatic and cognitive complexity thresholds. This is the strongest signal that a function needs refactoring — it has many paths AND is hard to understand.",
         docs_path: "explanations/health#complexity-metrics",
     },
+    RuleDef {
+        id: "fallow/refactoring-target",
+        name: "Refactoring Target",
+        short: "File identified as a high-priority refactoring candidate",
+        full: "File identified as a refactoring candidate based on a weighted combination of complexity density, churn velocity, dead code ratio, fan-in (blast radius), and fan-out (coupling). Categories: urgent churn+complexity, break circular dependency, split high-impact file, remove dead code, extract complex functions, reduce coupling.",
+        docs_path: "explanations/health#refactoring-targets",
+    },
 ];
 
 pub const DUPES_RULES: &[RuleDef] = &[RuleDef {
@@ -267,6 +274,12 @@ pub fn health_meta() -> Value {
                 "description": "Compares recent vs older commit frequency within the analysis window. accelerating = recent > 1.5\u{00d7} older, cooling = recent < 0.67\u{00d7} older, stable = in between.",
                 "values": ["accelerating", "stable", "cooling"],
                 "interpretation": "accelerating files need attention; cooling files are stabilizing"
+            },
+            "priority": {
+                "name": "Refactoring Priority",
+                "description": "Weighted score: complexity density (30%), hotspot boost (25%), dead code ratio (20%), fan-in (15%), fan-out (10%). Does not use the maintainability index to avoid double-counting.",
+                "range": "[0, 100]",
+                "interpretation": "higher = more urgent to refactor"
             }
         }
     })

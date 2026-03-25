@@ -110,22 +110,24 @@ fallow health --format json --quiet --top 10 --sort cognitive
 fallow health --format json --quiet --file-scores
 fallow health --format json --quiet --hotspots
 fallow health --format json --quiet --hotspots --since 3m --min-commits 5
+fallow health --format json --quiet --targets
 ```
 
 **Flags:**
 - `--max-cyclomatic <N>` -- cyclomatic complexity threshold (default: 20)
 - `--max-cognitive <N>` -- cognitive complexity threshold (default: 15)
-- `--top <N>` -- only show the top N most complex functions (and file scores/hotspots)
+- `--top <N>` -- only show the top N most complex functions (and file scores/hotspots/targets)
 - `--sort cyclomatic|cognitive|lines` -- sort order for results
 - `--file-scores` -- compute per-file maintainability index (fan-in, fan-out, dead code ratio, complexity density). Runs the full analysis pipeline.
 - `--hotspots` -- identify files that are both complex and frequently changing (combines git churn with complexity). Requires a git repository.
+- `--targets` -- ranked refactoring recommendations based on complexity, coupling, churn, and dead code signals. Categories: churn+complexity, circular dep, high impact, dead code, complexity, coupling.
 - `--since <DURATION>` -- git history window for hotspot analysis (default: 6m). Accepts durations (6m, 90d, 1y, 2w) or ISO dates (2025-06-01).
 - `--min-commits <N>` -- minimum commits for a file to appear in hotspot ranking (default: 3)
 - `--format human|json|compact|markdown|sarif` -- output format (default: human)
 
 **Exit codes:** 0 = no functions exceed thresholds, 1 = findings exist.
 
-**JSON output** includes a `findings` array and a `summary` object. With `--file-scores`, also includes a `file_scores` array with per-file metrics and `summary.files_scored` / `summary.average_maintainability`.
+**JSON output** includes a `findings` array and a `summary` object. With `--file-scores`, also includes a `file_scores` array with per-file metrics and `summary.files_scored` / `summary.average_maintainability`. With `--targets`, includes a `targets` array with `path`, `priority`, `recommendation`, `category`, and `factors`.
 
 ### `fix`
 
@@ -256,6 +258,7 @@ fallow health --format json --quiet
 fallow health --format json --quiet --top 10 --sort cognitive
 fallow health --format json --quiet --file-scores   # includes per-file maintainability index
 fallow health --format json --quiet --hotspots      # identify riskiest files (churn x complexity)
+fallow health --format json --quiet --targets       # ranked refactoring recommendations
 ```
 
 ### Safe auto-fix cycle

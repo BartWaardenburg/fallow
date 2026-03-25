@@ -119,6 +119,9 @@ pub struct HealthParams {
     /// Show only hotspots: files that are both complex and frequently changing.
     pub hotspots: Option<bool>,
 
+    /// Show only refactoring targets: ranked recommendations based on complexity, coupling, churn, and dead code.
+    pub targets: Option<bool>,
+
     /// Git history window for hotspot analysis. Accepts durations (6m, 90d, 1y) or ISO dates.
     pub since: Option<String>,
 

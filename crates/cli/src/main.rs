@@ -295,6 +295,11 @@ enum Command {
         #[arg(long)]
         hotspots: bool,
 
+        /// Show only refactoring targets: ranked recommendations based on complexity,
+        /// coupling, churn, and dead code signals. Requires full analysis pipeline.
+        #[arg(long)]
+        targets: bool,
+
         /// Git history window for hotspot analysis (default: 6m).
         /// Accepts durations (6m, 90d, 1y, 2w) or ISO dates (2025-06-01).
         #[arg(long, value_name = "DURATION")]
@@ -762,14 +767,16 @@ fn main() -> ExitCode {
             complexity,
             file_scores,
             hotspots,
+            targets,
             since,
             min_commits,
         } => {
             // No section flags = show all. Any flag set = show only those.
-            let any_section = complexity || file_scores || hotspots;
+            let any_section = complexity || file_scores || hotspots || targets;
             let eff_file_scores = if any_section { file_scores } else { true };
             let eff_hotspots = if any_section { hotspots } else { true };
             let eff_complexity = if any_section { complexity } else { true };
+            let eff_targets = if any_section { targets } else { true };
             health::run_health(&HealthOptions {
                 root: &root,
                 config_path: &cli.config,
@@ -789,6 +796,7 @@ fn main() -> ExitCode {
                 complexity: eff_complexity,
                 file_scores: eff_file_scores,
                 hotspots: eff_hotspots,
+                targets: eff_targets,
                 since: since.as_deref(),
                 min_commits,
                 explain: cli.explain,

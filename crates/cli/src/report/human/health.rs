@@ -18,7 +18,11 @@ pub(in crate::report) fn print_health_human(
         eprintln!();
     }
 
-    if report.findings.is_empty() && report.file_scores.is_empty() && report.hotspots.is_empty() {
+    if report.findings.is_empty()
+        && report.file_scores.is_empty()
+        && report.hotspots.is_empty()
+        && report.targets.is_empty()
+    {
         if !quiet {
             eprintln!(
                 "{}",
@@ -294,6 +298,74 @@ pub(in crate::report) fn build_health_human_lines(
             "  {}",
             format!(
                 "Files with high churn and high complexity \u{2014} {DOCS_HEALTH}#hotspot-metrics"
+            )
+            .dimmed()
+        ));
+        lines.push(String::new());
+    }
+
+    // Refactoring targets (last section — synthesis of data above)
+    if !report.targets.is_empty() {
+        lines.push(format!(
+            "{} {}",
+            "\u{25cf}".cyan(),
+            format!("Refactoring targets ({})", report.targets.len())
+                .cyan()
+                .bold()
+        ));
+        lines.push(String::new());
+
+        let shown_targets = report.targets.len().min(MAX_FLAT_ITEMS);
+        for target in &report.targets[..shown_targets] {
+            let file_str = relative_path(&target.path, root).display().to_string();
+
+            // Priority score: color-coded by urgency
+            let score_str = format!("{:>5.1}", target.priority);
+            let score_colored = if target.priority >= 70.0 {
+                score_str.red().bold().to_string()
+            } else if target.priority >= 40.0 {
+                score_str.yellow().to_string()
+            } else {
+                score_str.green().to_string()
+            };
+
+            // Path: dim directory, normal filename
+            let (dir, filename) = split_dir_filename(&file_str);
+
+            // Line 1: priority score + path
+            lines.push(format!(
+                "  {}    {}{}",
+                score_colored,
+                dir.dimmed(),
+                filename,
+            ));
+
+            // Line 2: category label (yellow) + recommendation (dimmed)
+            let label = target.category.label();
+            lines.push(format!(
+                "         {}  {}",
+                label.yellow(),
+                target.recommendation.dimmed(),
+            ));
+
+            // Blank line between entries
+            lines.push(String::new());
+        }
+        if report.targets.len() > MAX_FLAT_ITEMS {
+            lines.push(format!(
+                "  {}",
+                format!(
+                    "... and {} more targets",
+                    report.targets.len() - MAX_FLAT_ITEMS
+                )
+                .dimmed()
+            ));
+            lines.push(String::new());
+        }
+        lines.push(format!(
+            "  {}",
+            format!(
+                "Prioritized refactoring recommendations based on complexity, churn, and coupling signals \u{2014} {DOCS_HEALTH}#refactoring-targets"
             )
             .dimmed()
         ));
