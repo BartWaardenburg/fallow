@@ -1,0 +1,23 @@
+<svg width="800" height="450" viewBox="0 0 800 450" xmlns="http://www.w3.org/2000/svg">
+  <rect fill="#1e1e1e" width="800" height="450" rx="12"/>
+  <!-- Editor panel -->
+  <rect fill="#252526" x="80" y="40" width="640" height="260" rx="8"/>
+  <rect x="80" y="40" width="640" height="260" rx="8" stroke="#3c3c3c" stroke-width="1" fill="none"/>
+  <text fill="#858585" x="100" y="72" font-size="12" font-family="monospace">src/utils.ts</text>
+  <!-- Code with lightbulb -->
+  <text fill="#f59e0b" x="100" y="115" font-size="18">&#x1F4A1;</text>
+  <text fill="#858585" x="130" y="115" font-size="12" font-family="monospace">3</text>
+  <text fill="#d4d4d4" x="160" y="115" font-size="12" font-family="monospace" opacity="0.4">export const processData = () =&gt;</text>
+  <!-- Quick fix menu -->
+  <rect fill="#252526" x="140" y="130" width="300" height="80" rx="6"/>
+  <rect x="140" y="130" width="300" height="80" rx="6" stroke="#3c3c3c" stroke-width="1" fill="none"/>
+  <rect x="145" y="136" width="290" height="28" rx="4" fill="#094771"/>
+  <text fill="#d4d4d4" x="160" y="155" font-size="12">Remove unused export 'processData'</text>
+  <text fill="#858585" x="160" y="183" font-size="12">Delete this unused file</text>
+  <!-- Diff view -->
+  <rect fill="#252526" x="80" y="320" width="640" height="60" rx="8"/>
+  <rect x="80" y="320" width="640" height="60" rx="8" stroke="#3c3c3c" stroke-width="1" fill="none"/>
+  <text fill="#ef4444" x="100" y="356" font-size="12" font-family="monospace">- export const processData = () =&gt; {{ ... }}</text>
+  <!-- Label -->
+  <text fill="#d4d4d4" x="400" y="430" font-size="18" text-anchor="middle" font-weight="600">Use quick fixes or auto-fix to remove dead code</text>
+</svg>

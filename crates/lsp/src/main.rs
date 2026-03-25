@@ -13,8 +13,42 @@ use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 
+use serde::{Deserialize, Serialize};
+
 use fallow_core::duplicates::DuplicationReport;
 use fallow_core::results::AnalysisResults;
+
+// ── Custom LSP notification: fallow/analysisComplete ──────────────────────
+
+/// Custom notification sent to the client after every analysis completes.
+/// Carries summary stats so the extension can update the status bar, context
+/// keys, and other UI without running a separate CLI process.
+enum AnalysisComplete {}
+
+impl notification::Notification for AnalysisComplete {
+    type Params = AnalysisCompleteParams;
+    const METHOD: &'static str = "fallow/analysisComplete";
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AnalysisCompleteParams {
+    total_issues: usize,
+    unused_files: usize,
+    unused_exports: usize,
+    unused_types: usize,
+    unused_dependencies: usize,
+    unused_dev_dependencies: usize,
+    unused_enum_members: usize,
+    unused_class_members: usize,
+    unresolved_imports: usize,
+    unlisted_dependencies: usize,
+    duplicate_exports: usize,
+    type_only_dependencies: usize,
+    circular_dependencies: usize,
+    duplication_percentage: f64,
+    clone_groups: usize,
+}
 
 /// Diagnostic codes that the LSP client can disable via initializationOptions.
 /// Maps config key (e.g. "unused-files") to diagnostic code (e.g. "unused-file").
@@ -358,6 +392,28 @@ impl FallowLspServer {
                     self.publish_diagnostics(&results, &duplication, analysis_root)
                         .await;
                 }
+
+                // Send summary stats to the client before storing results
+                self.client
+                    .send_notification::<AnalysisComplete>(AnalysisCompleteParams {
+                        total_issues: results.total_issues(),
+                        unused_files: results.unused_files.len(),
+                        unused_exports: results.unused_exports.len(),
+                        unused_types: results.unused_types.len(),
+                        unused_dependencies: results.unused_dependencies.len(),
+                        unused_dev_dependencies: results.unused_dev_dependencies.len(),
+                        unused_enum_members: results.unused_enum_members.len(),
+                        unused_class_members: results.unused_class_members.len(),
+                        unresolved_imports: results.unresolved_imports.len(),
+                        unlisted_dependencies: results.unlisted_dependencies.len(),
+                        duplicate_exports: results.duplicate_exports.len(),
+                        type_only_dependencies: results.type_only_dependencies.len(),
+                        circular_dependencies: results.circular_dependencies.len(),
+                        duplication_percentage: duplication.stats.duplication_percentage,
+                        clone_groups: duplication.stats.clone_groups,
+                    })
+                    .await;
+
                 *self.results.write().await = Some(results);
                 *self.duplication.write().await = Some(duplication);
 
@@ -534,4 +590,10 @@ fn merge_duplication(target: &mut DuplicationReport, source: DuplicationReport) 
     target.stats.duplicated_lines += source.stats.duplicated_lines;
     target.stats.total_tokens += source.stats.total_tokens;
     target.stats.duplicated_tokens += source.stats.duplicated_tokens;
+    // Recompute percentage from merged totals (don't sum sub-project percentages)
+    target.stats.duplication_percentage = if target.stats.total_lines > 0 {
+        (target.stats.duplicated_lines as f64 / target.stats.total_lines as f64) * 100.0
+    } else {
+        0.0
+    };
 }

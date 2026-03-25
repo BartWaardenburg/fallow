@@ -238,38 +238,57 @@ pub fn build_diagnostics(
 
     // Duplicate exports: WARNING on each file that has the duplicate
     for dup in &results.duplicate_exports {
+        // Build related information linking all duplicate locations together
         for loc in &dup.locations {
             if let Ok(uri) = Url::from_file_path(&loc.path) {
-                let other_files: Vec<String> = dup
+                let related_info: Vec<DiagnosticRelatedInformation> = dup
                     .locations
                     .iter()
                     .filter(|l| l.path != loc.path)
-                    .map(|l| l.path.display().to_string())
+                    .filter_map(|l| {
+                        let other_uri = Url::from_file_path(&l.path).ok()?;
+                        Some(DiagnosticRelatedInformation {
+                            location: Location {
+                                uri: other_uri,
+                                range: Range {
+                                    start: Position {
+                                        line: l.line.saturating_sub(1),
+                                        character: l.col,
+                                    },
+                                    end: Position {
+                                        line: l.line.saturating_sub(1),
+                                        character: l.col + dup.export_name.len() as u32,
+                                    },
+                                },
+                            },
+                            message: "Also exported here".to_string(),
+                        })
+                    })
                     .collect();
                 let line = loc.line.saturating_sub(1);
-                let range = Range {
-                    start: Position {
-                        line,
-                        character: loc.col,
-                    },
-                    end: Position {
-                        line,
-                        character: loc.col,
-                    },
-                };
                 diagnostics_by_file
                     .entry(uri)
                     .or_default()
                     .push(Diagnostic {
-                        range,
+                        range: Range {
+                            start: Position {
+                                line,
+                                character: loc.col,
+                            },
+                            end: Position {
+                                line,
+                                character: loc.col + dup.export_name.len() as u32,
+                            },
+                        },
                         severity: Some(DiagnosticSeverity::WARNING),
                         source: Some("fallow".to_string()),
                         code: Some(NumberOrString::String("duplicate-export".to_string())),
-                        message: format!(
-                            "Duplicate export '{}' (also in: {})",
-                            dup.export_name,
-                            other_files.join(", ")
-                        ),
+                        message: format!("Duplicate export '{}'", dup.export_name,),
+                        related_information: if related_info.is_empty() {
+                            None
+                        } else {
+                            Some(related_info)
+                        },
                         ..Default::default()
                     });
             }
@@ -305,7 +324,7 @@ pub fn build_diagnostics(
                                 },
                                 end: Position {
                                     line: (other.end_line as u32).saturating_sub(1),
-                                    character: other.end_col as u32,
+                                    character: u32::MAX,
                                 },
                             },
                         },
@@ -325,10 +344,11 @@ pub fn build_diagnostics(
                         },
                         end: Position {
                             line: end_line,
-                            character: instance.end_col as u32,
+                            // Extend to end of last line to ensure full block is underlined
+                            character: u32::MAX,
                         },
                     },
-                    severity: Some(DiagnosticSeverity::HINT),
+                    severity: Some(DiagnosticSeverity::INFORMATION),
                     source: Some("fallow".to_string()),
                     code: Some(NumberOrString::String("code-duplication".to_string())),
                     message: format!(
@@ -363,6 +383,29 @@ pub fn build_diagnostics(
                 .collect();
             let message = format!("Circular dependency: {}", chain.join(" \u{2192} "));
             let line = cycle.line.saturating_sub(1);
+
+            // Related info: link to each file in the cycle chain
+            let related_info: Vec<DiagnosticRelatedInformation> = cycle
+                .files
+                .iter()
+                .skip(1) // skip the first file (it's the diagnostic location)
+                .enumerate()
+                .filter_map(|(i, f)| {
+                    let file_uri = Url::from_file_path(f).ok()?;
+                    let name = f.file_name().map_or_else(
+                        || f.display().to_string(),
+                        |n| n.to_string_lossy().into_owned(),
+                    );
+                    Some(DiagnosticRelatedInformation {
+                        location: Location {
+                            uri: file_uri,
+                            range: FIRST_LINE_RANGE,
+                        },
+                        message: format!("Step {} in cycle: {name}", i + 2),
+                    })
+                })
+                .collect();
+
             diagnostics_by_file
                 .entry(uri)
                 .or_default()
@@ -381,6 +424,11 @@ pub fn build_diagnostics(
                     source: Some("fallow".to_string()),
                     code: Some(NumberOrString::String("circular-dependency".to_string())),
                     message,
+                    related_information: if related_info.is_empty() {
+                        None
+                    } else {
+                        Some(related_info)
+                    },
                     ..Default::default()
                 });
         }
@@ -731,15 +779,22 @@ mod tests {
         let d = &utils_diags[0];
         assert_eq!(d.severity, Some(DiagnosticSeverity::WARNING));
         assert!(d.message.contains("formatDate"));
-        assert!(d.message.contains(&helpers_path.display().to_string()));
         // line 15 (1-based) → 14 (0-based)
         assert_eq!(d.range.start.line, 14);
         assert_eq!(d.range.start.character, 0);
+        // Range spans the export name
+        assert_eq!(d.range.end.character, "formatDate".len() as u32);
+        // Related info points to the other file
+        let related = d.related_information.as_ref().unwrap();
+        assert_eq!(related.len(), 1);
+        assert_eq!(related[0].location.uri, uri_helpers);
+        assert_eq!(related[0].message, "Also exported here");
 
         let helpers_diags = diags.get(&uri_helpers).unwrap();
         assert_eq!(helpers_diags.len(), 1);
         let dh = &helpers_diags[0];
-        assert!(dh.message.contains(&utils_path.display().to_string()));
+        let related_h = dh.related_information.as_ref().unwrap();
+        assert_eq!(related_h[0].location.uri, uri_utils);
     }
 
     #[test]
@@ -791,7 +846,7 @@ mod tests {
         assert_eq!(diags_a.len(), 1);
 
         let d = &diags_a[0];
-        assert_eq!(d.severity, Some(DiagnosticSeverity::HINT));
+        assert_eq!(d.severity, Some(DiagnosticSeverity::INFORMATION));
         assert_eq!(
             d.code,
             Some(NumberOrString::String("code-duplication".to_string()))

@@ -15,6 +15,7 @@ path = "src/main.rs"
 fallow-core = { workspace = true }
 fallow-config = { workspace = true }
 tower-lsp = { workspace = true }
+serde = { workspace = true }
 tokio = { workspace = true }
 serde_json = { workspace = true }
 tracing-subscriber = { workspace = true }

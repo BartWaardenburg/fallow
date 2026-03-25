@@ -1,0 +1,31 @@
+<svg width="800" height="450" viewBox="0 0 800 450" xmlns="http://www.w3.org/2000/svg">
+  <rect fill="#1e1e1e" width="800" height="450" rx="12"/>
+  <!-- Settings panel -->
+  <rect fill="#252526" x="80" y="40" width="640" height="340" rx="8"/>
+  <rect x="80" y="40" width="640" height="340" rx="8" stroke="#3c3c3c" stroke-width="1" fill="none"/>
+  <!-- Search bar -->
+  <rect x="100" y="60" width="600" height="32" rx="4" fill="#3c3c3c"/>
+  <text fill="#858585" x="116" y="82" font-size="13">fallow</text>
+  <!-- Settings items -->
+  <text fill="#d4d4d4" x="120" y="130" font-size="13" font-weight="600">Issue Types</text>
+  <text fill="#858585" x="120" y="150" font-size="12">Toggle individual issue types on or off</text>
+  <!-- Checkboxes -->
+  <text fill="#27c93f" x="140" y="185" font-size="16">&#9745;</text>
+  <text fill="#d4d4d4" x="165" y="185" font-size="13">unused-files</text>
+  <text fill="#27c93f" x="350" y="185" font-size="16">&#9745;</text>
+  <text fill="#d4d4d4" x="375" y="185" font-size="13">unused-exports</text>
+  <text fill="#27c93f" x="140" y="215" font-size="16">&#9745;</text>
+  <text fill="#d4d4d4" x="165" y="215" font-size="13">unused-types</text>
+  <text fill="#27c93f" x="350" y="215" font-size="16">&#9745;</text>
+  <text fill="#d4d4d4" x="375" y="215" font-size="13">unused-dependencies</text>
+  <text fill="#27c93f" x="140" y="245" font-size="16">&#9745;</text>
+  <text fill="#d4d4d4" x="165" y="245" font-size="13">circular-dependencies</text>
+  <text fill="#27c93f" x="350" y="245" font-size="16">&#9745;</text>
+  <text fill="#d4d4d4" x="375" y="245" font-size="13">unresolved-imports</text>
+  <!-- Duplication settings -->
+  <text fill="#d4d4d4" x="120" y="295" font-size="13" font-weight="600">Duplication</text>
+  <text fill="#858585" x="120" y="315" font-size="12">Mode: mild</text>
+  <text fill="#858585" x="280" y="315" font-size="12">Threshold: 5 lines</text>
+  <!-- Label -->
+  <text fill="#d4d4d4" x="400" y="430" font-size="18" text-anchor="middle" font-weight="600">Customize which rules to check and how strict</text>
+</svg>

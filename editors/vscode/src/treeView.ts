@@ -8,6 +8,50 @@ import type {
 } from "./types.js";
 import { ISSUE_CATEGORY_LABELS } from "./types.js";
 
+/** Resolve a potentially relative CLI path to an absolute path. */
+const resolveFilePath = (filePath: string): { absolute: string; relative: string } => {
+  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  const absolute = workspaceRoot && !path.isAbsolute(filePath)
+    ? path.resolve(workspaceRoot, filePath)
+    : filePath;
+  const relative = workspaceRoot
+    ? path.relative(workspaceRoot, absolute)
+    : filePath;
+  return { absolute, relative };
+};
+
+/** Icons per issue category. */
+const CATEGORY_ICONS: Record<IssueCategory, string> = {
+  "unused-files": "file-code",
+  "unused-exports": "symbol-method",
+  "unused-types": "symbol-interface",
+  "unused-dependencies": "package",
+  "unused-dev-dependencies": "package",
+  "unused-enum-members": "symbol-enum-member",
+  "unused-class-members": "symbol-field",
+  "unresolved-imports": "error",
+  "unlisted-dependencies": "package",
+  "duplicate-exports": "files",
+  "type-only-dependencies": "symbol-interface",
+  "circular-dependencies": "sync",
+};
+
+/** Icons for individual issue items. */
+const ISSUE_ICONS: Record<IssueCategory, string> = {
+  "unused-files": "file",
+  "unused-exports": "symbol-method",
+  "unused-types": "symbol-interface",
+  "unused-dependencies": "package",
+  "unused-dev-dependencies": "package",
+  "unused-enum-members": "symbol-enum-member",
+  "unused-class-members": "symbol-field",
+  "unresolved-imports": "error",
+  "unlisted-dependencies": "package",
+  "duplicate-exports": "copy",
+  "type-only-dependencies": "package",
+  "circular-dependencies": "sync",
+};
+
 type DeadCodeItem = CategoryItem | IssueItem;
 
 class CategoryItem extends vscode.TreeItem {
@@ -23,6 +67,7 @@ class CategoryItem extends vscode.TreeItem {
     );
     this.issues = issues;
     this.contextValue = "category";
+    this.iconPath = new vscode.ThemeIcon(CATEGORY_ICONS[category] ?? "warning");
   }
 }
 
@@ -31,23 +76,22 @@ class IssueItem extends vscode.TreeItem {
     label: string,
     readonly filePath: string,
     readonly line: number,
-    readonly col: number
+    readonly col: number,
+    category: IssueCategory
   ) {
     super(label, vscode.TreeItemCollapsibleState.None);
 
-    const relativePath = vscode.workspace.workspaceFolders?.[0]
-      ? path.relative(vscode.workspace.workspaceFolders[0].uri.fsPath, filePath)
-      : filePath;
+    const { absolute, relative } = resolveFilePath(filePath);
 
-    this.description = `${relativePath}:${line}`;
-    this.tooltip = `${label}\n${filePath}:${line}:${col}`;
+    this.description = `${relative}:${line}`;
+    this.tooltip = `${label}\n${absolute}:${line}:${col}`;
     this.contextValue = "issue";
 
     this.command = {
       command: "vscode.open",
       title: "Open File",
       arguments: [
-        vscode.Uri.file(filePath),
+        vscode.Uri.file(absolute),
         {
           selection: new vscode.Range(
             Math.max(0, line - 1),
@@ -59,7 +103,7 @@ class IssueItem extends vscode.TreeItem {
       ],
     };
 
-    this.iconPath = new vscode.ThemeIcon("warning");
+    this.iconPath = new vscode.ThemeIcon(ISSUE_ICONS[category] ?? "warning");
   }
 }
 
@@ -67,15 +111,48 @@ export class DeadCodeTreeProvider
   implements vscode.TreeDataProvider<DeadCodeItem>
 {
   private result: FallowCheckResult | null = null;
+  private view: vscode.TreeView<DeadCodeItem> | null = null;
 
   private readonly _onDidChangeTreeData = new vscode.EventEmitter<
     DeadCodeItem | undefined | null | void
   >();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
+  setView(view: vscode.TreeView<DeadCodeItem>): void {
+    this.view = view;
+  }
+
   update(result: FallowCheckResult | null): void {
     this.result = result;
     this._onDidChangeTreeData.fire();
+    this.updateBadge();
+  }
+
+  private updateBadge(): void {
+    if (!this.view) {
+      return;
+    }
+    if (!this.result) {
+      this.view.badge = undefined;
+      return;
+    }
+    const count =
+      this.result.unused_files.length +
+      this.result.unused_exports.length +
+      this.result.unused_types.length +
+      this.result.unused_dependencies.length +
+      this.result.unused_dev_dependencies.length +
+      this.result.unused_enum_members.length +
+      this.result.unused_class_members.length +
+      this.result.unresolved_imports.length +
+      this.result.unlisted_dependencies.length +
+      this.result.duplicate_exports.length +
+      (this.result.type_only_dependencies?.length ?? 0) +
+      (this.result.circular_dependencies?.length ?? 0);
+
+    this.view.badge = count > 0
+      ? { value: count, tooltip: `${count} issue${count === 1 ? "" : "s"}` }
+      : undefined;
   }
 
   getTreeItem(element: DeadCodeItem): vscode.TreeItem {
@@ -105,35 +182,35 @@ export class DeadCodeTreeProvider
     addCategory(
       "unused-files",
       this.result.unused_files.map(
-        (f) => new IssueItem(path.basename(f.path), f.path, 1, 0)
+        (f) => new IssueItem(path.basename(f.path), f.path, 1, 0, "unused-files")
       )
     );
 
     addCategory(
       "unused-exports",
       this.result.unused_exports.map(
-        (e) => new IssueItem(e.export_name, e.path, e.line, e.col)
+        (e) => new IssueItem(e.export_name, e.path, e.line, e.col, "unused-exports")
       )
     );
 
     addCategory(
       "unused-types",
       this.result.unused_types.map(
-        (e) => new IssueItem(e.export_name, e.path, e.line, e.col)
+        (e) => new IssueItem(e.export_name, e.path, e.line, e.col, "unused-types")
       )
     );
 
     addCategory(
       "unused-dependencies",
       this.result.unused_dependencies.map(
-        (d) => new IssueItem(d.package_name, d.path, 1, 0)
+        (d) => new IssueItem(d.package_name, d.path, 1, 0, "unused-dependencies")
       )
     );
 
     addCategory(
       "unused-dev-dependencies",
       this.result.unused_dev_dependencies.map(
-        (d) => new IssueItem(d.package_name, d.path, 1, 0)
+        (d) => new IssueItem(d.package_name, d.path, 1, 0, "unused-dev-dependencies")
       )
     );
 
@@ -141,7 +218,7 @@ export class DeadCodeTreeProvider
       "unused-enum-members",
       this.result.unused_enum_members.map(
         (m) =>
-          new IssueItem(`${m.parent_name}.${m.member_name}`, m.path, m.line, m.col)
+          new IssueItem(`${m.parent_name}.${m.member_name}`, m.path, m.line, m.col, "unused-enum-members")
       )
     );
 
@@ -149,21 +226,21 @@ export class DeadCodeTreeProvider
       "unused-class-members",
       this.result.unused_class_members.map(
         (m) =>
-          new IssueItem(`${m.parent_name}.${m.member_name}`, m.path, m.line, m.col)
+          new IssueItem(`${m.parent_name}.${m.member_name}`, m.path, m.line, m.col, "unused-class-members")
       )
     );
 
     addCategory(
       "unresolved-imports",
       this.result.unresolved_imports.map(
-        (i) => new IssueItem(i.specifier, i.path, i.line, i.col)
+        (i) => new IssueItem(i.specifier, i.path, i.line, i.col, "unresolved-imports")
       )
     );
 
     addCategory(
       "unlisted-dependencies",
       this.result.unlisted_dependencies.map(
-        (d) => new IssueItem(d.package_name, d.path, 1, 0)
+        (d) => new IssueItem(d.package_name, d.path, 1, 0, "unlisted-dependencies")
       )
     );
 
@@ -171,7 +248,7 @@ export class DeadCodeTreeProvider
       "duplicate-exports",
       this.result.duplicate_exports.flatMap((d) =>
         d.locations.map(
-          (loc) => new IssueItem(d.export_name, loc.path, loc.line, loc.col)
+          (loc) => new IssueItem(d.export_name, loc.path, loc.line, loc.col, "duplicate-exports")
         )
       )
     );
@@ -180,7 +257,7 @@ export class DeadCodeTreeProvider
       addCategory(
         "type-only-dependencies",
         this.result.type_only_dependencies.map(
-          (d) => new IssueItem(d.package_name, d.path, 1, 0)
+          (d) => new IssueItem(d.package_name, d.path, 1, 0, "type-only-dependencies")
         )
       );
     }
@@ -193,7 +270,8 @@ export class DeadCodeTreeProvider
             `${c.length} files`,
             c.files[0] ?? "",
             1,
-            0
+            0,
+            "circular-dependencies"
           )
         )
       );
@@ -238,19 +316,17 @@ class CloneInstanceItem extends vscode.TreeItem {
       vscode.TreeItemCollapsibleState.None
     );
 
-    const relativePath = vscode.workspace.workspaceFolders?.[0]
-      ? path.relative(vscode.workspace.workspaceFolders[0].uri.fsPath, filePath)
-      : filePath;
+    const { absolute, relative } = resolveFilePath(filePath);
 
-    this.description = relativePath;
-    this.tooltip = `${filePath}:${startLine}-${endLine}`;
+    this.description = relative;
+    this.tooltip = `${absolute}:${startLine}-${endLine}`;
     this.contextValue = "cloneInstance";
 
     this.command = {
       command: "vscode.open",
       title: "Open File",
       arguments: [
-        vscode.Uri.file(filePath),
+        vscode.Uri.file(absolute),
         {
           selection: new vscode.Range(
             Math.max(0, startLine - 1),

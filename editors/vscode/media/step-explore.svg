@@ -1,0 +1,32 @@
+<svg width="800" height="450" viewBox="0 0 800 450" xmlns="http://www.w3.org/2000/svg">
+  <rect fill="#1e1e1e" width="800" height="450" rx="12"/>
+  <!-- Sidebar panel -->
+  <rect fill="#252526" x="40" y="40" width="280" height="330" rx="8"/>
+  <rect x="40" y="40" width="280" height="330" rx="8" stroke="#3c3c3c" stroke-width="1" fill="none"/>
+  <text fill="#3794ff" x="60" y="72" font-size="13" font-weight="600">FALLOW</text>
+  <!-- Tree items -->
+  <text fill="#f59e0b" x="60" y="106" font-size="14">&#9654;</text>
+  <text fill="#d4d4d4" x="82" y="106" font-size="13">Unused Files (2)</text>
+  <text fill="#f59e0b" x="60" y="136" font-size="14">&#9654;</text>
+  <text fill="#d4d4d4" x="82" y="136" font-size="13">Unused Exports (5)</text>
+  <text fill="#f59e0b" x="60" y="166" font-size="14">&#9654;</text>
+  <text fill="#d4d4d4" x="82" y="166" font-size="13">Unused Dependencies (1)</text>
+  <text fill="#ef4444" x="60" y="196" font-size="14">&#9654;</text>
+  <text fill="#d4d4d4" x="82" y="196" font-size="13">Unresolved Imports (1)</text>
+  <text fill="#858585" x="60" y="226" font-size="13">Circular Dependencies (0)</text>
+  <!-- Editor panel -->
+  <rect fill="#252526" x="340" y="40" width="420" height="330" rx="8"/>
+  <rect x="340" y="40" width="420" height="330" rx="8" stroke="#3c3c3c" stroke-width="1" fill="none"/>
+  <text fill="#858585" x="360" y="72" font-size="12" font-family="monospace">src/utils.ts</text>
+  <text fill="#858585" x="360" y="108" font-size="12" font-family="monospace">1</text>
+  <text fill="#d4d4d4" x="395" y="108" font-size="12" font-family="monospace">import { join } from 'path';</text>
+  <text fill="#858585" x="360" y="132" font-size="12" font-family="monospace">2</text>
+  <text fill="#858585" x="360" y="156" font-size="12" font-family="monospace">3</text>
+  <text fill="#d4d4d4" x="395" y="156" font-size="12" font-family="monospace" opacity="0.4">export const processData = () =&gt;</text>
+  <text fill="#858585" x="360" y="180" font-size="12" font-family="monospace">4</text>
+  <text fill="#d4d4d4" x="395" y="180" font-size="12" font-family="monospace" opacity="0.4">  // 0 references — unused</text>
+  <!-- Squiggly underline -->
+  <line x1="395" y1="159" x2="620" y2="159" stroke="#f59e0b" stroke-width="1" stroke-dasharray="2,2" opacity="0.6"/>
+  <!-- Label -->
+  <text fill="#d4d4d4" x="400" y="420" font-size="18" text-anchor="middle" font-weight="600">Browse results in the sidebar and editor</text>
+</svg>

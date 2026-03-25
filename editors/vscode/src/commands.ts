@@ -171,7 +171,7 @@ export const runFix = async (
 
   if (!dryRun) {
     const confirm = await vscode.window.showWarningMessage(
-      "Fallow: This will remove unused exports and dependencies. Continue?",
+      "Fallow: This will unexport unused exports (keeps the code) and remove unused dependencies from package.json. Continue?",
       "Yes",
       "No"
     );
@@ -185,10 +185,59 @@ export const runFix = async (
     const result = JSON.parse(output) as FallowFixResult;
 
     if (dryRun) {
-      const fixCount = result.fixes.length;
-      void vscode.window.showInformationMessage(
-        `Fallow: ${fixCount} fix${fixCount === 1 ? "" : "es"} available. Run "Fallow: Auto-Fix" to apply.`
-      );
+      if (result.fixes.length === 0) {
+        void vscode.window.showInformationMessage("Fallow: no fixes available.");
+      } else {
+        const items: vscode.QuickPickItem[] = result.fixes.map((fix) => {
+          const label = fix.name ?? fix.package ?? fix.file ?? "unknown";
+          const detail = fix.path
+            ? `${fix.path}${fix.line ? `:${fix.line}` : ""}`
+            : fix.location ?? "";
+          return {
+            label: `$(wrench) ${label}`,
+            description: fix.type.replace(/_/g, " "),
+            detail,
+          };
+        });
+
+        items.push({ label: "", kind: vscode.QuickPickItemKind.Separator });
+        items.push({
+          label: "$(play) Apply all fixes",
+          description: `${result.fixes.length} fix${result.fixes.length === 1 ? "" : "es"}`,
+        });
+
+        // Map items to their fix data for navigation
+        const fixByLabel = new Map(
+          result.fixes.map((fix) => {
+            const label = `$(wrench) ${fix.name ?? fix.package ?? fix.file ?? "unknown"}`;
+            return [label, fix] as const;
+          })
+        );
+
+        const picked = await vscode.window.showQuickPick(items, {
+          title: `Fallow: ${result.fixes.length} fix${result.fixes.length === 1 ? "" : "es"} available`,
+          placeHolder: "Review fixes — select 'Apply all fixes' to apply, or click a fix to navigate",
+        });
+
+        if (!picked) {
+          // cancelled
+        } else if (picked.label === "$(play) Apply all fixes") {
+          void vscode.commands.executeCommand("fallow.fix");
+        } else {
+          // Navigate to the fix location
+          const fix = fixByLabel.get(picked.label);
+          const filePath = fix?.path ?? fix?.file;
+          if (filePath) {
+            const absolutePath = root && !path.isAbsolute(filePath)
+              ? path.resolve(root, filePath)
+              : filePath;
+            const line = Math.max(0, (fix?.line ?? 1) - 1);
+            void vscode.window.showTextDocument(vscode.Uri.file(absolutePath), {
+              selection: new vscode.Range(line, 0, line, 0),
+            });
+          }
+        }
+      }
     } else {
       const fixCount = result.fixes.length;
       void vscode.window.showInformationMessage(

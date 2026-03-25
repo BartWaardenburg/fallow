@@ -1,0 +1,22 @@
+<svg width="800" height="450" viewBox="0 0 800 450" xmlns="http://www.w3.org/2000/svg">
+  <rect fill="#1e1e1e" width="800" height="450" rx="12"/>
+  <!-- Terminal panel -->
+  <rect fill="#252526" x="80" y="60" width="640" height="280" rx="8"/>
+  <rect x="80" y="60" width="640" height="280" rx="8" stroke="#3c3c3c" stroke-width="1" fill="none"/>
+  <!-- Terminal header dots -->
+  <circle cx="104" cy="82" r="6" fill="#ff5f56"/>
+  <circle cx="124" cy="82" r="6" fill="#ffbd2e"/>
+  <circle cx="144" cy="82" r="6" fill="#27c93f"/>
+  <!-- Terminal content -->
+  <text fill="#858585" x="104" y="130" font-size="14" font-family="monospace">$</text>
+  <text fill="#d4d4d4" x="120" y="130" font-size="14" font-family="monospace">fallow check</text>
+  <text fill="#3794ff" x="104" y="170" font-size="13" font-family="monospace">Unused files (2)</text>
+  <text fill="#858585" x="120" y="195" font-size="12" font-family="monospace">src/old-parser.ts</text>
+  <text fill="#858585" x="120" y="215" font-size="12" font-family="monospace">src/deprecated.ts</text>
+  <text fill="#3794ff" x="104" y="255" font-size="13" font-family="monospace">Unused exports (5)</text>
+  <text fill="#858585" x="120" y="280" font-size="12" font-family="monospace">processData  src/utils.ts:12</text>
+  <text fill="#858585" x="120" y="300" font-size="12" font-family="monospace">formatOutput src/format.ts:34</text>
+  <text fill="#858585" x="120" y="320" font-size="12" font-family="monospace">...</text>
+  <!-- Label -->
+  <text fill="#d4d4d4" x="400" y="400" font-size="18" text-anchor="middle" font-weight="600">Run analysis to find unused code in your project</text>
+</svg>

@@ -2,7 +2,7 @@
   "name": "fallow-vscode",
   "displayName": "Fallow",
   "description": "Find unused code, circular dependencies, and code duplication in TypeScript/JavaScript",
-  "version": "0.3.0",
+  "version": "1.8.1",
   "publisher": "fallow-rs",
   "license": "MIT",
   "repository": {
@@ -64,7 +64,7 @@
       },
       {
         "command": "fallow.fix",
-        "title": "Fallow: Auto-Fix Unused Exports & Dependencies"
+        "title": "Fallow: Auto-Fix (unexport unused, remove unused deps)"
       },
       {
         "command": "fallow.fixDryRun",
@@ -77,6 +77,14 @@
       {
         "command": "fallow.showOutput",
         "title": "Fallow: Show Output Channel"
+      },
+      {
+        "command": "fallow.openSidebar",
+        "title": "Fallow: Open Sidebar"
+      },
+      {
+        "command": "fallow.openSettings",
+        "title": "Fallow: Open Settings"
       },
       {
         "command": "fallow.noop",
@@ -221,7 +229,72 @@
           "group": "navigation"
         }
       ]
-    }
+    },
+    "viewsWelcome": [
+      {
+        "view": "fallow.deadCode",
+        "contents": "No analysis results yet.\n[$(search) Run Analysis](command:fallow.analyze)\nFallow finds unused files, exports, dependencies, and more.",
+        "when": "!fallow.hasAnalyzed"
+      },
+      {
+        "view": "fallow.duplicates",
+        "contents": "No duplication results yet.\n[$(search) Run Analysis](command:fallow.analyze)\nFallow detects duplicated code blocks across your project.",
+        "when": "!fallow.hasAnalyzed"
+      }
+    ],
+    "walkthroughs": [
+      {
+        "id": "fallow.gettingStarted",
+        "title": "Get Started with Fallow",
+        "description": "Find and remove unused code, circular dependencies, and duplication in your TypeScript/JavaScript project.",
+        "steps": [
+          {
+            "id": "fallow.gettingStarted.analyze",
+            "title": "Run your first analysis",
+            "description": "Fallow scans your codebase to find unused files, exports, dependencies, circular dependencies, and code duplication.\n\nOpen the Command Palette and run **Fallow: Run Analysis**, or click the search icon in the Fallow sidebar.\n\n[Run Analysis](command:fallow.analyze)",
+            "media": {
+              "markdown": "media/step-analyze.md"
+            },
+            "completionEvents": [
+              "onCommand:fallow.analyze"
+            ]
+          },
+          {
+            "id": "fallow.gettingStarted.explore",
+            "title": "Explore the results",
+            "description": "After analysis completes, results appear across multiple surfaces in your editor.\n\nClick any item in the Fallow sidebar to jump to it in the editor.\n\n[Open Fallow Sidebar](command:fallow.openSidebar)",
+            "media": {
+              "markdown": "media/step-explore.md"
+            },
+            "completionEvents": [
+              "onCommand:fallow.openSidebar"
+            ]
+          },
+          {
+            "id": "fallow.gettingStarted.fix",
+            "title": "Fix an issue",
+            "description": "Auto-fix removes the `export` keyword from unused exports (keeping the code) and removes unused dependencies from package.json.\n\n[Auto-Fix](command:fallow.fix) · [Preview Fixes](command:fallow.fixDryRun)",
+            "media": {
+              "markdown": "media/step-fix.md"
+            },
+            "completionEvents": [
+              "onCommand:fallow.fix"
+            ]
+          },
+          {
+            "id": "fallow.gettingStarted.configure",
+            "title": "Configure rules",
+            "description": "Customize which checks to run and how strict they are.\n\n[Open Fallow Settings](command:fallow.openSettings)",
+            "media": {
+              "markdown": "media/step-configure.md"
+            },
+            "completionEvents": [
+              "onCommand:fallow.openSettings"
+            ]
+          }
+        ]
+      }
+    ]
   },
   "scripts": {
     "build": "rolldown -c",
