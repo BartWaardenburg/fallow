@@ -123,10 +123,7 @@ impl LanguageServer for FallowLspServer {
                 )),
                 code_action_provider: Some(CodeActionProviderCapability::Options(
                     CodeActionOptions {
-                        code_action_kinds: Some(vec![
-                            CodeActionKind::QUICKFIX,
-                            CodeActionKind::REFACTOR_EXTRACT,
-                        ]),
+                        code_action_kinds: Some(vec![CodeActionKind::QUICKFIX]),
                         ..Default::default()
                     },
                 )),
@@ -234,21 +231,6 @@ impl LanguageServer for FallowLspServer {
             uri,
             &params.range,
         ));
-
-        // Generate "Extract duplicate" code actions for duplication diagnostics
-        {
-            let duplication = self.duplication.read().await;
-            if let Some(ref report) = *duplication {
-                let extract_actions = code_actions::build_extract_duplicate_actions(
-                    &file_path,
-                    uri,
-                    &params.range,
-                    &report.clone_groups,
-                    &file_lines,
-                );
-                actions.extend(extract_actions);
-            }
-        }
 
         if actions.is_empty() {
             Ok(None)
