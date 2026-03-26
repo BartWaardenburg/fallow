@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1774555538046,
+  "lastUpdate": 1774559637118,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
@@ -1879,6 +1879,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/246502e30e80a5606cfbd6341bf925ff78136a29"
         },
         "date": 1774555537596,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 87.7,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "ae5fa1ea8e0970762d49a18b669e8dea80a4fd92",
+          "message": "feat: run conformance and benchmarks against 8 real-world projects\n\nConformance and performance benchmarks previously ran against tiny\nsynthetic fixtures, making them ineffective at catching real issues.\nBoth now clone and test 8 open-source projects (preact, fastify, zod,\nvue-core, svelte, query, vite, next.js) — the same set used by the\nmanual benchmark suite.\n\nChanges:\n- Add run-all.sh + aggregate.py for multi-project conformance\n- Add bench-ci.sh + bench-real-world.yml for daily perf tracking\n- Update conformance.yml to use run-all.sh with per-project reporting\n- Add real-world benchmarks card to metrics dashboard\n- Add favicon from fallow-docs to GitHub Pages\n- Update conformance README for multi-project setup",
+          "timestamp": "2026-03-26T22:12:55+01:00",
+          "tree_id": "7e8cd477c5bc5506d967dbe7acc4a8369b52afbb",
+          "url": "https://github.com/fallow-rs/fallow/commit/ae5fa1ea8e0970762d49a18b669e8dea80a4fd92"
+        },
+        "date": 1774559636247,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
