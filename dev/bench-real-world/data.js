@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-"lastUpdate": 1774565821639,
+"lastUpdate": 1774566420090,
 "repoUrl": "https://github.com/fallow-rs/fallow",
 "entries": {
 "Fallow Real-World Benchmarks": [
@@ -1054,11 +1054,6 @@ window.BENCHMARK_DATA = {
 "unit": "ms"
 },
 {
-"name": "preact RSS",
-"value": 17899520,
-"unit": "bytes"
-},
-{
 "name": "fastify (cold)",
 "value": 56,
 "unit": "ms"
@@ -1067,11 +1062,6 @@ window.BENCHMARK_DATA = {
 "name": "fastify (warm)",
 "value": 47,
 "unit": "ms"
-},
-{
-"name": "fastify RSS",
-"value": 22134784,
-"unit": "bytes"
 },
 {
 "name": "zod (cold)",
@@ -1084,11 +1074,6 @@ window.BENCHMARK_DATA = {
 "unit": "ms"
 },
 {
-"name": "zod RSS",
-"value": 18202624,
-"unit": "bytes"
-},
-{
 "name": "vue-core (cold)",
 "value": 115,
 "unit": "ms"
@@ -1097,11 +1082,6 @@ window.BENCHMARK_DATA = {
 "name": "vue-core (warm)",
 "value": 104,
 "unit": "ms"
-},
-{
-"name": "vue-core RSS",
-"value": 29380608,
-"unit": "bytes"
 },
 {
 "name": "svelte (cold)",
@@ -1114,11 +1094,6 @@ window.BENCHMARK_DATA = {
 "unit": "ms"
 },
 {
-"name": "svelte RSS",
-"value": 60620800,
-"unit": "bytes"
-},
-{
 "name": "query (cold)",
 "value": 340,
 "unit": "ms"
@@ -1127,11 +1102,6 @@ window.BENCHMARK_DATA = {
 "name": "query (warm)",
 "value": 327,
 "unit": "ms"
-},
-{
-"name": "query RSS",
-"value": 70361088,
-"unit": "bytes"
 },
 {
 "name": "vite (cold)",
@@ -1144,11 +1114,6 @@ window.BENCHMARK_DATA = {
 "unit": "ms"
 },
 {
-"name": "vite RSS",
-"value": 37625856,
-"unit": "bytes"
-},
-{
 "name": "next.js (cold)",
 "value": 1812,
 "unit": "ms"
@@ -1157,11 +1122,6 @@ window.BENCHMARK_DATA = {
 "name": "next.js (warm)",
 "value": 1728,
 "unit": "ms"
-},
-{
-"name": "next.js RSS",
-"value": 185729024,
-"unit": "bytes"
 }
 ]
 }
