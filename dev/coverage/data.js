@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1774554680423,
+  "lastUpdate": 1774555433844,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
@@ -1821,6 +1821,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/6bd74234fd32f865b4b772c584c3699590ceac21"
         },
         "date": 1774554680043,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 87.7,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "200961e2a6a661502bcf00a52c7e508051ed707c",
+          "message": "docs: update benchmark numbers to v2.2.0 measurements\n\nRebenchmarked on Apple M5 with 5 runs. Key changes:\n- Dead code vs knip v5: 5-41x (was 3-36x)\n- Dead code vs knip v6: 2-18x (was 2-14x)\n- Duplication vs jscpd: 8-26x (was 20-33x)\n- Added preact to dead code table\n- knip now correctly shown as erroring on next.js (was '--')",
+          "timestamp": "2026-03-26T21:02:53+01:00",
+          "tree_id": "e0263b5b95f1d1d423f308a606a52c2eb70796c9",
+          "url": "https://github.com/fallow-rs/fallow/commit/200961e2a6a661502bcf00a52c7e508051ed707c"
+        },
+        "date": 1774555432940,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
