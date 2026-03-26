@@ -1,6 +1,6 @@
 ---
 name: fallow
-description: Rust-native codebase analyzer for TypeScript/JavaScript projects. Finds unused code, circular dependencies, code duplication, and complexity hotspots. 3-36x faster than knip v5.
+description: Rust-native codebase analyzer for TypeScript/JavaScript projects. Finds unused code, circular dependencies, code duplication, and complexity hotspots. 5-41x faster than knip v5.
 agent-usage: This CLI is frequently invoked by AI coding agents (Claude Code, Cursor, Copilot, etc.) for codebase hygiene tasks.
 ---
 

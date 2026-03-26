@@ -1,6 +1,6 @@
 # Fallow for VS Code
 
-Find unused code, circular dependencies, and code duplication in TypeScript/JavaScript projects. Powered by [fallow](https://docs.fallow.tools), a Rust-native alternative to knip that is 3-36x faster than knip v5 (2-14x faster than knip v6).
+Find unused code, circular dependencies, and code duplication in TypeScript/JavaScript projects. Powered by [fallow](https://docs.fallow.tools), a Rust-native alternative to knip that is 5-41x faster than knip v5 (2-18x faster than knip v6).
 
 ## Features
 

@@ -176,11 +176,12 @@ Benchmarked on real open-source projects (median of 5 runs, Apple M5).
 
 | Project | Files | fallow | knip v5 | knip v6 | vs v5 | vs v6 |
 |:--------|------:|-------:|--------:|--------:|------:|------:|
-| [zod](https://github.com/colinhacks/zod) | 174 | **19ms** | 639ms | 334ms | 34x | 18x |
-| [fastify](https://github.com/fastify/fastify) | 286 | **24ms** | 1.13s | 289ms | 46x | 12x |
-| [TanStack/query](https://github.com/TanStack/query) | 901 | **148ms** | 2.75s | 1.41s | 19x | 10x |
-| [svelte](https://github.com/sveltejs/svelte) | 3,337 | **325ms** | 1.93s | 860ms | 6x | 3x |
-| [next.js](https://github.com/vercel/next.js) | 20,416 | **1.48s** | -- | -- | -- | -- |
+| [zod](https://github.com/colinhacks/zod) | 174 | **17ms** | 577ms | 300ms | 34x | 18x |
+| [fastify](https://github.com/fastify/fastify) | 286 | **19ms** | 791ms | 232ms | 41x | 12x |
+| [preact](https://github.com/preactjs/preact) | 244 | **20ms** | 767ms | 2.02s | 39x | 103x |
+| [TanStack/query](https://github.com/TanStack/query) | 901 | **170ms** | 2.50s | 1.28s | 15x | 8x |
+| [svelte](https://github.com/sveltejs/svelte) | 3,337 | **359ms** | 1.73s | 749ms | 5x | 2x |
+| [next.js](https://github.com/vercel/next.js) | 20,416 | **1.66s** | -- | -- | -- | -- |
 
 knip errors out on next.js. fallow completes in under 2 seconds.
 
@@ -188,9 +189,9 @@ knip errors out on next.js. fallow completes in under 2 seconds.
 
 | Project | Files | fallow | jscpd | Speedup |
 |:--------|------:|-------:|------:|--------:|
-| [fastify](https://github.com/fastify/fastify) | 286 | **84ms** | 2.83s | 34x |
-| [vue/core](https://github.com/vuejs/core) | 522 | **120ms** | 3.13s | 26x |
-| [next.js](https://github.com/vercel/next.js) | 20,416 | **3.16s** | 24.64s | 8x |
+| [fastify](https://github.com/fastify/fastify) | 286 | **76ms** | 1.96s | 26x |
+| [vue/core](https://github.com/vuejs/core) | 522 | **124ms** | 3.11s | 25x |
+| [next.js](https://github.com/vercel/next.js) | 20,416 | **2.89s** | 24.37s | 8x |
 
 No TypeScript compiler, no Node.js runtime. [How it works](https://docs.fallow.tools/explanations/architecture) | [Reproduce benchmarks](https://github.com/fallow-rs/fallow/tree/main/benchmarks)
 
