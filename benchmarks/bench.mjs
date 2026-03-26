@@ -123,11 +123,11 @@ function benchmarkProject(name, dir) {
     fTimesCold.push(fr.elapsed);
     if (i === 0) { fIssues = parseIssueCount(fr.stdout, fr.status); fPeakRss = fr.peakRssBytes; }
     const kr = timeRunWithMemory(knipBin, kArgs, dir);
-    if (kr.status !== 2) kTimes.push(kr.elapsed);
+    if (kr.status != null && kr.status !== 2) kTimes.push(kr.elapsed);
     if (i === 0) { kIssues = parseIssueCount(kr.stdout, kr.status); kPeakRss = kr.peakRssBytes; }
     if (hasKnip6) {
       const k6r = timeRunWithMemory(knip6Bin, kArgs, dir);
-      if (k6r.status !== 2) k6Times.push(k6r.elapsed);
+      if (k6r.status != null && k6r.status !== 2) k6Times.push(k6r.elapsed);
       if (i === 0) { k6Issues = parseIssueCount(k6r.stdout, k6r.status); k6PeakRss = k6r.peakRssBytes; }
     }
   }

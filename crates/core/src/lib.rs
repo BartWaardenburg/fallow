@@ -410,6 +410,11 @@ fn run_plugins(
         .collect();
 
     // Merge workspace results sequentially (deterministic order via par_iter index stability)
+    // Track seen names for O(1) dedup instead of O(n) Vec::contains
+    let mut seen_plugins: rustc_hash::FxHashSet<String> =
+        result.active_plugins.iter().cloned().collect();
+    let mut seen_prefixes: rustc_hash::FxHashSet<String> =
+        result.virtual_module_prefixes.iter().cloned().collect();
     for (ws_result, ws_prefix) in ws_results {
         // Prefix helper: workspace-relative patterns need the workspace prefix
         // to be matchable from the monorepo root. But patterns that are already
@@ -443,10 +448,11 @@ fn run_plugins(
                 .used_exports
                 .push((prefix_if_needed(file_pat), exports.clone()));
         }
-        // Merge active plugin names (deduplicated)
-        for plugin_name in &ws_result.active_plugins {
-            if !result.active_plugins.contains(plugin_name) {
-                result.active_plugins.push(plugin_name.clone());
+        // Merge active plugin names (deduplicated via HashSet)
+        for plugin_name in ws_result.active_plugins {
+            if !seen_plugins.contains(&plugin_name) {
+                seen_plugins.insert(plugin_name.clone());
+                result.active_plugins.push(plugin_name);
             }
         }
         // These don't need prefixing (absolute paths / package names)
@@ -459,9 +465,10 @@ fn run_plugins(
             .extend(ws_result.tooling_dependencies);
         // Virtual module prefixes (e.g., Docusaurus @theme/, @site/) are
         // package-name prefixes, not file paths — no workspace prefix needed.
-        for prefix in &ws_result.virtual_module_prefixes {
-            if !result.virtual_module_prefixes.contains(prefix) {
-                result.virtual_module_prefixes.push(prefix.clone());
+        for prefix in ws_result.virtual_module_prefixes {
+            if !seen_prefixes.contains(&prefix) {
+                seen_prefixes.insert(prefix.clone());
+                result.virtual_module_prefixes.push(prefix);
             }
         }
     }

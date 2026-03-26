@@ -60,9 +60,6 @@ pub(super) fn resolve_specifier(
     }
 
     // Bare specifier classification (used for fallback logic below).
-    // No cache lookup — per-file tsconfig path aliases (TsconfigDiscovery::Auto) can
-    // resolve the same bare specifier to different targets. A deterministic post-resolution
-    // pass in resolve_all_imports upgrades NpmPackage → InternalModule instead.
     let is_bare = is_bare_specifier(specifier);
     let is_alias = is_path_alias(specifier);
 
@@ -102,6 +99,12 @@ pub(super) fn resolve_specifier(
             match resolved_path.canonicalize() {
                 Ok(canonical) => {
                     if let Some(&file_id) = ctx.path_to_id.get(canonical.as_path()) {
+                        ResolveResult::InternalModule(file_id)
+                    } else if let Some(fallback) = ctx.canonical_fallback
+                        && let Some(file_id) = fallback.get(&canonical)
+                    {
+                        // Intra-project symlink: raw path differs from canonical path.
+                        // The lazy fallback resolves this without upfront bulk canonicalize.
                         ResolveResult::InternalModule(file_id)
                     } else if let Some(file_id) = try_source_fallback(&canonical, ctx.path_to_id) {
                         // Exports map resolved to a built output (e.g., dist/utils.js)

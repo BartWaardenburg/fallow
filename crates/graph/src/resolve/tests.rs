@@ -47,6 +47,7 @@ fn with_empty_ctx<F: FnOnce(&ResolveContext)>(f: F) {
         workspace_roots: &workspace_roots,
         path_aliases: &[],
         root: &root,
+        canonical_fallback: None,
     };
     f(&ctx);
 }

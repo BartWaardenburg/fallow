@@ -54,19 +54,34 @@ pub fn resolve_all_imports(
         .map(|(ws, canonical)| (ws.name.as_str(), canonical.as_path()))
         .collect();
 
-    // Pre-compute canonical paths ONCE for all files in parallel (avoiding repeated syscalls).
-    // Each canonicalize() is a syscall — parallelizing over rayon reduces wall time.
-    let canonical_paths: Vec<PathBuf> = files
-        .par_iter()
-        .map(|f| f.path.canonicalize().unwrap_or_else(|_| f.path.clone()))
-        .collect();
+    // Check if project root is already canonical (no symlinks in path).
+    // When true, raw paths == canonical paths for files under root, so we can skip
+    // the upfront bulk canonicalize() of all source files (21k+ syscalls on large projects).
+    // A lazy CanonicalFallback handles the rare intra-project symlink case.
+    let root_is_canonical = root.canonicalize().is_ok_and(|c| c == root);
 
-    // Build path -> FileId index using pre-computed canonical paths
-    let path_to_id: FxHashMap<&Path, FileId> = canonical_paths
-        .iter()
-        .enumerate()
-        .map(|(idx, canonical)| (canonical.as_path(), files[idx].id))
-        .collect();
+    // Pre-compute canonical paths ONCE for all files in parallel (avoiding repeated syscalls).
+    // Skipped when root is canonical — the lazy fallback below handles edge cases.
+    let canonical_paths: Vec<PathBuf> = if root_is_canonical {
+        Vec::new()
+    } else {
+        files
+            .par_iter()
+            .map(|f| f.path.canonicalize().unwrap_or_else(|_| f.path.clone()))
+            .collect()
+    };
+
+    // Primary path → FileId index. When root is canonical, uses raw paths (fast).
+    // Otherwise uses pre-computed canonical paths (correct for all symlink configurations).
+    let path_to_id: FxHashMap<&Path, FileId> = if root_is_canonical {
+        files.iter().map(|f| (f.path.as_path(), f.id)).collect()
+    } else {
+        canonical_paths
+            .iter()
+            .enumerate()
+            .map(|(idx, canonical)| (canonical.as_path(), files[idx].id))
+            .collect()
+    };
 
     // Also index by non-canonical path for fallback lookups
     let raw_path_to_id: FxHashMap<&Path, FileId> =
@@ -78,6 +93,14 @@ pub fn resolve_all_imports(
     // Create resolver ONCE and share across threads (oxc_resolver::Resolver is Send + Sync)
     let resolver = create_resolver(active_plugins);
 
+    // Lazy canonical fallback — only needed when root is canonical (path_to_id uses raw paths).
+    // When root is NOT canonical, path_to_id already uses canonical paths, no fallback needed.
+    let canonical_fallback = if root_is_canonical {
+        Some(types::CanonicalFallback::new(files))
+    } else {
+        None
+    };
+
     // Shared resolution context — avoids passing 6 arguments to every resolve_specifier call
     let ctx = ResolveContext {
         resolver: &resolver,
@@ -86,6 +109,7 @@ pub fn resolve_all_imports(
         workspace_roots: &workspace_roots,
         path_aliases,
         root,
+        canonical_fallback: canonical_fallback.as_ref(),
     };
 
     // Resolve in parallel — shared resolver instance.
@@ -110,10 +134,15 @@ pub fn resolve_all_imports(
                 &module.require_calls,
             ));
 
-            let from_dir = canonical_paths
-                .get(module.file_id.0 as usize)
-                .and_then(|p| p.parent())
-                .unwrap_or(file_path);
+            let from_dir = if canonical_paths.is_empty() {
+                // Root is canonical — raw paths are canonical
+                file_path.parent().unwrap_or(file_path)
+            } else {
+                canonical_paths
+                    .get(module.file_id.0 as usize)
+                    .and_then(|p| p.parent())
+                    .unwrap_or(file_path)
+            };
 
             Some(ResolvedModule {
                 file_id: module.file_id,
@@ -295,7 +324,8 @@ fn resolve_single_require(
 }
 
 /// Resolve dynamic import patterns via glob matching against discovered files.
-/// Uses pre-computed canonical paths (no syscalls in inner loop).
+/// When canonical paths are available, uses those for matching. Otherwise falls
+/// back to raw file paths from `files` (avoids allocating a separate PathBuf vec).
 fn resolve_dynamic_patterns(
     from_dir: &Path,
     patterns: &[DynamicImportPattern],
@@ -309,17 +339,31 @@ fn resolve_dynamic_patterns(
             let matcher = globset::Glob::new(&glob_str)
                 .ok()
                 .map(|g| g.compile_matcher())?;
-            let matched: Vec<FileId> = canonical_paths
-                .iter()
-                .enumerate()
-                .filter(|(_idx, canonical)| {
-                    canonical.strip_prefix(from_dir).is_ok_and(|relative| {
-                        let rel_str = format!("./{}", relative.to_string_lossy());
-                        matcher.is_match(&rel_str)
+            let matched: Vec<FileId> = if canonical_paths.is_empty() {
+                // Root is canonical — use raw file paths directly (no extra allocation)
+                files
+                    .iter()
+                    .filter(|f| {
+                        f.path.strip_prefix(from_dir).is_ok_and(|relative| {
+                            let rel_str = format!("./{}", relative.to_string_lossy());
+                            matcher.is_match(&rel_str)
+                        })
                     })
-                })
-                .map(|(idx, _)| files[idx].id)
-                .collect();
+                    .map(|f| f.id)
+                    .collect()
+            } else {
+                canonical_paths
+                    .iter()
+                    .enumerate()
+                    .filter(|(_idx, canonical)| {
+                        canonical.strip_prefix(from_dir).is_ok_and(|relative| {
+                            let rel_str = format!("./{}", relative.to_string_lossy());
+                            matcher.is_match(&rel_str)
+                        })
+                    })
+                    .map(|(idx, _)| files[idx].id)
+                    .collect()
+            };
             if matched.is_empty() {
                 None
             } else {
@@ -432,6 +476,7 @@ mod tests {
             workspace_roots: &workspace_roots,
             path_aliases: &[],
             root: &root,
+            canonical_fallback: None,
         };
         f(&ctx);
     }

@@ -72,7 +72,7 @@ pub struct ResolvedModule {
 pub(super) struct ResolveContext<'a> {
     /// The oxc_resolver instance (configured once, shared across threads).
     pub resolver: &'a Resolver,
-    /// Canonical path → FileId lookup.
+    /// Canonical path → FileId lookup (raw paths when root is canonical).
     pub path_to_id: &'a FxHashMap<&'a Path, FileId>,
     /// Raw (non-canonical) path → FileId lookup.
     pub raw_path_to_id: &'a FxHashMap<&'a Path, FileId>,
@@ -82,6 +82,100 @@ pub(super) struct ResolveContext<'a> {
     pub path_aliases: &'a [(String, String)],
     /// Project root directory.
     pub root: &'a Path,
+    /// Lazy canonical path → FileId fallback for intra-project symlinks.
+    /// Only initialized on first miss when root is canonical. `None` when
+    /// path_to_id already uses canonical paths (root is not canonical).
+    pub canonical_fallback: Option<&'a CanonicalFallback<'a>>,
+}
+
+/// Thread-safe lazy canonical path index, built on first access.
+pub(super) struct CanonicalFallback<'a> {
+    files: &'a [fallow_types::discover::DiscoveredFile],
+    map: std::sync::OnceLock<FxHashMap<std::path::PathBuf, FileId>>,
+}
+
+impl<'a> CanonicalFallback<'a> {
+    pub fn new(files: &'a [fallow_types::discover::DiscoveredFile]) -> Self {
+        Self {
+            files,
+            map: std::sync::OnceLock::new(),
+        }
+    }
+
+    /// Look up a canonical path, lazily building the index on first call.
+    pub fn get(&self, canonical: &Path) -> Option<FileId> {
+        let map = self.map.get_or_init(|| {
+            tracing::warn!(
+                "intra-project symlinks detected — building canonical path index ({} files)",
+                self.files.len()
+            );
+            self.files
+                .iter()
+                .filter_map(|f| {
+                    f.path
+                        .canonicalize()
+                        .ok()
+                        .map(|canonical| (canonical, f.id))
+                })
+                .collect()
+        });
+        map.get(canonical).copied()
+    }
+}
+
+#[cfg(all(test, not(miri)))]
+mod tests {
+    use super::*;
+    use fallow_types::discover::DiscoveredFile;
+    use std::path::PathBuf;
+
+    #[test]
+    fn canonical_fallback_returns_none_for_empty_files() {
+        let files: Vec<DiscoveredFile> = vec![];
+        let fallback = CanonicalFallback::new(&files);
+        assert!(fallback.get(Path::new("/nonexistent")).is_none());
+    }
+
+    #[test]
+    fn canonical_fallback_finds_existing_file() {
+        let temp = std::env::temp_dir().join("fallow-test-canonical-fallback");
+        let _ = std::fs::create_dir_all(&temp);
+        let test_file = temp.join("test.ts");
+        std::fs::write(&test_file, "").unwrap();
+
+        let files = vec![DiscoveredFile {
+            id: FileId(42),
+            path: test_file.clone(),
+            size_bytes: 0,
+        }];
+        let fallback = CanonicalFallback::new(&files);
+
+        let canonical = test_file.canonicalize().unwrap();
+        assert_eq!(fallback.get(&canonical), Some(FileId(42)));
+
+        // Second call uses cached map (OnceLock)
+        assert_eq!(fallback.get(&canonical), Some(FileId(42)));
+
+        let _ = std::fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn canonical_fallback_returns_none_for_missing_path() {
+        let temp = std::env::temp_dir().join("fallow-test-canonical-miss");
+        let _ = std::fs::create_dir_all(&temp);
+        let test_file = temp.join("exists.ts");
+        std::fs::write(&test_file, "").unwrap();
+
+        let files = vec![DiscoveredFile {
+            id: FileId(1),
+            path: test_file,
+            size_bytes: 0,
+        }];
+        let fallback = CanonicalFallback::new(&files);
+        assert!(fallback.get(Path::new("/nonexistent/file.ts")).is_none());
+
+        let _ = std::fs::remove_dir_all(&temp);
+    }
 }
 
 /// Known output directory names that may appear in exports map targets.
