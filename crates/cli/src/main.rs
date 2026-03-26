@@ -128,7 +128,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Analyze project for unused code, circular dependencies, and code duplication
+    /// Analyze project for unused code and circular dependencies
     #[command(name = "dead-code", alias = "check")]
     Check {
         /// Only report unused files

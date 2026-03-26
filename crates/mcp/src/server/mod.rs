@@ -55,7 +55,7 @@ fn resolve_binary() -> String {
 #[tool_router]
 impl FallowMcp {
     #[tool(
-        description = "Analyze a TypeScript/JavaScript project for unused code, circular dependencies, code duplication, complexity hotspots, and more. Detects unused files, exports, types, dependencies, enum/class members, unresolved imports, unlisted dependencies, duplicate exports, and circular dependencies. Returns structured JSON with all issues found, grouped by issue type. Supports baseline comparisons (baseline/save_baseline) and performance tuning (no_cache, threads).",
+        description = "Analyze a TypeScript/JavaScript project for unused code and circular dependencies. Detects unused files, exports, types, dependencies, enum/class members, unresolved imports, unlisted dependencies, duplicate exports, and circular dependencies. Returns structured JSON with all issues found, grouped by issue type. For code duplication use find_dupes, for complexity hotspots use check_health. Supports baseline comparisons (baseline/save_baseline) and performance tuning (no_cache, threads).",
         annotations(read_only_hint = true, open_world_hint = true)
     )]
     async fn analyze(&self, params: Parameters<AnalyzeParams>) -> Result<CallToolResult, McpError> {
