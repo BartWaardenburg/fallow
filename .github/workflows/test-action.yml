@@ -80,6 +80,7 @@ jobs:
         id: fallow
         uses: ./
         with:
+          command: dead-code
           root: tests/fixtures/basic-project
           format: json
           fail-on-issues: false
