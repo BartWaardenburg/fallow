@@ -30,6 +30,10 @@ fn dummy_span() -> Span {
 /// empty lookup tables. Every specifier resolves to `NpmPackage` or
 /// `Unresolvable`, which is fine — the tests focus on how helper functions
 /// *transform* inputs into `ResolvedImport` / `ResolvedReExport` structs.
+///
+/// Under Miri this is a no-op: `oxc_resolver` uses the `statx` syscall
+/// (via `rustix`) which Miri does not support.
+#[cfg(not(miri))]
 fn with_empty_ctx<F: FnOnce(&ResolveContext)>(f: F) {
     let resolver = specifier::create_resolver(&[]);
     let path_to_id = FxHashMap::default();
@@ -45,6 +49,11 @@ fn with_empty_ctx<F: FnOnce(&ResolveContext)>(f: F) {
         root: &root,
     };
     f(&ctx);
+}
+
+#[cfg(miri)]
+fn with_empty_ctx<F: FnOnce(&ResolveContext)>(_f: F) {
+    // oxc_resolver uses statx syscall unsupported by Miri — skip.
 }
 
 fn make_import(source: &str, imported: ImportedName, local: &str) -> ImportInfo {

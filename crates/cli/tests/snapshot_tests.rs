@@ -157,13 +157,7 @@ fn sarif_output_snapshot() {
     let sarif = build_sarif(&results, &root, &rules);
     let json_str = serde_json::to_string_pretty(&sarif).expect("should serialize");
 
-    insta::assert_snapshot!(
-        "sarif_output",
-        json_str.replace(
-            &format!("\"version\": \"{}\"", env!("CARGO_PKG_VERSION")),
-            "\"version\": \"[VERSION]\"",
-        )
-    );
+    insta::assert_snapshot!("sarif_output", redact_sarif_version(&json_str));
 }
 
 #[test]
@@ -174,13 +168,7 @@ fn sarif_empty_results_snapshot() {
     let sarif = build_sarif(&results, &root, &rules);
     let json_str = serde_json::to_string_pretty(&sarif).expect("should serialize");
 
-    insta::assert_snapshot!(
-        "sarif_empty",
-        json_str.replace(
-            &format!("\"version\": \"{}\"", env!("CARGO_PKG_VERSION")),
-            "\"version\": \"[VERSION]\"",
-        )
-    );
+    insta::assert_snapshot!("sarif_empty", redact_sarif_version(&json_str));
 }
 
 // ── Compact format ───────────────────────────────────────────────
@@ -474,13 +462,7 @@ fn sarif_re_export_variant_snapshot() {
     let rules = RulesConfig::default();
     let sarif = build_sarif(&results, &root, &rules);
     let json_str = serde_json::to_string_pretty(&sarif).expect("should serialize");
-    insta::assert_snapshot!(
-        "sarif_re_export_variant",
-        json_str.replace(
-            &format!("\"version\": \"{}\"", env!("CARGO_PKG_VERSION")),
-            "\"version\": \"[VERSION]\"",
-        )
-    );
+    insta::assert_snapshot!("sarif_re_export_variant", redact_sarif_version(&json_str));
 }
 
 // ── SARIF with mixed severity levels ────────────────────────────
@@ -506,13 +488,7 @@ fn sarif_mixed_severity_snapshot() {
     };
     let sarif = build_sarif(&results, &root, &rules);
     let json_str = serde_json::to_string_pretty(&sarif).expect("should serialize");
-    insta::assert_snapshot!(
-        "sarif_mixed_severity",
-        json_str.replace(
-            &format!("\"version\": \"{}\"", env!("CARGO_PKG_VERSION")),
-            "\"version\": \"[VERSION]\"",
-        )
-    );
+    insta::assert_snapshot!("sarif_mixed_severity", redact_sarif_version(&json_str));
 }
 
 // ── Type-only dependency snapshots ──────────────────────────────
@@ -709,9 +685,14 @@ fn json_duplicate_exports_only_snapshot() {
 // ── Per-issue-type SARIF snapshots ──────────────────────────────
 
 fn redact_sarif_version(json_str: &str) -> String {
+    // Only redact the fallow tool version inside `"driver": { "name": "fallow", "version": "..." }`,
+    // not the SARIF spec `"version": "2.1.0"` at the top level (which may collide).
     json_str.replace(
-        &format!("\"version\": \"{}\"", env!("CARGO_PKG_VERSION")),
-        "\"version\": \"[VERSION]\"",
+        &format!(
+            "\"name\": \"fallow\",\n          \"version\": \"{}\"",
+            env!("CARGO_PKG_VERSION")
+        ),
+        "\"name\": \"fallow\",\n          \"version\": \"[VERSION]\"",
     )
 }
 

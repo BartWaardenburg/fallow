@@ -447,7 +447,8 @@ runs:
         fi
 
         # Build base arguments
-        ARGS=("$INPUT_COMMAND" --root "$INPUT_ROOT" --quiet --format json)
+        ARGS=(--root "$INPUT_ROOT" --quiet --format json)
+        [ -n "$INPUT_COMMAND" ] && ARGS=("$INPUT_COMMAND" "${ARGS[@]}")
 
         # Config file
         [ -n "$INPUT_CONFIG" ] && ARGS+=(--config "$INPUT_CONFIG")
@@ -546,7 +547,8 @@ runs:
         # Fallback SARIF generation (separate run when --sarif-file not available)
         if [ "$INPUT_FORMAT" = "sarif" ] && [ "$INPUT_COMMAND" != "fix" ] && \
            { [ ! -f fallow-results.sarif ] || ! jq -e '.' fallow-results.sarif > /dev/null 2>&1; }; then
-          SARIF_ARGS=("$INPUT_COMMAND" --root "$INPUT_ROOT" --quiet --format sarif)
+          SARIF_ARGS=(--root "$INPUT_ROOT" --quiet --format sarif)
+          [ -n "$INPUT_COMMAND" ] && SARIF_ARGS=("$INPUT_COMMAND" "${SARIF_ARGS[@]}")
           [ -n "$INPUT_CONFIG" ] && SARIF_ARGS+=(--config "$INPUT_CONFIG")
           [ "$INPUT_PRODUCTION" = "true" ] && SARIF_ARGS+=(--production)
           [ -n "$INPUT_CHANGED_SINCE" ] && SARIF_ARGS+=(--changed-since "$INPUT_CHANGED_SINCE")
