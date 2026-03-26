@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1774526374422,
+  "lastUpdate": 1774526527349,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
@@ -1647,6 +1647,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/649bbd4c342f634da0996af76c6a7ddbc3cec864"
         },
         "date": 1774526373436,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 87.5,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "084f6c5a0a00a639a35c16c1960543d365ab9046",
+          "message": "docs: restore coverage badge to README",
+          "timestamp": "2026-03-26T13:01:12+01:00",
+          "tree_id": "3a21e4b1e1365287eed9e9bdb661fa50e9a5de55",
+          "url": "https://github.com/fallow-rs/fallow/commit/084f6c5a0a00a639a35c16c1960543d365ab9046"
+        },
+        "date": 1774526526300,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
