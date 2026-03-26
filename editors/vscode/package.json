@@ -2,7 +2,7 @@
   "name": "fallow-vscode",
   "displayName": "Fallow",
   "description": "Find unused code, circular dependencies, and code duplication in TypeScript/JavaScript",
-  "version": "2.0.1",
+  "version": "2.1.0",
   "publisher": "fallow-rs",
   "license": "MIT",
   "repository": {

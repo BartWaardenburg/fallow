@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-03-25
+
+### Added
+
+- **GitLab CI template** (`ci/gitlab-ci.yml`) — includable template with full feature parity to the GitHub Action: Code Quality reports (CodeClimate format) for inline MR annotations, MR comment summaries, incremental caching, and all fallow commands/options via `FALLOW_*` variables
+- **GitHub Action: test workflow** — CI validation for SARIF, JSON, dupes, fix, zero-issues, and PR comment scenarios
+
+### Fixed
+
+- **`list --no-cache`** — the `--no-cache` flag now works correctly with the `list` command
+- **GitHub Action: `check` → `dead-code` rename** — completed the rename across all case statements, SARIF fallback, and job summary dispatch
+- **`dead-code` subcommand** in backwards-compatibility stable interface list
+
 ## [2.0.1] - 2026-03-25
 
 ### Added
@@ -412,7 +425,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.0.1...HEAD
+[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.1.0...HEAD
 [2.0.1]: https://github.com/fallow-rs/fallow/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/fallow-rs/fallow/compare/v1.9.0...v2.0.0
 [1.9.0]: https://github.com/fallow-rs/fallow/compare/v1.8.1...v1.9.0
@@ -421,6 +434,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [1.7.0]: https://github.com/fallow-rs/fallow/compare/v1.6.1...v1.7.0
 [1.6.1]: https://github.com/fallow-rs/fallow/compare/v1.6.0...v1.6.1
 [1.6.0]: https://github.com/fallow-rs/fallow/compare/v1.5.0...v1.6.0
+[2.1.0]: https://github.com/fallow-rs/fallow/compare/v2.0.1...v2.1.0
 [1.5.0]: https://github.com/fallow-rs/fallow/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/fallow-rs/fallow/compare/v1.3.1...v1.4.0
 [1.3.1]: https://github.com/fallow-rs/fallow/compare/v1.3.0...v1.3.1
