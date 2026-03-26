@@ -359,7 +359,10 @@ pub fn build_duplication_codeclimate(report: &DuplicationReport, root: &Path) ->
     for (i, group) in report.clone_groups.iter().enumerate() {
         for instance in &group.instances {
             let path = relative_path(&instance.file, root).display().to_string();
-            issues.push(cc_issue(
+            let line = instance.start_line as u32;
+            // Include group index in fingerprint to distinguish overlapping clone groups
+            let fingerprint = format!("fallow/code-duplication:{}:{}:g{}", path, line, i + 1);
+            let mut issue = cc_issue(
                 "fallow/code-duplication",
                 &format!(
                     "Code clone group {} ({} lines, {} instances)",
@@ -369,8 +372,10 @@ pub fn build_duplication_codeclimate(report: &DuplicationReport, root: &Path) ->
                 ),
                 "minor",
                 &path,
-                Some(instance.start_line as u32),
-            ));
+                Some(line),
+            );
+            issue["fingerprint"] = serde_json::Value::String(fingerprint);
+            issues.push(issue);
         }
     }
 
