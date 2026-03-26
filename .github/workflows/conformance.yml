@@ -84,7 +84,7 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           auto-push: true
           comment-on-alert: true
-          alert-threshold: '95%'
+          alert-threshold: '105%'
           fail-on-alert: false
           save-data-file: true
           gh-pages-branch: gh-pages
