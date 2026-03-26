@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1774508416201,
+  "lastUpdate": 1774561393566,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Conformance": [
@@ -84,6 +84,73 @@ window.BENCHMARK_DATA = {
             "name": "Knip Total",
             "value": 6,
             "unit": "issues"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg",
+            "email": "bart@waardenburg.dev"
+          },
+          "committer": {
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg",
+            "email": "bart@waardenburg.dev"
+          },
+          "id": "6466c29f10f928356aaadbd9c519cdf9565e5716",
+          "message": "fix: suppress npm/pnpm install stdout leaking into JSON reports\n\nnpm install output was written to stdout, polluting the JSON report\ncaptured by the workflow. Redirect both stdout and stderr to /dev/null.",
+          "timestamp": "2026-03-26T21:38:39Z",
+          "url": "https://github.com/fallow-rs/fallow/commit/6466c29f10f928356aaadbd9c519cdf9565e5716"
+        },
+        "date": 1774561392542,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Agreement Rate",
+            "value": 1.8,
+            "unit": "%"
+          },
+          {
+            "name": "Agreed Issues",
+            "value": 141,
+            "unit": "issues"
+          },
+          {
+            "name": "Fallow Total",
+            "value": 7257,
+            "unit": "issues"
+          },
+          {
+            "name": "Knip Total",
+            "value": 670,
+            "unit": "issues"
+          },
+          {
+            "name": "fastify Agreement",
+            "value": 3.1,
+            "unit": "%"
+          },
+          {
+            "name": "preact Agreement",
+            "value": 2.9,
+            "unit": "%"
+          },
+          {
+            "name": "query Agreement",
+            "value": 0,
+            "unit": "%"
+          },
+          {
+            "name": "svelte Agreement",
+            "value": 0.3,
+            "unit": "%"
+          },
+          {
+            "name": "zod Agreement",
+            "value": 9,
+            "unit": "%"
           }
         ]
       }
