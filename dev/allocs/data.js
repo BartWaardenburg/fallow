@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1774526164805,
+  "lastUpdate": 1774537765729,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
@@ -1837,6 +1837,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Total Allocations",
             "value": 12054,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 420346,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 5168,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "00e1a5d688340bf3f5af293cc3af354fab03482e",
+          "message": "feat: add efficiency score, confidence levels, and adaptive thresholds to refactoring targets\n\nTargets are now sorted by efficiency (priority/effort) to surface quick wins\nfirst. Each target includes a confidence level (high/medium/low) based on data\nsource reliability, and fan-in/fan-out thresholds adapt to the project's\ndistribution using percentiles instead of hardcoded constants.\n\nOutput improvements from expert panel review:\n- Human: efficiency as hero number, labeled effort:/confidence:, effort summary\n- Compact: underscore category labels (circular_dep, dead_code) for parsing\n- Markdown: reduced from 7 to 5 columns\n- SARIF: priority, efficiency, confidence in message\n- JSON: target_thresholds object with adaptive percentile values\n- Cycle path evidence deduplicated",
+          "timestamp": "2026-03-26T16:07:01+01:00",
+          "tree_id": "bff7f2618da14866803f188a8941bbc937ab9a9b",
+          "url": "https://github.com/fallow-rs/fallow/commit/00e1a5d688340bf3f5af293cc3af354fab03482e"
+        },
+        "date": 1774537764597,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 3035737,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 12044,
             "unit": "allocations"
           },
           {
