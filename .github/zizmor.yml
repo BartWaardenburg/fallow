@@ -6,6 +6,7 @@ rules:
   # dtolnay/rust-toolchain is the Rust ecosystem standard for CI toolchain management
   superfluous-actions:
     ignore:
+      - actions/setup-rust/action.yml
       - allocs.yml
       - bench.yml
       - bench-real-world.yml
