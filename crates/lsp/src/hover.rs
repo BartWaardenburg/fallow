@@ -964,4 +964,369 @@ mod tests {
             _ => panic!("Expected markup contents"),
         }
     }
+
+    #[test]
+    fn hover_on_used_export_no_locations_shows_period() {
+        let root = test_root();
+        let path = root.join("src/utils.ts");
+        let mut results = AnalysisResults::default();
+        results.export_usages.push(ExportUsage {
+            path: path.clone(),
+            export_name: "helper".to_string(),
+            line: 5,
+            col: 0,
+            reference_count: 3,
+            reference_locations: vec![], // no location details
+        });
+        let duplication = DuplicationReport::default();
+        let pos = Position {
+            line: 4,
+            character: 0,
+        };
+
+        let hover = build_hover(&results, &duplication, &path, pos).unwrap();
+        match &hover.contents {
+            HoverContents::Markup(m) => {
+                // Should end with "." when no locations are listed
+                assert!(m.value.ends_with('.'), "Expected message to end with period, got: {}", m.value);
+                assert!(m.value.contains("3 files"));
+                assert!(!m.value.contains('\n'));
+            }
+            _ => panic!("Expected markup contents"),
+        }
+    }
+
+    #[test]
+    fn hover_on_used_export_truncates_at_10_references() {
+        let root = test_root();
+        let path = root.join("src/popular.ts");
+        let mut results = AnalysisResults::default();
+
+        // Create 15 reference locations
+        let locations: Vec<ReferenceLocation> = (1..=15)
+            .map(|i| ReferenceLocation {
+                path: root.join(format!("src/file{i}.ts")),
+                line: i,
+                col: 0,
+            })
+            .collect();
+
+        results.export_usages.push(ExportUsage {
+            path: path.clone(),
+            export_name: "popular".to_string(),
+            line: 1,
+            col: 0,
+            reference_count: 15,
+            reference_locations: locations,
+        });
+        let duplication = DuplicationReport::default();
+        let pos = Position {
+            line: 0,
+            character: 3,
+        };
+
+        let hover = build_hover(&results, &duplication, &path, pos).unwrap();
+        match &hover.contents {
+            HoverContents::Markup(m) => {
+                assert!(m.value.contains("15 files"));
+                // Should list first 10 files
+                for i in 1..=10 {
+                    assert!(
+                        m.value.contains(&format!("file{i}.ts")),
+                        "Expected file{i}.ts in hover, got: {}",
+                        m.value
+                    );
+                }
+                // Should NOT list files 11-15 inline
+                assert!(!m.value.contains("file11.ts"));
+                // Should show "... and 5 more"
+                assert!(
+                    m.value.contains("... and 5 more"),
+                    "Expected truncation message, got: {}",
+                    m.value
+                );
+            }
+            _ => panic!("Expected markup contents"),
+        }
+    }
+
+    #[test]
+    fn hover_on_used_export_exactly_10_references_no_truncation() {
+        let root = test_root();
+        let path = root.join("src/moderate.ts");
+        let mut results = AnalysisResults::default();
+
+        let locations: Vec<ReferenceLocation> = (1..=10)
+            .map(|i| ReferenceLocation {
+                path: root.join(format!("src/ref{i}.ts")),
+                line: i,
+                col: 0,
+            })
+            .collect();
+
+        results.export_usages.push(ExportUsage {
+            path: path.clone(),
+            export_name: "moderate".to_string(),
+            line: 1,
+            col: 0,
+            reference_count: 10,
+            reference_locations: locations,
+        });
+        let duplication = DuplicationReport::default();
+        let pos = Position {
+            line: 0,
+            character: 0,
+        };
+
+        let hover = build_hover(&results, &duplication, &path, pos).unwrap();
+        match &hover.contents {
+            HoverContents::Markup(m) => {
+                // All 10 should be listed
+                for i in 1..=10 {
+                    assert!(m.value.contains(&format!("ref{i}.ts")));
+                }
+                // No "... and X more" message
+                assert!(!m.value.contains("... and"));
+            }
+            _ => panic!("Expected markup contents"),
+        }
+    }
+
+    #[test]
+    fn hover_on_unresolved_import_at_boundary_columns() {
+        let root = test_root();
+        let path = root.join("src/app.ts");
+        let mut results = AnalysisResults::default();
+        // specifier "./mod" is 5 chars, specifier_col=10, range covers [10, 17) (5 + 2 quotes)
+        results.unresolved_imports.push(UnresolvedImport {
+            path: path.clone(),
+            specifier: "./mod".to_string(),
+            line: 1,
+            col: 0,
+            specifier_col: 10,
+        });
+        let duplication = DuplicationReport::default();
+
+        // At specifier_col (start boundary) => should match
+        let pos = Position {
+            line: 0,
+            character: 10,
+        };
+        assert!(build_hover(&results, &duplication, &path, pos).is_some());
+
+        // At end_col - 1 (last char in range, 10 + 5 + 2 - 1 = 16) => should match
+        let pos = Position {
+            line: 0,
+            character: 16,
+        };
+        assert!(build_hover(&results, &duplication, &path, pos).is_some());
+
+        // At end_col (past the range, 10 + 5 + 2 = 17) => should NOT match
+        let pos = Position {
+            line: 0,
+            character: 17,
+        };
+        assert!(build_hover(&results, &duplication, &path, pos).is_none());
+
+        // Just before specifier_col => should NOT match
+        let pos = Position {
+            line: 0,
+            character: 9,
+        };
+        assert!(build_hover(&results, &duplication, &path, pos).is_none());
+    }
+
+    #[test]
+    fn hover_on_unused_export_at_exact_boundary_columns() {
+        let root = test_root();
+        let path = root.join("src/utils.ts");
+        let mut results = AnalysisResults::default();
+        // export name "abc" at col=7, spans [7, 10)
+        results.unused_exports.push(UnusedExport {
+            path: path.clone(),
+            export_name: "abc".to_string(),
+            is_type_only: false,
+            line: 1,
+            col: 7,
+            span_start: 0,
+            is_re_export: false,
+        });
+        let duplication = DuplicationReport::default();
+
+        // At col (start boundary, inclusive) => should match
+        let pos = Position {
+            line: 0,
+            character: 7,
+        };
+        assert!(build_hover(&results, &duplication, &path, pos).is_some());
+
+        // At end_col - 1 (last inclusive char) => should match
+        let pos = Position {
+            line: 0,
+            character: 9,
+        };
+        assert!(build_hover(&results, &duplication, &path, pos).is_some());
+
+        // At end_col (exclusive) => should NOT match
+        let pos = Position {
+            line: 0,
+            character: 10,
+        };
+        assert!(build_hover(&results, &duplication, &path, pos).is_none());
+    }
+
+    #[test]
+    fn hover_on_unused_member_at_boundary_columns() {
+        let root = test_root();
+        let path = root.join("src/enums.ts");
+        let mut results = AnalysisResults::default();
+        // member "Red" at col=4, spans [4, 7)
+        results.unused_enum_members.push(UnusedMember {
+            path: path.clone(),
+            parent_name: "Color".to_string(),
+            member_name: "Red".to_string(),
+            kind: MemberKind::EnumMember,
+            line: 3,
+            col: 4,
+        });
+        let duplication = DuplicationReport::default();
+
+        // Exactly at col => match
+        let pos = Position {
+            line: 2,
+            character: 4,
+        };
+        assert!(build_hover(&results, &duplication, &path, pos).is_some());
+
+        // Past end => no match
+        let pos = Position {
+            line: 2,
+            character: 7,
+        };
+        assert!(build_hover(&results, &duplication, &path, pos).is_none());
+    }
+
+    #[test]
+    fn hover_duplication_with_more_than_10_other_instances() {
+        let root = test_root();
+        let path_main = root.join("src/main.ts");
+        let results = AnalysisResults::default();
+
+        // Create 13 instances total (1 for main file + 12 others)
+        let mut instances = vec![CloneInstance {
+            file: path_main.clone(),
+            start_line: 1,
+            end_line: 5,
+            start_col: 0,
+            end_col: 10,
+            fragment: "code".to_string(),
+        }];
+        for i in 1..=12 {
+            instances.push(CloneInstance {
+                file: root.join(format!("src/dup{i}.ts")),
+                start_line: 10,
+                end_line: 14,
+                start_col: 0,
+                end_col: 10,
+                fragment: "code".to_string(),
+            });
+        }
+
+        let duplication = DuplicationReport {
+            clone_groups: vec![CloneGroup {
+                instances,
+                token_count: 30,
+                line_count: 5,
+            }],
+            clone_families: vec![],
+            stats: DuplicationStats::default(),
+        };
+
+        let pos = Position {
+            line: 2,
+            character: 0,
+        };
+        let hover = build_hover(&results, &duplication, &path_main, pos).unwrap();
+        match &hover.contents {
+            HoverContents::Markup(m) => {
+                assert!(m.value.contains("12 other instances"));
+                // Should only list first 10 and truncate
+                for i in 1..=10 {
+                    assert!(
+                        m.value.contains(&format!("dup{i}.ts")),
+                        "Expected dup{i}.ts in hover"
+                    );
+                }
+                assert!(!m.value.contains("dup11.ts"));
+                assert!(m.value.contains("... and 2 more"));
+            }
+            _ => panic!("Expected markup contents"),
+        }
+    }
+
+    #[test]
+    fn hover_priority_unused_export_over_used_export() {
+        let root = test_root();
+        let path = root.join("src/utils.ts");
+        let mut results = AnalysisResults::default();
+
+        // Both unused export and used export at the same position
+        results.unused_exports.push(UnusedExport {
+            path: path.clone(),
+            export_name: "foo".to_string(),
+            is_type_only: false,
+            line: 5,
+            col: 0,
+            span_start: 0,
+            is_re_export: false,
+        });
+        results.export_usages.push(ExportUsage {
+            path: path.clone(),
+            export_name: "foo".to_string(),
+            line: 5,
+            col: 0,
+            reference_count: 2,
+            reference_locations: vec![],
+        });
+        let duplication = DuplicationReport::default();
+        let pos = Position {
+            line: 4,
+            character: 1,
+        };
+
+        let hover = build_hover(&results, &duplication, &path, pos).unwrap();
+        match &hover.contents {
+            HoverContents::Markup(m) => {
+                // Unused export check runs before used export check
+                assert!(m.value.contains("not imported"));
+            }
+            _ => panic!("Expected markup contents"),
+        }
+    }
+
+    #[test]
+    fn hover_on_different_file_returns_none() {
+        let root = test_root();
+        let path_a = root.join("src/a.ts");
+        let path_b = root.join("src/b.ts");
+
+        let mut results = AnalysisResults::default();
+        results.unused_exports.push(UnusedExport {
+            path: path_a,
+            export_name: "foo".to_string(),
+            is_type_only: false,
+            line: 1,
+            col: 0,
+            span_start: 0,
+            is_re_export: false,
+        });
+        let duplication = DuplicationReport::default();
+
+        // Hover on path_b where there are no issues
+        let pos = Position {
+            line: 0,
+            character: 0,
+        };
+        assert!(build_hover(&results, &duplication, &path_b, pos).is_none());
+    }
 }

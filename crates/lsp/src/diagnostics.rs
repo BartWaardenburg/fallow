@@ -506,8 +506,9 @@ mod tests {
     use fallow_core::duplicates::{CloneGroup, CloneInstance, DuplicationStats};
     use fallow_core::extract::MemberKind;
     use fallow_core::results::{
-        DependencyLocation, DuplicateExport, DuplicateLocation, ImportSite, UnlistedDependency,
-        UnresolvedImport, UnusedDependency, UnusedExport, UnusedFile, UnusedMember,
+        CircularDependency, DependencyLocation, DuplicateExport, DuplicateLocation, ImportSite,
+        TypeOnlyDependency, UnlistedDependency, UnresolvedImport, UnusedDependency, UnusedExport,
+        UnusedFile, UnusedMember,
     };
 
     fn test_root() -> PathBuf {
@@ -1028,5 +1029,303 @@ mod tests {
         let uri = Url::from_file_path(root.join("src/edge.ts")).unwrap();
         let d = &diags[&uri][0];
         assert_eq!(d.range.start.line, 0);
+    }
+
+    #[test]
+    fn unused_optional_dependency_produces_warning() {
+        let root = test_root();
+        let mut results = AnalysisResults::default();
+        results.unused_optional_dependencies.push(UnusedDependency {
+            package_name: "fsevents".to_string(),
+            location: DependencyLocation::OptionalDependencies,
+            path: root.join("package.json"),
+            line: 12,
+        });
+
+        let duplication = empty_duplication();
+        let diags = build_diagnostics(&results, &duplication, &root);
+
+        let uri = Url::from_file_path(root.join("package.json")).unwrap();
+        let file_diags = &diags[&uri];
+        assert_eq!(file_diags.len(), 1);
+
+        let d = &file_diags[0];
+        assert_eq!(d.severity, Some(DiagnosticSeverity::WARNING));
+        assert_eq!(d.message, "Unused optionalDependency: fsevents");
+        assert_eq!(
+            d.code,
+            Some(NumberOrString::String(
+                "unused-optional-dependency".to_string()
+            ))
+        );
+        assert_eq!(d.range.start.line, 11); // 1-based 12 -> 0-based 11
+        assert_eq!(d.range.start.character, 0);
+        assert_eq!(d.range.end.character, u32::MAX);
+    }
+
+    #[test]
+    fn circular_dependency_produces_warning_with_chain_message() {
+        let root = test_root();
+        let file_a = root.join("src/a.ts");
+        let file_b = root.join("src/b.ts");
+        let file_c = root.join("src/c.ts");
+
+        let mut results = AnalysisResults::default();
+        results
+            .circular_dependencies
+            .push(CircularDependency {
+                files: vec![file_a.clone(), file_b.clone(), file_c.clone()],
+                length: 3,
+                line: 2,
+                col: 20,
+            });
+
+        let duplication = empty_duplication();
+        let diags = build_diagnostics(&results, &duplication, &root);
+
+        // Diagnostic should be on the first file in the cycle
+        let uri_a = Url::from_file_path(&file_a).unwrap();
+        let file_diags = &diags[&uri_a];
+        assert_eq!(file_diags.len(), 1);
+
+        let d = &file_diags[0];
+        assert_eq!(d.severity, Some(DiagnosticSeverity::WARNING));
+        assert_eq!(
+            d.code,
+            Some(NumberOrString::String("circular-dependency".to_string()))
+        );
+        assert!(d.message.contains("Circular dependency"));
+        assert!(d.message.contains("a.ts"));
+        assert!(d.message.contains("b.ts"));
+        assert!(d.message.contains("c.ts"));
+        assert!(d.message.contains("\u{2192}")); // arrow separator
+
+        // Line should be 0-based
+        assert_eq!(d.range.start.line, 1); // 1-based 2 -> 0-based 1
+        assert_eq!(d.range.start.character, 20);
+        assert_eq!(d.range.end.character, u32::MAX);
+
+        // Related information should point to other files in the cycle
+        let related = d.related_information.as_ref().unwrap();
+        assert_eq!(related.len(), 2); // file_b and file_c (skips first file)
+        assert_eq!(related[0].message, "Step 2 in cycle: b.ts");
+        assert_eq!(related[1].message, "Step 3 in cycle: c.ts");
+
+        let uri_b = Url::from_file_path(&file_b).unwrap();
+        let uri_c = Url::from_file_path(&file_c).unwrap();
+        assert_eq!(related[0].location.uri, uri_b);
+        assert_eq!(related[1].location.uri, uri_c);
+    }
+
+    #[test]
+    fn circular_dependency_with_single_file_has_no_related_info() {
+        let root = test_root();
+        let file_a = root.join("src/self.ts");
+
+        let mut results = AnalysisResults::default();
+        results
+            .circular_dependencies
+            .push(CircularDependency {
+                files: vec![file_a.clone()],
+                length: 1,
+                line: 1,
+                col: 0,
+            });
+
+        let duplication = empty_duplication();
+        let diags = build_diagnostics(&results, &duplication, &root);
+
+        let uri = Url::from_file_path(&file_a).unwrap();
+        let d = &diags[&uri][0];
+        // With a single file, skip(1) yields nothing, so related_information is None
+        assert!(d.related_information.is_none());
+    }
+
+    #[test]
+    fn circular_dependency_with_empty_files_produces_no_diagnostic() {
+        let root = test_root();
+        let mut results = AnalysisResults::default();
+        results
+            .circular_dependencies
+            .push(CircularDependency {
+                files: vec![],
+                length: 0,
+                line: 0,
+                col: 0,
+            });
+
+        let duplication = empty_duplication();
+        let diags = build_diagnostics(&results, &duplication, &root);
+        assert!(diags.is_empty());
+    }
+
+    #[test]
+    fn type_only_dependency_produces_information_diagnostic() {
+        let root = test_root();
+        let mut results = AnalysisResults::default();
+        results.type_only_dependencies.push(TypeOnlyDependency {
+            package_name: "@types/react".to_string(),
+            path: root.join("package.json"),
+            line: 8,
+        });
+
+        let duplication = empty_duplication();
+        let diags = build_diagnostics(&results, &duplication, &root);
+
+        let uri = Url::from_file_path(root.join("package.json")).unwrap();
+        let file_diags = &diags[&uri];
+        assert_eq!(file_diags.len(), 1);
+
+        let d = &file_diags[0];
+        assert_eq!(d.severity, Some(DiagnosticSeverity::INFORMATION));
+        assert_eq!(
+            d.code,
+            Some(NumberOrString::String("type-only-dependency".to_string()))
+        );
+        assert!(d.message.contains("@types/react"));
+        assert!(d.message.contains("Type-only dependency"));
+        assert!(d.message.contains("devDependency"));
+        assert_eq!(d.range.start.line, 7); // 1-based 8 -> 0-based 7
+        assert_eq!(d.range.start.character, 0);
+        assert_eq!(d.range.end.character, u32::MAX);
+    }
+
+    #[test]
+    fn doc_link_produces_valid_url() {
+        let link = doc_link("unused-exports");
+        assert!(link.is_some());
+        let desc = link.unwrap();
+        assert_eq!(
+            desc.href.as_str(),
+            "https://docs.fallow.tools/explanations/dead-code#unused-exports"
+        );
+    }
+
+    #[test]
+    fn first_line_range_values() {
+        assert_eq!(FIRST_LINE_RANGE.start.line, 0);
+        assert_eq!(FIRST_LINE_RANGE.start.character, 0);
+        assert_eq!(FIRST_LINE_RANGE.end.line, 0);
+        assert_eq!(FIRST_LINE_RANGE.end.character, u32::MAX);
+    }
+
+    #[test]
+    fn all_diagnostic_codes_have_doc_links() {
+        let root = test_root();
+        let path = root.join("src/file.ts");
+        let mut results = AnalysisResults::default();
+
+        // Add one of each issue type to verify all produce code_description
+        results.unused_exports.push(UnusedExport {
+            path: path.clone(),
+            export_name: "e".to_string(),
+            is_type_only: false,
+            line: 1,
+            col: 0,
+            span_start: 0,
+            is_re_export: false,
+        });
+        results.unused_types.push(UnusedExport {
+            path: path.clone(),
+            export_name: "T".to_string(),
+            is_type_only: true,
+            line: 2,
+            col: 0,
+            span_start: 0,
+            is_re_export: false,
+        });
+        results.unused_files.push(UnusedFile {
+            path: path.clone(),
+        });
+        results.unused_enum_members.push(UnusedMember {
+            path: path.clone(),
+            parent_name: "E".to_string(),
+            member_name: "A".to_string(),
+            kind: MemberKind::EnumMember,
+            line: 3,
+            col: 0,
+        });
+
+        let duplication = empty_duplication();
+        let diags = build_diagnostics(&results, &duplication, &root);
+
+        let uri = Url::from_file_path(&path).unwrap();
+        let file_diags = &diags[&uri];
+
+        for d in file_diags {
+            assert!(
+                d.code_description.is_some(),
+                "Diagnostic code {:?} should have a code_description doc link",
+                d.code
+            );
+            let href = &d.code_description.as_ref().unwrap().href;
+            assert!(
+                href.as_str().starts_with("https://docs.fallow.tools/"),
+                "Doc link should point to fallow docs: {href}"
+            );
+        }
+    }
+
+    #[test]
+    fn duplication_with_single_instance_has_no_related_info() {
+        let root = test_root();
+        let results = AnalysisResults::default();
+        let duplication = DuplicationReport {
+            clone_groups: vec![CloneGroup {
+                instances: vec![CloneInstance {
+                    file: root.join("src/only.ts"),
+                    start_line: 1,
+                    end_line: 5,
+                    start_col: 0,
+                    end_col: 10,
+                    fragment: "code".to_string(),
+                }],
+                token_count: 20,
+                line_count: 5,
+            }],
+            clone_families: vec![],
+            stats: DuplicationStats {
+                total_files: 1,
+                files_with_clones: 1,
+                total_lines: 20,
+                duplicated_lines: 5,
+                total_tokens: 100,
+                duplicated_tokens: 20,
+                clone_groups: 1,
+                clone_instances: 1,
+                duplication_percentage: 25.0,
+            },
+        };
+
+        let diags = build_diagnostics(&results, &duplication, &root);
+        let uri = Url::from_file_path(root.join("src/only.ts")).unwrap();
+        let d = &diags[&uri][0];
+
+        // Single instance => no "other" instances => no related info
+        assert!(d.related_information.is_none());
+    }
+
+    #[test]
+    fn duplicate_export_with_single_location_has_no_related_info() {
+        let root = test_root();
+        let path = root.join("src/solo.ts");
+
+        let mut results = AnalysisResults::default();
+        results.duplicate_exports.push(DuplicateExport {
+            export_name: "helper".to_string(),
+            locations: vec![DuplicateLocation {
+                path: path.clone(),
+                line: 5,
+                col: 0,
+            }],
+        });
+
+        let duplication = empty_duplication();
+        let diags = build_diagnostics(&results, &duplication, &root);
+
+        let uri = Url::from_file_path(&path).unwrap();
+        let d = &diags[&uri][0];
+        // No other locations to relate to
+        assert!(d.related_information.is_none());
     }
 }

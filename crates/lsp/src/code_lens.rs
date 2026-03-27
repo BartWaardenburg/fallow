@@ -354,4 +354,115 @@ mod tests {
         assert_eq!(lenses.len(), 1);
         assert_eq!(lenses[0].range.start.line, 0);
     }
+
+    #[test]
+    fn reference_locations_with_mixed_valid_invalid_paths() {
+        let root = test_root();
+        let utils_path = root.join("src/utils.ts");
+        let mut results = AnalysisResults::default();
+        results.export_usages.push(ExportUsage {
+            path: utils_path.clone(),
+            export_name: "helper".to_string(),
+            line: 5,
+            col: 7,
+            reference_count: 2,
+            reference_locations: vec![
+                ReferenceLocation {
+                    path: root.join("src/app.ts"), // valid absolute path
+                    line: 3,
+                    col: 10,
+                },
+                // An empty path won't produce a valid file URI on most platforms
+                ReferenceLocation {
+                    path: std::path::PathBuf::new(),
+                    line: 1,
+                    col: 0,
+                },
+            ],
+        });
+
+        let uri = Url::from_file_path(&utils_path).unwrap();
+        let lenses = build_code_lenses(&results, &utils_path, &uri);
+        assert_eq!(lenses.len(), 1);
+
+        let cmd = lenses[0].command.as_ref().unwrap();
+        // Should still use showReferences because at least one valid location exists
+        assert_eq!(cmd.command, "editor.action.showReferences");
+
+        let args = cmd.arguments.as_ref().unwrap();
+        let ref_locs = args[2].as_array().unwrap();
+        // Only the valid path should be in the references
+        assert_eq!(ref_locs.len(), 1);
+    }
+
+    #[test]
+    fn lens_range_is_zero_width_point() {
+        let root = test_root();
+        let path = root.join("src/utils.ts");
+        let mut results = AnalysisResults::default();
+        results.export_usages.push(ExportUsage {
+            path: path.clone(),
+            export_name: "fn".to_string(),
+            line: 10,
+            col: 5,
+            reference_count: 1,
+            reference_locations: vec![],
+        });
+
+        let uri = Url::from_file_path(&path).unwrap();
+        let lenses = build_code_lenses(&results, &path, &uri);
+        assert_eq!(lenses.len(), 1);
+
+        // Code lens range should be a zero-width point (start == end)
+        assert_eq!(lenses[0].range.start, lenses[0].range.end);
+    }
+
+    #[test]
+    fn lens_data_is_none() {
+        let root = test_root();
+        let path = root.join("src/utils.ts");
+        let mut results = AnalysisResults::default();
+        results.export_usages.push(ExportUsage {
+            path: path.clone(),
+            export_name: "fn".to_string(),
+            line: 1,
+            col: 0,
+            reference_count: 1,
+            reference_locations: vec![],
+        });
+
+        let uri = Url::from_file_path(&path).unwrap();
+        let lenses = build_code_lenses(&results, &path, &uri);
+        assert!(lenses[0].data.is_none(), "Code lens data should be None since resolve_provider is false");
+    }
+
+    #[test]
+    fn reference_location_line_is_converted_to_zero_based() {
+        let root = test_root();
+        let utils_path = root.join("src/utils.ts");
+        let mut results = AnalysisResults::default();
+        results.export_usages.push(ExportUsage {
+            path: utils_path.clone(),
+            export_name: "x".to_string(),
+            line: 1,
+            col: 0,
+            reference_count: 1,
+            reference_locations: vec![ReferenceLocation {
+                path: root.join("src/consumer.ts"),
+                line: 42, // 1-based
+                col: 5,
+            }],
+        });
+
+        let uri = Url::from_file_path(&utils_path).unwrap();
+        let lenses = build_code_lenses(&results, &utils_path, &uri);
+
+        let cmd = lenses[0].command.as_ref().unwrap();
+        let args = cmd.arguments.as_ref().unwrap();
+        let ref_locs = args[2].as_array().unwrap();
+
+        // Reference line should be converted to 0-based (42 -> 41)
+        assert_eq!(ref_locs[0]["range"]["start"]["line"], 41);
+        assert_eq!(ref_locs[0]["range"]["start"]["character"], 5);
+    }
 }

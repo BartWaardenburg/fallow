@@ -582,3 +582,365 @@ fn merge_duplication(target: &mut DuplicationReport, source: DuplicationReport) 
         0.0
     };
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use fallow_core::duplicates::{CloneGroup, CloneInstance, DuplicationStats};
+    use fallow_core::results::{
+        CircularDependency, UnlistedDependency, UnusedDependency, UnusedExport, UnusedFile,
+        UnusedMember,
+    };
+
+    // -----------------------------------------------------------------------
+    // merge_results
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn merge_results_into_empty_target() {
+        let mut target = AnalysisResults::default();
+        let mut source = AnalysisResults::default();
+        source.unused_files.push(UnusedFile {
+            path: "/a.ts".into(),
+        });
+        source.unused_exports.push(UnusedExport {
+            path: "/a.ts".into(),
+            export_name: "foo".to_string(),
+            is_type_only: false,
+            line: 1,
+            col: 0,
+            span_start: 0,
+            is_re_export: false,
+        });
+
+        merge_results(&mut target, source);
+
+        assert_eq!(target.unused_files.len(), 1);
+        assert_eq!(target.unused_exports.len(), 1);
+    }
+
+    #[test]
+    fn merge_results_accumulates_from_multiple_sources() {
+        let mut target = AnalysisResults::default();
+
+        let mut source_a = AnalysisResults::default();
+        source_a.unused_files.push(UnusedFile {
+            path: "/a.ts".into(),
+        });
+        source_a.unresolved_imports.push(fallow_core::results::UnresolvedImport {
+            path: "/a.ts".into(),
+            specifier: "./missing".to_string(),
+            line: 1,
+            col: 0,
+            specifier_col: 10,
+        });
+
+        let mut source_b = AnalysisResults::default();
+        source_b.unused_files.push(UnusedFile {
+            path: "/b.ts".into(),
+        });
+        source_b.unused_exports.push(UnusedExport {
+            path: "/b.ts".into(),
+            export_name: "bar".to_string(),
+            is_type_only: false,
+            line: 5,
+            col: 0,
+            span_start: 0,
+            is_re_export: false,
+        });
+
+        merge_results(&mut target, source_a);
+        merge_results(&mut target, source_b);
+
+        assert_eq!(target.unused_files.len(), 2);
+        assert_eq!(target.unused_exports.len(), 1);
+        assert_eq!(target.unresolved_imports.len(), 1);
+    }
+
+    #[test]
+    fn merge_results_covers_all_fields() {
+        let mut target = AnalysisResults::default();
+        let mut source = AnalysisResults::default();
+
+        source.unused_files.push(UnusedFile { path: "/f.ts".into() });
+        source.unused_exports.push(UnusedExport {
+            path: "/f.ts".into(),
+            export_name: "e".to_string(),
+            is_type_only: false,
+            line: 1,
+            col: 0,
+            span_start: 0,
+            is_re_export: false,
+        });
+        source.unused_types.push(UnusedExport {
+            path: "/f.ts".into(),
+            export_name: "T".to_string(),
+            is_type_only: true,
+            line: 2,
+            col: 0,
+            span_start: 0,
+            is_re_export: false,
+        });
+        source.unused_dependencies.push(UnusedDependency {
+            package_name: "dep".to_string(),
+            location: fallow_core::results::DependencyLocation::Dependencies,
+            path: "/pkg.json".into(),
+            line: 3,
+        });
+        source.unused_dev_dependencies.push(UnusedDependency {
+            package_name: "dev-dep".to_string(),
+            location: fallow_core::results::DependencyLocation::DevDependencies,
+            path: "/pkg.json".into(),
+            line: 4,
+        });
+        source.unused_optional_dependencies.push(UnusedDependency {
+            package_name: "opt-dep".to_string(),
+            location: fallow_core::results::DependencyLocation::OptionalDependencies,
+            path: "/pkg.json".into(),
+            line: 5,
+        });
+        source.unused_enum_members.push(UnusedMember {
+            path: "/f.ts".into(),
+            parent_name: "E".to_string(),
+            member_name: "A".to_string(),
+            kind: fallow_core::extract::MemberKind::EnumMember,
+            line: 6,
+            col: 0,
+        });
+        source.unused_class_members.push(UnusedMember {
+            path: "/f.ts".into(),
+            parent_name: "C".to_string(),
+            member_name: "m".to_string(),
+            kind: fallow_core::extract::MemberKind::ClassMethod,
+            line: 7,
+            col: 0,
+        });
+        source.unresolved_imports.push(fallow_core::results::UnresolvedImport {
+            path: "/f.ts".into(),
+            specifier: "./gone".to_string(),
+            line: 8,
+            col: 0,
+            specifier_col: 10,
+        });
+        source.unlisted_dependencies.push(UnlistedDependency {
+            package_name: "unlisted".to_string(),
+            imported_from: vec![],
+        });
+        source.duplicate_exports.push(fallow_core::results::DuplicateExport {
+            export_name: "dup".to_string(),
+            locations: vec![],
+        });
+        source.type_only_dependencies.push(fallow_core::results::TypeOnlyDependency {
+            package_name: "type-only".to_string(),
+            path: "/pkg.json".into(),
+            line: 9,
+        });
+        source.circular_dependencies.push(CircularDependency {
+            files: vec!["/a.ts".into(), "/b.ts".into()],
+            length: 2,
+            line: 10,
+            col: 0,
+        });
+
+        merge_results(&mut target, source);
+
+        assert_eq!(target.unused_files.len(), 1);
+        assert_eq!(target.unused_exports.len(), 1);
+        assert_eq!(target.unused_types.len(), 1);
+        assert_eq!(target.unused_dependencies.len(), 1);
+        assert_eq!(target.unused_dev_dependencies.len(), 1);
+        assert_eq!(target.unused_optional_dependencies.len(), 1);
+        assert_eq!(target.unused_enum_members.len(), 1);
+        assert_eq!(target.unused_class_members.len(), 1);
+        assert_eq!(target.unresolved_imports.len(), 1);
+        assert_eq!(target.unlisted_dependencies.len(), 1);
+        assert_eq!(target.duplicate_exports.len(), 1);
+        assert_eq!(target.type_only_dependencies.len(), 1);
+        assert_eq!(target.circular_dependencies.len(), 1);
+    }
+
+    #[test]
+    fn merge_results_with_empty_source() {
+        let mut target = AnalysisResults::default();
+        target.unused_files.push(UnusedFile { path: "/a.ts".into() });
+
+        let source = AnalysisResults::default();
+        merge_results(&mut target, source);
+
+        // Target should be unchanged
+        assert_eq!(target.unused_files.len(), 1);
+    }
+
+    // -----------------------------------------------------------------------
+    // merge_duplication
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn merge_duplication_into_empty_target() {
+        let mut target = DuplicationReport::default();
+        let source = DuplicationReport {
+            clone_groups: vec![CloneGroup {
+                instances: vec![CloneInstance {
+                    file: "/a.ts".into(),
+                    start_line: 1,
+                    end_line: 5,
+                    start_col: 0,
+                    end_col: 10,
+                    fragment: "code".to_string(),
+                }],
+                token_count: 20,
+                line_count: 5,
+            }],
+            clone_families: vec![],
+            stats: DuplicationStats {
+                total_files: 10,
+                files_with_clones: 2,
+                total_lines: 100,
+                duplicated_lines: 10,
+                total_tokens: 500,
+                duplicated_tokens: 50,
+                clone_groups: 1,
+                clone_instances: 1,
+                duplication_percentage: 10.0,
+            },
+        };
+
+        merge_duplication(&mut target, source);
+
+        assert_eq!(target.clone_groups.len(), 1);
+        assert_eq!(target.stats.total_files, 10);
+        assert_eq!(target.stats.total_lines, 100);
+        assert_eq!(target.stats.duplicated_lines, 10);
+        assert_eq!(target.stats.duplication_percentage, 10.0);
+    }
+
+    #[test]
+    fn merge_duplication_recomputes_percentage() {
+        let mut target = DuplicationReport {
+            clone_groups: vec![],
+            clone_families: vec![],
+            stats: DuplicationStats {
+                total_files: 5,
+                files_with_clones: 1,
+                total_lines: 200,
+                duplicated_lines: 20,
+                total_tokens: 1000,
+                duplicated_tokens: 100,
+                clone_groups: 1,
+                clone_instances: 2,
+                duplication_percentage: 10.0, // 20/200 * 100
+            },
+        };
+        let source = DuplicationReport {
+            clone_groups: vec![],
+            clone_families: vec![],
+            stats: DuplicationStats {
+                total_files: 3,
+                files_with_clones: 1,
+                total_lines: 300,
+                duplicated_lines: 60,
+                total_tokens: 1500,
+                duplicated_tokens: 300,
+                clone_groups: 2,
+                clone_instances: 4,
+                duplication_percentage: 20.0, // 60/300 * 100
+            },
+        };
+
+        merge_duplication(&mut target, source);
+
+        // Merged: total_lines=500, duplicated_lines=80
+        // Recomputed: 80/500 * 100 = 16.0 (NOT 10.0 + 20.0 = 30.0)
+        assert_eq!(target.stats.total_files, 8);
+        assert_eq!(target.stats.files_with_clones, 2);
+        assert_eq!(target.stats.total_lines, 500);
+        assert_eq!(target.stats.duplicated_lines, 80);
+        assert_eq!(target.stats.total_tokens, 2500);
+        assert_eq!(target.stats.duplicated_tokens, 400);
+        assert_eq!(target.stats.clone_groups, 3);
+        assert_eq!(target.stats.clone_instances, 6);
+        assert!((target.stats.duplication_percentage - 16.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn merge_duplication_zero_total_lines_yields_zero_percentage() {
+        let mut target = DuplicationReport::default();
+        let source = DuplicationReport::default();
+
+        merge_duplication(&mut target, source);
+
+        assert_eq!(target.stats.total_lines, 0);
+        assert_eq!(target.stats.duplication_percentage, 0.0);
+    }
+
+    #[test]
+    fn merge_duplication_with_empty_source() {
+        let mut target = DuplicationReport {
+            clone_groups: vec![CloneGroup {
+                instances: vec![],
+                token_count: 10,
+                line_count: 3,
+            }],
+            clone_families: vec![],
+            stats: DuplicationStats {
+                total_files: 5,
+                files_with_clones: 1,
+                total_lines: 100,
+                duplicated_lines: 10,
+                total_tokens: 500,
+                duplicated_tokens: 50,
+                clone_groups: 1,
+                clone_instances: 1,
+                duplication_percentage: 10.0,
+            },
+        };
+
+        let source = DuplicationReport::default();
+        merge_duplication(&mut target, source);
+
+        // Target stats should remain the same (merged with zeros)
+        assert_eq!(target.clone_groups.len(), 1);
+        assert_eq!(target.stats.total_files, 5);
+        assert_eq!(target.stats.duplication_percentage, 10.0);
+    }
+
+    // -----------------------------------------------------------------------
+    // ISSUE_TYPE_TO_DIAGNOSTIC_CODE
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn issue_type_mapping_has_expected_entries() {
+        // Verify all expected issue types are present
+        let keys: Vec<&str> = ISSUE_TYPE_TO_DIAGNOSTIC_CODE
+            .iter()
+            .map(|(k, _)| *k)
+            .collect();
+
+        assert!(keys.contains(&"unused-files"));
+        assert!(keys.contains(&"unused-exports"));
+        assert!(keys.contains(&"unused-types"));
+        assert!(keys.contains(&"unused-dependencies"));
+        assert!(keys.contains(&"unused-dev-dependencies"));
+        assert!(keys.contains(&"unused-optional-dependencies"));
+        assert!(keys.contains(&"unused-enum-members"));
+        assert!(keys.contains(&"unused-class-members"));
+        assert!(keys.contains(&"unresolved-imports"));
+        assert!(keys.contains(&"unlisted-dependencies"));
+        assert!(keys.contains(&"duplicate-exports"));
+        assert!(keys.contains(&"type-only-dependencies"));
+        assert!(keys.contains(&"circular-dependencies"));
+    }
+
+    #[test]
+    fn issue_type_mapping_codes_are_singular() {
+        // All diagnostic codes should be singular (e.g., "unused-file" not "unused-files")
+        for &(config_key, diag_code) in ISSUE_TYPE_TO_DIAGNOSTIC_CODE {
+            // Config keys are plural, diagnostic codes are singular
+            assert!(
+                !diag_code.ends_with('s') || diag_code.ends_with("ss"),
+                "Diagnostic code '{diag_code}' for config key '{config_key}' should be singular"
+            );
+        }
+    }
+}
