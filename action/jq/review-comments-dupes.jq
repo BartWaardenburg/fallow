@@ -19,6 +19,8 @@ def footer: "\n\n---\n<sub><a href=\"https://docs.fallow.tools/explanations/dupl
       ($group.instances | map(select(. != $inst)) |
         map((.file | rel_path) as $p | "- " + file_link($p; .start_line; .end_line)) | join("\n")) as $others |
       {
+        type: "duplication",
+        group_id: "\($this_path):\($group.token_count):\($group.line_count)",
         path: (prefix + $this_path),
         start_line: $inst.start_line,
         line: $inst.end_line,
