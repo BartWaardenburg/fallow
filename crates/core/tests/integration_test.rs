@@ -29,3 +29,18 @@ mod rules_config;
 mod sfc_parsing;
 #[path = "integration_test/workspaces.rs"]
 mod workspaces;
+
+#[path = "integration_test/css_modules_unused.rs"]
+mod css_modules_unused;
+#[path = "integration_test/production_mode.rs"]
+mod production_mode;
+#[path = "integration_test/re_export_chains.rs"]
+mod re_export_chains;
+#[path = "integration_test/suppression_comments.rs"]
+mod suppression_comments;
+#[path = "integration_test/type_only_deps.rs"]
+mod type_only_deps;
+#[path = "integration_test/unused_enum_members.rs"]
+mod unused_enum_members;
+#[path = "integration_test/workspace_cross_imports.rs"]
+mod workspace_cross_imports;

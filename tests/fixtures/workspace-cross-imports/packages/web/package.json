@@ -1,0 +1,7 @@
+{
+  "name": "@myorg/web",
+  "main": "src/index.ts",
+  "dependencies": {
+    "@myorg/core": "*"
+  }
+}
