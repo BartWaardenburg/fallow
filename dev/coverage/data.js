@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1774612041024,
+  "lastUpdate": 1774612368361,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
@@ -2517,6 +2517,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/658106c3e3c984decea45c756dd789cf10a44ed0"
         },
         "date": 1774612040667,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 87.8,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "5c8ca9fdd866eb0d78c6a4ce4471740d03c583bf",
+          "message": "fix: resolve absolute paths in dupes/health review comments and fix targets field name\n\n- Dupes: strip absolute runner paths to relative using FALLOW_ROOT\n- Health: use `targets` field (not `refactoring_targets`) for combined output\n- Health: apply same rel_path fix for findings and targets paths\n- Export FALLOW_ROOT env var for jq access",
+          "timestamp": "2026-03-27T12:51:57+01:00",
+          "tree_id": "5f9586162cb060801e52885b5a6b975322875687",
+          "url": "https://github.com/fallow-rs/fallow/commit/5c8ca9fdd866eb0d78c6a4ce4471740d03c583bf"
+        },
+        "date": 1774612367753,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
