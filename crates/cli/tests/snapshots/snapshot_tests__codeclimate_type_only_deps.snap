@@ -11,7 +11,7 @@ expression: json_str
       "Bug Risk"
     ],
     "severity": "minor",
-    "fingerprint": "ce7c5c861453f2d2",
+    "fingerprint": "34d2064787c07f45",
     "location": {
       "path": "package.json",
       "lines": {

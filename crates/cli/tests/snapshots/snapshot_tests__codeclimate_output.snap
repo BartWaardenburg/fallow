@@ -11,7 +11,7 @@ expression: json_str
       "Bug Risk"
     ],
     "severity": "major",
-    "fingerprint": "c4d5d570389b6321",
+    "fingerprint": "e3912cb6bb9b0212",
     "location": {
       "path": "src/dead.ts",
       "lines": {
@@ -27,7 +27,7 @@ expression: json_str
       "Bug Risk"
     ],
     "severity": "major",
-    "fingerprint": "1d25c1dfe1837da4",
+    "fingerprint": "ebe2360218821412",
     "location": {
       "path": "src/utils.ts",
       "lines": {
@@ -43,7 +43,7 @@ expression: json_str
       "Bug Risk"
     ],
     "severity": "major",
-    "fingerprint": "70129604df6adaf0",
+    "fingerprint": "deb0e9de35cc06d9",
     "location": {
       "path": "src/types.ts",
       "lines": {
@@ -59,7 +59,7 @@ expression: json_str
       "Bug Risk"
     ],
     "severity": "major",
-    "fingerprint": "565a703b90e29ab5",
+    "fingerprint": "1d04d08d81daf650",
     "location": {
       "path": "package.json",
       "lines": {
@@ -75,7 +75,7 @@ expression: json_str
       "Bug Risk"
     ],
     "severity": "major",
-    "fingerprint": "0a6f69176391810d",
+    "fingerprint": "2a4393b133ea1523",
     "location": {
       "path": "package.json",
       "lines": {
@@ -91,7 +91,7 @@ expression: json_str
       "Bug Risk"
     ],
     "severity": "major",
-    "fingerprint": "5c890a87a0ad36a9",
+    "fingerprint": "66616a09b329d842",
     "location": {
       "path": "package.json",
       "lines": {
@@ -107,7 +107,7 @@ expression: json_str
       "Bug Risk"
     ],
     "severity": "minor",
-    "fingerprint": "ce7c5c861453f2d2",
+    "fingerprint": "34d2064787c07f45",
     "location": {
       "path": "package.json",
       "lines": {
@@ -123,7 +123,7 @@ expression: json_str
       "Bug Risk"
     ],
     "severity": "major",
-    "fingerprint": "a2666411f17dc9d4",
+    "fingerprint": "090d4d65832bf868",
     "location": {
       "path": "src/enums.ts",
       "lines": {
@@ -139,7 +139,7 @@ expression: json_str
       "Bug Risk"
     ],
     "severity": "major",
-    "fingerprint": "2ca79023e7a41930",
+    "fingerprint": "25579ea7b6940453",
     "location": {
       "path": "src/service.ts",
       "lines": {
@@ -155,7 +155,7 @@ expression: json_str
       "Bug Risk"
     ],
     "severity": "major",
-    "fingerprint": "58fddadd09f5631f",
+    "fingerprint": "231a7ed9e16a19a6",
     "location": {
       "path": "src/app.ts",
       "lines": {
@@ -171,7 +171,7 @@ expression: json_str
       "Bug Risk"
     ],
     "severity": "major",
-    "fingerprint": "ec112dff06d36cce",
+    "fingerprint": "2ef210a41606f3aa",
     "location": {
       "path": "src/cli.ts",
       "lines": {
@@ -187,7 +187,7 @@ expression: json_str
       "Bug Risk"
     ],
     "severity": "major",
-    "fingerprint": "059e550191b06ac6",
+    "fingerprint": "da73cab5c65b029d",
     "location": {
       "path": "src/config.ts",
       "lines": {
@@ -203,7 +203,7 @@ expression: json_str
       "Bug Risk"
     ],
     "severity": "major",
-    "fingerprint": "298ba9d90b56a182",
+    "fingerprint": "cc6a09c8dc227321",
     "location": {
       "path": "src/types.ts",
       "lines": {
@@ -219,7 +219,7 @@ expression: json_str
       "Bug Risk"
     ],
     "severity": "major",
-    "fingerprint": "9c9054f3055939fb",
+    "fingerprint": "405f0abed155920d",
     "location": {
       "path": "src/a.ts",
       "lines": {

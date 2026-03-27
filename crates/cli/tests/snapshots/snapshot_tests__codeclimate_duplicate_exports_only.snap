@@ -11,7 +11,7 @@ expression: json_str
       "Bug Risk"
     ],
     "severity": "major",
-    "fingerprint": "059e550191b06ac6",
+    "fingerprint": "da73cab5c65b029d",
     "location": {
       "path": "src/config.ts",
       "lines": {
@@ -27,7 +27,7 @@ expression: json_str
       "Bug Risk"
     ],
     "severity": "major",
-    "fingerprint": "298ba9d90b56a182",
+    "fingerprint": "cc6a09c8dc227321",
     "location": {
       "path": "src/types.ts",
       "lines": {

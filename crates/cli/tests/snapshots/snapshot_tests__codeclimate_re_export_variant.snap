@@ -11,7 +11,7 @@ expression: json_str
       "Bug Risk"
     ],
     "severity": "major",
-    "fingerprint": "855fead6db8e0871",
+    "fingerprint": "551a4bfe2be74003",
     "location": {
       "path": "src/index.ts",
       "lines": {

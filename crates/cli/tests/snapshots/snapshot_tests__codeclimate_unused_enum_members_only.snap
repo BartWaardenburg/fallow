@@ -11,7 +11,7 @@ expression: json_str
       "Bug Risk"
     ],
     "severity": "major",
-    "fingerprint": "a2666411f17dc9d4",
+    "fingerprint": "090d4d65832bf868",
     "location": {
       "path": "src/enums.ts",
       "lines": {

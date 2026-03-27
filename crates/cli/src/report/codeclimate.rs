@@ -1,5 +1,3 @@
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
 use std::path::Path;
 use std::process::ExitCode;
 
@@ -28,13 +26,20 @@ fn cc_path(path: &Path, root: &Path) -> String {
 
 /// Compute a deterministic fingerprint hash from key fields.
 ///
-/// Uses `DefaultHasher` seeded with a fixed value for cross-run stability.
+/// Uses FNV-1a (64-bit) for guaranteed cross-version stability.
+/// `DefaultHasher` is explicitly not specified across Rust versions.
 fn fingerprint_hash(parts: &[&str]) -> String {
-    let mut hasher = DefaultHasher::new();
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325; // FNV offset basis
     for part in parts {
-        part.hash(&mut hasher);
+        for byte in part.bytes() {
+            hash ^= u64::from(byte);
+            hash = hash.wrapping_mul(0x0100_0000_01b3); // FNV prime
+        }
+        // Separator between parts to avoid "ab"+"c" == "a"+"bc"
+        hash ^= 0xff;
+        hash = hash.wrapping_mul(0x0100_0000_01b3);
     }
-    format!("{:016x}", hasher.finish())
+    format!("{hash:016x}")
 }
 
 /// Build a single CodeClimate issue object.
