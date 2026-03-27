@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1774629937031,
+  "lastUpdate": 1774637081663,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
@@ -2783,6 +2783,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "Code Coverage",
             "value": 87.8,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "71607c663bf77959a6df31a588ca3340f24bb29c",
+          "message": "fix: remove unnecessary raw string hashes in plugin test",
+          "timestamp": "2026-03-27T19:39:40+01:00",
+          "tree_id": "7e1b4ee0a1b35446c0d8872e798cb9ac8297b792",
+          "url": "https://github.com/fallow-rs/fallow/commit/71607c663bf77959a6df31a588ca3340f24bb29c"
+        },
+        "date": 1774637081293,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 91.4,
             "unit": "%"
           }
         ]
