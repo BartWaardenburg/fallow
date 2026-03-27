@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1774644668511,
+  "lastUpdate": 1774645521607,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
@@ -2894,6 +2894,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/3d6ad8957f919db4e8db202668dde479ad29a698"
         },
         "date": 1774644667866,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 91.6,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "3ca42bf8dce57da5f11ca86af9804935fe2994aa",
+          "message": "chore: add typos check to pre-commit hook",
+          "timestamp": "2026-03-27T22:04:17+01:00",
+          "tree_id": "b2fdbb7b9e845b2ab6f474f69e7e486d264296d3",
+          "url": "https://github.com/fallow-rs/fallow/commit/3ca42bf8dce57da5f11ca86af9804935fe2994aa"
+        },
+        "date": 1774645520996,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
