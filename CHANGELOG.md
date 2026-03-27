@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-03-27
+
+### Added
+
+- **Test-only production dependency detection** -- new issue type (14th) flags production dependencies that are only imported by test files, suggesting they be moved to `devDependencies`. Full pipeline: all 6 output formats, LSP diagnostics, baseline support, inline suppression, severity rules (default: `warn`).
+- **`tap` test runner support** -- `tap` and `@tapjs/*` packages recognized as tooling dependencies
+- **`type-only-dependency` inline suppression** -- `// fallow-ignore-next-line type-only-dependency` now works (was a pre-existing gap where the suppression comment was silently ignored)
+
+### Fixed
+
+- **Tooling over-exemption** -- removed blanket `@babel/`, `babel-`, and `@rollup/` prefix exemptions from unused dependency detection. These packages are now verified against actual config files via plugin parsing, catching ~8 previously missed unused dev dependencies.
+- **ESLint shared config following** -- ESLint plugin now reads imported config packages one level deep to discover peer dependencies referenced by shared configs
+- **Prettier config parsing** -- new PrettierPlugin extracts plugin references from `.prettierrc` and `prettier.config.*` files
+- **Storybook addon object form** -- Storybook plugin now handles `{ name: '@storybook/addon-essentials' }` object entries alongside string entries in the `addons` array
+
 ## [2.3.1] - 2026-03-27
 
 ### Added
@@ -546,7 +561,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.3.1...HEAD
+[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.4.0...HEAD
+[2.4.0]: https://github.com/fallow-rs/fallow/compare/v2.3.1...v2.4.0
 [2.3.1]: https://github.com/fallow-rs/fallow/compare/v2.3.0...v2.3.1
 [2.3.0]: https://github.com/fallow-rs/fallow/compare/v2.2.3...v2.3.0
 [2.2.3]: https://github.com/fallow-rs/fallow/compare/v2.2.1...v2.2.3
