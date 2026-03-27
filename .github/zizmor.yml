@@ -4,20 +4,10 @@ rules:
     ignore:
       - release.yml
   # dtolnay/rust-toolchain is the Rust ecosystem standard for CI toolchain management
+  # (used in .github/actions/setup-rust/action.yml composite action)
   superfluous-actions:
     ignore:
-      - setup-rust/action.yml
-      - allocs.yml
-      - bench.yml
-      - bench-real-world.yml
-      - bloat.yml
-      - ci.yml
-      - conformance.yml
-      - coverage.yml
-      - cross-arch.yml
-      - ecosystem-full.yml
-      - ecosystem.yml
-      - release.yml
+      - action.yml
   # Caching in release workflow is acceptable — tags are immutable
   cache-poisoning:
     ignore:
