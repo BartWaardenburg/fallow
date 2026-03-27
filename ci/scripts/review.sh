@@ -176,10 +176,25 @@ curl -sf \
   && echo "Posted review body" \
   || echo "WARNING: Failed to post review body"
 
-# --- Post inline discussions ---
+# --- Fetch diff_refs from MR API (more reliable than CI env vars) ---
 
-BASE_SHA="${CI_MERGE_REQUEST_DIFF_BASE_SHA:-}"
-HEAD_SHA="${CI_COMMIT_SHA:-}"
+DIFF_REFS=$(curl -sf \
+  --header "${AUTH_HEADER}" \
+  "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/merge_requests/${CI_MERGE_REQUEST_IID}" \
+  | jq -r '.diff_refs // empty' 2>/dev/null)
+
+if [ -n "$DIFF_REFS" ] && echo "$DIFF_REFS" | jq -e '.base_sha' > /dev/null 2>&1; then
+  BASE_SHA=$(echo "$DIFF_REFS" | jq -r '.base_sha')
+  START_SHA=$(echo "$DIFF_REFS" | jq -r '.start_sha')
+  HEAD_SHA=$(echo "$DIFF_REFS" | jq -r '.head_sha')
+  echo "Using diff_refs from MR API (base: ${BASE_SHA:0:12}, start: ${START_SHA:0:12}, head: ${HEAD_SHA:0:12})"
+else
+  # Fallback to CI env vars
+  BASE_SHA="${CI_MERGE_REQUEST_DIFF_BASE_SHA:-}"
+  START_SHA="$BASE_SHA"
+  HEAD_SHA="${CI_COMMIT_SHA:-}"
+  echo "Using CI env vars for SHAs (diff_refs not available)"
+fi
 
 POSTED=0
 SKIPPED=0
@@ -195,7 +210,7 @@ while IFS= read -r comment; do
     PAYLOAD=$(jq -n \
       --arg body "$BODY_VAL" \
       --arg base "$BASE_SHA" \
-      --arg start "$BASE_SHA" \
+      --arg start "$START_SHA" \
       --arg head "$HEAD_SHA" \
       --arg path "$PATH_VAL" \
       --argjson line "$LINE_VAL" \
