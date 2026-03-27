@@ -23,9 +23,7 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
-      - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
-
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - uses: ./.github/actions/setup-rust
 
       - uses: taiki-e/install-action@2d15d02e710b40b6332201aba6af30d595b5cd96 # cargo-llvm-cov
 
@@ -65,18 +63,14 @@ jobs:
           " > coverage-bench.json
 
       - name: Store coverage metrics
-        uses: benchmark-action/github-action-benchmark@a7bc2366eda11037936ea57d811a43b3418d3073 # v1
+        uses: ./.github/actions/store-benchmark
         with:
           name: Fallow Coverage
-          tool: 'customBiggerIsBetter'
+          tool: customBiggerIsBetter
           output-file-path: coverage-bench.json
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          auto-push: true
+          data-dir: coverage
           alert-threshold: '105%'
-          fail-on-alert: false
-          save-data-file: true
-          gh-pages-branch: gh-pages
-          benchmark-data-dir-path: dev/coverage
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Update coverage badge
         run: |

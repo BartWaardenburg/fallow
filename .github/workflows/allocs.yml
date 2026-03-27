@@ -38,11 +38,9 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
-      - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
-
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - uses: ./.github/actions/setup-rust
         with:
-          key: allocs
+          cache-key: allocs
 
       - name: Run allocation benchmark
         run: cargo bench --bench allocations 2>&1 | tee alloc-output.txt
@@ -113,18 +111,11 @@ jobs:
 
       - name: Store allocation metrics
         if: always() && steps.parse.outcome != 'skipped'
-        uses: benchmark-action/github-action-benchmark@a7bc2366eda11037936ea57d811a43b3418d3073 # v1
-        continue-on-error: ${{ github.event_name == 'pull_request' }}
+        uses: ./.github/actions/store-benchmark
         with:
           name: Fallow Allocations
-          tool: 'customSmallerIsBetter'
+          tool: customSmallerIsBetter
           output-file-path: alloc-bench.json
+          data-dir: allocs
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          auto-push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-          comment-on-alert: true
-          comment-always: ${{ github.event_name == 'pull_request' }}
-          alert-threshold: '110%'
-          fail-on-alert: false
-          save-data-file: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-          gh-pages-branch: gh-pages
-          benchmark-data-dir-path: dev/allocs
+          continue-on-error: ${{ github.event_name == 'pull_request' }}

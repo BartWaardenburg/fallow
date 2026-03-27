@@ -40,11 +40,9 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
-
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - uses: ./.github/actions/setup-rust
         with:
-          key: bloat
+          cache-key: bloat
 
       - name: Install cargo-bloat
         run: cargo install cargo-bloat --locked
@@ -73,18 +71,12 @@ jobs:
           " > bloat-bench.json
 
       - name: Store binary size metric
-        uses: benchmark-action/github-action-benchmark@a7bc2366eda11037936ea57d811a43b3418d3073 # v1
-        continue-on-error: ${{ github.event_name == 'pull_request' }}
+        uses: ./.github/actions/store-benchmark
         with:
           name: Fallow Binary Size
-          tool: 'customSmallerIsBetter'
+          tool: customSmallerIsBetter
           output-file-path: bloat-bench.json
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          auto-push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-          comment-on-alert: true
-          comment-always: ${{ github.event_name == 'pull_request' }}
+          data-dir: bloat
           alert-threshold: '115%'
-          fail-on-alert: false
-          save-data-file: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-          gh-pages-branch: gh-pages
-          benchmark-data-dir-path: dev/bloat
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          continue-on-error: ${{ github.event_name == 'pull_request' }}

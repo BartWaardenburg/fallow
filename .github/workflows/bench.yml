@@ -37,11 +37,9 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
-      - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
-
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - uses: ./.github/actions/setup-rust
         with:
-          key: bench
+          cache-key: bench
 
       - name: Run benchmarks
         # Only run the `analysis` bench target (not `large_analysis` which
@@ -49,25 +47,14 @@ jobs:
         run: cargo bench --bench analysis -- --output-format bencher | tee bench-output.txt
 
       - name: Store benchmark result
-        uses: benchmark-action/github-action-benchmark@a7bc2366eda11037936ea57d811a43b3418d3073 # v1
-        continue-on-error: ${{ github.event_name == 'pull_request' }}
+        uses: ./.github/actions/store-benchmark
         with:
           name: Fallow Benchmarks
-          tool: 'cargo'
+          tool: cargo
           output-file-path: bench-output.txt
+          data-dir: bench
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          # Store results in gh-pages branch
-          auto-push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-          # Comment on PRs with benchmark comparison
-          comment-on-alert: true
-          comment-always: ${{ github.event_name == 'pull_request' }}
-          # Alert if performance regresses by more than 10%
-          alert-threshold: '110%'
-          fail-on-alert: false
-          # Compare against previous results
-          save-data-file: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-          gh-pages-branch: gh-pages
-          benchmark-data-dir-path: dev/bench
+          continue-on-error: ${{ github.event_name == 'pull_request' }}
 
       - name: Deploy dashboard
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'

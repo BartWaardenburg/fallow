@@ -37,13 +37,10 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+      - uses: ./.github/actions/setup-rust
         with:
           targets: ${{ matrix.target }}
-
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          key: cross-${{ matrix.target }}
+          cache-key: cross-${{ matrix.target }}
 
       - name: Check compilation
         run: cargo check --workspace --target ${{ matrix.target }}

@@ -19,9 +19,7 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
-      - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
-
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - uses: ./.github/actions/setup-rust
 
       - name: Publish fallow-types
         run: cargo publish -p fallow-types || echo "Already published, skipping"
@@ -124,9 +122,10 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
-      - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+      - uses: ./.github/actions/setup-rust
         with:
           targets: ${{ matrix.target }}
+          cache-key: ${{ matrix.target }}
 
       - name: Install musl tools
         if: contains(matrix.target, 'musl')
@@ -139,10 +138,6 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu
-
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          key: ${{ matrix.target }}
 
       - name: Build CLI release binary
         run: cargo build --release --target ${{ matrix.target }} -p fallow-cli
@@ -237,56 +232,25 @@ jobs:
       - name: Ensure latest npm (for trusted publishing)
         run: npm install -g npm@latest
 
-      - name: Download darwin-arm64 binary
+      - name: Download all npm binaries
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          name: npm-darwin-arm64
-          path: npm/darwin-arm64
+          pattern: npm-*
+          path: npm-artifacts
 
-      - name: Download darwin-x64 binary
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          name: npm-darwin-x64
-          path: npm/darwin-x64
-
-      - name: Download linux-x64-gnu binary
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          name: npm-linux-x64-gnu
-          path: npm/linux-x64-gnu
-
-      - name: Download linux-arm64-gnu binary
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          name: npm-linux-arm64-gnu
-          path: npm/linux-arm64-gnu
-
-      - name: Download linux-x64-musl binary
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          name: npm-linux-x64-musl
-          path: npm/linux-x64-musl
-
-      - name: Download linux-arm64-musl binary
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          name: npm-linux-arm64-musl
-          path: npm/linux-arm64-musl
-
-      - name: Download win32-x64-msvc binary
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          name: npm-win32-x64-msvc
-          path: npm/win32-x64-msvc
+      - name: Organize binaries into npm directories
+        run: |
+          for dir in npm-artifacts/npm-*; do
+            target="npm/$(basename "$dir" | sed 's/^npm-//')"
+            mkdir -p "$target"
+            cp "$dir"/* "$target"/
+          done
 
       - name: Set binary permissions
         run: |
-          chmod +x npm/darwin-arm64/fallow
-          chmod +x npm/darwin-x64/fallow
-          chmod +x npm/linux-x64-gnu/fallow
-          chmod +x npm/linux-arm64-gnu/fallow
-          chmod +x npm/linux-x64-musl/fallow
-          chmod +x npm/linux-arm64-musl/fallow
+          for bin in npm/*/fallow; do
+            [ -f "$bin" ] && chmod +x "$bin"
+          done
 
       - name: Update versions
         run: |

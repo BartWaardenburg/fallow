@@ -1,0 +1,29 @@
+name: Setup Rust
+description: Install Rust toolchain and configure build caching
+
+inputs:
+  toolchain:
+    description: 'Rust toolchain to install (stable, nightly, 1.92.0, etc.)'
+    default: 'stable'
+  components:
+    description: 'Comma-separated components (e.g., clippy, rustfmt)'
+    default: ''
+  targets:
+    description: 'Comma-separated compilation targets'
+    default: ''
+  cache-key:
+    description: 'Extra cache key to differentiate cache entries'
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7
+      with:
+        toolchain: ${{ inputs.toolchain }}
+        components: ${{ inputs.components }}
+        targets: ${{ inputs.targets }}
+
+    - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      with:
+        key: ${{ inputs.cache-key }}
