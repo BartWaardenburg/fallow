@@ -634,4 +634,170 @@ mod tests {
             "non-test file should still have Error severity"
         );
     }
+
+    // ── promote_warns_to_errors ─────────────────────────────────────
+
+    #[test]
+    fn promote_warns_to_errors_promotes_all_warns() {
+        let mut rules = RulesConfig {
+            unused_files: Severity::Warn,
+            unused_exports: Severity::Warn,
+            unused_types: Severity::Warn,
+            unused_dependencies: Severity::Warn,
+            unused_dev_dependencies: Severity::Warn,
+            unused_optional_dependencies: Severity::Warn,
+            unused_enum_members: Severity::Warn,
+            unused_class_members: Severity::Warn,
+            unresolved_imports: Severity::Warn,
+            unlisted_dependencies: Severity::Warn,
+            duplicate_exports: Severity::Warn,
+            type_only_dependencies: Severity::Warn,
+            circular_dependencies: Severity::Warn,
+        };
+        promote_warns_to_errors(&mut rules);
+
+        assert_eq!(rules.unused_files, Severity::Error);
+        assert_eq!(rules.unused_exports, Severity::Error);
+        assert_eq!(rules.unused_types, Severity::Error);
+        assert_eq!(rules.unused_dependencies, Severity::Error);
+        assert_eq!(rules.unused_dev_dependencies, Severity::Error);
+        assert_eq!(rules.unused_optional_dependencies, Severity::Error);
+        assert_eq!(rules.unused_enum_members, Severity::Error);
+        assert_eq!(rules.unused_class_members, Severity::Error);
+        assert_eq!(rules.unresolved_imports, Severity::Error);
+        assert_eq!(rules.unlisted_dependencies, Severity::Error);
+        assert_eq!(rules.duplicate_exports, Severity::Error);
+        assert_eq!(rules.type_only_dependencies, Severity::Error);
+        assert_eq!(rules.circular_dependencies, Severity::Error);
+    }
+
+    #[test]
+    fn promote_warns_to_errors_preserves_off() {
+        let mut rules = RulesConfig {
+            unused_files: Severity::Off,
+            unused_exports: Severity::Off,
+            unused_types: Severity::Off,
+            unused_dependencies: Severity::Off,
+            unused_dev_dependencies: Severity::Off,
+            unused_optional_dependencies: Severity::Off,
+            unused_enum_members: Severity::Off,
+            unused_class_members: Severity::Off,
+            unresolved_imports: Severity::Off,
+            unlisted_dependencies: Severity::Off,
+            duplicate_exports: Severity::Off,
+            type_only_dependencies: Severity::Off,
+            circular_dependencies: Severity::Off,
+        };
+        promote_warns_to_errors(&mut rules);
+
+        // Off should remain Off
+        assert_eq!(rules.unused_files, Severity::Off);
+        assert_eq!(rules.unused_exports, Severity::Off);
+        assert_eq!(rules.unused_types, Severity::Off);
+        assert_eq!(rules.circular_dependencies, Severity::Off);
+    }
+
+    #[test]
+    fn promote_warns_to_errors_preserves_existing_errors() {
+        let mut rules = RulesConfig::default(); // all Error
+        promote_warns_to_errors(&mut rules);
+
+        // Error should remain Error
+        assert_eq!(rules.unused_files, Severity::Error);
+        assert_eq!(rules.unused_exports, Severity::Error);
+    }
+
+    #[test]
+    fn promote_warns_to_errors_mixed_severities() {
+        let mut rules = RulesConfig {
+            unused_files: Severity::Error,
+            unused_exports: Severity::Warn,
+            unused_types: Severity::Off,
+            ..RulesConfig::default()
+        };
+        promote_warns_to_errors(&mut rules);
+
+        assert_eq!(rules.unused_files, Severity::Error);
+        assert_eq!(rules.unused_exports, Severity::Error);
+        assert_eq!(rules.unused_types, Severity::Off);
+    }
+
+    // ── has_error_severity_issues: non-file-scoped types ────────────
+
+    #[test]
+    fn has_error_circular_deps_detected() {
+        let mut results = AnalysisResults::default();
+        results.circular_dependencies.push(CircularDependency {
+            files: vec![
+                PathBuf::from("/project/src/a.ts"),
+                PathBuf::from("/project/src/b.ts"),
+            ],
+            length: 2,
+            line: 1,
+            col: 0,
+        });
+        let rules = RulesConfig::default();
+        assert!(has_error_severity_issues(&results, &rules, None));
+    }
+
+    #[test]
+    fn has_error_circular_deps_warn_not_detected() {
+        let mut results = AnalysisResults::default();
+        results.circular_dependencies.push(CircularDependency {
+            files: vec![
+                PathBuf::from("/project/src/a.ts"),
+                PathBuf::from("/project/src/b.ts"),
+            ],
+            length: 2,
+            line: 1,
+            col: 0,
+        });
+        let rules = RulesConfig {
+            circular_dependencies: Severity::Warn,
+            ..RulesConfig::default()
+        };
+        // No other issues, circular is Warn -> no error
+        assert!(!has_error_severity_issues(&results, &rules, None));
+    }
+
+    #[test]
+    fn has_error_optional_deps_detected() {
+        let mut results = AnalysisResults::default();
+        results.unused_optional_dependencies.push(UnusedDependency {
+            package_name: "optional-pkg".into(),
+            location: DependencyLocation::OptionalDependencies,
+            path: PathBuf::from("/project/package.json"),
+            line: 5,
+        });
+        let rules = RulesConfig::default();
+        assert!(has_error_severity_issues(&results, &rules, None));
+    }
+
+    #[test]
+    fn has_error_type_only_deps_warn_by_default() {
+        let mut results = AnalysisResults::default();
+        results.type_only_dependencies.push(TypeOnlyDependency {
+            package_name: "zod".into(),
+            path: PathBuf::from("/project/package.json"),
+            line: 8,
+        });
+        let rules = RulesConfig::default();
+        // type_only_dependencies defaults to Warn, not Error
+        assert!(!has_error_severity_issues(&results, &rules, None));
+    }
+
+    #[test]
+    fn has_error_type_only_deps_detected_when_error() {
+        let mut results = AnalysisResults::default();
+        results.type_only_dependencies.push(TypeOnlyDependency {
+            package_name: "zod".into(),
+            path: PathBuf::from("/project/package.json"),
+            line: 8,
+        });
+        let rules = RulesConfig {
+            type_only_dependencies: Severity::Error,
+            ..RulesConfig::default()
+        };
+        assert!(has_error_severity_issues(&results, &rules, None));
+    }
 }

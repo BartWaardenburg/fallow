@@ -644,4 +644,23 @@ mod tests {
             "AppUtils.tsx"
         );
     }
+
+    #[test]
+    fn elide_common_prefix_identical_paths() {
+        assert_eq!(elide_common_prefix("src/foo.ts", "src/foo.ts"), "foo.ts");
+    }
+
+    #[test]
+    fn split_dir_filename_single_slash() {
+        let (dir, file) = split_dir_filename("/file.ts");
+        assert_eq!(dir, "/");
+        assert_eq!(file, "file.ts");
+    }
+
+    #[test]
+    fn emit_json_returns_success_for_valid_value() {
+        let value = serde_json::json!({"key": "value"});
+        let code = emit_json(&value, "test");
+        assert_eq!(code, ExitCode::SUCCESS);
+    }
 }

@@ -409,4 +409,194 @@ mod tests {
         assert_eq!(results.unused_class_members.len(), 1);
         assert_eq!(results.unused_class_members[0].member_name, "init");
     }
+
+    // ── filter_changed_files ────────────────────────────────────────
+
+    #[test]
+    fn filter_changed_files_keeps_only_changed() {
+        let mut results = AnalysisResults::default();
+        results.unused_files.push(UnusedFile {
+            path: PathBuf::from("/project/src/a.ts"),
+        });
+        results.unused_files.push(UnusedFile {
+            path: PathBuf::from("/project/src/b.ts"),
+        });
+
+        let mut changed = rustc_hash::FxHashSet::default();
+        changed.insert(PathBuf::from("/project/src/a.ts"));
+
+        filter_changed_files(&mut results, &changed);
+
+        assert_eq!(results.unused_files.len(), 1);
+        assert_eq!(
+            results.unused_files[0].path,
+            PathBuf::from("/project/src/a.ts")
+        );
+    }
+
+    #[test]
+    fn filter_changed_files_preserves_unused_deps() {
+        let mut results = AnalysisResults::default();
+        results.unused_dependencies.push(UnusedDependency {
+            package_name: "lodash".into(),
+            location: DependencyLocation::Dependencies,
+            path: PathBuf::from("/project/package.json"),
+            line: 5,
+        });
+        results.unused_dev_dependencies.push(UnusedDependency {
+            package_name: "jest".into(),
+            location: DependencyLocation::DevDependencies,
+            path: PathBuf::from("/project/package.json"),
+            line: 10,
+        });
+
+        let changed = rustc_hash::FxHashSet::default(); // empty set
+
+        filter_changed_files(&mut results, &changed);
+
+        // Dependency-level issues are NOT filtered by changed files
+        assert_eq!(results.unused_dependencies.len(), 1);
+        assert_eq!(results.unused_dev_dependencies.len(), 1);
+    }
+
+    #[test]
+    fn filter_changed_files_filters_exports_by_path() {
+        let mut results = AnalysisResults::default();
+        results.unused_exports.push(UnusedExport {
+            path: PathBuf::from("/project/src/a.ts"),
+            export_name: "foo".into(),
+            is_type_only: false,
+            line: 1,
+            col: 0,
+            span_start: 0,
+            is_re_export: false,
+        });
+        results.unused_exports.push(UnusedExport {
+            path: PathBuf::from("/project/src/b.ts"),
+            export_name: "bar".into(),
+            is_type_only: false,
+            line: 1,
+            col: 0,
+            span_start: 0,
+            is_re_export: false,
+        });
+
+        let mut changed = rustc_hash::FxHashSet::default();
+        changed.insert(PathBuf::from("/project/src/b.ts"));
+
+        filter_changed_files(&mut results, &changed);
+
+        assert_eq!(results.unused_exports.len(), 1);
+        assert_eq!(results.unused_exports[0].export_name, "bar");
+    }
+
+    #[test]
+    fn filter_changed_files_drops_duplicate_exports_below_two() {
+        let mut results = AnalysisResults::default();
+        results.duplicate_exports.push(DuplicateExport {
+            export_name: "helper".into(),
+            locations: vec![
+                DuplicateLocation {
+                    path: PathBuf::from("/project/src/a.ts"),
+                    line: 1,
+                    col: 0,
+                },
+                DuplicateLocation {
+                    path: PathBuf::from("/project/src/b.ts"),
+                    line: 2,
+                    col: 0,
+                },
+            ],
+        });
+
+        let mut changed = rustc_hash::FxHashSet::default();
+        changed.insert(PathBuf::from("/project/src/a.ts"));
+
+        filter_changed_files(&mut results, &changed);
+
+        // Only one location is in changed files -> group dropped
+        assert!(results.duplicate_exports.is_empty());
+    }
+
+    #[test]
+    fn filter_changed_files_keeps_circular_deps_if_any_file_changed() {
+        let mut results = AnalysisResults::default();
+        results.circular_dependencies.push(CircularDependency {
+            files: vec![
+                PathBuf::from("/project/src/a.ts"),
+                PathBuf::from("/project/src/b.ts"),
+            ],
+            length: 2,
+            line: 1,
+            col: 0,
+        });
+
+        let mut changed = rustc_hash::FxHashSet::default();
+        changed.insert(PathBuf::from("/project/src/b.ts"));
+
+        filter_changed_files(&mut results, &changed);
+
+        assert_eq!(results.circular_dependencies.len(), 1);
+    }
+
+    #[test]
+    fn filter_changed_files_removes_circular_deps_if_no_file_changed() {
+        let mut results = AnalysisResults::default();
+        results.circular_dependencies.push(CircularDependency {
+            files: vec![
+                PathBuf::from("/project/src/a.ts"),
+                PathBuf::from("/project/src/b.ts"),
+            ],
+            length: 2,
+            line: 1,
+            col: 0,
+        });
+
+        let mut changed = rustc_hash::FxHashSet::default();
+        changed.insert(PathBuf::from("/project/src/c.ts"));
+
+        filter_changed_files(&mut results, &changed);
+
+        assert!(results.circular_dependencies.is_empty());
+    }
+
+    #[test]
+    fn filter_changed_files_keeps_unlisted_dep_if_importer_changed() {
+        let mut results = AnalysisResults::default();
+        results.unlisted_dependencies.push(UnlistedDependency {
+            package_name: "chalk".into(),
+            imported_from: vec![ImportSite {
+                path: PathBuf::from("/project/src/a.ts"),
+                line: 1,
+                col: 0,
+            }],
+        });
+
+        let mut changed = rustc_hash::FxHashSet::default();
+        changed.insert(PathBuf::from("/project/src/a.ts"));
+
+        filter_changed_files(&mut results, &changed);
+
+        assert_eq!(results.unlisted_dependencies.len(), 1);
+    }
+
+    #[test]
+    fn filter_changed_files_removes_unlisted_dep_if_no_importer_changed() {
+        let mut results = AnalysisResults::default();
+        results.unlisted_dependencies.push(UnlistedDependency {
+            package_name: "chalk".into(),
+            imported_from: vec![ImportSite {
+                path: PathBuf::from("/project/src/a.ts"),
+                line: 1,
+                col: 0,
+            }],
+        });
+
+        let mut changed = rustc_hash::FxHashSet::default();
+        changed.insert(PathBuf::from("/project/src/b.ts"));
+
+        filter_changed_files(&mut results, &changed);
+
+        assert!(results.unlisted_dependencies.is_empty());
+    }
 }

@@ -472,6 +472,7 @@ mod tests {
             |f| f.unresolved_imports = true,
             |f| f.unlisted_deps = true,
             |f| f.duplicate_exports = true,
+            |f| f.circular_deps = true,
         ];
         for setter in flags {
             let mut f = no_filters();
@@ -535,6 +536,31 @@ mod tests {
         assert!(results.unused_exports.is_empty());
         assert!(results.unused_types.is_empty());
         assert!(results.duplicate_exports.is_empty());
+    }
+
+    #[test]
+    fn apply_circular_deps_filter_keeps_only_circular_deps() {
+        let mut results = make_results();
+        // Add circular dependency to results
+        results
+            .circular_dependencies
+            .push(fallow_core::results::CircularDependency {
+                files: vec![
+                    PathBuf::from("/project/src/a.ts"),
+                    PathBuf::from("/project/src/b.ts"),
+                ],
+                length: 2,
+                line: 1,
+                col: 0,
+            });
+        let mut f = no_filters();
+        f.circular_deps = true;
+        f.apply(&mut results);
+
+        assert_eq!(results.circular_dependencies.len(), 1);
+        assert!(results.unused_files.is_empty());
+        assert!(results.unused_exports.is_empty());
+        assert!(results.unused_dependencies.is_empty());
     }
 
     // ── TraceOptions::any_active ─────────────────────────────────
