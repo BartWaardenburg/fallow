@@ -6,3 +6,8 @@ cargo fmt --all -- --check
 
 echo "Running cargo clippy..."
 cargo clippy --workspace -- -D warnings
+
+if command -v typos &> /dev/null; then
+  echo "Running typos check..."
+  typos
+fi
