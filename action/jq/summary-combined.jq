@@ -6,74 +6,69 @@ def rel_path: split("/") | if length > 3 then .[-3:] | join("/") else join("/") 
 (count(.dupes.stats; "clone_groups")) as $dupes |
 (count(.health.summary; "functions_above_threshold")) as $health |
 ($check + $dupes + $health) as $total |
-
-# Vital signs
 (.health.vital_signs // {}) as $vitals |
 (.health.summary // {}) as $summary |
 (.dupes.stats // {}) as $dupes_stats |
 
 if $total == 0 then
-  "# \ud83c\udf3f Fallow \u2014 Codebase Analysis\n\n" +
+  "# \ud83c\udf3f Fallow\n\n" +
   "> [!NOTE]\n> **No issues found**\n\n" +
-  "| Metric | Status |\n|:-------|:-------|\n" +
-  "| Dead code | :white_check_mark: Clean |\n" +
-  "| Duplication | :white_check_mark: Clean |\n" +
-  "| Complexity | :white_check_mark: Clean |\n" +
-  (if $vitals.maintainability_avg then "\n**Maintainability index:** \(pct($vitals.maintainability_avg))/100" else "" end)
+  ":white_check_mark: Dead code \u00b7 :white_check_mark: Duplication \u00b7 :white_check_mark: Complexity" +
+  (if $vitals.maintainability_avg then "\n\nMaintainability: **\(pct($vitals.maintainability_avg))** / 100" else "" end)
 else
-  "# \ud83c\udf3f Fallow \u2014 Codebase Analysis\n\n" +
-  "> [!WARNING]\n> **\($total) issues** found\n\n" +
+  "# \ud83c\udf3f Fallow\n\n" +
 
-  # Overview table
-  "| Analysis | Status | Details |\n|:---------|:-------|:--------|\n" +
+  # One-line status
+  (if $check > 0 then ":warning: **\($check)** dead code" else ":white_check_mark: Dead code" end) +
+  " \u00b7 " +
+  (if $dupes > 0 then ":warning: **\($dupes)** clone groups" else ":white_check_mark: Duplication" end) +
+  " \u00b7 " +
+  (if $health > 0 then ":warning: **\($health)** complex functions" else ":white_check_mark: Complexity" end) +
+  "\n\n" +
+
+  # Dead code breakdown
   (if $check > 0 then
-    "| :warning: Dead code | **\($check) issues** | " +
+    "<details>\n<summary><strong>Dead code (\($check) issues)</strong></summary>\n\n" +
+    "| Category | Count |\n|:---------|------:|\n" +
     ([
-      (if (.check.unused_exports | length) > 0 then "\((.check.unused_exports | length)) unused exports" else null end),
-      (if (.check.unused_files | length) > 0 then "\((.check.unused_files | length)) unused files" else null end),
-      (if (.check.unused_dependencies | length) > 0 then "\((.check.unused_dependencies | length)) unused deps" else null end),
-      (if (.check.unresolved_imports | length) > 0 then "\((.check.unresolved_imports | length)) unresolved imports" else null end),
-      (if (.check.circular_dependencies | length) > 0 then "\((.check.circular_dependencies | length)) circular deps" else null end)
-    ] | map(select(. != null)) | join(", ")) +
-    " |\n"
-  else "| :white_check_mark: Dead code | Clean | \u2014 |\n" end) +
-  (if $dupes > 0 then
-    "| :warning: Duplication | **\($dupes) clone groups** | \($dupes_stats.duplicated_lines) duplicated lines (\(pct($dupes_stats.duplication_percentage))%) |\n"
-  else "| :white_check_mark: Duplication | Clean | \u2014 |\n" end) +
-  (if $health > 0 then
-    "| :warning: Complexity | **\($health) functions** | above threshold (\($summary.functions_analyzed) analyzed) |\n"
-  else "| :white_check_mark: Complexity | Clean | \($summary.functions_analyzed // 0) functions analyzed |\n" end) +
-
-  # Vital signs
-  (if $vitals | length > 0 then
-    "\n### Vital signs\n\n" +
-    "| Metric | Value |\n|:-------|------:|\n" +
-    (if $vitals.maintainability_avg then "| Maintainability index | **\(pct($vitals.maintainability_avg))** / 100 |\n" else "" end) +
-    (if $vitals.dead_export_pct then "| Dead exports | \(pct($vitals.dead_export_pct))% |\n" else "" end) +
-    (if $vitals.avg_cyclomatic then "| Avg cyclomatic complexity | \(pct($vitals.avg_cyclomatic)) |\n" else "" end) +
-    (if $vitals.p90_cyclomatic then "| P90 cyclomatic complexity | \($vitals.p90_cyclomatic) |\n" else "" end) +
-    (if $vitals.unused_dep_count then "| Unused dependencies | \($vitals.unused_dep_count) |\n" else "" end)
+      (if (.check.unused_files | length) > 0 then "| Unused files | \(.check.unused_files | length) |" else null end),
+      (if (.check.unused_exports | length) > 0 then "| Unused exports | \(.check.unused_exports | length) |" else null end),
+      (if (.check.unused_dependencies | length) > 0 then "| Unused dependencies | \(.check.unused_dependencies | length) |" else null end),
+      (if (.check.unresolved_imports | length) > 0 then "| Unresolved imports | \(.check.unresolved_imports | length) |" else null end),
+      (if (.check.circular_dependencies | length) > 0 then "| Circular dependencies | \(.check.circular_dependencies | length) |" else null end),
+      (if (.check.type_only_dependencies | length) > 0 then "| Type-only dependencies | \(.check.type_only_dependencies | length) |" else null end)
+    ] | map(select(. != null)) | join("\n")) +
+    "\n\n</details>\n\n"
   else "" end) +
 
-  # Top findings
-  (if (.health.findings // [] | length) > 0 then
-    "\n<details>\n<summary><strong>Complexity hotspots (\(.health.findings | length))</strong></summary>\n\n" +
+  # Duplication breakdown
+  (if $dupes > 0 then
+    "<details>\n<summary><strong>Duplication (\($dupes) clone groups, \(pct($dupes_stats.duplication_percentage))%)</strong></summary>\n\n" +
+    "| Metric | Value |\n|:-------|------:|\n" +
+    "| Duplicated lines | \($dupes_stats.duplicated_lines) |\n" +
+    "| Clone instances | \($dupes_stats.clone_instances) |\n" +
+    "| Files with clones | \($dupes_stats.files_with_clones) |\n" +
+    "\n</details>\n\n"
+  else "" end) +
+
+  # Complexity breakdown
+  (if $health > 0 then
+    "<details>\n<summary><strong>Complexity (\($health) functions above threshold)</strong></summary>\n\n" +
     "| File | Function | Cyclomatic | Cognitive |\n|:-----|:---------|----------:|---------:|\n" +
     ([.health.findings[:5][] |
       "| `\(.path | rel_path):\(.line)` | `\(.name)` | \(.cyclomatic) | \(.cognitive) |"
     ] | join("\n")) +
-    "\n\n</details>\n"
+    "\n\n</details>\n\n"
   else "" end) +
 
-  # Refactoring targets
-  (if (.health.targets // [] | length) > 0 then
-    "\n<details>\n<summary><strong>Refactoring targets (\(.health.targets | length))</strong></summary>\n\n" +
-    ([.health.targets[:3][] |
-      "- **\(.path | rel_path)** \u2014 \(.recommendation) *(effort: \(.effort), confidence: \(.confidence))*"
-    ] | join("\n")) +
-    "\n\n</details>\n"
+  # Vital signs
+  (if $vitals | length > 0 then
+    "| Metric | Value |\n|:-------|------:|\n" +
+    (if $vitals.maintainability_avg then "| Maintainability | **\(pct($vitals.maintainability_avg))** / 100 |\n" else "" end) +
+    (if $vitals.dead_export_pct then "| Dead exports | \(pct($vitals.dead_export_pct))% |\n" else "" end) +
+    (if $vitals.avg_cyclomatic then "| Avg complexity | \(pct($vitals.avg_cyclomatic)) |\n" else "" end) +
+    "\n"
   else "" end) +
 
-  # Fix suggestion
-  "\n> [!TIP]\n> Run `fallow fix --dry-run` to preview auto-fixes, or see the inline review comments for per-finding details.\n> Add `// fallow-ignore-next-line` above a line to suppress a specific finding."
+  "> [!TIP]\n> Run `fallow fix --dry-run` to preview auto-fixes. Add `/** @public */` above exports to preserve them.\n> See inline review comments for per-finding details."
 end

@@ -89,14 +89,13 @@ if ! echo "$PAYLOAD" | gh api \
     SINGLE=$(echo "$COMMENTS" | jq --arg body "$REVIEW_BODY" '{
       event: "COMMENT",
       body: (if '"$i"' == 0 then $body else "" end),
-      comments: [.['"$i"']]
+      comments: [.['"$i"'] | {path, line, body}]
     }')
-    if echo "$SINGLE" | gh api \
+    RESULT=$(echo "$SINGLE" | gh api \
       "repos/${GH_REPO}/pulls/${PR_NUMBER}/reviews" \
       --method POST \
-      --input - > /dev/null 2>&1; then
-      POSTED=$((POSTED + 1))
-    fi
+      --input - 2>&1) && POSTED=$((POSTED + 1)) || \
+      echo "  Skip: $(echo "$COMMENTS" | jq -r ".[${i}].path"):$(echo "$COMMENTS" | jq -r ".[${i}].line")"
   done
   echo "Posted $POSTED of $TOTAL comments individually"
 else
