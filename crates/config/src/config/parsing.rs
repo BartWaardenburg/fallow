@@ -192,6 +192,25 @@ impl FallowConfig {
     /// # Errors
     ///
     /// Returns an error string when a discovered config file exists but fails to load.
+    /// Find the config file path without loading it.
+    /// Searches the same locations as `find_and_load`.
+    pub fn find_config_path(start: &Path) -> Option<PathBuf> {
+        let mut dir = start;
+        loop {
+            for name in CONFIG_NAMES {
+                let candidate = dir.join(name);
+                if candidate.exists() {
+                    return Some(candidate);
+                }
+            }
+            if dir.join(".git").exists() || dir.join("package.json").exists() {
+                break;
+            }
+            dir = dir.parent()?;
+        }
+        None
+    }
+
     pub fn find_and_load(start: &Path) -> Result<Option<(Self, PathBuf)>, String> {
         let mut dir = start;
         loop {
@@ -295,6 +314,7 @@ ignoreDependencies = ["autoprefixer", "postcss"]
             production: false,
             plugins: vec![],
             overrides: vec![],
+            regression: None,
         };
         let resolved = config.resolve(
             PathBuf::from("/tmp/test"),
@@ -331,6 +351,7 @@ ignoreDependencies = ["autoprefixer", "postcss"]
             production: false,
             plugins: vec![],
             overrides: vec![],
+            regression: None,
         };
         let resolved = config.resolve(
             PathBuf::from("/tmp/test"),
@@ -363,6 +384,7 @@ ignoreDependencies = ["autoprefixer", "postcss"]
             production: false,
             plugins: vec![],
             overrides: vec![],
+            regression: None,
         };
         let resolved = config.resolve(
             PathBuf::from("/tmp/project"),
@@ -1056,6 +1078,7 @@ minTokens = 100
             production: true,
             plugins: vec![],
             overrides: vec![],
+            regression: None,
         };
         let resolved = config.resolve(
             PathBuf::from("/tmp/test"),

@@ -30,6 +30,10 @@ fn check_changed_args_with_special_ref() {
         workspace: None,
         baseline: None,
         save_baseline: None,
+        fail_on_regression: None,
+        tolerance: None,
+        regression_baseline: None,
+        save_regression_baseline: None,
         no_cache: None,
         threads: None,
     };
@@ -72,6 +76,10 @@ fn check_changed_args_production_false_is_omitted() {
         workspace: None,
         baseline: None,
         save_baseline: None,
+        fail_on_regression: None,
+        tolerance: None,
+        regression_baseline: None,
+        save_regression_baseline: None,
         no_cache: None,
         threads: None,
     };
@@ -215,6 +223,10 @@ fn check_changed_args_only_root() {
         workspace: None,
         baseline: None,
         save_baseline: None,
+        fail_on_regression: None,
+        tolerance: None,
+        regression_baseline: None,
+        save_regression_baseline: None,
         no_cache: None,
         threads: None,
     };
@@ -517,6 +529,10 @@ fn check_changed_args_baseline_only() {
         production: None,
         workspace: None,
         save_baseline: None,
+        fail_on_regression: None,
+        tolerance: None,
+        regression_baseline: None,
+        save_regression_baseline: None,
         no_cache: None,
         threads: None,
     };
@@ -536,6 +552,10 @@ fn check_changed_args_save_baseline_only() {
         production: None,
         workspace: None,
         baseline: None,
+        fail_on_regression: None,
+        tolerance: None,
+        regression_baseline: None,
+        save_regression_baseline: None,
         no_cache: None,
         threads: None,
     };
@@ -661,6 +681,10 @@ fn check_changed_args_unicode_in_paths() {
         production: None,
         baseline: None,
         save_baseline: None,
+        fail_on_regression: None,
+        tolerance: None,
+        regression_baseline: None,
+        save_regression_baseline: None,
         no_cache: None,
         threads: None,
     };
@@ -743,6 +767,10 @@ fn check_changed_args_empty_config_still_passes_flag() {
         workspace: None,
         baseline: None,
         save_baseline: None,
+        fail_on_regression: None,
+        tolerance: None,
+        regression_baseline: None,
+        save_regression_baseline: None,
         no_cache: None,
         threads: None,
     };
@@ -787,6 +815,10 @@ fn check_changed_args_threads_boundary() {
         workspace: None,
         baseline: None,
         save_baseline: None,
+        fail_on_regression: None,
+        tolerance: None,
+        regression_baseline: None,
+        save_regression_baseline: None,
         no_cache: None,
     };
     let args = build_check_changed_args(params);
@@ -903,6 +935,10 @@ fn check_changed_args_no_cache_true() {
         workspace: None,
         baseline: None,
         save_baseline: None,
+        fail_on_regression: None,
+        tolerance: None,
+        regression_baseline: None,
+        save_regression_baseline: None,
         threads: None,
     };
     let args = build_check_changed_args(params);

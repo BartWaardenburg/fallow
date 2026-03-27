@@ -5,6 +5,7 @@ use fallow_config::{OutputFormat, ResolvedConfig};
 use fallow_core::results::AnalysisResults;
 
 use crate::baseline::{BaselineData, filter_new_issues};
+use crate::regression::{self, RegressionOpts, RegressionOutcome};
 use crate::report;
 use crate::{emit_error, load_config};
 
@@ -124,6 +125,7 @@ pub struct CheckOptions<'a> {
     pub include_dupes: bool,
     pub trace_opts: &'a TraceOptions,
     pub explain: bool,
+    pub regression_opts: RegressionOpts<'a>,
 }
 
 /// Result of executing check analysis without printing.
@@ -132,6 +134,7 @@ pub struct CheckResult {
     pub config: ResolvedConfig,
     pub elapsed: Duration,
     pub fail_on_issues: bool,
+    pub regression: Option<RegressionOutcome>,
 }
 
 /// Run analysis, filtering, and baseline handling. Returns results without printing.
@@ -224,6 +227,53 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
         return Err(exit);
     }
 
+    // Warn if saving a baseline from scoped results (would produce misleading counts)
+    if !matches!(
+        opts.regression_opts.save_target,
+        regression::SaveRegressionTarget::None
+    ) && opts.regression_opts.scoped
+    {
+        eprintln!(
+            "Warning: saving regression baseline with --changed-since or --workspace active. \
+             The baseline will reflect only scoped results, not the full project."
+        );
+    }
+
+    // Save regression baseline if requested.
+    // Track the just-saved counts so that if --fail-on-regression is also active,
+    // the same-run comparison uses the fresh baseline (not the pre-save config state).
+    let just_saved_baseline = match opts.regression_opts.save_target {
+        regression::SaveRegressionTarget::File(save_path) => {
+            let counts = regression::CheckCounts::from_results(&results);
+            regression::save_regression_baseline(save_path, opts.root, Some(&counts), None)?;
+            Some(counts)
+        }
+        regression::SaveRegressionTarget::Config => {
+            let counts = regression::CheckCounts::from_results(&results);
+            let config_path = if let Some(explicit) = opts.config_path {
+                explicit.clone()
+            } else {
+                match fallow_config::FallowConfig::find_config_path(opts.root) {
+                    Some(p) => p,
+                    None => opts.root.join(".fallowrc.json"),
+                }
+            };
+            regression::save_baseline_to_config(&config_path, &counts)?;
+            Some(counts)
+        }
+        regression::SaveRegressionTarget::None => None,
+    };
+
+    // Regression detection — use just-saved baseline if available, then config, then file
+    let config_baseline_ref = just_saved_baseline
+        .as_ref()
+        .map(regression::CheckCounts::to_config_baseline);
+    let config_baseline = config_baseline_ref
+        .as_ref()
+        .or_else(|| config.regression.as_ref().and_then(|r| r.baseline.as_ref()));
+    let regression_outcome =
+        regression::compare_check_regression(&results, &opts.regression_opts, config_baseline)?;
+
     // SARIF file write
     if let Some(sarif_path) = opts.sarif_file {
         output::write_sarif_file(&results, &config, sarif_path, opts.quiet);
@@ -234,11 +284,17 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
         config,
         elapsed,
         fail_on_issues: opts.fail_on_issues,
+        regression: regression_outcome,
     })
 }
 
 /// Print check results and return appropriate exit code.
-pub fn print_check_result(result: &CheckResult, quiet: bool, explain: bool) -> ExitCode {
+pub fn print_check_result(
+    result: &CheckResult,
+    quiet: bool,
+    explain: bool,
+    regression_json: bool,
+) -> ExitCode {
     let effective_rules = if result.fail_on_issues {
         let mut r = result.config.rules.clone();
         rules::promote_warns_to_errors(&mut r);
@@ -254,9 +310,28 @@ pub fn print_check_result(result: &CheckResult, quiet: bool, explain: bool) -> E
         quiet,
         explain,
     };
-    let report_code = report::print_results(&result.results, &ctx, &result.config.output);
+    let report_code = report::print_results(
+        &result.results,
+        &ctx,
+        &result.config.output,
+        if regression_json {
+            result.regression.as_ref()
+        } else {
+            None
+        },
+    );
     if report_code != ExitCode::SUCCESS {
         return report_code;
+    }
+
+    // Print regression outcome to stderr
+    if let Some(ref outcome) = result.regression {
+        if !quiet {
+            regression::print_regression_outcome(outcome);
+        }
+        if outcome.is_failure() {
+            return ExitCode::from(1);
+        }
     }
 
     if rules::has_error_severity_issues(&result.results, &effective_rules, Some(&result.config)) {
@@ -272,7 +347,7 @@ pub fn run_check(opts: &CheckOptions<'_>) -> ExitCode {
         Err(code) => return code,
     };
 
-    let exit = print_check_result(&result, opts.quiet, opts.explain);
+    let exit = print_check_result(&result, opts.quiet, opts.explain, true);
 
     // Cross-reference: run duplication analysis on the full results
     // (the combined command handles this separately)

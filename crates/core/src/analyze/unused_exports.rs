@@ -454,6 +454,7 @@ mod tests {
             production: false,
             plugins: vec![],
             overrides: vec![],
+            regression: None,
         }
         .resolve(
             PathBuf::from("/tmp/test"),
@@ -708,6 +709,7 @@ mod tests {
             production: false,
             plugins: vec![],
             overrides: vec![],
+            regression: None,
         }
         .resolve(
             PathBuf::from("/tmp/test"),

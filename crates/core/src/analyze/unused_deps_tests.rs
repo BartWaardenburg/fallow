@@ -329,6 +329,7 @@ fn test_config(root: PathBuf) -> ResolvedConfig {
         production: false,
         plugins: vec![],
         overrides: vec![],
+        regression: None,
     }
     .resolve(root, OutputFormat::Human, 1, true, true)
 }
@@ -546,6 +547,7 @@ fn ignore_dependencies_config_filters_deps() {
         production: false,
         plugins: vec![],
         overrides: vec![],
+        regression: None,
     }
     .resolve(
         PathBuf::from("/project"),
@@ -802,6 +804,7 @@ fn type_only_dep_skips_ignored_deps() {
         production: false,
         plugins: vec![],
         overrides: vec![],
+        regression: None,
     }
     .resolve(
         PathBuf::from("/project"),

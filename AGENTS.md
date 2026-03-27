@@ -66,6 +66,10 @@ These flags work with any subcommand:
 | `--explain` | Include `_meta` with metric definitions in JSON output |
 | `--ci` | CI mode: `--format sarif --fail-on-issues --quiet` |
 | `--fail-on-issues` | Exit 1 if any issues found |
+| `--fail-on-regression` | Fail if issue count increased beyond tolerance vs regression baseline |
+| `--tolerance <N>` | Allowed increase: `"2%"` (percentage) or `"5"` (absolute). Default: `"0"` |
+| `--regression-baseline <PATH>` | Path to regression baseline file (overrides config-embedded baseline) |
+| `--save-regression-baseline [PATH]` | Save current counts as regression baseline. No path = write into config file |
 | `--sarif-file <PATH>` | Write SARIF alongside primary output |
 | `--performance` | Show pipeline timing breakdown |
 

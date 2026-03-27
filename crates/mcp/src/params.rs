@@ -27,6 +27,18 @@ pub struct AnalyzeParams {
     /// Save current results as a baseline file for future comparisons.
     pub save_baseline: Option<String>,
 
+    /// Fail if issue counts regressed compared to the regression baseline.
+    pub fail_on_regression: Option<bool>,
+
+    /// Regression tolerance. Accepts a percentage ("2%") or absolute count ("5").
+    pub tolerance: Option<String>,
+
+    /// Path to a regression baseline file to compare against.
+    pub regression_baseline: Option<String>,
+
+    /// Save current results as a regression baseline file for future comparisons.
+    pub save_regression_baseline: Option<String>,
+
     /// Disable the incremental parse cache. Forces a full re-parse of all files.
     pub no_cache: Option<bool>,
 
@@ -57,6 +69,18 @@ pub struct CheckChangedParams {
 
     /// Save current results as a baseline file for future comparisons.
     pub save_baseline: Option<String>,
+
+    /// Fail if issue counts regressed compared to the regression baseline.
+    pub fail_on_regression: Option<bool>,
+
+    /// Regression tolerance. Accepts a percentage ("2%") or absolute count ("5").
+    pub tolerance: Option<String>,
+
+    /// Path to a regression baseline file to compare against.
+    pub regression_baseline: Option<String>,
+
+    /// Save current results as a regression baseline file for future comparisons.
+    pub save_regression_baseline: Option<String>,
 
     /// Disable the incremental parse cache. Forces a full re-parse of all files.
     pub no_cache: Option<bool>,

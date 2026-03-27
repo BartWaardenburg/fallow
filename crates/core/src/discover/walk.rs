@@ -305,6 +305,7 @@ mod tests {
                 production,
                 plugins: vec![],
                 overrides: vec![],
+                regression: None,
             }
             .resolve(root, OutputFormat::Human, 1, true, true)
         }

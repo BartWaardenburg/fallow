@@ -13,9 +13,15 @@ pub(super) fn print_json(
     root: &Path,
     elapsed: Duration,
     explain: bool,
+    regression: Option<&crate::regression::RegressionOutcome>,
 ) -> ExitCode {
     match build_json(results, root, elapsed) {
         Ok(mut output) => {
+            if let Some(outcome) = regression
+                && let serde_json::Value::Object(ref mut map) = output
+            {
+                map.insert("regression".to_string(), outcome.to_json());
+            }
             if explain {
                 insert_meta(&mut output, explain::check_meta());
             }

@@ -95,6 +95,10 @@ variables:
 
   # Dead-code specific
   FALLOW_ISSUE_TYPES: ""        # Comma-separated: unused-files,unused-exports,...
+  FALLOW_FAIL_ON_REGRESSION: "false"
+  FALLOW_TOLERANCE: "0"
+  FALLOW_REGRESSION_BASELINE: ""
+  FALLOW_SAVE_REGRESSION_BASELINE: ""
 
   # Dupes specific
   FALLOW_DUPES_MODE: "mild"     # strict, mild, weak, semantic
@@ -276,6 +280,10 @@ variables:
               ARGS+=("--${t}")
             done
           fi
+          [ "$FALLOW_FAIL_ON_REGRESSION" = "true" ] && ARGS+=(--fail-on-regression)
+          [ -n "$FALLOW_TOLERANCE" ] && [ "$FALLOW_TOLERANCE" != "0" ] && ARGS+=(--tolerance "$FALLOW_TOLERANCE")
+          [ -n "$FALLOW_REGRESSION_BASELINE" ] && ARGS+=(--regression-baseline "$FALLOW_REGRESSION_BASELINE")
+          [ -n "$FALLOW_SAVE_REGRESSION_BASELINE" ] && ARGS+=(--save-regression-baseline "$FALLOW_SAVE_REGRESSION_BASELINE")
           ;;
         dupes)
           ARGS+=(--mode "$FALLOW_DUPES_MODE")

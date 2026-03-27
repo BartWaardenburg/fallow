@@ -392,6 +392,7 @@ mod tests {
                 production: false,
                 plugins: vec![],
                 overrides: vec![],
+                regression: None,
             }
             .resolve(
                 PathBuf::from("/tmp/orchestration-test"),

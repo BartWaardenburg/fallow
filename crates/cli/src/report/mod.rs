@@ -121,17 +121,22 @@ pub const fn severity_to_level(s: Severity) -> Level {
 
 /// Print analysis results in the configured format.
 /// Returns exit code 2 if serialization fails, SUCCESS otherwise.
+///
+/// When `regression` is `Some`, the JSON format includes a `regression` key in the output envelope.
 pub fn print_results(
     results: &AnalysisResults,
     ctx: &ReportContext<'_>,
     output: &OutputFormat,
+    regression: Option<&crate::regression::RegressionOutcome>,
 ) -> ExitCode {
     match output {
         OutputFormat::Human => {
             human::print_human(results, ctx.root, ctx.rules, ctx.elapsed, ctx.quiet);
             ExitCode::SUCCESS
         }
-        OutputFormat::Json => json::print_json(results, ctx.root, ctx.elapsed, ctx.explain),
+        OutputFormat::Json => {
+            json::print_json(results, ctx.root, ctx.elapsed, ctx.explain, regression)
+        }
         OutputFormat::Compact => {
             compact::print_compact(results, ctx.root);
             ExitCode::SUCCESS

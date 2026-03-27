@@ -62,6 +62,8 @@ pub struct ResolvedConfig {
     pub external_plugins: Vec<ExternalPluginDef>,
     /// Per-file rule overrides with pre-compiled glob matchers.
     pub overrides: Vec<ResolvedOverride>,
+    /// Regression config (passed through from user config, not resolved).
+    pub regression: Option<super::RegressionConfig>,
 }
 
 impl FallowConfig {
@@ -164,6 +166,7 @@ impl FallowConfig {
             quiet,
             external_plugins,
             overrides,
+            regression: self.regression,
         }
     }
 }
@@ -236,6 +239,7 @@ mod tests {
             production: false,
             plugins: vec![],
             overrides: vec![],
+            regression: None,
         };
         let resolved = config.resolve(
             PathBuf::from("/project"),
@@ -271,6 +275,7 @@ mod tests {
                     ..Default::default()
                 },
             }],
+            regression: None,
         };
         let resolved = config.resolve(
             PathBuf::from("/project"),
@@ -322,6 +327,7 @@ mod tests {
                     },
                 },
             ],
+            regression: None,
         };
         let resolved = config.resolve(
             PathBuf::from("/project"),
@@ -357,6 +363,7 @@ mod tests {
             production,
             plugins: vec![],
             overrides: vec![],
+            regression: None,
         }
     }
 

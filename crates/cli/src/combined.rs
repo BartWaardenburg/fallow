@@ -6,6 +6,7 @@ use fallow_config::OutputFormat;
 use crate::check::{CheckOptions, CheckResult, IssueFilters, TraceOptions};
 use crate::dupes::{DupesMode, DupesOptions, DupesResult};
 use crate::health::{HealthOptions, HealthResult, SortBy};
+use crate::regression;
 use crate::report;
 use crate::{AnalysisKind, emit_error};
 
@@ -28,6 +29,7 @@ pub struct CombinedOptions<'a> {
     pub run_check: bool,
     pub run_dupes: bool,
     pub run_health: bool,
+    pub regression_opts: regression::RegressionOpts<'a>,
 }
 
 /// Resolve which analyses to run based on --only/--skip flags.
@@ -85,6 +87,7 @@ pub fn run_combined(opts: &CombinedOptions<'_>) -> ExitCode {
             include_dupes: false,
             trace_opts: &trace_opts,
             explain: opts.explain,
+            regression_opts: opts.regression_opts,
         };
         match crate::check::execute_check(&check_opts) {
             Ok(result) => {
@@ -184,7 +187,8 @@ pub fn run_combined(opts: &CombinedOptions<'_>) -> ExitCode {
                     eprintln!();
                     eprintln!("── Dead Code ──────────────────────────────────────");
                 }
-                let code = crate::check::print_check_result(result, opts.quiet, opts.explain);
+                let code =
+                    crate::check::print_check_result(result, opts.quiet, opts.explain, false);
                 max_exit = max_exit.max(exit_code_to_u8(code));
             }
 
@@ -205,6 +209,18 @@ pub fn run_combined(opts: &CombinedOptions<'_>) -> ExitCode {
                 let code = crate::health::print_health_result(result, opts.quiet, opts.explain);
                 max_exit = max_exit.max(exit_code_to_u8(code));
             }
+        }
+    }
+
+    // Regression exit code (applies regardless of output format)
+    if let Some(ref result) = check_result
+        && let Some(ref outcome) = result.regression
+    {
+        if !opts.quiet {
+            regression::print_regression_outcome(outcome);
+        }
+        if outcome.is_failure() {
+            max_exit = max_exit.max(1);
         }
     }
 
@@ -252,7 +268,12 @@ fn print_combined_json(
 
     if let Some(result) = check {
         match report::build_json(&result.results, &result.config.root, result.elapsed) {
-            Ok(json) => {
+            Ok(mut json) => {
+                if let Some(ref outcome) = result.regression
+                    && let serde_json::Value::Object(ref mut map) = json
+                {
+                    map.insert("regression".to_string(), outcome.to_json());
+                }
                 combined.insert("check".into(), json);
             }
             Err(e) => {

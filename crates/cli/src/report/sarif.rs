@@ -846,8 +846,8 @@ mod tests {
         let sarif = build_sarif(&results, &root, &RulesConfig::default());
 
         let entries = sarif["runs"][0]["results"].as_array().unwrap();
-        // 14 issues but duplicate_exports has 2 locations => 15 SARIF results
-        assert_eq!(entries.len(), 15);
+        // All issue types with one entry each; duplicate_exports has 2 locations => one extra SARIF result
+        assert_eq!(entries.len(), results.total_issues() + 1);
 
         let rule_ids: Vec<&str> = entries
             .iter()
@@ -858,6 +858,7 @@ mod tests {
         assert!(rule_ids.contains(&"fallow/unused-type"));
         assert!(rule_ids.contains(&"fallow/unused-dependency"));
         assert!(rule_ids.contains(&"fallow/unused-dev-dependency"));
+        assert!(rule_ids.contains(&"fallow/unused-optional-dependency"));
         assert!(rule_ids.contains(&"fallow/type-only-dependency"));
         assert!(rule_ids.contains(&"fallow/test-only-dependency"));
         assert!(rule_ids.contains(&"fallow/unused-enum-member"));

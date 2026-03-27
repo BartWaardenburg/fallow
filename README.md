@@ -112,6 +112,7 @@ fallow:
 
 - `--changed-since main` -- analyze only files touched in a PR
 - `--baseline` / `--save-baseline` -- fail only on **new** issues
+- `--fail-on-regression` / `--tolerance 2%` -- fail only if issues **grew** beyond tolerance
 - `--format sarif` -- upload to GitHub Code Scanning
 - `--format codeclimate` -- GitLab Code Quality inline MR annotations
 - `--format annotations` -- GitHub Actions inline PR annotations (no Action required)

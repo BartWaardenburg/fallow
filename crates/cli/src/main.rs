@@ -18,6 +18,7 @@ mod health_types;
 mod init;
 mod list;
 mod migrate;
+mod regression;
 mod report;
 mod schema;
 mod validate;
@@ -116,6 +117,33 @@ struct Cli {
     /// Write SARIF output to a file (in addition to the primary --format output)
     #[arg(long, global = true, value_name = "PATH")]
     sarif_file: Option<PathBuf>,
+
+    /// Fail if issue count increased beyond tolerance compared to a regression baseline.
+    /// Use --save-regression-baseline to create a baseline first, then
+    /// --fail-on-regression on subsequent runs to detect regressions.
+    #[arg(long, global = true)]
+    fail_on_regression: bool,
+
+    /// Allowed issue count increase before a regression is flagged.
+    /// Use "N%" for percentage (e.g., "2%") or "N" for absolute count (e.g., "5").
+    /// Default: "0" (any increase fails). Only used with --fail-on-regression.
+    #[arg(long, global = true, value_name = "TOLERANCE", default_value = "0")]
+    tolerance: String,
+
+    /// Path to the regression baseline file for --fail-on-regression.
+    /// Default: .fallow/regression-baseline.json
+    #[arg(long, global = true, value_name = "PATH")]
+    regression_baseline: Option<PathBuf>,
+
+    /// Save the current issue counts as a regression baseline.
+    /// Without a path: writes into the config file (.fallowrc.json / fallow.toml).
+    /// With a path: writes a standalone JSON file.
+    #[expect(
+        clippy::option_option,
+        reason = "clap pattern: None=not passed, Some(None)=flag only (write to config), Some(Some(path))=write to file"
+    )]
+    #[arg(long, global = true, value_name = "PATH", num_args = 0..=1, default_missing_value = "")]
+    save_regression_baseline: Option<Option<String>>,
 
     /// Run only specific analyses when no subcommand is given (comma-separated: dead-code,dupes,health)
     #[arg(long, value_delimiter = ',')]
@@ -679,6 +707,21 @@ fn main() -> ExitCode {
         return emit_error("--only and --skip are mutually exclusive", 2, &output);
     }
 
+    // Parse regression tolerance
+    let tolerance = match regression::Tolerance::parse(&cli.tolerance) {
+        Ok(t) => t,
+        Err(e) => return emit_error(&format!("invalid --tolerance: {e}"), 2, &output),
+    };
+
+    // Resolve save-regression-baseline target
+    let save_regression_file: Option<std::path::PathBuf> =
+        cli.save_regression_baseline.as_ref().and_then(|opt| {
+            opt.as_ref()
+                .filter(|s| !s.is_empty())
+                .map(std::path::PathBuf::from)
+        });
+    let save_to_config = cli.save_regression_baseline.is_some() && save_regression_file.is_none();
+
     match cli.command {
         // Bare `fallow` — run all analyses (check + dupes + health)
         None => {
@@ -710,6 +753,20 @@ fn main() -> ExitCode {
                 run_check,
                 run_dupes,
                 run_health,
+                regression_opts: regression::RegressionOpts {
+                    fail_on_regression: cli.fail_on_regression,
+                    tolerance,
+                    regression_baseline_file: cli.regression_baseline.as_deref(),
+                    save_target: if let Some(ref path) = save_regression_file {
+                        regression::SaveRegressionTarget::File(path)
+                    } else if save_to_config {
+                        regression::SaveRegressionTarget::Config
+                    } else {
+                        regression::SaveRegressionTarget::None
+                    },
+                    scoped: cli.changed_since.is_some() || cli.workspace.is_some(),
+                    quiet,
+                },
             })
         }
         Some(command) => match command {
@@ -772,6 +829,20 @@ fn main() -> ExitCode {
                     include_dupes,
                     trace_opts: &trace_opts,
                     explain: cli.explain,
+                    regression_opts: regression::RegressionOpts {
+                        fail_on_regression: cli.fail_on_regression,
+                        tolerance,
+                        regression_baseline_file: cli.regression_baseline.as_deref(),
+                        save_target: if let Some(ref path) = save_regression_file {
+                            regression::SaveRegressionTarget::File(path)
+                        } else if save_to_config {
+                            regression::SaveRegressionTarget::Config
+                        } else {
+                            regression::SaveRegressionTarget::None
+                        },
+                        scoped: cli.changed_since.is_some() || cli.workspace.is_some(),
+                        quiet,
+                    },
                 })
             }
             Command::Watch { no_clear } => watch::run_watch(&watch::WatchOptions {

@@ -95,6 +95,10 @@
           "type": "array",
           "items": { "$ref": "#/definitions/CircularDependency" }
         },
+        "regression": {
+          "$ref": "#/definitions/RegressionResult",
+          "description": "Regression check result. Only present when --fail-on-regression is used."
+        },
         "_meta": { "$ref": "#/definitions/Meta" }
       }
     },
@@ -853,6 +857,22 @@
           "minimum": 0,
           "maximum": 100
         }
+      }
+    },
+
+    "RegressionResult": {
+      "type": "object",
+      "description": "Result of regression detection (--fail-on-regression). Compares current issue counts against a baseline from config or an explicit file.",
+      "required": ["status", "exceeded"],
+      "properties": {
+        "status": { "type": "string", "enum": ["pass", "exceeded", "skipped"] },
+        "baseline_total": { "type": "integer" },
+        "current_total": { "type": "integer" },
+        "delta": { "type": "integer" },
+        "tolerance": { "type": "number" },
+        "tolerance_kind": { "type": "string", "enum": ["absolute", "percentage"] },
+        "exceeded": { "type": "boolean" },
+        "reason": { "type": "string", "description": "Only present when status is 'skipped'." }
       }
     },
 

@@ -401,14 +401,15 @@ mod tests {
         assert!(lines[2].starts_with("unused-type:"));
         assert!(lines[3].starts_with("unused-dep:"));
         assert!(lines[4].starts_with("unused-devdep:"));
-        assert!(lines[5].starts_with("unused-enum-member:"));
-        assert!(lines[6].starts_with("unused-class-member:"));
-        assert!(lines[7].starts_with("unresolved-import:"));
-        assert!(lines[8].starts_with("unlisted-dep:"));
-        assert!(lines[9].starts_with("duplicate-export:"));
-        assert!(lines[10].starts_with("type-only-dep:"));
-        assert!(lines[11].starts_with("test-only-dep:"));
-        assert!(lines[12].starts_with("circular-dependency:"));
+        assert!(lines[5].starts_with("unused-optionaldep:"));
+        assert!(lines[6].starts_with("unused-enum-member:"));
+        assert!(lines[7].starts_with("unused-class-member:"));
+        assert!(lines[8].starts_with("unresolved-import:"));
+        assert!(lines[9].starts_with("unlisted-dep:"));
+        assert!(lines[10].starts_with("duplicate-export:"));
+        assert!(lines[11].starts_with("type-only-dep:"));
+        assert!(lines[12].starts_with("test-only-dep:"));
+        assert!(lines[13].starts_with("circular-dependency:"));
     }
 
     #[test]

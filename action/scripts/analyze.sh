@@ -4,7 +4,9 @@ set -o pipefail
 # Run fallow analysis with CLI argument construction (deduped)
 # Required env: INPUT_COMMAND, INPUT_ROOT, INPUT_CONFIG, INPUT_FORMAT, INPUT_PRODUCTION,
 #   INPUT_CHANGED_SINCE, INPUT_AUTO_CHANGED_SINCE, PR_BASE_SHA, EVENT_NAME,
-#   INPUT_BASELINE, INPUT_SAVE_BASELINE, INPUT_ARGS, INPUT_DUPES_MODE,
+#   INPUT_BASELINE, INPUT_SAVE_BASELINE, INPUT_FAIL_ON_REGRESSION,
+#   INPUT_TOLERANCE, INPUT_REGRESSION_BASELINE, INPUT_SAVE_REGRESSION_BASELINE,
+#   INPUT_ARGS, INPUT_DUPES_MODE,
 #   INPUT_MIN_TOKENS, INPUT_MIN_LINES, INPUT_THRESHOLD, INPUT_SKIP_LOCAL,
 #   INPUT_CROSS_LANGUAGE, INPUT_DRY_RUN, INPUT_WORKSPACE, INPUT_MAX_CYCLOMATIC,
 #   INPUT_MAX_COGNITIVE, INPUT_TOP, INPUT_SORT, INPUT_FILE_SCORES, INPUT_HOTSPOTS,
@@ -51,6 +53,10 @@ build_command_args() {
           ARGS+=("--${t}")
         done
       fi
+      [ "${INPUT_FAIL_ON_REGRESSION:-}" = "true" ] && ARGS+=(--fail-on-regression)
+      [ -n "${INPUT_TOLERANCE:-}" ] && [ "${INPUT_TOLERANCE:-}" != "0" ] && ARGS+=(--tolerance "$INPUT_TOLERANCE")
+      [ -n "${INPUT_REGRESSION_BASELINE:-}" ] && ARGS+=(--regression-baseline "$INPUT_REGRESSION_BASELINE")
+      [ -n "${INPUT_SAVE_REGRESSION_BASELINE:-}" ] && ARGS+=(--save-regression-baseline "$INPUT_SAVE_REGRESSION_BASELINE")
       ;;
     dupes)
       ARGS+=(--mode "${INPUT_DUPES_MODE:-mild}")
@@ -91,6 +97,10 @@ build_command_args() {
       if [ "${INPUT_FORMAT:-}" = "sarif" ] && [ "${HAS_SARIF_FILE:-false}" = "true" ]; then
         ARGS+=(--sarif-file fallow-results.sarif)
       fi
+      [ "${INPUT_FAIL_ON_REGRESSION:-}" = "true" ] && ARGS+=(--fail-on-regression)
+      [ -n "${INPUT_TOLERANCE:-}" ] && [ "${INPUT_TOLERANCE:-}" != "0" ] && ARGS+=(--tolerance "$INPUT_TOLERANCE")
+      [ -n "${INPUT_REGRESSION_BASELINE:-}" ] && ARGS+=(--regression-baseline "$INPUT_REGRESSION_BASELINE")
+      [ -n "${INPUT_SAVE_REGRESSION_BASELINE:-}" ] && ARGS+=(--save-regression-baseline "$INPUT_SAVE_REGRESSION_BASELINE")
       ;;
   esac
 }

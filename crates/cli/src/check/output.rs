@@ -216,6 +216,7 @@ mod tests {
             quiet: true,
             external_plugins: vec![],
             overrides: vec![],
+            regression: None,
         }
     }
 

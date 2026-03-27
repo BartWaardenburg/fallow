@@ -532,14 +532,7 @@ mod tests {
 
     /// Build sample results including optional deps (extends the shared helper).
     fn sample_results(root: &Path) -> AnalysisResults {
-        let mut r = crate::report::test_helpers::sample_results(root);
-        r.unused_optional_dependencies.push(UnusedDependency {
-            package_name: "fsevents".to_string(),
-            location: DependencyLocation::OptionalDependencies,
-            path: root.join("package.json"),
-            line: 10,
-        });
-        r
+        crate::report::test_helpers::sample_results(root)
     }
 
     // ── Empty results ──

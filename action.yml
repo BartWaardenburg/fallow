@@ -139,6 +139,21 @@ inputs:
   issue-types:
     description: 'Comma-separated issue types to report (dead-code command). Valid: unused-files, unused-exports, unused-types, unused-deps, unused-enum-members, unused-class-members, unresolved-imports, unlisted-deps, duplicate-exports, circular-deps'
     required: false
+  # Regression detection
+  fail-on-regression:
+    description: 'Exit with code 1 if issue counts regressed compared to baseline (dead-code command)'
+    required: false
+    default: 'false'
+  tolerance:
+    description: 'Allowed regression tolerance before failing (e.g. "2%" or "5") (dead-code command)'
+    required: false
+    default: '0'
+  regression-baseline:
+    description: 'Path to regression baseline file for comparison (dead-code command)'
+    required: false
+  save-regression-baseline:
+    description: 'Save current results as a regression baseline file (dead-code command)'
+    required: false
   # Fix-specific inputs
   dry-run:
     description: 'Preview changes without modifying files (fix command, default: true for CI safety)'
@@ -224,6 +239,10 @@ runs:
         INPUT_MIN_COMMITS: ${{ inputs.min-commits }}
         INPUT_SAVE_SNAPSHOT: ${{ inputs.save-snapshot }}
         INPUT_ISSUE_TYPES: ${{ inputs.issue-types }}
+        INPUT_FAIL_ON_REGRESSION: ${{ inputs.fail-on-regression }}
+        INPUT_TOLERANCE: ${{ inputs.tolerance }}
+        INPUT_REGRESSION_BASELINE: ${{ inputs.regression-baseline }}
+        INPUT_SAVE_REGRESSION_BASELINE: ${{ inputs.save-regression-baseline }}
         INPUT_NO_CACHE: ${{ inputs.no-cache }}
         INPUT_THREADS: ${{ inputs.threads }}
         INPUT_ONLY: ${{ inputs.only }}

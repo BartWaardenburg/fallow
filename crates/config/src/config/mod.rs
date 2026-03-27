@@ -107,6 +107,62 @@ pub struct FallowConfig {
     /// Per-file rule overrides matching oxlint's overrides pattern.
     #[serde(default)]
     pub overrides: Vec<ConfigOverride>,
+
+    /// Regression detection baseline embedded in config.
+    /// Stores issue counts from a known-good state for CI regression checks.
+    /// Populated by `--save-regression-baseline` (no path), read by `--fail-on-regression`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub regression: Option<RegressionConfig>,
+}
+
+/// Regression baseline counts, embedded in the config file.
+///
+/// When `--fail-on-regression` is used without `--regression-baseline <PATH>`,
+/// fallow reads the baseline from this config section.
+/// When `--save-regression-baseline` is used without a path argument,
+/// fallow writes the baseline into the config file.
+#[derive(Debug, Default, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RegressionConfig {
+    /// Dead code issue counts baseline.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub baseline: Option<RegressionBaseline>,
+}
+
+/// Per-type issue counts for regression comparison.
+#[derive(Debug, Default, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RegressionBaseline {
+    #[serde(default)]
+    pub total_issues: usize,
+    #[serde(default)]
+    pub unused_files: usize,
+    #[serde(default)]
+    pub unused_exports: usize,
+    #[serde(default)]
+    pub unused_types: usize,
+    #[serde(default)]
+    pub unused_dependencies: usize,
+    #[serde(default)]
+    pub unused_dev_dependencies: usize,
+    #[serde(default)]
+    pub unused_optional_dependencies: usize,
+    #[serde(default)]
+    pub unused_enum_members: usize,
+    #[serde(default)]
+    pub unused_class_members: usize,
+    #[serde(default)]
+    pub unresolved_imports: usize,
+    #[serde(default)]
+    pub unlisted_dependencies: usize,
+    #[serde(default)]
+    pub duplicate_exports: usize,
+    #[serde(default)]
+    pub circular_dependencies: usize,
+    #[serde(default)]
+    pub type_only_dependencies: usize,
+    #[serde(default)]
+    pub test_only_dependencies: usize,
 }
 
 #[cfg(test)]

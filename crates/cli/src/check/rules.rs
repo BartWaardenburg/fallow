@@ -303,6 +303,7 @@ mod tests {
             production: false,
             plugins: vec![],
             overrides: vec![],
+            regression: None,
         }
         .resolve(
             PathBuf::from("/project"),
@@ -537,6 +538,7 @@ mod tests {
             rules: RulesConfig::default(), // all Error
             production: false,
             plugins: vec![],
+            regression: None,
             overrides: vec![fallow_config::ConfigOverride {
                 files: vec!["**/*.test.ts".to_string()],
                 rules: fallow_config::PartialRulesConfig {

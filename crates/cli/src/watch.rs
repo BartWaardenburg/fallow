@@ -108,7 +108,7 @@ fn analyze_and_report(config: &fallow_config::ResolvedConfig, opts: &WatchOption
         quiet: opts.quiet,
         explain: opts.explain,
     };
-    let report_code = report::print_results(&results, &ctx, &config.output);
+    let report_code = report::print_results(&results, &ctx, &config.output, None);
     if report_code != ExitCode::SUCCESS {
         eprintln!("Warning: report output failed");
     }
@@ -382,6 +382,7 @@ mod tests {
             production: false,
             plugins: vec![],
             overrides: vec![],
+            regression: None,
         }
         .resolve(root.to_path_buf(), output, threads, false, quiet)
     }

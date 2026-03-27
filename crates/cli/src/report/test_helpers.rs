@@ -42,6 +42,12 @@ pub(super) fn sample_results(root: &Path) -> AnalysisResults {
         path: root.join("package.json"),
         line: 5,
     });
+    r.unused_optional_dependencies.push(UnusedDependency {
+        package_name: "fsevents".to_string(),
+        location: DependencyLocation::OptionalDependencies,
+        path: root.join("package.json"),
+        line: 15,
+    });
     r.unused_enum_members.push(UnusedMember {
         path: root.join("src/enums.ts"),
         parent_name: "Status".to_string(),

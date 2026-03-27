@@ -29,6 +29,7 @@ pub fn create_config(root: PathBuf) -> fallow_config::ResolvedConfig {
         production: false,
         plugins: vec![],
         overrides: vec![],
+        regression: None,
     }
     .resolve(root, OutputFormat::Human, 4, true, true)
 }
@@ -52,6 +53,7 @@ pub fn create_config_with_cache(
         production: false,
         plugins: vec![],
         overrides: vec![],
+        regression: None,
     }
     .resolve(root, OutputFormat::Human, 4, false, true); // no_cache = false to enable caching
     config.cache_dir = cache_dir;

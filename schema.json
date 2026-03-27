@@ -128,6 +128,17 @@
         "$ref": "#/$defs/ConfigOverride"
       },
       "default": []
+    },
+    "regression": {
+      "description": "Regression detection baseline embedded in config.\nStores issue counts from a known-good state for CI regression checks.\nPopulated by `--save-regression-baseline` (no path), read by `--fail-on-regression`.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RegressionConfig"
+        },
+        {
+          "type": "null"
+        }
+      ]
     }
   },
   "additionalProperties": false,
@@ -727,6 +738,119 @@
               "type": "null"
             }
           ]
+        }
+      }
+    },
+    "RegressionConfig": {
+      "description": "Regression baseline counts, embedded in the config file.\n\nWhen `--fail-on-regression` is used without `--regression-baseline <PATH>`,\nfallow reads the baseline from this config section.\nWhen `--save-regression-baseline` is used without a path argument,\nfallow writes the baseline into the config file.",
+      "type": "object",
+      "properties": {
+        "baseline": {
+          "description": "Dead code issue counts baseline.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RegressionBaseline"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "RegressionBaseline": {
+      "description": "Per-type issue counts for regression comparison.",
+      "type": "object",
+      "properties": {
+        "totalIssues": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0,
+          "default": 0
+        },
+        "unusedFiles": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0,
+          "default": 0
+        },
+        "unusedExports": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0,
+          "default": 0
+        },
+        "unusedTypes": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0,
+          "default": 0
+        },
+        "unusedDependencies": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0,
+          "default": 0
+        },
+        "unusedDevDependencies": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0,
+          "default": 0
+        },
+        "unusedOptionalDependencies": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0,
+          "default": 0
+        },
+        "unusedEnumMembers": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0,
+          "default": 0
+        },
+        "unusedClassMembers": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0,
+          "default": 0
+        },
+        "unresolvedImports": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0,
+          "default": 0
+        },
+        "unlistedDependencies": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0,
+          "default": 0
+        },
+        "duplicateExports": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0,
+          "default": 0
+        },
+        "circularDependencies": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0,
+          "default": 0
+        },
+        "typeOnlyDependencies": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0,
+          "default": 0
+        },
+        "testOnlyDependencies": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0,
+          "default": 0
         }
       }
     }

@@ -23,6 +23,7 @@ pub fn make_config(root: PathBuf, no_cache: bool) -> fallow_config::ResolvedConf
         production: false,
         plugins: vec![],
         overrides: vec![],
+        regression: None,
     }
     .resolve(root, OutputFormat::Human, 4, no_cache, true)
 }
