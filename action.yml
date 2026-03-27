@@ -312,6 +312,7 @@ runs:
       env:
         GH_TOKEN: ${{ inputs.github-token }}
         PR_NUMBER: ${{ github.event.pull_request.number }}
+        PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         GH_REPO: ${{ github.repository }}
         FALLOW_COMMAND: ${{ steps.analyze.outputs.command }}
         FALLOW_ROOT: ${{ inputs.root }}

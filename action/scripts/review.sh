@@ -25,7 +25,7 @@ if [ "$FALLOW_ROOT" != "." ]; then
 fi
 
 # Export env vars for jq access
-export PREFIX MAX FALLOW_ROOT
+export PREFIX MAX FALLOW_ROOT GH_REPO PR_NUMBER PR_HEAD_SHA
 
 # Collect all review comments from the results
 COMMENTS="[]"
@@ -57,8 +57,10 @@ fi
 
 echo "Posting $TOTAL review comments..."
 
-# Build the review payload
-REVIEW_BODY=$'**Fallow** found issues in this PR \u2014 see inline comments below.\n\n<!-- fallow-review -->'
+# Generate rich review body from the analysis results
+REVIEW_BODY=$(jq -r -f "${ACTION_JQ_DIR}/review-body.jq" fallow-results.json 2>/dev/null) || \
+  REVIEW_BODY=$'## \xf0\x9f\x8c\xbf Fallow Review\n\nSee inline comments for details.\n\n<!-- fallow-review -->'
+
 PAYLOAD=$(echo "$COMMENTS" | jq --arg body "$REVIEW_BODY" '{
   event: "COMMENT",
   body: $body,
