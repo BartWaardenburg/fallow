@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1774629958911,
+  "lastUpdate": 1774637111386,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
@@ -2541,6 +2541,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Total Allocations",
             "value": 11935,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 420734,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 5168,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "71607c663bf77959a6df31a588ca3340f24bb29c",
+          "message": "fix: remove unnecessary raw string hashes in plugin test",
+          "timestamp": "2026-03-27T19:39:40+01:00",
+          "tree_id": "7e1b4ee0a1b35446c0d8872e798cb9ac8297b792",
+          "url": "https://github.com/fallow-rs/fallow/commit/71607c663bf77959a6df31a588ca3340f24bb29c"
+        },
+        "date": 1774637110307,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 3038022,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 11957,
             "unit": "allocations"
           },
           {
