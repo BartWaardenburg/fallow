@@ -43,7 +43,12 @@ def merge_same_line:
       {
         path: .[0].path,
         line: .[0].line,
-        body: ([.[].body] | join("\n\n---\n\n"))
+        body: (
+          "**\(length) findings on this line:**\n\n" +
+          ([to_entries[] |
+            "---\n\n**[\(.key + 1)/\(length)]**\n\n\(.value.body)"
+          ] | join("\n\n"))
+        )
       }
     end
   ];

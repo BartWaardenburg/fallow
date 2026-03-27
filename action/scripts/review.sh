@@ -74,8 +74,14 @@ fi
 echo "Posting $TOTAL review comments (after merging)..."
 
 # Generate rich review body from the analysis results
-REVIEW_BODY=$(jq -r -f "${ACTION_JQ_DIR}/review-body.jq" fallow-results.json 2>/dev/null) || \
-  REVIEW_BODY=$'## \xf0\x9f\x8c\xbf Fallow Review\n\nSee inline comments for details.\n\n<!-- fallow-review -->'
+REVIEW_BODY=""
+if [ -f "${ACTION_JQ_DIR}/review-body.jq" ]; then
+  REVIEW_BODY=$(jq -r -f "${ACTION_JQ_DIR}/review-body.jq" fallow-results.json 2>&1) || true
+fi
+# Fallback if jq failed or produced empty output
+if [ -z "$REVIEW_BODY" ] || echo "$REVIEW_BODY" | /usr/bin/grep -q "^jq:"; then
+  REVIEW_BODY=$'## \xf0\x9f\x8c\xbf Fallow Review\n\nFound **'"$TOTAL"$'** issues \xe2\x80\x94 see inline comments below.\n\n<!-- fallow-review -->'
+fi
 
 PAYLOAD=$(echo "$COMMENTS" | jq --arg body "$REVIEW_BODY" '{
   event: "COMMENT",
