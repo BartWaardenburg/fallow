@@ -58,7 +58,7 @@ fi
 echo "Posting $TOTAL review comments..."
 
 # Build the review payload
-REVIEW_BODY="**Fallow** found issues in this PR — see inline comments below.\n\n<!-- fallow-review -->"
+REVIEW_BODY=$'**Fallow** found issues in this PR \u2014 see inline comments below.\n\n<!-- fallow-review -->'
 PAYLOAD=$(echo "$COMMENTS" | jq --arg body "$REVIEW_BODY" '{
   event: "COMMENT",
   body: $body,
