@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -eo pipefail
+set -o pipefail
 
 # Run fallow analysis with CLI argument construction (deduped)
 # Required env: INPUT_COMMAND, INPUT_ROOT, INPUT_CONFIG, INPUT_FORMAT, INPUT_PRODUCTION,
@@ -13,97 +13,83 @@ set -eo pipefail
 #   INPUT_ONLY, INPUT_SKIP
 
 # --- Shared argument building functions ---
+# Uses global ARGS array (avoids bash nameref compatibility issues)
 
 build_common_args() {
-  local -n args_ref=$1
-  local format=${2:-json}
+  local format=${1:-json}
 
-  args_ref=(--root "$INPUT_ROOT" --quiet --format "$format")
-  [ -n "$INPUT_COMMAND" ] && args_ref=("$INPUT_COMMAND" "${args_ref[@]}")
+  ARGS=(--root "$INPUT_ROOT" --quiet --format "$format")
+  [ -n "$INPUT_COMMAND" ] && ARGS=("$INPUT_COMMAND" "${ARGS[@]}")
 
-  # Config file
-  [ -n "${INPUT_CONFIG:-}" ] && args_ref+=(--config "$INPUT_CONFIG")
+  [ -n "${INPUT_CONFIG:-}" ] && ARGS+=(--config "$INPUT_CONFIG")
+  [ "${INPUT_PRODUCTION:-}" = "true" ] && ARGS+=(--production)
+  [ -n "${INPUT_CHANGED_SINCE:-}" ] && ARGS+=(--changed-since "$INPUT_CHANGED_SINCE")
+  [ -n "${INPUT_BASELINE:-}" ] && ARGS+=(--baseline "$INPUT_BASELINE")
+  [ -n "${INPUT_SAVE_BASELINE:-}" ] && ARGS+=(--save-baseline "$INPUT_SAVE_BASELINE")
+  [ -n "${INPUT_WORKSPACE:-}" ] && ARGS+=(--workspace "$INPUT_WORKSPACE")
+  [ "${INPUT_NO_CACHE:-}" = "true" ] && ARGS+=(--no-cache)
+  [ -n "${INPUT_THREADS:-}" ] && ARGS+=(--threads "$INPUT_THREADS")
 
-  # Production mode
-  [ "${INPUT_PRODUCTION:-}" = "true" ] && args_ref+=(--production)
-
-  # Changed-since (may be auto-detected)
-  [ -n "${INPUT_CHANGED_SINCE:-}" ] && args_ref+=(--changed-since "$INPUT_CHANGED_SINCE")
-
-  # Baseline
-  [ -n "${INPUT_BASELINE:-}" ] && args_ref+=(--baseline "$INPUT_BASELINE")
-  [ -n "${INPUT_SAVE_BASELINE:-}" ] && args_ref+=(--save-baseline "$INPUT_SAVE_BASELINE")
-
-  # Workspace
-  [ -n "${INPUT_WORKSPACE:-}" ] && args_ref+=(--workspace "$INPUT_WORKSPACE")
-
-  # Cache and threads
-  [ "${INPUT_NO_CACHE:-}" = "true" ] && args_ref+=(--no-cache)
-  [ -n "${INPUT_THREADS:-}" ] && args_ref+=(--threads "$INPUT_THREADS")
-
-  # Bare invocation selectors (only/skip apply when no command is given)
   if [ -z "$INPUT_COMMAND" ]; then
-    [ -n "${INPUT_ONLY:-}" ] && args_ref+=(--only "$INPUT_ONLY")
-    [ -n "${INPUT_SKIP:-}" ] && args_ref+=(--skip "$INPUT_SKIP")
+    [ -n "${INPUT_ONLY:-}" ] && ARGS+=(--only "$INPUT_ONLY")
+    [ -n "${INPUT_SKIP:-}" ] && ARGS+=(--skip "$INPUT_SKIP")
   fi
 }
 
 build_command_args() {
-  local -n args_ref=$1
-  local include_top=${2:-true}  # SARIF fallback omits --top
+  local include_top=${1:-true}
 
   case "$INPUT_COMMAND" in
     dead-code|check)
       if [ "${INPUT_FORMAT:-}" = "sarif" ] && [ "${HAS_SARIF_FILE:-false}" = "true" ]; then
-        args_ref+=(--sarif-file fallow-results.sarif)
+        ARGS+=(--sarif-file fallow-results.sarif)
       fi
-      # Issue type filters
       if [ -n "${INPUT_ISSUE_TYPES:-}" ]; then
         IFS=',' read -ra TYPES <<< "$INPUT_ISSUE_TYPES"
         for t in "${TYPES[@]}"; do
-          t="$(echo "$t" | xargs)"  # trim whitespace
-          args_ref+=("--${t}")
+          t="$(echo "$t" | xargs)"
+          ARGS+=("--${t}")
         done
       fi
       ;;
     dupes)
-      args_ref+=(--mode "${INPUT_DUPES_MODE:-mild}")
-      [ -n "${INPUT_MIN_TOKENS:-}" ] && args_ref+=(--min-tokens "$INPUT_MIN_TOKENS")
-      [ -n "${INPUT_MIN_LINES:-}" ] && args_ref+=(--min-lines "$INPUT_MIN_LINES")
-      [ -n "${INPUT_THRESHOLD:-}" ] && args_ref+=(--threshold "$INPUT_THRESHOLD")
-      [ "${INPUT_SKIP_LOCAL:-}" = "true" ] && args_ref+=(--skip-local)
-      [ "${INPUT_CROSS_LANGUAGE:-}" = "true" ] && args_ref+=(--cross-language)
-      [ "$include_top" = "true" ] && [ -n "${INPUT_TOP:-}" ] && args_ref+=(--top "$INPUT_TOP")
+      ARGS+=(--mode "${INPUT_DUPES_MODE:-mild}")
+      [ -n "${INPUT_MIN_TOKENS:-}" ] && ARGS+=(--min-tokens "$INPUT_MIN_TOKENS")
+      [ -n "${INPUT_MIN_LINES:-}" ] && ARGS+=(--min-lines "$INPUT_MIN_LINES")
+      [ -n "${INPUT_THRESHOLD:-}" ] && ARGS+=(--threshold "$INPUT_THRESHOLD")
+      [ "${INPUT_SKIP_LOCAL:-}" = "true" ] && ARGS+=(--skip-local)
+      [ "${INPUT_CROSS_LANGUAGE:-}" = "true" ] && ARGS+=(--cross-language)
+      [ "$include_top" = "true" ] && [ -n "${INPUT_TOP:-}" ] && ARGS+=(--top "$INPUT_TOP")
       ;;
     health)
-      [ -n "${INPUT_MAX_CYCLOMATIC:-}" ] && args_ref+=(--max-cyclomatic "$INPUT_MAX_CYCLOMATIC")
-      [ -n "${INPUT_MAX_COGNITIVE:-}" ] && args_ref+=(--max-cognitive "$INPUT_MAX_COGNITIVE")
-      [ "$include_top" = "true" ] && [ -n "${INPUT_TOP:-}" ] && args_ref+=(--top "$INPUT_TOP")
-      [ -n "${INPUT_SORT:-}" ] && args_ref+=(--sort "$INPUT_SORT")
-      [ "${INPUT_FILE_SCORES:-}" = "true" ] && args_ref+=(--file-scores)
-      [ "${INPUT_HOTSPOTS:-}" = "true" ] && args_ref+=(--hotspots)
-      [ "${INPUT_TARGETS:-}" = "true" ] && args_ref+=(--targets)
-      [ "${INPUT_COMPLEXITY:-}" = "true" ] && args_ref+=(--complexity)
-      [ -n "${INPUT_SINCE:-}" ] && args_ref+=(--since "$INPUT_SINCE")
-      [ -n "${INPUT_MIN_COMMITS:-}" ] && args_ref+=(--min-commits "$INPUT_MIN_COMMITS")
+      [ -n "${INPUT_MAX_CYCLOMATIC:-}" ] && ARGS+=(--max-cyclomatic "$INPUT_MAX_CYCLOMATIC")
+      [ -n "${INPUT_MAX_COGNITIVE:-}" ] && ARGS+=(--max-cognitive "$INPUT_MAX_COGNITIVE")
+      [ "$include_top" = "true" ] && [ -n "${INPUT_TOP:-}" ] && ARGS+=(--top "$INPUT_TOP")
+      [ -n "${INPUT_SORT:-}" ] && ARGS+=(--sort "$INPUT_SORT")
+      [ "${INPUT_FILE_SCORES:-}" = "true" ] && ARGS+=(--file-scores)
+      [ "${INPUT_HOTSPOTS:-}" = "true" ] && ARGS+=(--hotspots)
+      [ "${INPUT_TARGETS:-}" = "true" ] && ARGS+=(--targets)
+      [ "${INPUT_COMPLEXITY:-}" = "true" ] && ARGS+=(--complexity)
+      [ -n "${INPUT_SINCE:-}" ] && ARGS+=(--since "$INPUT_SINCE")
+      [ -n "${INPUT_MIN_COMMITS:-}" ] && ARGS+=(--min-commits "$INPUT_MIN_COMMITS")
       if [ -n "${INPUT_SAVE_SNAPSHOT:-}" ]; then
         if [ "$INPUT_SAVE_SNAPSHOT" = "true" ]; then
-          args_ref+=(--save-snapshot)
+          ARGS+=(--save-snapshot)
         else
-          args_ref+=(--save-snapshot "$INPUT_SAVE_SNAPSHOT")
+          ARGS+=(--save-snapshot "$INPUT_SAVE_SNAPSHOT")
         fi
       fi
       ;;
     fix)
       if [ "${INPUT_DRY_RUN:-}" = "true" ]; then
-        args_ref+=(--dry-run)
+        ARGS+=(--dry-run)
       else
-        args_ref+=(--yes)
+        ARGS+=(--yes)
       fi
       ;;
     "")
       if [ "${INPUT_FORMAT:-}" = "sarif" ] && [ "${HAS_SARIF_FILE:-false}" = "true" ]; then
-        args_ref+=(--sarif-file fallow-results.sarif)
+        ARGS+=(--sarif-file fallow-results.sarif)
       fi
       ;;
   esac
@@ -131,9 +117,13 @@ fi
 # --- Check for --sarif-file support ---
 
 HAS_SARIF_FILE=false
-if { [ "$INPUT_COMMAND" = "dead-code" ] || [ "$INPUT_COMMAND" = "check" ] || [ -z "$INPUT_COMMAND" ]; } && \
-   fallow dead-code --help 2>/dev/null | grep -q -- '--sarif-file'; then
-  HAS_SARIF_FILE=true
+if { [ "$INPUT_COMMAND" = "dead-code" ] || [ "$INPUT_COMMAND" = "check" ] || [ -z "$INPUT_COMMAND" ]; }; then
+  HELP_TMP=$(mktemp)
+  fallow dead-code --help > "$HELP_TMP" 2>/dev/null || true
+  if /usr/bin/grep -q -- '--sarif-file' "$HELP_TMP"; then
+    HAS_SARIF_FILE=true
+  fi
+  rm -f "$HELP_TMP"
 fi
 
 # --- Auto-detect changed-since in PR context ---
@@ -148,8 +138,8 @@ fi
 # --- Build and run main analysis ---
 
 ARGS=()
-build_common_args ARGS json
-build_command_args ARGS true
+build_common_args json
+build_command_args true
 
 # Parse extra arguments safely
 EXTRA_ARGS=()
@@ -171,11 +161,11 @@ fi
 
 if [ "${INPUT_FORMAT:-}" = "sarif" ] && [ "$INPUT_COMMAND" != "fix" ] && \
    { [ ! -f fallow-results.sarif ] || ! jq -e '.' fallow-results.sarif > /dev/null 2>&1; }; then
-  SARIF_ARGS=()
-  build_common_args SARIF_ARGS sarif
-  build_command_args SARIF_ARGS false  # omit --top for SARIF
+  ARGS=()
+  build_common_args sarif
+  build_command_args false  # omit --top for SARIF
 
-  if ! fallow "${SARIF_ARGS[@]}" "${EXTRA_ARGS[@]}" > fallow-results.sarif 2>/dev/null; then
+  if ! fallow "${ARGS[@]}" "${EXTRA_ARGS[@]}" > fallow-results.sarif 2>/dev/null; then
     echo "::warning::SARIF generation failed"
   fi
 fi
