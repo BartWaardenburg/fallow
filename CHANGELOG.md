@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.3] - 2026-03-27
+
+### Added
+
+- **Auto-changed-since for PRs** — GitHub Action automatically scopes analysis to changed files in pull requests using `--changed-since` with the merge base, eliminating the need for manual configuration
+- **Enriched PR annotations** — inline annotations now include actionable context (export names, dependency names, file paths) with improved formatting for duplication annotations
+- **VS Code status bar and tree views** — expanded extension UX with project health status bar, issue tree view, and pnpm workspace support
+- **`analyze_with_parse_result` API** — new public function in `fallow-core` that accepts pre-parsed modules, enabling callers to skip the parsing stage when modules are already available
+
+### Changed
+
+- **Health pipeline optimization** — `fallow health --file-scores` no longer runs the analysis pipeline twice; pre-parsed modules are reused via the new `analyze_with_parse_result` API
+- **O(1) tooling dependency lookups** — `GENERAL_TOOLING_EXACT` (76 entries) converted from linear slice scan to `OnceLock<FxHashSet>` for constant-time lookups
+- **O(1) unused import binding lookups** — `ResolvedModule.unused_import_bindings` converted from `Vec<String>` to `FxHashSet<String>` in hot-path reference population
+- **Optimized member export referencing** — `mark_member_exports_referenced` now uses `FxHashSet<&str>` and avoids per-export `to_string()` allocation
+- **Report dispatcher unified** — new `ReportContext` struct replaces individual parameters across all 3 report dispatch functions for consistent signatures
+- **`define_plugin!` macro extended** — supports `resolve_config: imports_only` variant; Cypress, Commitlint, Remark plugins migrated
+- **Comprehensive code deduplication** — `emit_json()`, `plural()`, `build_json_envelope()`, shared `sample_results` test helper, fix module helpers, config parser shared traversal
+
+### Fixed
+
+- **Watch mode reload stability** — hardened debounce behavior and related cleanup
+- **Windows CI path normalization** — discovery tests now normalize path separators for cross-platform compatibility
+- **GitHub Action `pull_request_target` handling** — correctly detects and handles `pull_request_target` events in auto-changed-since logic
+
+### Removed
+
+- **1,986 lines of dead code** — removed orphaned `crates/graph/src/graph/build/` directory that was never compiled (abandoned refactoring artifact)
+
 ## [2.2.2] - 2026-03-27
 
 ### Added
@@ -503,6 +532,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [1.0.3]: https://github.com/fallow-rs/fallow/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/fallow-rs/fallow/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/fallow-rs/fallow/compare/v1.0.0...v1.0.1
+[2.2.3]: https://github.com/fallow-rs/fallow/compare/v2.2.2...v2.2.3
 [2.2.2]: https://github.com/fallow-rs/fallow/compare/v2.2.1...v2.2.2
 [1.0.0]: https://github.com/fallow-rs/fallow/compare/v0.3.0...v1.0.0
 [0.3.0]: https://github.com/fallow-rs/fallow/compare/v0.2.0...v0.3.0
