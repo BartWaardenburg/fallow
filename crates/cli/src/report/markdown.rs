@@ -1048,4 +1048,502 @@ mod tests {
         );
         assert!(md.contains("src/legacy.ts"), "should contain second target");
     }
+
+    // ── Dependency in workspace package ──
+
+    #[test]
+    fn markdown_dep_in_workspace_shows_package_label() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results.unused_dependencies.push(UnusedDependency {
+            package_name: "lodash".to_string(),
+            location: DependencyLocation::Dependencies,
+            path: root.join("packages/core/package.json"),
+            line: 5,
+        });
+        let md = build_markdown(&results, &root);
+        // Non-root package.json should show the label
+        assert!(md.contains("(packages/core/package.json)"));
+    }
+
+    #[test]
+    fn markdown_dep_at_root_no_extra_label() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results.unused_dependencies.push(UnusedDependency {
+            package_name: "lodash".to_string(),
+            location: DependencyLocation::Dependencies,
+            path: root.join("package.json"),
+            line: 5,
+        });
+        let md = build_markdown(&results, &root);
+        assert!(md.contains("- `lodash`"));
+        assert!(!md.contains("(package.json)"));
+    }
+
+    // ── Multiple exports same file grouped ──
+
+    #[test]
+    fn markdown_exports_grouped_by_file() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results.unused_exports.push(UnusedExport {
+            path: root.join("src/utils.ts"),
+            export_name: "alpha".to_string(),
+            is_type_only: false,
+            line: 5,
+            col: 0,
+            span_start: 0,
+            is_re_export: false,
+        });
+        results.unused_exports.push(UnusedExport {
+            path: root.join("src/utils.ts"),
+            export_name: "beta".to_string(),
+            is_type_only: false,
+            line: 10,
+            col: 0,
+            span_start: 0,
+            is_re_export: false,
+        });
+        results.unused_exports.push(UnusedExport {
+            path: root.join("src/other.ts"),
+            export_name: "gamma".to_string(),
+            is_type_only: false,
+            line: 1,
+            col: 0,
+            span_start: 0,
+            is_re_export: false,
+        });
+        let md = build_markdown(&results, &root);
+        // File header should appear only once for utils.ts
+        let utils_count = md.matches("- `src/utils.ts`").count();
+        assert_eq!(utils_count, 1, "file header should appear once per file");
+        // Both exports should be under it as sub-items
+        assert!(md.contains(":5 `alpha`"));
+        assert!(md.contains(":10 `beta`"));
+    }
+
+    // ── Multiple issues plural header ──
+
+    #[test]
+    fn markdown_multiple_issues_plural() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results.unused_files.push(UnusedFile {
+            path: root.join("src/a.ts"),
+        });
+        results.unused_files.push(UnusedFile {
+            path: root.join("src/b.ts"),
+        });
+        let md = build_markdown(&results, &root);
+        assert!(md.starts_with("## Fallow: 2 issues found\n"));
+    }
+
+    // ── Duplication markdown with zero estimated savings ──
+
+    #[test]
+    fn duplication_markdown_zero_savings_no_suffix() {
+        let root = PathBuf::from("/project");
+        let report = DuplicationReport {
+            clone_groups: vec![CloneGroup {
+                instances: vec![CloneInstance {
+                    file: root.join("src/a.ts"),
+                    start_line: 1,
+                    end_line: 5,
+                    start_col: 0,
+                    end_col: 0,
+                    fragment: String::new(),
+                }],
+                token_count: 30,
+                line_count: 5,
+            }],
+            clone_families: vec![CloneFamily {
+                files: vec![root.join("src/a.ts")],
+                groups: vec![],
+                total_duplicated_lines: 5,
+                total_duplicated_tokens: 30,
+                suggestions: vec![RefactoringSuggestion {
+                    kind: RefactoringKind::ExtractFunction,
+                    description: "Extract function".to_string(),
+                    estimated_savings: 0,
+                }],
+            }],
+            stats: DuplicationStats {
+                clone_groups: 1,
+                clone_instances: 1,
+                duplication_percentage: 1.0,
+                ..Default::default()
+            },
+        };
+        let md = build_duplication_markdown(&report, &root);
+        assert!(md.contains("Extract function"));
+        assert!(!md.contains("lines saved"));
+    }
+
+    // ── Health markdown vital signs ──
+
+    #[test]
+    fn health_markdown_vital_signs_table() {
+        let root = PathBuf::from("/project");
+        let report = crate::health_types::HealthReport {
+            findings: vec![],
+            summary: crate::health_types::HealthSummary {
+                files_analyzed: 10,
+                functions_analyzed: 50,
+                functions_above_threshold: 0,
+                max_cyclomatic_threshold: 20,
+                max_cognitive_threshold: 15,
+                files_scored: None,
+                average_maintainability: None,
+            },
+            vital_signs: Some(crate::health_types::VitalSigns {
+                avg_cyclomatic: 3.5,
+                p90_cyclomatic: 12,
+                dead_file_pct: Some(5.0),
+                dead_export_pct: Some(10.2),
+                duplication_pct: None,
+                maintainability_avg: Some(72.3),
+                hotspot_count: Some(3),
+                circular_dep_count: Some(1),
+                unused_dep_count: Some(2),
+            }),
+            file_scores: vec![],
+            hotspots: vec![],
+            hotspot_summary: None,
+            targets: vec![],
+            target_thresholds: None,
+        };
+        let md = build_health_markdown(&report, &root);
+        assert!(md.contains("## Vital Signs"));
+        assert!(md.contains("| Metric | Value |"));
+        assert!(md.contains("| Avg Cyclomatic | 3.5 |"));
+        assert!(md.contains("| P90 Cyclomatic | 12 |"));
+        assert!(md.contains("| Dead Files | 5.0% |"));
+        assert!(md.contains("| Dead Exports | 10.2% |"));
+        assert!(md.contains("| Maintainability (avg) | 72.3 |"));
+        assert!(md.contains("| Hotspots | 3 |"));
+        assert!(md.contains("| Circular Deps | 1 |"));
+        assert!(md.contains("| Unused Deps | 2 |"));
+    }
+
+    // ── Health markdown file scores ──
+
+    #[test]
+    fn health_markdown_file_scores_table() {
+        let root = PathBuf::from("/project");
+        let report = crate::health_types::HealthReport {
+            findings: vec![crate::health_types::HealthFinding {
+                path: root.join("src/dummy.ts"),
+                name: "fn".to_string(),
+                line: 1,
+                col: 0,
+                cyclomatic: 25,
+                cognitive: 20,
+                line_count: 50,
+                exceeded: crate::health_types::ExceededThreshold::Both,
+            }],
+            summary: crate::health_types::HealthSummary {
+                files_analyzed: 5,
+                functions_analyzed: 10,
+                functions_above_threshold: 1,
+                max_cyclomatic_threshold: 20,
+                max_cognitive_threshold: 15,
+                files_scored: Some(1),
+                average_maintainability: Some(65.0),
+            },
+            vital_signs: None,
+            file_scores: vec![crate::health_types::FileHealthScore {
+                path: root.join("src/utils.ts"),
+                fan_in: 5,
+                fan_out: 3,
+                dead_code_ratio: 0.25,
+                complexity_density: 0.8,
+                maintainability_index: 72.5,
+                total_cyclomatic: 40,
+                total_cognitive: 30,
+                function_count: 10,
+                lines: 200,
+            }],
+            hotspots: vec![],
+            hotspot_summary: None,
+            targets: vec![],
+            target_thresholds: None,
+        };
+        let md = build_health_markdown(&report, &root);
+        assert!(md.contains("### File Health Scores (1 files)"));
+        assert!(md.contains("| File | MI | Fan-in | Fan-out | Dead Code | Density |"));
+        assert!(md.contains("| `src/utils.ts` | 72.5 | 5 | 3 | 25% | 0.80 |"));
+        assert!(md.contains("**Average maintainability index:** 65.0/100"));
+    }
+
+    // ── Health markdown hotspots ──
+
+    #[test]
+    fn health_markdown_hotspots_table() {
+        let root = PathBuf::from("/project");
+        let report = crate::health_types::HealthReport {
+            findings: vec![crate::health_types::HealthFinding {
+                path: root.join("src/dummy.ts"),
+                name: "fn".to_string(),
+                line: 1,
+                col: 0,
+                cyclomatic: 25,
+                cognitive: 20,
+                line_count: 50,
+                exceeded: crate::health_types::ExceededThreshold::Both,
+            }],
+            summary: crate::health_types::HealthSummary {
+                files_analyzed: 5,
+                functions_analyzed: 10,
+                functions_above_threshold: 1,
+                max_cyclomatic_threshold: 20,
+                max_cognitive_threshold: 15,
+                files_scored: None,
+                average_maintainability: None,
+            },
+            vital_signs: None,
+            file_scores: vec![],
+            hotspots: vec![crate::health_types::HotspotEntry {
+                path: root.join("src/hot.ts"),
+                score: 85.0,
+                commits: 42,
+                weighted_commits: 35.0,
+                lines_added: 500,
+                lines_deleted: 200,
+                complexity_density: 1.2,
+                fan_in: 10,
+                trend: fallow_core::churn::ChurnTrend::Accelerating,
+            }],
+            hotspot_summary: Some(crate::health_types::HotspotSummary {
+                since: "6 months".to_string(),
+                min_commits: 3,
+                files_analyzed: 50,
+                files_excluded: 5,
+                shallow_clone: false,
+            }),
+            targets: vec![],
+            target_thresholds: None,
+        };
+        let md = build_health_markdown(&report, &root);
+        assert!(md.contains("### Hotspots (1 files, since 6 months)"));
+        assert!(md.contains("| `src/hot.ts` | 85.0 | 42 | 700 | 1.20 | 10 | accelerating |"));
+        assert!(md.contains("*5 files excluded (< 3 commits)*"));
+    }
+
+    // ── Health markdown metric legend ──
+
+    #[test]
+    fn health_markdown_metric_legend_with_scores() {
+        let root = PathBuf::from("/project");
+        let report = crate::health_types::HealthReport {
+            findings: vec![crate::health_types::HealthFinding {
+                path: root.join("src/x.ts"),
+                name: "f".to_string(),
+                line: 1,
+                col: 0,
+                cyclomatic: 25,
+                cognitive: 20,
+                line_count: 10,
+                exceeded: crate::health_types::ExceededThreshold::Both,
+            }],
+            summary: crate::health_types::HealthSummary {
+                files_analyzed: 1,
+                functions_analyzed: 1,
+                functions_above_threshold: 1,
+                max_cyclomatic_threshold: 20,
+                max_cognitive_threshold: 15,
+                files_scored: Some(1),
+                average_maintainability: Some(70.0),
+            },
+            vital_signs: None,
+            file_scores: vec![crate::health_types::FileHealthScore {
+                path: root.join("src/x.ts"),
+                fan_in: 1,
+                fan_out: 1,
+                dead_code_ratio: 0.0,
+                complexity_density: 0.5,
+                maintainability_index: 80.0,
+                total_cyclomatic: 10,
+                total_cognitive: 8,
+                function_count: 2,
+                lines: 50,
+            }],
+            hotspots: vec![],
+            hotspot_summary: None,
+            targets: vec![],
+            target_thresholds: None,
+        };
+        let md = build_health_markdown(&report, &root);
+        assert!(md.contains("<details><summary>Metric definitions</summary>"));
+        assert!(md.contains("**MI** \u{2014} Maintainability Index"));
+        assert!(md.contains("**Fan-in**"));
+        assert!(md.contains("Full metric reference"));
+    }
+
+    // ── Health markdown truncated findings ──
+
+    #[test]
+    fn health_markdown_truncated_findings_shown_count() {
+        let root = PathBuf::from("/project");
+        let report = crate::health_types::HealthReport {
+            findings: vec![crate::health_types::HealthFinding {
+                path: root.join("src/x.ts"),
+                name: "f".to_string(),
+                line: 1,
+                col: 0,
+                cyclomatic: 25,
+                cognitive: 20,
+                line_count: 10,
+                exceeded: crate::health_types::ExceededThreshold::Both,
+            }],
+            summary: crate::health_types::HealthSummary {
+                files_analyzed: 10,
+                functions_analyzed: 50,
+                functions_above_threshold: 5, // 5 total but only 1 shown
+                max_cyclomatic_threshold: 20,
+                max_cognitive_threshold: 15,
+                files_scored: None,
+                average_maintainability: None,
+            },
+            vital_signs: None,
+            file_scores: vec![],
+            hotspots: vec![],
+            hotspot_summary: None,
+            targets: vec![],
+            target_thresholds: None,
+        };
+        let md = build_health_markdown(&report, &root);
+        assert!(md.contains("5 high complexity functions (1 shown)"));
+    }
+
+    // ── escape_backticks ──
+
+    #[test]
+    fn escape_backticks_handles_multiple() {
+        assert_eq!(escape_backticks("a`b`c"), "a\\`b\\`c");
+    }
+
+    #[test]
+    fn escape_backticks_no_backticks_unchanged() {
+        assert_eq!(escape_backticks("hello"), "hello");
+    }
+
+    // ── Unresolved import in markdown ──
+
+    #[test]
+    fn markdown_unresolved_import_grouped_by_file() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results.unresolved_imports.push(UnresolvedImport {
+            path: root.join("src/app.ts"),
+            specifier: "./missing".to_string(),
+            line: 3,
+            col: 0,
+            specifier_col: 0,
+        });
+        let md = build_markdown(&results, &root);
+        assert!(md.contains("### Unresolved imports (1)"));
+        assert!(md.contains("- `src/app.ts`"));
+        assert!(md.contains(":3 `./missing`"));
+    }
+
+    // ── Markdown optional dep ──
+
+    #[test]
+    fn markdown_unused_optional_dep() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results.unused_optional_dependencies.push(UnusedDependency {
+            package_name: "fsevents".to_string(),
+            location: DependencyLocation::OptionalDependencies,
+            path: root.join("package.json"),
+            line: 12,
+        });
+        let md = build_markdown(&results, &root);
+        assert!(md.contains("### Unused optionalDependencies (1)"));
+        assert!(md.contains("- `fsevents`"));
+    }
+
+    // ── Health markdown no hotspot exclusion message when 0 excluded ──
+
+    #[test]
+    fn health_markdown_hotspots_no_excluded_message() {
+        let root = PathBuf::from("/project");
+        let report = crate::health_types::HealthReport {
+            findings: vec![crate::health_types::HealthFinding {
+                path: root.join("src/x.ts"),
+                name: "f".to_string(),
+                line: 1,
+                col: 0,
+                cyclomatic: 25,
+                cognitive: 20,
+                line_count: 10,
+                exceeded: crate::health_types::ExceededThreshold::Both,
+            }],
+            summary: crate::health_types::HealthSummary {
+                files_analyzed: 5,
+                functions_analyzed: 10,
+                functions_above_threshold: 1,
+                max_cyclomatic_threshold: 20,
+                max_cognitive_threshold: 15,
+                files_scored: None,
+                average_maintainability: None,
+            },
+            vital_signs: None,
+            file_scores: vec![],
+            hotspots: vec![crate::health_types::HotspotEntry {
+                path: root.join("src/hot.ts"),
+                score: 50.0,
+                commits: 10,
+                weighted_commits: 8.0,
+                lines_added: 100,
+                lines_deleted: 50,
+                complexity_density: 0.5,
+                fan_in: 3,
+                trend: fallow_core::churn::ChurnTrend::Stable,
+            }],
+            hotspot_summary: Some(crate::health_types::HotspotSummary {
+                since: "6 months".to_string(),
+                min_commits: 3,
+                files_analyzed: 50,
+                files_excluded: 0,
+                shallow_clone: false,
+            }),
+            targets: vec![],
+            target_thresholds: None,
+        };
+        let md = build_health_markdown(&report, &root);
+        assert!(!md.contains("files excluded"));
+    }
+
+    // ── Duplication markdown plural ──
+
+    #[test]
+    fn duplication_markdown_single_group_no_plural() {
+        let root = PathBuf::from("/project");
+        let report = DuplicationReport {
+            clone_groups: vec![CloneGroup {
+                instances: vec![CloneInstance {
+                    file: root.join("src/a.ts"),
+                    start_line: 1,
+                    end_line: 5,
+                    start_col: 0,
+                    end_col: 0,
+                    fragment: String::new(),
+                }],
+                token_count: 30,
+                line_count: 5,
+            }],
+            clone_families: vec![],
+            stats: DuplicationStats {
+                clone_groups: 1,
+                clone_instances: 1,
+                duplication_percentage: 2.0,
+                ..Default::default()
+            },
+        };
+        let md = build_duplication_markdown(&report, &root);
+        assert!(md.contains("1 clone group found"));
+        assert!(!md.contains("1 clone groups found"));
+    }
 }

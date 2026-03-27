@@ -418,4 +418,190 @@ mod tests {
         let lines = build_compact_lines(&results, &root);
         assert_eq!(lines[0], "unused-file:src/deep/nested/file.ts");
     }
+
+    // ── Re-export variants ──
+
+    #[test]
+    fn compact_re_export_tagged_correctly() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results.unused_exports.push(UnusedExport {
+            path: root.join("src/index.ts"),
+            export_name: "reExported".to_string(),
+            is_type_only: false,
+            line: 1,
+            col: 0,
+            span_start: 0,
+            is_re_export: true,
+        });
+
+        let lines = build_compact_lines(&results, &root);
+        assert_eq!(lines[0], "unused-re-export:src/index.ts:1:reExported");
+    }
+
+    #[test]
+    fn compact_type_re_export_tagged_correctly() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results.unused_types.push(UnusedExport {
+            path: root.join("src/index.ts"),
+            export_name: "ReExportedType".to_string(),
+            is_type_only: true,
+            line: 3,
+            col: 0,
+            span_start: 0,
+            is_re_export: true,
+        });
+
+        let lines = build_compact_lines(&results, &root);
+        assert_eq!(
+            lines[0],
+            "unused-re-export-type:src/index.ts:3:ReExportedType"
+        );
+    }
+
+    // ── Unused optional dependency ──
+
+    #[test]
+    fn compact_unused_optional_dep_format() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results.unused_optional_dependencies.push(UnusedDependency {
+            package_name: "fsevents".to_string(),
+            location: DependencyLocation::OptionalDependencies,
+            path: root.join("package.json"),
+            line: 12,
+        });
+
+        let lines = build_compact_lines(&results, &root);
+        assert_eq!(lines[0], "unused-optionaldep:fsevents");
+    }
+
+    // ── Circular dependency ──
+
+    #[test]
+    fn compact_circular_dependency_format() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results.circular_dependencies.push(CircularDependency {
+            files: vec![root.join("src/a.ts"), root.join("src/b.ts")],
+            length: 2,
+            line: 3,
+            col: 0,
+        });
+
+        let lines = build_compact_lines(&results, &root);
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].starts_with("circular-dependency:src/a.ts:3:"));
+        assert!(lines[0].contains("src/a.ts"));
+        assert!(lines[0].contains("src/b.ts"));
+        // Chain should close the cycle: a -> b -> a
+        assert!(lines[0].contains("\u{2192}"));
+    }
+
+    #[test]
+    fn compact_circular_dependency_closes_cycle() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results.circular_dependencies.push(CircularDependency {
+            files: vec![
+                root.join("src/a.ts"),
+                root.join("src/b.ts"),
+                root.join("src/c.ts"),
+            ],
+            length: 3,
+            line: 1,
+            col: 0,
+        });
+
+        let lines = build_compact_lines(&results, &root);
+        // Chain: a -> b -> c -> a
+        let chain_part = lines[0].split(':').next_back().unwrap();
+        let parts: Vec<&str> = chain_part.split(" \u{2192} ").collect();
+        assert_eq!(parts.len(), 4);
+        assert_eq!(parts[0], parts[3]); // first == last (cycle closes)
+    }
+
+    // ── Type-only dependency ──
+
+    #[test]
+    fn compact_type_only_dep_format() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results.type_only_dependencies.push(TypeOnlyDependency {
+            package_name: "zod".to_string(),
+            path: root.join("package.json"),
+            line: 8,
+        });
+
+        let lines = build_compact_lines(&results, &root);
+        assert_eq!(lines[0], "type-only-dep:zod");
+    }
+
+    // ── Multiple items of same type ──
+
+    #[test]
+    fn compact_multiple_unused_files() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results.unused_files.push(UnusedFile {
+            path: root.join("src/a.ts"),
+        });
+        results.unused_files.push(UnusedFile {
+            path: root.join("src/b.ts"),
+        });
+
+        let lines = build_compact_lines(&results, &root);
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0], "unused-file:src/a.ts");
+        assert_eq!(lines[1], "unused-file:src/b.ts");
+    }
+
+    // ── Output ordering matches issue types ──
+
+    #[test]
+    fn compact_ordering_optional_dep_between_devdep_and_enum() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results.unused_dev_dependencies.push(UnusedDependency {
+            package_name: "jest".to_string(),
+            location: DependencyLocation::DevDependencies,
+            path: root.join("package.json"),
+            line: 5,
+        });
+        results.unused_optional_dependencies.push(UnusedDependency {
+            package_name: "fsevents".to_string(),
+            location: DependencyLocation::OptionalDependencies,
+            path: root.join("package.json"),
+            line: 12,
+        });
+        results.unused_enum_members.push(UnusedMember {
+            path: root.join("src/enums.ts"),
+            parent_name: "Status".to_string(),
+            member_name: "Deprecated".to_string(),
+            kind: MemberKind::EnumMember,
+            line: 8,
+            col: 2,
+        });
+
+        let lines = build_compact_lines(&results, &root);
+        assert_eq!(lines.len(), 3);
+        assert!(lines[0].starts_with("unused-devdep:"));
+        assert!(lines[1].starts_with("unused-optionaldep:"));
+        assert!(lines[2].starts_with("unused-enum-member:"));
+    }
+
+    // ── Path outside root ──
+
+    #[test]
+    fn compact_path_outside_root_preserved() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results.unused_files.push(UnusedFile {
+            path: PathBuf::from("/other/place/file.ts"),
+        });
+
+        let lines = build_compact_lines(&results, &root);
+        assert!(lines[0].contains("/other/place/file.ts"));
+    }
 }

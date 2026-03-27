@@ -972,4 +972,157 @@ mod tests {
             );
         }
     }
+
+    // ── insert_meta ─────────────────────────────────────────────────
+
+    #[test]
+    fn insert_meta_adds_key_to_object() {
+        let mut output = serde_json::json!({ "foo": 1 });
+        let meta = serde_json::json!({ "docs": "https://example.com" });
+        insert_meta(&mut output, meta.clone());
+        assert_eq!(output["_meta"], meta);
+    }
+
+    #[test]
+    fn insert_meta_noop_on_non_object() {
+        let mut output = serde_json::json!([1, 2, 3]);
+        let meta = serde_json::json!({ "docs": "https://example.com" });
+        insert_meta(&mut output, meta);
+        // Should not panic or add anything
+        assert!(output.is_array());
+    }
+
+    #[test]
+    fn insert_meta_overwrites_existing_meta() {
+        let mut output = serde_json::json!({ "_meta": "old" });
+        let meta = serde_json::json!({ "new": true });
+        insert_meta(&mut output, meta.clone());
+        assert_eq!(output["_meta"], meta);
+    }
+
+    // ── build_json_envelope ─────────────────────────────────────────
+
+    #[test]
+    fn build_json_envelope_has_metadata_fields() {
+        let report = serde_json::json!({ "findings": [] });
+        let elapsed = Duration::from_millis(42);
+        let output = build_json_envelope(report, elapsed);
+
+        assert_eq!(output["schema_version"], 3);
+        assert!(output["version"].is_string());
+        assert_eq!(output["elapsed_ms"], 42);
+        assert!(output["findings"].is_array());
+    }
+
+    #[test]
+    fn build_json_envelope_metadata_appears_first() {
+        let report = serde_json::json!({ "data": "value" });
+        let output = build_json_envelope(report, Duration::from_millis(10));
+
+        let keys: Vec<&String> = output.as_object().unwrap().keys().collect();
+        assert_eq!(keys[0], "schema_version");
+        assert_eq!(keys[1], "version");
+        assert_eq!(keys[2], "elapsed_ms");
+    }
+
+    #[test]
+    fn build_json_envelope_non_object_report() {
+        // If report_value is not an Object, only metadata fields appear
+        let report = serde_json::json!("not an object");
+        let output = build_json_envelope(report, Duration::from_millis(0));
+
+        let obj = output.as_object().unwrap();
+        assert_eq!(obj.len(), 3);
+        assert!(obj.contains_key("schema_version"));
+        assert!(obj.contains_key("version"));
+        assert!(obj.contains_key("elapsed_ms"));
+    }
+
+    // ── strip_root_prefix with null value ──
+
+    #[test]
+    fn strip_root_prefix_null_unchanged() {
+        let mut value = serde_json::Value::Null;
+        strip_root_prefix(&mut value, "/project/");
+        assert!(value.is_null());
+    }
+
+    // ── strip_root_prefix with empty string ──
+
+    #[test]
+    fn strip_root_prefix_empty_string() {
+        let mut value = serde_json::json!("");
+        strip_root_prefix(&mut value, "/project/");
+        assert_eq!(value, "");
+    }
+
+    // ── strip_root_prefix on mixed nested structure ──
+
+    #[test]
+    fn strip_root_prefix_mixed_types() {
+        let mut value = serde_json::json!({
+            "path": "/project/src/file.ts",
+            "line": 42,
+            "flag": true,
+            "nested": {
+                "items": ["/project/a.ts", 99, null, "/project/b.ts"],
+                "deep": { "path": "/project/c.ts" }
+            }
+        });
+        strip_root_prefix(&mut value, "/project/");
+        assert_eq!(value["path"], "src/file.ts");
+        assert_eq!(value["line"], 42);
+        assert_eq!(value["flag"], true);
+        assert_eq!(value["nested"]["items"][0], "a.ts");
+        assert_eq!(value["nested"]["items"][1], 99);
+        assert!(value["nested"]["items"][2].is_null());
+        assert_eq!(value["nested"]["items"][3], "b.ts");
+        assert_eq!(value["nested"]["deep"]["path"], "c.ts");
+    }
+
+    // ── JSON with explain meta for check ──
+
+    #[test]
+    fn json_check_meta_integrates_correctly() {
+        let root = PathBuf::from("/project");
+        let results = AnalysisResults::default();
+        let elapsed = Duration::from_millis(0);
+        let mut output = build_json(&results, &root, elapsed).expect("should serialize");
+        insert_meta(&mut output, crate::explain::check_meta());
+
+        assert!(output["_meta"]["docs"].is_string());
+        assert!(output["_meta"]["rules"].is_object());
+    }
+
+    // ── JSON unused member kind serialization ──
+
+    #[test]
+    fn json_unused_member_kind_serialized() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results.unused_enum_members.push(UnusedMember {
+            path: root.join("src/enums.ts"),
+            parent_name: "Color".to_string(),
+            member_name: "Red".to_string(),
+            kind: MemberKind::EnumMember,
+            line: 3,
+            col: 2,
+        });
+        results.unused_class_members.push(UnusedMember {
+            path: root.join("src/class.ts"),
+            parent_name: "Foo".to_string(),
+            member_name: "bar".to_string(),
+            kind: MemberKind::ClassMethod,
+            line: 10,
+            col: 4,
+        });
+
+        let elapsed = Duration::from_millis(0);
+        let output = build_json(&results, &root, elapsed).expect("should serialize");
+
+        let enum_member = &output["unused_enum_members"][0];
+        assert!(enum_member["kind"].is_string());
+        let class_member = &output["unused_class_members"][0];
+        assert!(class_member["kind"].is_string());
+    }
 }

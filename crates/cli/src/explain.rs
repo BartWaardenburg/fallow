@@ -478,4 +478,295 @@ mod tests {
         assert!(metrics.contains_key("clone_groups"));
         assert!(metrics.contains_key("clone_families"));
     }
+
+    // ── HEALTH_RULES completeness ──────────────────────────────────
+
+    #[test]
+    fn health_rules_all_have_fallow_prefix() {
+        for rule in HEALTH_RULES {
+            assert!(
+                rule.id.starts_with("fallow/"),
+                "health rule {} should start with fallow/",
+                rule.id
+            );
+        }
+    }
+
+    #[test]
+    fn health_rules_all_have_docs_path() {
+        for rule in HEALTH_RULES {
+            assert!(
+                !rule.docs_path.is_empty(),
+                "health rule {} should have a docs_path",
+                rule.id
+            );
+        }
+    }
+
+    #[test]
+    fn health_rules_all_have_non_empty_fields() {
+        for rule in HEALTH_RULES {
+            assert!(
+                !rule.name.is_empty(),
+                "health rule {} missing name",
+                rule.id
+            );
+            assert!(
+                !rule.short.is_empty(),
+                "health rule {} missing short description",
+                rule.id
+            );
+            assert!(
+                !rule.full.is_empty(),
+                "health rule {} missing full description",
+                rule.id
+            );
+        }
+    }
+
+    // ── DUPES_RULES completeness ───────────────────────────────────
+
+    #[test]
+    fn dupes_rules_all_have_fallow_prefix() {
+        for rule in DUPES_RULES {
+            assert!(
+                rule.id.starts_with("fallow/"),
+                "dupes rule {} should start with fallow/",
+                rule.id
+            );
+        }
+    }
+
+    #[test]
+    fn dupes_rules_all_have_docs_path() {
+        for rule in DUPES_RULES {
+            assert!(
+                !rule.docs_path.is_empty(),
+                "dupes rule {} should have a docs_path",
+                rule.id
+            );
+        }
+    }
+
+    #[test]
+    fn dupes_rules_all_have_non_empty_fields() {
+        for rule in DUPES_RULES {
+            assert!(!rule.name.is_empty(), "dupes rule {} missing name", rule.id);
+            assert!(
+                !rule.short.is_empty(),
+                "dupes rule {} missing short description",
+                rule.id
+            );
+            assert!(
+                !rule.full.is_empty(),
+                "dupes rule {} missing full description",
+                rule.id
+            );
+        }
+    }
+
+    // ── CHECK_RULES field completeness ─────────────────────────────
+
+    #[test]
+    fn check_rules_all_have_non_empty_fields() {
+        for rule in CHECK_RULES {
+            assert!(!rule.name.is_empty(), "check rule {} missing name", rule.id);
+            assert!(
+                !rule.short.is_empty(),
+                "check rule {} missing short description",
+                rule.id
+            );
+            assert!(
+                !rule.full.is_empty(),
+                "check rule {} missing full description",
+                rule.id
+            );
+        }
+    }
+
+    // ── rule_docs_url with health/dupes rules ──────────────────────
+
+    #[test]
+    fn rule_docs_url_health_rule() {
+        let rule = rule_by_id("fallow/high-cyclomatic-complexity").unwrap();
+        let url = rule_docs_url(rule);
+        assert!(url.starts_with("https://docs.fallow.tools/"));
+        assert!(url.contains("health"));
+    }
+
+    #[test]
+    fn rule_docs_url_dupes_rule() {
+        let rule = rule_by_id("fallow/code-duplication").unwrap();
+        let url = rule_docs_url(rule);
+        assert!(url.starts_with("https://docs.fallow.tools/"));
+        assert!(url.contains("duplication"));
+    }
+
+    // ── health_meta metric structure ───────────────────────────────
+
+    #[test]
+    fn health_meta_all_metrics_have_name_and_description() {
+        let meta = health_meta();
+        let metrics = meta["metrics"].as_object().unwrap();
+        for (key, value) in metrics {
+            assert!(
+                value.get("name").is_some(),
+                "health metric {key} missing 'name'"
+            );
+            assert!(
+                value.get("description").is_some(),
+                "health metric {key} missing 'description'"
+            );
+            assert!(
+                value.get("interpretation").is_some(),
+                "health metric {key} missing 'interpretation'"
+            );
+        }
+    }
+
+    #[test]
+    fn health_meta_has_all_expected_metrics() {
+        let meta = health_meta();
+        let metrics = meta["metrics"].as_object().unwrap();
+        let expected = [
+            "cyclomatic",
+            "cognitive",
+            "line_count",
+            "maintainability_index",
+            "complexity_density",
+            "dead_code_ratio",
+            "fan_in",
+            "fan_out",
+            "score",
+            "weighted_commits",
+            "trend",
+            "priority",
+            "efficiency",
+            "effort",
+            "confidence",
+        ];
+        for key in &expected {
+            assert!(
+                metrics.contains_key(*key),
+                "health_meta missing expected metric: {key}"
+            );
+        }
+    }
+
+    // ── dupes_meta metric structure ────────────────────────────────
+
+    #[test]
+    fn dupes_meta_all_metrics_have_name_and_description() {
+        let meta = dupes_meta();
+        let metrics = meta["metrics"].as_object().unwrap();
+        for (key, value) in metrics {
+            assert!(
+                value.get("name").is_some(),
+                "dupes metric {key} missing 'name'"
+            );
+            assert!(
+                value.get("description").is_some(),
+                "dupes metric {key} missing 'description'"
+            );
+        }
+    }
+
+    #[test]
+    fn dupes_meta_has_line_count() {
+        let meta = dupes_meta();
+        let metrics = meta["metrics"].as_object().unwrap();
+        assert!(metrics.contains_key("line_count"));
+    }
+
+    // ── docs URLs ─────────────────────────────────────────────────
+
+    #[test]
+    fn check_docs_url_valid() {
+        assert!(CHECK_DOCS.starts_with("https://"));
+        assert!(CHECK_DOCS.contains("dead-code"));
+    }
+
+    #[test]
+    fn health_docs_url_valid() {
+        assert!(HEALTH_DOCS.starts_with("https://"));
+        assert!(HEALTH_DOCS.contains("health"));
+    }
+
+    #[test]
+    fn dupes_docs_url_valid() {
+        assert!(DUPES_DOCS.starts_with("https://"));
+        assert!(DUPES_DOCS.contains("dupes"));
+    }
+
+    // ── check_meta docs URL matches constant ──────────────────────
+
+    #[test]
+    fn check_meta_docs_url_matches_constant() {
+        let meta = check_meta();
+        assert_eq!(meta["docs"].as_str().unwrap(), CHECK_DOCS);
+    }
+
+    #[test]
+    fn health_meta_docs_url_matches_constant() {
+        let meta = health_meta();
+        assert_eq!(meta["docs"].as_str().unwrap(), HEALTH_DOCS);
+    }
+
+    #[test]
+    fn dupes_meta_docs_url_matches_constant() {
+        let meta = dupes_meta();
+        assert_eq!(meta["docs"].as_str().unwrap(), DUPES_DOCS);
+    }
+
+    // ── rule_by_id finds all check rules ──────────────────────────
+
+    #[test]
+    fn rule_by_id_finds_all_check_rules() {
+        for rule in CHECK_RULES {
+            assert!(
+                rule_by_id(rule.id).is_some(),
+                "rule_by_id should find check rule {}",
+                rule.id
+            );
+        }
+    }
+
+    #[test]
+    fn rule_by_id_finds_all_health_rules() {
+        for rule in HEALTH_RULES {
+            assert!(
+                rule_by_id(rule.id).is_some(),
+                "rule_by_id should find health rule {}",
+                rule.id
+            );
+        }
+    }
+
+    #[test]
+    fn rule_by_id_finds_all_dupes_rules() {
+        for rule in DUPES_RULES {
+            assert!(
+                rule_by_id(rule.id).is_some(),
+                "rule_by_id should find dupes rule {}",
+                rule.id
+            );
+        }
+    }
+
+    // ── Rule count verification ───────────────────────────────────
+
+    #[test]
+    fn check_rules_count() {
+        assert_eq!(CHECK_RULES.len(), 13);
+    }
+
+    #[test]
+    fn health_rules_count() {
+        assert_eq!(HEALTH_RULES.len(), 4);
+    }
+
+    #[test]
+    fn dupes_rules_count() {
+        assert_eq!(DUPES_RULES.len(), 1);
+    }
 }
