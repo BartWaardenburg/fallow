@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1774618379888,
+  "lastUpdate": 1774618675653,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
@@ -2633,6 +2633,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/93867ff0f4e0aceb5df35285f14a9bfb2dce38cc"
         },
         "date": 1774618379283,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 87.8,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "ea730db740ecd0c91b517edf4ea0ccccdf91b815",
+          "message": "fix: address final panel review findings\n\n1. Review body: fix silent jq failure with explicit error logging and\n   robust fallback that always includes issue count\n2. Merged same-line comments: add numbered headers ([1/2], [2/2]) and\n   \"N findings on this line\" intro for visual hierarchy\n3. Duplication suggestion: clean text without duplicate filenames,\n   write own message instead of parsing Rust-generated description",
+          "timestamp": "2026-03-27T14:36:58+01:00",
+          "tree_id": "e2e432048f0601fcdddfbc7b07f61593f62a892f",
+          "url": "https://github.com/fallow-rs/fallow/commit/ea730db740ecd0c91b517edf4ea0ccccdf91b815"
+        },
+        "date": 1774618675237,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
