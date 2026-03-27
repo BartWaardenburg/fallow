@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1774612368361,
+  "lastUpdate": 1774613230751,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
@@ -2546,6 +2546,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/5c8ca9fdd866eb0d78c6a4ce4471740d03c583bf"
         },
         "date": 1774612367753,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 87.8,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "55811de52c25f67d7712d52a84cfed7fe24a5092",
+          "message": "refactor: extract action.yml into modular jq scripts and bash scripts\n\naction.yml reduced from 1122 to 339 lines (70% reduction).\n\nExtracted to action/jq/ (11 files):\n- summary-{check,dupes,health,fix,combined}.jq\n- annotations-{check,dupes,health}.jq\n- review-comments-{check,dupes,health}.jq\n\nExtracted to action/scripts/ (6 files):\n- install.sh, analyze.sh, summary.sh, annotate.sh, comment.sh, review.sh\n\nKey improvements:\n- CLI arg construction deduplicated via build_common_args() and\n  build_command_args() functions in analyze.sh — SARIF fallback\n  reuses the same functions instead of duplicating 100 lines\n- Command-to-script mapping centralized in each script\n- jq scripts are independently testable:\n  echo '{}' | jq -f action/jq/summary-check.jq\n- action.yml is now a thin orchestrator with only inputs, outputs,\n  conditions, env mapping, and script invocations",
+          "timestamp": "2026-03-27T13:06:10+01:00",
+          "tree_id": "bf7f2543591418aae984dbdcf390aa3e04eac8c8",
+          "url": "https://github.com/fallow-rs/fallow/commit/55811de52c25f67d7712d52a84cfed7fe24a5092"
+        },
+        "date": 1774613229746,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
