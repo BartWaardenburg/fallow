@@ -783,4 +783,116 @@ mod tests {
         assert_eq!(rule.exports.len(), 3);
         assert!(rule.exports.contains(&"FOO".to_string()));
     }
+
+    mod proptests {
+        use super::*;
+        use proptest::prelude::*;
+
+        fn arb_resolved_config(production: bool) -> ResolvedConfig {
+            make_config(production).resolve(
+                PathBuf::from("/project"),
+                OutputFormat::Human,
+                1,
+                true,
+                true,
+            )
+        }
+
+        proptest! {
+            /// Resolved config always has non-empty ignore patterns (defaults are always added).
+            #[test]
+            fn resolved_config_has_default_ignores(production in any::<bool>()) {
+                let resolved = arb_resolved_config(production);
+                // Default patterns include node_modules, dist, build, .git, coverage, *.min.js, *.min.mjs
+                prop_assert!(
+                    resolved.ignore_patterns.is_match("node_modules/foo/bar.js"),
+                    "Default ignore should match node_modules"
+                );
+                prop_assert!(
+                    resolved.ignore_patterns.is_match("dist/bundle.js"),
+                    "Default ignore should match dist"
+                );
+            }
+
+            /// Production mode always forces dev and optional deps to Off.
+            #[test]
+            fn production_forces_dev_deps_off(_unused in Just(())) {
+                let resolved = arb_resolved_config(true);
+                prop_assert_eq!(
+                    resolved.rules.unused_dev_dependencies,
+                    Severity::Off,
+                    "Production should force unused_dev_dependencies off"
+                );
+                prop_assert_eq!(
+                    resolved.rules.unused_optional_dependencies,
+                    Severity::Off,
+                    "Production should force unused_optional_dependencies off"
+                );
+            }
+
+            /// Non-production mode preserves default severity for dev deps.
+            #[test]
+            fn non_production_preserves_dev_deps_default(_unused in Just(())) {
+                let resolved = arb_resolved_config(false);
+                prop_assert_eq!(
+                    resolved.rules.unused_dev_dependencies,
+                    Severity::Error,
+                    "Non-production should keep default dev dep severity"
+                );
+            }
+
+            /// Cache dir is always root/.fallow.
+            #[test]
+            fn cache_dir_is_root_fallow(dir_suffix in "[a-zA-Z0-9_]{1,20}") {
+                let root = PathBuf::from(format!("/project/{dir_suffix}"));
+                let expected_cache = root.join(".fallow");
+                let resolved = make_config(false).resolve(
+                    root,
+                    OutputFormat::Human,
+                    1,
+                    true,
+                    true,
+                );
+                prop_assert_eq!(
+                    resolved.cache_dir, expected_cache,
+                    "Cache dir should be root/.fallow"
+                );
+            }
+
+            /// Thread count is always passed through exactly.
+            #[test]
+            fn threads_passed_through(threads in 1..64usize) {
+                let resolved = make_config(false).resolve(
+                    PathBuf::from("/project"),
+                    OutputFormat::Human,
+                    threads,
+                    true,
+                    true,
+                );
+                prop_assert_eq!(
+                    resolved.threads, threads,
+                    "Thread count should be passed through"
+                );
+            }
+
+            /// Custom ignore patterns are merged with defaults, not replacing them.
+            #[test]
+            fn custom_ignores_dont_replace_defaults(pattern in "[a-zA-Z0-9_*/.]{1,30}") {
+                let mut config = make_config(false);
+                config.ignore_patterns = vec![pattern];
+                let resolved = config.resolve(
+                    PathBuf::from("/project"),
+                    OutputFormat::Human,
+                    1,
+                    true,
+                    true,
+                );
+                // Defaults should still be present
+                prop_assert!(
+                    resolved.ignore_patterns.is_match("node_modules/foo/bar.js"),
+                    "Default node_modules ignore should still be active"
+                );
+            }
+        }
+    }
 }

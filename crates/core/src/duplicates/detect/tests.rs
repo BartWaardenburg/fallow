@@ -1398,3 +1398,126 @@ fn detector_groups_sorted_by_token_count_desc() {
         );
     }
 }
+
+mod proptests {
+    use super::*;
+    use proptest::prelude::*;
+
+    proptest! {
+        /// Suffix array is always a permutation of 0..n.
+        #[test]
+        fn suffix_array_is_permutation(values in prop::collection::vec(-100i64..100i64, 1..100)) {
+            let sa = suffix_array::build_suffix_array(&values);
+            let n = values.len();
+            prop_assert_eq!(sa.len(), n, "SA length should equal input length");
+            let mut sorted = sa;
+            sorted.sort_unstable();
+            let expected: Vec<usize> = (0..n).collect();
+            prop_assert_eq!(sorted, expected, "SA should be a permutation of 0..n");
+        }
+
+        /// Suffix array of empty input is empty.
+        #[test]
+        fn suffix_array_empty_input(_unused in Just(())) {
+            let sa = suffix_array::build_suffix_array(&[]);
+            prop_assert!(sa.is_empty());
+        }
+
+        /// LCP values are always non-negative (they are usize, so >= 0).
+        /// Also: LCP array has the same length as the suffix array.
+        #[test]
+        fn lcp_values_same_length_as_sa(values in prop::collection::vec(0i64..50i64, 1..80)) {
+            let sa = suffix_array::build_suffix_array(&values);
+            let lcp_arr = lcp::build_lcp(&values, &sa);
+            prop_assert_eq!(lcp_arr.len(), sa.len(), "LCP array should have same length as SA");
+            // LCP[0] is always 0
+            if !lcp_arr.is_empty() {
+                prop_assert_eq!(lcp_arr[0], 0, "LCP[0] should always be 0");
+            }
+        }
+
+        /// LCP values should never exceed the remaining text length.
+        #[test]
+        fn lcp_values_bounded_by_text_length(values in prop::collection::vec(0i64..20i64, 1..60)) {
+            let n = values.len();
+            let sa = suffix_array::build_suffix_array(&values);
+            let lcp_arr = lcp::build_lcp(&values, &sa);
+            for (i, &lcp_val) in lcp_arr.iter().enumerate() {
+                if i > 0 {
+                    let remaining_curr = n - sa[i];
+                    let remaining_prev = n - sa[i - 1];
+                    let max_possible = remaining_curr.min(remaining_prev);
+                    prop_assert!(
+                        lcp_val <= max_possible,
+                        "LCP[{}]={} exceeds max possible {} (suffixes at {} and {})",
+                        i, lcp_val, max_possible, sa[i], sa[i - 1]
+                    );
+                }
+            }
+        }
+
+        /// Detected clones always have >= min_tokens tokens.
+        #[test]
+        fn clones_respect_min_tokens(
+            min_tokens in 3..15usize,
+            hash_values in prop::collection::vec(1u64..20u64, 5..30),
+        ) {
+            let detector = CloneDetector::new(min_tokens, 1, false);
+            let source_a = (0..hash_values.len()).fold(String::new(), |mut acc, i| {
+                use std::fmt::Write;
+                let _ = writeln!(acc, "t{i}");
+                acc
+            });
+            let source_b = source_a.clone();
+
+            let hashed_a = make_hashed_tokens(&hash_values);
+            let hashed_b = make_hashed_tokens(&hash_values);
+            let ft_a = make_file_tokens(&source_a, hash_values.len());
+            let ft_b = make_file_tokens(&source_b, hash_values.len());
+
+            let report = detector.detect(vec![
+                (PathBuf::from("dir_a/a.ts"), hashed_a, ft_a),
+                (PathBuf::from("dir_b/b.ts"), hashed_b, ft_b),
+            ]);
+
+            for group in &report.clone_groups {
+                prop_assert!(
+                    group.token_count >= min_tokens,
+                    "Clone group has {} tokens, but min is {}",
+                    group.token_count, min_tokens
+                );
+            }
+        }
+
+        /// Clone groups should always have at least 2 instances.
+        #[test]
+        fn clone_groups_have_at_least_two_instances(
+            hash_values in prop::collection::vec(1u64..10u64, 5..20),
+        ) {
+            let detector = CloneDetector::new(3, 1, false);
+            let source = (0..hash_values.len()).fold(String::new(), |mut acc, i| {
+                use std::fmt::Write;
+                let _ = writeln!(acc, "t{i}");
+                acc
+            });
+
+            let hashed_a = make_hashed_tokens(&hash_values);
+            let hashed_b = make_hashed_tokens(&hash_values);
+            let ft_a = make_file_tokens(&source, hash_values.len());
+            let ft_b = make_file_tokens(&source, hash_values.len());
+
+            let report = detector.detect(vec![
+                (PathBuf::from("dir_a/a.ts"), hashed_a, ft_a),
+                (PathBuf::from("dir_b/b.ts"), hashed_b, ft_b),
+            ]);
+
+            for group in &report.clone_groups {
+                prop_assert!(
+                    group.instances.len() >= 2,
+                    "Clone group should have at least 2 instances, got {}",
+                    group.instances.len()
+                );
+            }
+        }
+    }
+}

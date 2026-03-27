@@ -663,4 +663,89 @@ mod tests {
         let code = emit_json(&value, "test");
         assert_eq!(code, ExitCode::SUCCESS);
     }
+
+    mod proptests {
+        use super::*;
+        use proptest::prelude::*;
+
+        proptest! {
+            /// split_dir_filename always reconstructs the original path.
+            #[test]
+            fn split_dir_filename_reconstructs_path(path in "[a-zA-Z0-9_./\\-]{0,100}") {
+                let (dir, file) = split_dir_filename(&path);
+                let reconstructed = format!("{dir}{file}");
+                prop_assert_eq!(
+                    reconstructed, path,
+                    "dir+file should reconstruct the original path"
+                );
+            }
+
+            /// plural returns either "" or "s", nothing else.
+            #[test]
+            fn plural_returns_empty_or_s(n: usize) {
+                let result = plural(n);
+                prop_assert!(
+                    result.is_empty() || result == "s",
+                    "plural should return \"\" or \"s\", got {:?}",
+                    result
+                );
+            }
+
+            /// plural(1) is always "" and plural(n != 1) is always "s".
+            #[test]
+            fn plural_singular_only_for_one(n: usize) {
+                let result = plural(n);
+                if n == 1 {
+                    prop_assert_eq!(result, "", "plural(1) should be empty");
+                } else {
+                    prop_assert_eq!(result, "s", "plural({}) should be \"s\"", n);
+                }
+            }
+
+            /// normalize_uri never panics and always replaces backslashes.
+            #[test]
+            fn normalize_uri_no_backslashes(path in "[a-zA-Z0-9_.\\\\/ \\[\\]%-]{0,100}") {
+                let result = normalize_uri(&path);
+                prop_assert!(
+                    !result.contains('\\'),
+                    "Result should not contain backslashes: {result}"
+                );
+            }
+
+            /// normalize_uri always encodes brackets.
+            #[test]
+            fn normalize_uri_encodes_all_brackets(path in "[a-zA-Z0-9_./\\[\\]%-]{0,80}") {
+                let result = normalize_uri(&path);
+                prop_assert!(
+                    !result.contains('[') && !result.contains(']'),
+                    "Result should not contain raw brackets: {result}"
+                );
+            }
+
+            /// elide_common_prefix always returns a suffix of or equal to target.
+            #[test]
+            fn elide_common_prefix_returns_suffix_of_target(
+                base in "[a-zA-Z0-9_./]{0,50}",
+                target in "[a-zA-Z0-9_./]{0,50}",
+            ) {
+                let result = elide_common_prefix(&base, &target);
+                prop_assert!(
+                    target.ends_with(result),
+                    "Result {:?} should be a suffix of target {:?}",
+                    result, target
+                );
+            }
+
+            /// relative_path never panics.
+            #[test]
+            fn relative_path_never_panics(
+                root in "/[a-zA-Z0-9_/]{0,30}",
+                suffix in "[a-zA-Z0-9_./]{0,30}",
+            ) {
+                let root_path = Path::new(&root);
+                let full = PathBuf::from(format!("{root}/{suffix}"));
+                let _ = relative_path(&full, root_path);
+            }
+        }
+    }
 }

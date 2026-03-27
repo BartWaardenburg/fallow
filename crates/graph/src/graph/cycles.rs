@@ -1372,4 +1372,97 @@ mod tests {
             cycles.len()
         );
     }
+
+    mod proptests {
+        use super::*;
+        use proptest::prelude::*;
+
+        proptest! {
+            /// A DAG (directed acyclic graph) should always have zero cycles.
+            /// We construct a DAG by only allowing edges from lower to higher node indices.
+            #[test]
+            fn dag_has_no_cycles(
+                file_count in 2..20usize,
+                edge_pairs in prop::collection::vec((0..19u32, 0..19u32), 0..30),
+            ) {
+                // Filter to only forward edges (i < j) to guarantee a DAG
+                let dag_edges: Vec<(u32, u32)> = edge_pairs
+                    .into_iter()
+                    .filter(|(a, b)| (*a as usize) < file_count && (*b as usize) < file_count && a < b)
+                    .collect();
+
+                let graph = build_cycle_graph(file_count, &dag_edges);
+                let cycles = graph.find_cycles();
+                prop_assert!(
+                    cycles.is_empty(),
+                    "DAG should have no cycles, but found {}",
+                    cycles.len()
+                );
+            }
+
+            /// Adding mutual edges A->B->A should always detect a cycle.
+            #[test]
+            fn mutual_edges_always_detect_cycle(extra_nodes in 0..10usize) {
+                let file_count = 2 + extra_nodes;
+                let graph = build_cycle_graph(file_count, &[(0, 1), (1, 0)]);
+                let cycles = graph.find_cycles();
+                prop_assert!(
+                    !cycles.is_empty(),
+                    "A->B->A should always produce at least one cycle"
+                );
+                // The cycle should contain both nodes 0 and 1
+                let has_pair_cycle = cycles.iter().any(|c| {
+                    c.contains(&FileId(0)) && c.contains(&FileId(1))
+                });
+                prop_assert!(has_pair_cycle, "Should find a cycle containing nodes 0 and 1");
+            }
+
+            /// All cycle members should be valid FileId indices.
+            #[test]
+            fn cycle_members_are_valid_indices(
+                file_count in 2..15usize,
+                edge_pairs in prop::collection::vec((0..14u32, 0..14u32), 1..20),
+            ) {
+                let edges: Vec<(u32, u32)> = edge_pairs
+                    .into_iter()
+                    .filter(|(a, b)| (*a as usize) < file_count && (*b as usize) < file_count && a != b)
+                    .collect();
+
+                let graph = build_cycle_graph(file_count, &edges);
+                let cycles = graph.find_cycles();
+                for cycle in &cycles {
+                    prop_assert!(cycle.len() >= 2, "Cycles must have at least 2 nodes");
+                    for file_id in cycle {
+                        prop_assert!(
+                            (file_id.0 as usize) < file_count,
+                            "FileId {} exceeds file count {}",
+                            file_id.0, file_count
+                        );
+                    }
+                }
+            }
+
+            /// Cycles should be sorted by length (shortest first).
+            #[test]
+            fn cycles_sorted_by_length(
+                file_count in 3..12usize,
+                edge_pairs in prop::collection::vec((0..11u32, 0..11u32), 2..25),
+            ) {
+                let edges: Vec<(u32, u32)> = edge_pairs
+                    .into_iter()
+                    .filter(|(a, b)| (*a as usize) < file_count && (*b as usize) < file_count && a != b)
+                    .collect();
+
+                let graph = build_cycle_graph(file_count, &edges);
+                let cycles = graph.find_cycles();
+                for window in cycles.windows(2) {
+                    prop_assert!(
+                        window[0].len() <= window[1].len(),
+                        "Cycles should be sorted by length: {} > {}",
+                        window[0].len(), window[1].len()
+                    );
+                }
+            }
+        }
+    }
 }

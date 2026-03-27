@@ -41,6 +41,7 @@ toml = { workspace = true }
 insta = { workspace = true }
 fallow-types = { workspace = true }
 oxc_span = { workspace = true }
+proptest = { workspace = true }
 
 [lints]
 workspace = true

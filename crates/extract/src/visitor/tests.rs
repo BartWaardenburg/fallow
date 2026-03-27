@@ -1965,3 +1965,77 @@ fn import_and_re_export_same_source() {
     assert_eq!(info.imports[0].source, "./mod");
     assert_eq!(info.re_exports[0].source, "./mod");
 }
+
+mod proptests {
+    use super::*;
+    use proptest::prelude::*;
+
+    fn arb_valid_js_source() -> impl Strategy<Value = String> {
+        prop_oneof![
+            Just("const x = 1;".to_string()),
+            Just("export const a = 42;".to_string()),
+            Just("import { foo } from './bar';".to_string()),
+            Just("export default function() {}".to_string()),
+            Just("export { x } from './mod';".to_string()),
+            Just("const y = require('./util');".to_string()),
+            Just("export class Foo {}".to_string()),
+            Just("export type T = string;".to_string()),
+            Just("export interface I { x: number; }".to_string()),
+            Just("import * as ns from './all';".to_string()),
+            Just("export * from './barrel';".to_string()),
+            "[a-zA-Z_][a-zA-Z0-9_]{0,20}".prop_map(|id| format!("export const {id} = 1;")),
+            "[a-zA-Z_][a-zA-Z0-9_]{0,20}".prop_map(|id| format!("import {{ {id} }} from './mod';")),
+        ]
+    }
+
+    proptest! {
+        /// Parsing any valid JS/TS source never panics.
+        #[test]
+        fn parse_never_panics(source in "[a-zA-Z0-9 (){};=+\\-*/'\",.<>:\\n!?@#$%^&|~`_]{0,200}") {
+            let _ = parse(&source);
+        }
+
+        /// Star re-export sources should go into re_exports, not exports.
+        #[test]
+        fn star_reexport_does_not_pollute_exports(
+            mod_name in "[a-z]{1,10}",
+        ) {
+            let source = format!("export * from './{mod_name}';");
+            let info = parse(&source);
+            // Star re-exports should be in re_exports, not exports
+            prop_assert!(
+                !info.re_exports.is_empty(),
+                "Star re-export should produce a re_export entry"
+            );
+            // The export list should not contain the re-exported names
+            for exp in &info.exports {
+                if let ExportName::Named(name) = &exp.name {
+                    prop_assert_ne!(name, "*", "Star re-export should not appear in exports");
+                }
+            }
+        }
+
+        /// All export names should be non-empty strings (for Named variants).
+        #[test]
+        fn export_names_are_non_empty(source in arb_valid_js_source()) {
+            let info = parse(&source);
+            for export in &info.exports {
+                if let ExportName::Named(name) = &export.name {
+                    prop_assert!(!name.is_empty(), "Named export should have non-empty name");
+                }
+            }
+        }
+
+        /// All import sources should be non-empty strings.
+        #[test]
+        fn import_sources_are_non_empty(source in arb_valid_js_source()) {
+            let info = parse(&source);
+            for import in &info.imports {
+                prop_assert!(!import.source.is_empty(), "Import source should be non-empty");
+            }
+            for re_export in &info.re_exports {
+                prop_assert!(!re_export.source.is_empty(), "Re-export source should be non-empty");
+            }
+        }
+    }
+}
