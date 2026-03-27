@@ -339,4 +339,448 @@ mod tests {
         let rules2 = resolved.resolve_rules_for_path(Path::new("/project/foo.ts"));
         assert_eq!(rules2.unused_files, Severity::Warn);
     }
+
+    /// Helper to build a FallowConfig with minimal boilerplate.
+    fn make_config(production: bool) -> FallowConfig {
+        FallowConfig {
+            schema: None,
+            extends: vec![],
+            entry: vec![],
+            ignore_patterns: vec![],
+            framework: vec![],
+            workspaces: None,
+            ignore_dependencies: vec![],
+            ignore_exports: vec![],
+            duplicates: DuplicatesConfig::default(),
+            health: HealthConfig::default(),
+            rules: RulesConfig::default(),
+            production,
+            plugins: vec![],
+            overrides: vec![],
+        }
+    }
+
+    // ── Production mode ─────────────────────────────────────────────
+
+    #[test]
+    fn resolve_production_forces_dev_deps_off() {
+        let resolved = make_config(true).resolve(
+            PathBuf::from("/project"),
+            OutputFormat::Human,
+            1,
+            true,
+            true,
+        );
+        assert_eq!(
+            resolved.rules.unused_dev_dependencies,
+            Severity::Off,
+            "production mode should force unused_dev_dependencies to off"
+        );
+    }
+
+    #[test]
+    fn resolve_production_forces_optional_deps_off() {
+        let resolved = make_config(true).resolve(
+            PathBuf::from("/project"),
+            OutputFormat::Human,
+            1,
+            true,
+            true,
+        );
+        assert_eq!(
+            resolved.rules.unused_optional_dependencies,
+            Severity::Off,
+            "production mode should force unused_optional_dependencies to off"
+        );
+    }
+
+    #[test]
+    fn resolve_production_preserves_other_rules() {
+        let resolved = make_config(true).resolve(
+            PathBuf::from("/project"),
+            OutputFormat::Human,
+            1,
+            true,
+            true,
+        );
+        // Other rules should remain at their defaults
+        assert_eq!(resolved.rules.unused_files, Severity::Error);
+        assert_eq!(resolved.rules.unused_exports, Severity::Error);
+        assert_eq!(resolved.rules.unused_dependencies, Severity::Error);
+    }
+
+    #[test]
+    fn resolve_non_production_keeps_dev_deps_default() {
+        let resolved = make_config(false).resolve(
+            PathBuf::from("/project"),
+            OutputFormat::Human,
+            1,
+            true,
+            true,
+        );
+        assert_eq!(
+            resolved.rules.unused_dev_dependencies,
+            Severity::Error,
+            "non-production should keep default severity"
+        );
+        assert_eq!(resolved.rules.unused_optional_dependencies, Severity::Error);
+    }
+
+    #[test]
+    fn resolve_production_flag_stored() {
+        let resolved = make_config(true).resolve(
+            PathBuf::from("/project"),
+            OutputFormat::Human,
+            1,
+            true,
+            true,
+        );
+        assert!(resolved.production);
+
+        let resolved2 = make_config(false).resolve(
+            PathBuf::from("/project"),
+            OutputFormat::Human,
+            1,
+            true,
+            true,
+        );
+        assert!(!resolved2.production);
+    }
+
+    // ── Default ignore patterns ─────────────────────────────────────
+
+    #[test]
+    fn resolve_default_ignores_node_modules() {
+        let resolved = make_config(false).resolve(
+            PathBuf::from("/project"),
+            OutputFormat::Human,
+            1,
+            true,
+            true,
+        );
+        assert!(
+            resolved
+                .ignore_patterns
+                .is_match("node_modules/lodash/index.js")
+        );
+        assert!(
+            resolved
+                .ignore_patterns
+                .is_match("packages/a/node_modules/react/index.js")
+        );
+    }
+
+    #[test]
+    fn resolve_default_ignores_dist() {
+        let resolved = make_config(false).resolve(
+            PathBuf::from("/project"),
+            OutputFormat::Human,
+            1,
+            true,
+            true,
+        );
+        assert!(resolved.ignore_patterns.is_match("dist/bundle.js"));
+        assert!(
+            resolved
+                .ignore_patterns
+                .is_match("packages/ui/dist/index.js")
+        );
+    }
+
+    #[test]
+    fn resolve_default_ignores_root_build_only() {
+        let resolved = make_config(false).resolve(
+            PathBuf::from("/project"),
+            OutputFormat::Human,
+            1,
+            true,
+            true,
+        );
+        assert!(
+            resolved.ignore_patterns.is_match("build/output.js"),
+            "root build/ should be ignored"
+        );
+        // The pattern is `build/**` (root-only), not `**/build/**`
+        assert!(
+            !resolved.ignore_patterns.is_match("src/build/helper.ts"),
+            "nested build/ should NOT be ignored by default"
+        );
+    }
+
+    #[test]
+    fn resolve_default_ignores_minified_files() {
+        let resolved = make_config(false).resolve(
+            PathBuf::from("/project"),
+            OutputFormat::Human,
+            1,
+            true,
+            true,
+        );
+        assert!(resolved.ignore_patterns.is_match("vendor/jquery.min.js"));
+        assert!(resolved.ignore_patterns.is_match("lib/utils.min.mjs"));
+    }
+
+    #[test]
+    fn resolve_default_ignores_git() {
+        let resolved = make_config(false).resolve(
+            PathBuf::from("/project"),
+            OutputFormat::Human,
+            1,
+            true,
+            true,
+        );
+        assert!(resolved.ignore_patterns.is_match(".git/objects/ab/123.js"));
+    }
+
+    #[test]
+    fn resolve_default_ignores_coverage() {
+        let resolved = make_config(false).resolve(
+            PathBuf::from("/project"),
+            OutputFormat::Human,
+            1,
+            true,
+            true,
+        );
+        assert!(
+            resolved
+                .ignore_patterns
+                .is_match("coverage/lcov-report/index.js")
+        );
+    }
+
+    #[test]
+    fn resolve_source_files_not_ignored_by_default() {
+        let resolved = make_config(false).resolve(
+            PathBuf::from("/project"),
+            OutputFormat::Human,
+            1,
+            true,
+            true,
+        );
+        assert!(!resolved.ignore_patterns.is_match("src/index.ts"));
+        assert!(
+            !resolved
+                .ignore_patterns
+                .is_match("src/components/Button.tsx")
+        );
+        assert!(!resolved.ignore_patterns.is_match("lib/utils.js"));
+    }
+
+    // ── Custom ignore patterns ──────────────────────────────────────
+
+    #[test]
+    fn resolve_custom_ignore_patterns_merged_with_defaults() {
+        let mut config = make_config(false);
+        config.ignore_patterns = vec!["**/__generated__/**".to_string()];
+        let resolved = config.resolve(
+            PathBuf::from("/project"),
+            OutputFormat::Human,
+            1,
+            true,
+            true,
+        );
+        // Custom pattern works
+        assert!(
+            resolved
+                .ignore_patterns
+                .is_match("src/__generated__/types.ts")
+        );
+        // Default patterns still work
+        assert!(resolved.ignore_patterns.is_match("node_modules/foo/bar.js"));
+    }
+
+    // ── Config fields passthrough ───────────────────────────────────
+
+    #[test]
+    fn resolve_passes_through_entry_patterns() {
+        let mut config = make_config(false);
+        config.entry = vec!["src/**/*.ts".to_string(), "lib/**/*.js".to_string()];
+        let resolved = config.resolve(
+            PathBuf::from("/project"),
+            OutputFormat::Human,
+            1,
+            true,
+            true,
+        );
+        assert_eq!(resolved.entry_patterns, vec!["src/**/*.ts", "lib/**/*.js"]);
+    }
+
+    #[test]
+    fn resolve_passes_through_ignore_dependencies() {
+        let mut config = make_config(false);
+        config.ignore_dependencies = vec!["postcss".to_string(), "autoprefixer".to_string()];
+        let resolved = config.resolve(
+            PathBuf::from("/project"),
+            OutputFormat::Human,
+            1,
+            true,
+            true,
+        );
+        assert_eq!(
+            resolved.ignore_dependencies,
+            vec!["postcss", "autoprefixer"]
+        );
+    }
+
+    #[test]
+    fn resolve_sets_cache_dir() {
+        let resolved = make_config(false).resolve(
+            PathBuf::from("/my/project"),
+            OutputFormat::Human,
+            1,
+            true,
+            true,
+        );
+        assert_eq!(resolved.cache_dir, PathBuf::from("/my/project/.fallow"));
+    }
+
+    #[test]
+    fn resolve_passes_through_thread_count() {
+        let resolved = make_config(false).resolve(
+            PathBuf::from("/project"),
+            OutputFormat::Human,
+            8,
+            true,
+            true,
+        );
+        assert_eq!(resolved.threads, 8);
+    }
+
+    #[test]
+    fn resolve_passes_through_quiet_flag() {
+        let resolved = make_config(false).resolve(
+            PathBuf::from("/project"),
+            OutputFormat::Human,
+            1,
+            true,
+            false,
+        );
+        assert!(!resolved.quiet);
+
+        let resolved2 = make_config(false).resolve(
+            PathBuf::from("/project"),
+            OutputFormat::Human,
+            1,
+            true,
+            true,
+        );
+        assert!(resolved2.quiet);
+    }
+
+    #[test]
+    fn resolve_passes_through_no_cache_flag() {
+        let resolved_no_cache = make_config(false).resolve(
+            PathBuf::from("/project"),
+            OutputFormat::Human,
+            1,
+            true,
+            true,
+        );
+        assert!(resolved_no_cache.no_cache);
+
+        let resolved_with_cache = make_config(false).resolve(
+            PathBuf::from("/project"),
+            OutputFormat::Human,
+            1,
+            false,
+            true,
+        );
+        assert!(!resolved_with_cache.no_cache);
+    }
+
+    // ── Override resolution edge cases ───────────────────────────────
+
+    #[test]
+    fn resolve_override_with_invalid_glob_skipped() {
+        let mut config = make_config(false);
+        config.overrides = vec![ConfigOverride {
+            files: vec!["[invalid".to_string()],
+            rules: PartialRulesConfig {
+                unused_files: Some(Severity::Off),
+                ..Default::default()
+            },
+        }];
+        let resolved = config.resolve(
+            PathBuf::from("/project"),
+            OutputFormat::Human,
+            1,
+            true,
+            true,
+        );
+        // Invalid glob should be skipped, so no overrides should be compiled
+        assert!(
+            resolved.overrides.is_empty(),
+            "override with invalid glob should be skipped"
+        );
+    }
+
+    #[test]
+    fn resolve_override_with_empty_files_skipped() {
+        let mut config = make_config(false);
+        config.overrides = vec![ConfigOverride {
+            files: vec![],
+            rules: PartialRulesConfig {
+                unused_files: Some(Severity::Off),
+                ..Default::default()
+            },
+        }];
+        let resolved = config.resolve(
+            PathBuf::from("/project"),
+            OutputFormat::Human,
+            1,
+            true,
+            true,
+        );
+        assert!(
+            resolved.overrides.is_empty(),
+            "override with no file patterns should be skipped"
+        );
+    }
+
+    #[test]
+    fn resolve_multiple_valid_overrides() {
+        let mut config = make_config(false);
+        config.overrides = vec![
+            ConfigOverride {
+                files: vec!["*.test.ts".to_string()],
+                rules: PartialRulesConfig {
+                    unused_exports: Some(Severity::Off),
+                    ..Default::default()
+                },
+            },
+            ConfigOverride {
+                files: vec!["*.stories.tsx".to_string()],
+                rules: PartialRulesConfig {
+                    unused_files: Some(Severity::Off),
+                    ..Default::default()
+                },
+            },
+        ];
+        let resolved = config.resolve(
+            PathBuf::from("/project"),
+            OutputFormat::Human,
+            1,
+            true,
+            true,
+        );
+        assert_eq!(resolved.overrides.len(), 2);
+    }
+
+    // ── IgnoreExportRule ────────────────────────────────────────────
+
+    #[test]
+    fn ignore_export_rule_deserialize() {
+        let json = r#"{"file": "src/types/*.ts", "exports": ["*"]}"#;
+        let rule: IgnoreExportRule = serde_json::from_str(json).unwrap();
+        assert_eq!(rule.file, "src/types/*.ts");
+        assert_eq!(rule.exports, vec!["*"]);
+    }
+
+    #[test]
+    fn ignore_export_rule_specific_exports() {
+        let json = r#"{"file": "src/constants.ts", "exports": ["FOO", "BAR", "BAZ"]}"#;
+        let rule: IgnoreExportRule = serde_json::from_str(json).unwrap();
+        assert_eq!(rule.exports.len(), 3);
+        assert!(rule.exports.contains(&"FOO".to_string()));
+    }
 }

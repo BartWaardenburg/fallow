@@ -23,3 +23,69 @@ pub use walk::{SOURCE_EXTENSIONS, discover_files};
 /// - `.changeset` — Changesets configuration
 /// - `.github` — GitHub workflows and CI scripts
 const ALLOWED_HIDDEN_DIRS: &[&str] = &[".storybook", ".well-known", ".changeset", ".github"];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── ALLOWED_HIDDEN_DIRS exhaustiveness ───────────────────────────
+
+    #[test]
+    fn allowed_hidden_dirs_count() {
+        // Guard: if a new dir is added, add a test for it
+        assert_eq!(
+            ALLOWED_HIDDEN_DIRS.len(),
+            4,
+            "update tests when adding new allowed hidden dirs"
+        );
+    }
+
+    #[test]
+    fn allowed_hidden_dirs_all_start_with_dot() {
+        for dir in ALLOWED_HIDDEN_DIRS {
+            assert!(
+                dir.starts_with('.'),
+                "allowed hidden dir '{dir}' must start with '.'"
+            );
+        }
+    }
+
+    #[test]
+    fn allowed_hidden_dirs_no_duplicates() {
+        let mut seen = rustc_hash::FxHashSet::default();
+        for dir in ALLOWED_HIDDEN_DIRS {
+            assert!(seen.insert(*dir), "duplicate allowed hidden dir: {dir}");
+        }
+    }
+
+    #[test]
+    fn allowed_hidden_dirs_no_trailing_slash() {
+        for dir in ALLOWED_HIDDEN_DIRS {
+            assert!(
+                !dir.ends_with('/'),
+                "allowed hidden dir '{dir}' should not have trailing slash"
+            );
+        }
+    }
+
+    // ── Re-export smoke tests ───────────────────────────────────────
+
+    #[test]
+    fn file_id_re_exported() {
+        // Verify the re-export works by constructing a FileId through the discover module
+        let id = FileId(42);
+        assert_eq!(id.0, 42);
+    }
+
+    #[test]
+    fn source_extensions_re_exported() {
+        assert!(SOURCE_EXTENSIONS.contains(&"ts"));
+        assert!(SOURCE_EXTENSIONS.contains(&"tsx"));
+    }
+
+    #[test]
+    fn compile_glob_set_re_exported() {
+        let result = compile_glob_set(&["**/*.ts".to_string()]);
+        assert!(result.is_some());
+    }
+}

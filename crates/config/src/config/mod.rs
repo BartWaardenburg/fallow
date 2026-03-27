@@ -89,3 +89,210 @@ pub struct FallowConfig {
     #[serde(default)]
     pub overrides: Vec<ConfigOverride>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── Default trait ───────────────────────────────────────────────
+
+    #[test]
+    fn default_config_has_empty_collections() {
+        let config = FallowConfig::default();
+        assert!(config.schema.is_none());
+        assert!(config.extends.is_empty());
+        assert!(config.entry.is_empty());
+        assert!(config.ignore_patterns.is_empty());
+        assert!(config.framework.is_empty());
+        assert!(config.workspaces.is_none());
+        assert!(config.ignore_dependencies.is_empty());
+        assert!(config.ignore_exports.is_empty());
+        assert!(config.plugins.is_empty());
+        assert!(config.overrides.is_empty());
+        assert!(!config.production);
+    }
+
+    #[test]
+    fn default_config_rules_are_error() {
+        let config = FallowConfig::default();
+        assert_eq!(config.rules.unused_files, Severity::Error);
+        assert_eq!(config.rules.unused_exports, Severity::Error);
+        assert_eq!(config.rules.unused_dependencies, Severity::Error);
+    }
+
+    #[test]
+    fn default_config_duplicates_enabled() {
+        let config = FallowConfig::default();
+        assert!(config.duplicates.enabled);
+        assert_eq!(config.duplicates.min_tokens, 50);
+        assert_eq!(config.duplicates.min_lines, 5);
+    }
+
+    #[test]
+    fn default_config_health_thresholds() {
+        let config = FallowConfig::default();
+        assert_eq!(config.health.max_cyclomatic, 20);
+        assert_eq!(config.health.max_cognitive, 15);
+    }
+
+    // ── JSON deserialization ────────────────────────────────────────
+
+    #[test]
+    fn deserialize_empty_json_object() {
+        let config: FallowConfig = serde_json::from_str("{}").unwrap();
+        assert!(config.entry.is_empty());
+        assert!(!config.production);
+    }
+
+    #[test]
+    fn deserialize_json_with_all_top_level_fields() {
+        let json = r#"{
+            "$schema": "https://fallow.dev/schema.json",
+            "entry": ["src/main.ts"],
+            "ignorePatterns": ["generated/**"],
+            "ignoreDependencies": ["postcss"],
+            "production": true,
+            "plugins": ["custom-plugin.toml"],
+            "rules": {"unused-files": "warn"},
+            "duplicates": {"enabled": false},
+            "health": {"maxCyclomatic": 30}
+        }"#;
+        let config: FallowConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            config.schema.as_deref(),
+            Some("https://fallow.dev/schema.json")
+        );
+        assert_eq!(config.entry, vec!["src/main.ts"]);
+        assert_eq!(config.ignore_patterns, vec!["generated/**"]);
+        assert_eq!(config.ignore_dependencies, vec!["postcss"]);
+        assert!(config.production);
+        assert_eq!(config.plugins, vec!["custom-plugin.toml"]);
+        assert_eq!(config.rules.unused_files, Severity::Warn);
+        assert!(!config.duplicates.enabled);
+        assert_eq!(config.health.max_cyclomatic, 30);
+    }
+
+    #[test]
+    fn deserialize_json_deny_unknown_fields() {
+        let json = r#"{"unknownField": true}"#;
+        let result: Result<FallowConfig, _> = serde_json::from_str(json);
+        assert!(result.is_err(), "unknown fields should be rejected");
+    }
+
+    #[test]
+    fn deserialize_json_production_mode_default_false() {
+        let config: FallowConfig = serde_json::from_str("{}").unwrap();
+        assert!(!config.production);
+    }
+
+    #[test]
+    fn deserialize_json_production_mode_true() {
+        let config: FallowConfig = serde_json::from_str(r#"{"production": true}"#).unwrap();
+        assert!(config.production);
+    }
+
+    // ── TOML deserialization ────────────────────────────────────────
+
+    #[test]
+    fn deserialize_toml_minimal() {
+        let toml_str = r#"
+entry = ["src/index.ts"]
+production = true
+"#;
+        let config: FallowConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.entry, vec!["src/index.ts"]);
+        assert!(config.production);
+    }
+
+    #[test]
+    fn deserialize_toml_with_inline_framework() {
+        let toml_str = r#"
+[[framework]]
+name = "my-framework"
+enablers = ["my-framework-pkg"]
+entryPoints = ["src/routes/**/*.tsx"]
+"#;
+        let config: FallowConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.framework.len(), 1);
+        assert_eq!(config.framework[0].name, "my-framework");
+        assert_eq!(config.framework[0].enablers, vec!["my-framework-pkg"]);
+        assert_eq!(
+            config.framework[0].entry_points,
+            vec!["src/routes/**/*.tsx"]
+        );
+    }
+
+    #[test]
+    fn deserialize_toml_with_workspace_config() {
+        let toml_str = r#"
+[workspaces]
+patterns = ["packages/*", "apps/*"]
+"#;
+        let config: FallowConfig = toml::from_str(toml_str).unwrap();
+        assert!(config.workspaces.is_some());
+        let ws = config.workspaces.unwrap();
+        assert_eq!(ws.patterns, vec!["packages/*", "apps/*"]);
+    }
+
+    #[test]
+    fn deserialize_toml_with_ignore_exports() {
+        let toml_str = r#"
+[[ignoreExports]]
+file = "src/types/**/*.ts"
+exports = ["*"]
+"#;
+        let config: FallowConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.ignore_exports.len(), 1);
+        assert_eq!(config.ignore_exports[0].file, "src/types/**/*.ts");
+        assert_eq!(config.ignore_exports[0].exports, vec!["*"]);
+    }
+
+    #[test]
+    fn deserialize_toml_deny_unknown_fields() {
+        let toml_str = r"bogus_field = true";
+        let result: Result<FallowConfig, _> = toml::from_str(toml_str);
+        assert!(result.is_err(), "unknown fields should be rejected");
+    }
+
+    // ── Serialization roundtrip ─────────────────────────────────────
+
+    #[test]
+    fn json_serialize_roundtrip() {
+        let config = FallowConfig {
+            entry: vec!["src/main.ts".to_string()],
+            production: true,
+            ..FallowConfig::default()
+        };
+        let json = serde_json::to_string(&config).unwrap();
+        let restored: FallowConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.entry, vec!["src/main.ts"]);
+        assert!(restored.production);
+    }
+
+    #[test]
+    fn schema_field_not_serialized() {
+        let config = FallowConfig {
+            schema: Some("https://example.com/schema.json".to_string()),
+            ..FallowConfig::default()
+        };
+        let json = serde_json::to_string(&config).unwrap();
+        // $schema has skip_serializing, should not appear in output
+        assert!(
+            !json.contains("$schema"),
+            "schema field should be skipped in serialization"
+        );
+    }
+
+    #[test]
+    fn extends_field_not_serialized() {
+        let config = FallowConfig {
+            extends: vec!["base.json".to_string()],
+            ..FallowConfig::default()
+        };
+        let json = serde_json::to_string(&config).unwrap();
+        assert!(
+            !json.contains("extends"),
+            "extends field should be skipped in serialization"
+        );
+    }
+}

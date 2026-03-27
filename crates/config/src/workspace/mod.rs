@@ -306,4 +306,318 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
+
+    // ── dir_name ────────────────────────────────────────────────────
+
+    #[test]
+    fn dir_name_extracts_last_component() {
+        assert_eq!(dir_name(Path::new("/project/packages/core")), "core");
+        assert_eq!(dir_name(Path::new("/my-app")), "my-app");
+    }
+
+    #[test]
+    fn dir_name_empty_for_root_path() {
+        // Root path has no file_name component
+        assert_eq!(dir_name(Path::new("/")), "");
+    }
+
+    // ── WorkspaceConfig deserialization ──────────────────────────────
+
+    #[test]
+    fn workspace_config_deserialize_json() {
+        let json = r#"{"patterns": ["packages/*", "apps/*"]}"#;
+        let config: WorkspaceConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(config.patterns, vec!["packages/*", "apps/*"]);
+    }
+
+    #[test]
+    fn workspace_config_deserialize_empty_patterns() {
+        let json = r#"{"patterns": []}"#;
+        let config: WorkspaceConfig = serde_json::from_str(json).unwrap();
+        assert!(config.patterns.is_empty());
+    }
+
+    #[test]
+    fn workspace_config_default_patterns() {
+        let json = "{}";
+        let config: WorkspaceConfig = serde_json::from_str(json).unwrap();
+        assert!(config.patterns.is_empty());
+    }
+
+    // ── WorkspaceInfo ───────────────────────────────────────────────
+
+    #[test]
+    fn workspace_info_default_not_internal() {
+        let ws = WorkspaceInfo {
+            root: PathBuf::from("/project/packages/a"),
+            name: "a".to_string(),
+            is_internal_dependency: false,
+        };
+        assert!(!ws.is_internal_dependency);
+    }
+
+    // ── mark_internal_dependencies ──────────────────────────────────
+
+    #[test]
+    fn mark_internal_deps_detects_cross_references() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let pkg_a = temp_dir.path().join("a");
+        let pkg_b = temp_dir.path().join("b");
+        std::fs::create_dir_all(&pkg_a).unwrap();
+        std::fs::create_dir_all(&pkg_b).unwrap();
+
+        let mut workspaces = vec![
+            (
+                WorkspaceInfo {
+                    root: pkg_a,
+                    name: "@scope/a".to_string(),
+                    is_internal_dependency: false,
+                },
+                vec!["@scope/b".to_string()], // "a" depends on "b"
+            ),
+            (
+                WorkspaceInfo {
+                    root: pkg_b,
+                    name: "@scope/b".to_string(),
+                    is_internal_dependency: false,
+                },
+                vec!["lodash".to_string()], // "b" depends on external only
+            ),
+        ];
+
+        mark_internal_dependencies(&mut workspaces);
+
+        // "b" is depended on by "a", so it should be marked as internal
+        let ws_a = workspaces
+            .iter()
+            .find(|(ws, _)| ws.name == "@scope/a")
+            .unwrap();
+        assert!(
+            !ws_a.0.is_internal_dependency,
+            "a is not depended on by others"
+        );
+
+        let ws_b = workspaces
+            .iter()
+            .find(|(ws, _)| ws.name == "@scope/b")
+            .unwrap();
+        assert!(ws_b.0.is_internal_dependency, "b is depended on by a");
+    }
+
+    #[test]
+    fn mark_internal_deps_no_cross_references() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let pkg_a = temp_dir.path().join("a");
+        let pkg_b = temp_dir.path().join("b");
+        std::fs::create_dir_all(&pkg_a).unwrap();
+        std::fs::create_dir_all(&pkg_b).unwrap();
+
+        let mut workspaces = vec![
+            (
+                WorkspaceInfo {
+                    root: pkg_a,
+                    name: "a".to_string(),
+                    is_internal_dependency: false,
+                },
+                vec!["react".to_string()],
+            ),
+            (
+                WorkspaceInfo {
+                    root: pkg_b,
+                    name: "b".to_string(),
+                    is_internal_dependency: false,
+                },
+                vec!["lodash".to_string()],
+            ),
+        ];
+
+        mark_internal_dependencies(&mut workspaces);
+
+        assert!(!workspaces[0].0.is_internal_dependency);
+        assert!(!workspaces[1].0.is_internal_dependency);
+    }
+
+    #[test]
+    fn mark_internal_deps_deduplicates_by_path() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let pkg_a = temp_dir.path().join("a");
+        std::fs::create_dir_all(&pkg_a).unwrap();
+
+        let mut workspaces = vec![
+            (
+                WorkspaceInfo {
+                    root: pkg_a.clone(),
+                    name: "a".to_string(),
+                    is_internal_dependency: false,
+                },
+                vec![],
+            ),
+            (
+                WorkspaceInfo {
+                    root: pkg_a,
+                    name: "a".to_string(),
+                    is_internal_dependency: false,
+                },
+                vec![],
+            ),
+        ];
+
+        mark_internal_dependencies(&mut workspaces);
+        assert_eq!(
+            workspaces.len(),
+            1,
+            "duplicate paths should be deduplicated"
+        );
+    }
+
+    // ── collect_workspace_patterns ──────────────────────────────────
+
+    #[test]
+    fn collect_patterns_from_package_json() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        std::fs::write(
+            dir.path().join("package.json"),
+            r#"{"workspaces": ["packages/*", "apps/*"]}"#,
+        )
+        .unwrap();
+
+        let patterns = collect_workspace_patterns(dir.path());
+        assert_eq!(patterns, vec!["packages/*", "apps/*"]);
+    }
+
+    #[test]
+    fn collect_patterns_from_pnpm_workspace() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        std::fs::write(
+            dir.path().join("pnpm-workspace.yaml"),
+            "packages:\n  - 'packages/*'\n  - 'libs/*'\n",
+        )
+        .unwrap();
+
+        let patterns = collect_workspace_patterns(dir.path());
+        assert_eq!(patterns, vec!["packages/*", "libs/*"]);
+    }
+
+    #[test]
+    fn collect_patterns_combines_sources() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        std::fs::write(
+            dir.path().join("package.json"),
+            r#"{"workspaces": ["packages/*"]}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("pnpm-workspace.yaml"),
+            "packages:\n  - 'apps/*'\n",
+        )
+        .unwrap();
+
+        let patterns = collect_workspace_patterns(dir.path());
+        assert!(patterns.contains(&"packages/*".to_string()));
+        assert!(patterns.contains(&"apps/*".to_string()));
+    }
+
+    #[test]
+    fn collect_patterns_empty_when_no_configs() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let patterns = collect_workspace_patterns(dir.path());
+        assert!(patterns.is_empty());
+    }
+
+    // ── discover_workspaces integration ─────────────────────────────
+
+    #[test]
+    fn discover_workspaces_from_package_json() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let pkg_a = dir.path().join("packages").join("a");
+        let pkg_b = dir.path().join("packages").join("b");
+        std::fs::create_dir_all(&pkg_a).unwrap();
+        std::fs::create_dir_all(&pkg_b).unwrap();
+
+        std::fs::write(
+            dir.path().join("package.json"),
+            r#"{"workspaces": ["packages/*"]}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            pkg_a.join("package.json"),
+            r#"{"name": "@test/a", "dependencies": {"@test/b": "workspace:*"}}"#,
+        )
+        .unwrap();
+        std::fs::write(pkg_b.join("package.json"), r#"{"name": "@test/b"}"#).unwrap();
+
+        let workspaces = discover_workspaces(dir.path());
+        assert_eq!(workspaces.len(), 2);
+
+        let ws_a = workspaces.iter().find(|ws| ws.name == "@test/a").unwrap();
+        assert!(!ws_a.is_internal_dependency);
+
+        let ws_b = workspaces.iter().find(|ws| ws.name == "@test/b").unwrap();
+        assert!(ws_b.is_internal_dependency, "b is depended on by a");
+    }
+
+    #[test]
+    fn discover_workspaces_empty_project() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let workspaces = discover_workspaces(dir.path());
+        assert!(workspaces.is_empty());
+    }
+
+    #[test]
+    fn discover_workspaces_with_negated_patterns() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let pkg_a = dir.path().join("packages").join("a");
+        let pkg_test = dir.path().join("packages").join("test-utils");
+        std::fs::create_dir_all(&pkg_a).unwrap();
+        std::fs::create_dir_all(&pkg_test).unwrap();
+
+        std::fs::write(
+            dir.path().join("package.json"),
+            r#"{"workspaces": ["packages/*", "!packages/test-*"]}"#,
+        )
+        .unwrap();
+        std::fs::write(pkg_a.join("package.json"), r#"{"name": "a"}"#).unwrap();
+        std::fs::write(pkg_test.join("package.json"), r#"{"name": "test-utils"}"#).unwrap();
+
+        let workspaces = discover_workspaces(dir.path());
+        assert_eq!(workspaces.len(), 1);
+        assert_eq!(workspaces[0].name, "a");
+    }
+
+    #[test]
+    fn discover_workspaces_skips_root_as_workspace() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        // pnpm-workspace.yaml listing "." should not add root as workspace
+        std::fs::write(
+            dir.path().join("pnpm-workspace.yaml"),
+            "packages:\n  - '.'\n",
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("package.json"), r#"{"name": "root"}"#).unwrap();
+
+        let workspaces = discover_workspaces(dir.path());
+        assert!(
+            workspaces.is_empty(),
+            "root directory should not be added as workspace"
+        );
+    }
+
+    #[test]
+    fn discover_workspaces_name_fallback_to_dir_name() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let pkg_a = dir.path().join("packages").join("my-app");
+        std::fs::create_dir_all(&pkg_a).unwrap();
+
+        std::fs::write(
+            dir.path().join("package.json"),
+            r#"{"workspaces": ["packages/*"]}"#,
+        )
+        .unwrap();
+        // package.json without a name field
+        std::fs::write(pkg_a.join("package.json"), "{}").unwrap();
+
+        let workspaces = discover_workspaces(dir.path());
+        assert_eq!(workspaces.len(), 1);
+        assert_eq!(workspaces[0].name, "my-app", "should fall back to dir name");
+    }
 }
