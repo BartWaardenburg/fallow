@@ -99,9 +99,9 @@ if ! echo "$PAYLOAD" | gh api \
   # Fallback: post comments one by one, skipping failures
   POSTED=0
   for i in $(seq 0 $((TOTAL - 1))); do
-    SINGLE=$(echo "$COMMENTS" | jq --arg body "$REVIEW_BODY" '{
+    SINGLE=$(echo "$COMMENTS" | jq --arg body "$REVIEW_BODY" --argjson first "$POSTED" '{
       event: "COMMENT",
-      body: (if '"$i"' == 0 then $body else "" end),
+      body: (if $first == 0 then $body else "" end),
       comments: [.['"$i"'] | {path, line, body}]
     }')
     RESULT=$(echo "$SINGLE" | gh api \
