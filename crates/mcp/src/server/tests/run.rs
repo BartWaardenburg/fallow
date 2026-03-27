@@ -1,3 +1,4 @@
+#[cfg(unix)]
 use rmcp::model::*;
 
 use crate::tools::run_fallow;

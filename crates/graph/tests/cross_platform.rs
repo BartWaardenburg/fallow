@@ -524,8 +524,7 @@ mod windows_paths {
         let path = PathBuf::from(r"C:\Users/project\src/index.ts");
         assert_eq!(path.file_name().and_then(OsStr::to_str), Some("index.ts"));
         // On Windows, PathBuf normalizes mixed separators
-        let components: Vec<_> = path.components().collect();
-        assert!(components.len() >= 4);
+        assert!(path.components().count() >= 4);
     }
 
     #[test]
