@@ -1027,3 +1027,232 @@ fn re_export_unresolvable() {
         assert!(matches!(result[0].target, ResolveResult::Unresolvable(_)));
     });
 }
+
+// -----------------------------------------------------------------------
+// apply_specifier_upgrades: re-export triggers upgrade for imports
+// -----------------------------------------------------------------------
+
+#[test]
+fn specifier_upgrades_re_export_triggers_import_upgrade() {
+    // Module 0 has a re-export that resolves to InternalModule.
+    // Module 1 has a static import for the same specifier as NpmPackage.
+    // The re-export should trigger the import to be upgraded.
+    let mut modules = vec![
+        make_resolved_module(
+            0,
+            vec![],
+            vec![],
+            vec![make_resolved_re_export(
+                "@myorg/shared",
+                ResolveResult::InternalModule(FileId(5)),
+            )],
+        ),
+        make_resolved_module(
+            1,
+            vec![make_resolved_import(
+                "@myorg/shared",
+                ResolveResult::NpmPackage("@myorg/shared".into()),
+            )],
+            vec![],
+            vec![],
+        ),
+    ];
+
+    apply_specifier_upgrades(&mut modules);
+
+    assert!(matches!(
+        modules[1].resolved_imports[0].target,
+        ResolveResult::InternalModule(FileId(5))
+    ));
+}
+
+#[test]
+fn specifier_upgrades_re_export_triggers_dynamic_import_upgrade() {
+    // A re-export resolving to InternalModule should also upgrade
+    // dynamic imports for the same specifier.
+    let mut modules = vec![
+        make_resolved_module(
+            0,
+            vec![],
+            vec![],
+            vec![make_resolved_re_export(
+                "my-workspace-pkg",
+                ResolveResult::InternalModule(FileId(7)),
+            )],
+        ),
+        make_resolved_module(
+            1,
+            vec![],
+            vec![make_resolved_import(
+                "my-workspace-pkg",
+                ResolveResult::NpmPackage("my-workspace-pkg".into()),
+            )],
+            vec![],
+        ),
+    ];
+
+    apply_specifier_upgrades(&mut modules);
+
+    assert!(matches!(
+        modules[1].resolved_dynamic_imports[0].target,
+        ResolveResult::InternalModule(FileId(7))
+    ));
+}
+
+#[test]
+fn specifier_upgrades_does_not_upgrade_external_file() {
+    // ExternalFile results should never be upgraded, even when a bare
+    // specifier matches.
+    let mut modules = vec![
+        make_resolved_module(
+            0,
+            vec![make_resolved_import(
+                "shared-lib",
+                ResolveResult::InternalModule(FileId(3)),
+            )],
+            vec![],
+            vec![],
+        ),
+        make_resolved_module(
+            1,
+            vec![ResolvedImport {
+                info: make_import("shared-lib", ImportedName::Default, "lib"),
+                target: ResolveResult::ExternalFile(PathBuf::from("/node_modules/shared-lib/index.js")),
+            }],
+            vec![],
+            vec![],
+        ),
+    ];
+
+    apply_specifier_upgrades(&mut modules);
+
+    // ExternalFile should remain ExternalFile (only NpmPackage gets upgraded)
+    assert!(matches!(
+        modules[1].resolved_imports[0].target,
+        ResolveResult::ExternalFile(_)
+    ));
+}
+
+// -----------------------------------------------------------------------
+// resolve_dynamic_patterns: edge cases
+// -----------------------------------------------------------------------
+
+#[test]
+fn dynamic_patterns_prefix_without_suffix() {
+    let from_dir = Path::new("/project/src");
+    let patterns = vec![DynamicImportPattern {
+        prefix: "./pages/".into(),
+        suffix: None,
+        span: dummy_span(),
+    }];
+    let canonical_paths = vec![
+        PathBuf::from("/project/src/pages/Home.tsx"),
+        PathBuf::from("/project/src/pages/About.tsx"),
+        PathBuf::from("/project/src/utils.ts"),
+    ];
+    let files = vec![
+        DiscoveredFile {
+            id: FileId(0),
+            path: PathBuf::from("/project/src/pages/Home.tsx"),
+            size_bytes: 100,
+        },
+        DiscoveredFile {
+            id: FileId(1),
+            path: PathBuf::from("/project/src/pages/About.tsx"),
+            size_bytes: 100,
+        },
+        DiscoveredFile {
+            id: FileId(2),
+            path: PathBuf::from("/project/src/utils.ts"),
+            size_bytes: 100,
+        },
+    ];
+
+    let result = resolve_dynamic_patterns(from_dir, &patterns, &canonical_paths, &files);
+
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].1.len(), 2);
+    assert!(result[0].1.contains(&FileId(0)));
+    assert!(result[0].1.contains(&FileId(1)));
+}
+
+#[test]
+fn dynamic_patterns_empty_canonical_paths() {
+    let from_dir = Path::new("/project/src");
+    let patterns = vec![DynamicImportPattern {
+        prefix: "./locales/".into(),
+        suffix: Some(".json".into()),
+        span: dummy_span(),
+    }];
+
+    let result = resolve_dynamic_patterns(from_dir, &patterns, &[], &[]);
+    assert!(result.is_empty());
+}
+
+// -----------------------------------------------------------------------
+// resolve_single_require: edge cases
+// -----------------------------------------------------------------------
+
+#[test]
+fn require_destructured_empty_names_uses_namespace() {
+    // Empty destructured_names means the whole module is imported
+    with_empty_ctx(|ctx| {
+        let req = RequireCallInfo {
+            source: "path".into(),
+            span: dummy_span(),
+            destructured_names: vec![],
+            local_name: None,
+        };
+        let file = Path::new("/project/src/app.js");
+        let result = resolve_single_require(ctx, file, &req);
+
+        assert_eq!(result.len(), 1);
+        assert!(matches!(
+            result[0].info.imported_name,
+            ImportedName::Namespace
+        ));
+    });
+}
+
+// -----------------------------------------------------------------------
+// resolve_single_dynamic_import: edge cases
+// -----------------------------------------------------------------------
+
+#[test]
+fn dynamic_import_empty_destructured_and_no_local_is_side_effect() {
+    with_empty_ctx(|ctx| {
+        let imp = DynamicImportInfo {
+            source: "./init".into(),
+            span: dummy_span(),
+            destructured_names: vec![],
+            local_name: None,
+        };
+        let file = Path::new("/project/src/app.ts");
+        let result = resolve_single_dynamic_import(ctx, file, &imp);
+
+        assert_eq!(result.len(), 1);
+        assert!(matches!(
+            result[0].info.imported_name,
+            ImportedName::SideEffect
+        ));
+        assert_eq!(result[0].info.local_name, "");
+    });
+}
+
+#[test]
+fn dynamic_import_preserves_source_span() {
+    with_empty_ctx(|ctx| {
+        let imp = DynamicImportInfo {
+            source: "./lazy".into(),
+            span: Span::new(42, 84),
+            destructured_names: vec!["x".into()],
+            local_name: None,
+        };
+        let file = Path::new("/project/src/app.ts");
+        let result = resolve_single_dynamic_import(ctx, file, &imp);
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].info.span.start, 42);
+        assert_eq!(result[0].info.span.end, 84);
+    });
+}

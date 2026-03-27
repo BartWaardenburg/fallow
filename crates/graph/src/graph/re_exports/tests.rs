@@ -2114,3 +2114,180 @@ fn entry_point_named_re_export_no_in_graph_consumers_multiple_exports() {
         "internal_helper should NOT be marked used — not re-exported by entry point"
     );
 }
+
+#[test]
+fn entry_point_star_re_export_skips_default() {
+    // Per ES spec, `export * from './source'` does NOT re-export the default export.
+    // Verify that entry point star re-export does not mark the source's default as used.
+    let files = vec![
+        DiscoveredFile {
+            id: FileId(0),
+            path: PathBuf::from("/project/index.ts"),
+            size_bytes: 100,
+        },
+        DiscoveredFile {
+            id: FileId(1),
+            path: PathBuf::from("/project/source.ts"),
+            size_bytes: 50,
+        },
+    ];
+    let entry_points = vec![EntryPoint {
+        path: PathBuf::from("/project/index.ts"),
+        source: EntryPointSource::PackageJsonMain,
+    }];
+    let resolved_modules = vec![
+        // index.ts: export * from './source'
+        ResolvedModule {
+            file_id: FileId(0),
+            path: PathBuf::from("/project/index.ts"),
+            exports: vec![],
+            re_exports: vec![ResolvedReExport {
+                info: fallow_types::extract::ReExportInfo {
+                    source: "./source".to_string(),
+                    imported_name: "*".to_string(),
+                    exported_name: "*".to_string(),
+                    is_type_only: false,
+                },
+                target: ResolveResult::InternalModule(FileId(1)),
+            }],
+            resolved_imports: vec![],
+            resolved_dynamic_imports: vec![],
+            resolved_dynamic_patterns: vec![],
+            member_accesses: vec![],
+            whole_object_uses: vec![],
+            has_cjs_exports: false,
+            unused_import_bindings: FxHashSet::default(),
+        },
+        // source.ts: export default function() {} and export const named = 42
+        ResolvedModule {
+            file_id: FileId(1),
+            path: PathBuf::from("/project/source.ts"),
+            exports: vec![
+                fallow_types::extract::ExportInfo {
+                    name: ExportName::Default,
+                    local_name: None,
+                    is_type_only: false,
+                    is_public: false,
+                    span: oxc_span::Span::new(0, 20),
+                    members: vec![],
+                },
+                fallow_types::extract::ExportInfo {
+                    name: ExportName::Named("named".to_string()),
+                    local_name: Some("named".to_string()),
+                    is_type_only: false,
+                    is_public: false,
+                    span: oxc_span::Span::new(25, 45),
+                    members: vec![],
+                },
+            ],
+            re_exports: vec![],
+            resolved_imports: vec![],
+            resolved_dynamic_imports: vec![],
+            resolved_dynamic_patterns: vec![],
+            member_accesses: vec![],
+            whole_object_uses: vec![],
+            has_cjs_exports: false,
+            unused_import_bindings: FxHashSet::default(),
+        },
+    ];
+
+    let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
+    let source = &graph.modules[1];
+
+    let default_export = source
+        .exports
+        .iter()
+        .find(|e| matches!(e.name, ExportName::Default))
+        .unwrap();
+    assert!(
+        default_export.references.is_empty(),
+        "default export should NOT be marked as used by `export *` (ES spec)"
+    );
+
+    let named_export = source
+        .exports
+        .iter()
+        .find(|e| e.name.to_string() == "named")
+        .unwrap();
+    assert!(
+        !named_export.references.is_empty(),
+        "named export should be marked as used by entry point `export *`"
+    );
+}
+
+#[test]
+fn no_re_exports_skips_chain_resolution() {
+    // When there are no re-exports, chain resolution should be a no-op.
+    let files = vec![
+        DiscoveredFile {
+            id: FileId(0),
+            path: PathBuf::from("/project/entry.ts"),
+            size_bytes: 100,
+        },
+        DiscoveredFile {
+            id: FileId(1),
+            path: PathBuf::from("/project/utils.ts"),
+            size_bytes: 50,
+        },
+    ];
+    let entry_points = vec![EntryPoint {
+        path: PathBuf::from("/project/entry.ts"),
+        source: EntryPointSource::PackageJsonMain,
+    }];
+    let resolved_modules = vec![
+        ResolvedModule {
+            file_id: FileId(0),
+            path: PathBuf::from("/project/entry.ts"),
+            exports: vec![],
+            re_exports: vec![],
+            resolved_imports: vec![ResolvedImport {
+                info: ImportInfo {
+                    source: "./utils".to_string(),
+                    imported_name: ImportedName::Named("foo".to_string()),
+                    local_name: "foo".to_string(),
+                    is_type_only: false,
+                    span: oxc_span::Span::new(0, 10),
+                    source_span: oxc_span::Span::default(),
+                },
+                target: ResolveResult::InternalModule(FileId(1)),
+            }],
+            resolved_dynamic_imports: vec![],
+            resolved_dynamic_patterns: vec![],
+            member_accesses: vec![],
+            whole_object_uses: vec![],
+            has_cjs_exports: false,
+            unused_import_bindings: FxHashSet::default(),
+        },
+        ResolvedModule {
+            file_id: FileId(1),
+            path: PathBuf::from("/project/utils.ts"),
+            exports: vec![fallow_types::extract::ExportInfo {
+                name: ExportName::Named("foo".to_string()),
+                local_name: Some("foo".to_string()),
+                is_type_only: false,
+                is_public: false,
+                span: oxc_span::Span::new(0, 20),
+                members: vec![],
+            }],
+            re_exports: vec![],
+            resolved_imports: vec![],
+            resolved_dynamic_imports: vec![],
+            resolved_dynamic_patterns: vec![],
+            member_accesses: vec![],
+            whole_object_uses: vec![],
+            has_cjs_exports: false,
+            unused_import_bindings: FxHashSet::default(),
+        },
+    ];
+
+    let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
+    let utils = &graph.modules[1];
+    let foo = utils
+        .exports
+        .iter()
+        .find(|e| e.name.to_string() == "foo")
+        .unwrap();
+    // Direct import reference should still work
+    assert_eq!(foo.references.len(), 1);
+    assert_eq!(foo.references[0].from_file, FileId(0));
+}

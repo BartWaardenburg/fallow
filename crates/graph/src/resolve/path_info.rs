@@ -78,6 +78,83 @@ mod tests {
         assert!(!is_bare_specifier("/absolute"));
     }
 
+    #[test]
+    fn test_is_bare_specifier_url_specifiers() {
+        assert!(!is_bare_specifier("https://cdn.example.com/lib.js"));
+        assert!(!is_bare_specifier("http://example.com/module"));
+        assert!(!is_bare_specifier("data:text/javascript,export default 42"));
+    }
+
+    // ── is_path_alias ───────────────────────────────────────────────
+
+    #[test]
+    fn path_alias_hash_prefix() {
+        assert!(is_path_alias("#internal/module"));
+        assert!(is_path_alias("#shared"));
+    }
+
+    #[test]
+    fn path_alias_tilde_prefix() {
+        assert!(is_path_alias("~/components/Button"));
+        assert!(is_path_alias("~~/utils/helpers"));
+    }
+
+    #[test]
+    fn path_alias_at_slash_prefix() {
+        assert!(is_path_alias("@/components/Button"));
+        assert!(is_path_alias("@/lib"));
+    }
+
+    #[test]
+    fn path_alias_pascal_case_scope() {
+        // PascalCase scoped packages are tsconfig aliases, not npm packages
+        assert!(is_path_alias("@Components/Button"));
+        assert!(is_path_alias("@Hooks/useApi"));
+        assert!(is_path_alias("@Services/auth"));
+    }
+
+    #[test]
+    fn path_alias_lowercase_scope_is_not_alias() {
+        // Lowercase scoped packages are regular npm packages
+        assert!(!is_path_alias("@babel/core"));
+        assert!(!is_path_alias("@types/react"));
+        assert!(!is_path_alias("@scope/pkg"));
+    }
+
+    #[test]
+    fn path_alias_plain_specifier_is_not_alias() {
+        assert!(!is_path_alias("react"));
+        assert!(!is_path_alias("lodash/merge"));
+        assert!(!is_path_alias("my-utils"));
+    }
+
+    #[test]
+    fn path_alias_tilde_without_slash_is_not_alias() {
+        // `~something` without a slash is not a path alias convention
+        assert!(!is_path_alias("~something"));
+    }
+
+    // ── extract_package_name edge cases ─────────────────────────────
+
+    #[test]
+    fn extract_package_name_bare_scope_only() {
+        // Edge case: just `@scope` without a package name
+        assert_eq!(extract_package_name("@scope"), "@scope");
+    }
+
+    #[test]
+    fn extract_package_name_deep_subpath() {
+        assert_eq!(
+            extract_package_name("@scope/pkg/deep/nested/path"),
+            "@scope/pkg"
+        );
+    }
+
+    #[test]
+    fn extract_package_name_single_name() {
+        assert_eq!(extract_package_name("react"), "react");
+    }
+
     mod proptests {
         use super::*;
         use proptest::prelude::*;

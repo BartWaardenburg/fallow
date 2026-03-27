@@ -1947,4 +1947,266 @@ mod tests {
         assert!(graph.package_usage.contains_key("react"));
         assert!(graph.type_only_package_usage.contains_key("react"));
     }
+
+    // ── is_css_module_path: additional edge cases ─────────────────────
+
+    #[test]
+    fn css_module_path_less_not_matched() {
+        // .module.less is not supported (only .css and .scss)
+        assert!(!is_css_module_path(std::path::Path::new(
+            "Button.module.less"
+        )));
+    }
+
+    #[test]
+    fn css_module_path_nested_directory() {
+        assert!(is_css_module_path(std::path::Path::new(
+            "/project/src/components/Button.module.css"
+        )));
+    }
+
+    #[test]
+    fn css_module_path_no_extension() {
+        assert!(!is_css_module_path(std::path::Path::new("Button.module")));
+    }
+
+    #[test]
+    fn css_module_path_double_module() {
+        // Edge case: file like "Button.module.module.css"
+        assert!(is_css_module_path(std::path::Path::new(
+            "Button.module.module.css"
+        )));
+    }
+
+    // ── mark_member_exports_referenced: edge cases ───────────────────
+
+    #[test]
+    fn mark_member_exports_referenced_default_export() {
+        let mut exports = vec![ExportSymbol {
+            name: ExportName::Default,
+            is_type_only: false,
+            is_public: false,
+            span: oxc_span::Span::new(0, 5),
+            references: Vec::new(),
+            members: Vec::new(),
+        }];
+        let accessed = vec!["default".to_string()];
+        let found = mark_member_exports_referenced(
+            &mut exports,
+            FileId(0),
+            &accessed,
+            oxc_span::Span::new(0, 10),
+            &ReferenceKind::NamespaceImport,
+        );
+        assert_eq!(exports[0].references.len(), 1);
+        assert!(found.contains("default"));
+    }
+
+    #[test]
+    fn mark_member_exports_referenced_deduplicates() {
+        let mut exports = vec![ExportSymbol {
+            name: ExportName::Named("foo".to_string()),
+            is_type_only: false,
+            is_public: false,
+            span: oxc_span::Span::new(0, 5),
+            references: vec![SymbolReference {
+                from_file: FileId(0),
+                kind: ReferenceKind::NamedImport,
+                import_span: oxc_span::Span::new(0, 10),
+            }],
+            members: Vec::new(),
+        }];
+        let accessed = vec!["foo".to_string()];
+        let found = mark_member_exports_referenced(
+            &mut exports,
+            FileId(0), // same file as existing reference
+            &accessed,
+            oxc_span::Span::new(0, 10),
+            &ReferenceKind::NamespaceImport,
+        );
+        // Should not add duplicate reference from same file
+        assert_eq!(exports[0].references.len(), 1);
+        assert!(found.contains("foo"));
+    }
+
+    #[test]
+    fn mark_member_exports_referenced_empty_accessed() {
+        let mut exports = vec![ExportSymbol {
+            name: ExportName::Named("foo".to_string()),
+            is_type_only: false,
+            is_public: false,
+            span: oxc_span::Span::new(0, 5),
+            references: Vec::new(),
+            members: Vec::new(),
+        }];
+        let accessed: Vec<String> = vec![];
+        let found = mark_member_exports_referenced(
+            &mut exports,
+            FileId(0),
+            &accessed,
+            oxc_span::Span::new(0, 10),
+            &ReferenceKind::NamespaceImport,
+        );
+        assert!(exports[0].references.is_empty());
+        assert!(found.is_empty());
+    }
+
+    // ── create_synthetic_exports_for_star_re_exports: default export ──
+
+    #[test]
+    fn create_synthetic_exports_default_member() {
+        let mut exports = Vec::new();
+        let re_exports = vec![ReExportEdge {
+            source_file: FileId(2),
+            imported_name: "*".to_string(),
+            exported_name: "*".to_string(),
+            is_type_only: false,
+        }];
+        let accessed = vec!["default".to_string()];
+        let found = FxHashSet::default();
+
+        create_synthetic_exports_for_star_re_exports(
+            &mut exports,
+            &re_exports,
+            FileId(0),
+            &accessed,
+            &found,
+            oxc_span::Span::new(0, 10),
+        );
+
+        assert_eq!(exports.len(), 1);
+        assert!(matches!(exports[0].name, ExportName::Default));
+    }
+
+    // ── build_module_node: star re-export skips creating export symbol ──
+
+    #[test]
+    fn star_re_export_does_not_create_named_export_symbol() {
+        // `export * from './source'` should NOT create an ExportSymbol on the barrel
+        let files = vec![
+            DiscoveredFile {
+                id: FileId(0),
+                path: std::path::PathBuf::from("/project/barrel.ts"),
+                size_bytes: 50,
+            },
+            DiscoveredFile {
+                id: FileId(1),
+                path: std::path::PathBuf::from("/project/source.ts"),
+                size_bytes: 50,
+            },
+        ];
+        let entry_points = vec![fallow_types::discover::EntryPoint {
+            path: std::path::PathBuf::from("/project/barrel.ts"),
+            source: fallow_types::discover::EntryPointSource::PackageJsonMain,
+        }];
+        let resolved_modules = vec![
+            ResolvedModule {
+                file_id: FileId(0),
+                path: std::path::PathBuf::from("/project/barrel.ts"),
+                exports: vec![],
+                re_exports: vec![crate::resolve::ResolvedReExport {
+                    info: fallow_types::extract::ReExportInfo {
+                        source: "./source".to_string(),
+                        imported_name: "*".to_string(),
+                        exported_name: "*".to_string(),
+                        is_type_only: false,
+                    },
+                    target: ResolveResult::InternalModule(FileId(1)),
+                }],
+                resolved_imports: vec![],
+                resolved_dynamic_imports: vec![],
+                resolved_dynamic_patterns: vec![],
+                member_accesses: vec![],
+                whole_object_uses: vec![],
+                has_cjs_exports: false,
+                unused_import_bindings: FxHashSet::default(),
+            },
+            ResolvedModule {
+                file_id: FileId(1),
+                path: std::path::PathBuf::from("/project/source.ts"),
+                exports: vec![fallow_types::extract::ExportInfo {
+                    name: ExportName::Named("helper".to_string()),
+                    local_name: Some("helper".to_string()),
+                    is_type_only: false,
+                    is_public: false,
+                    span: oxc_span::Span::new(0, 20),
+                    members: vec![],
+                }],
+                re_exports: vec![],
+                resolved_imports: vec![],
+                resolved_dynamic_imports: vec![],
+                resolved_dynamic_patterns: vec![],
+                member_accesses: vec![],
+                whole_object_uses: vec![],
+                has_cjs_exports: false,
+                unused_import_bindings: FxHashSet::default(),
+            },
+        ];
+
+        let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
+        let barrel = &graph.modules[0];
+        // Star re-exports should NOT create named ExportSymbol entries
+        // (they are handled by re-export chain propagation instead)
+        assert!(
+            barrel.exports.is_empty(),
+            "star re-export should not create named export symbols on barrel"
+        );
+    }
+
+    // ── duplicate re-export: skip if export already exists ──────────
+
+    #[test]
+    fn re_export_skips_duplicate_export_name() {
+        // If a module both declares and re-exports the same name, only one
+        // ExportSymbol should exist.
+        let files = vec![DiscoveredFile {
+            id: FileId(0),
+            path: std::path::PathBuf::from("/project/barrel.ts"),
+            size_bytes: 50,
+        }];
+        let entry_points = vec![fallow_types::discover::EntryPoint {
+            path: std::path::PathBuf::from("/project/barrel.ts"),
+            source: fallow_types::discover::EntryPointSource::PackageJsonMain,
+        }];
+        let resolved_modules = vec![ResolvedModule {
+            file_id: FileId(0),
+            path: std::path::PathBuf::from("/project/barrel.ts"),
+            exports: vec![fallow_types::extract::ExportInfo {
+                name: ExportName::Named("foo".to_string()),
+                local_name: Some("foo".to_string()),
+                is_type_only: false,
+                is_public: false,
+                span: oxc_span::Span::new(0, 20),
+                members: vec![],
+            }],
+            re_exports: vec![crate::resolve::ResolvedReExport {
+                info: fallow_types::extract::ReExportInfo {
+                    source: "./source".to_string(),
+                    imported_name: "foo".to_string(),
+                    exported_name: "foo".to_string(),
+                    is_type_only: false,
+                },
+                target: ResolveResult::InternalModule(FileId(1)),
+            }],
+            resolved_imports: vec![],
+            resolved_dynamic_imports: vec![],
+            resolved_dynamic_patterns: vec![],
+            member_accesses: vec![],
+            whole_object_uses: vec![],
+            has_cjs_exports: false,
+            unused_import_bindings: FxHashSet::default(),
+        }];
+
+        let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
+        let barrel = &graph.modules[0];
+        assert_eq!(
+            barrel
+                .exports
+                .iter()
+                .filter(|e| e.name.to_string() == "foo")
+                .count(),
+            1,
+            "duplicate export name from re-export should be skipped"
+        );
+    }
 }

@@ -168,4 +168,87 @@ mod tests {
         let core_files = state.files_in_workspace(core_ws);
         assert_eq!(core_files, vec![FileId(2)]);
     }
+
+    #[test]
+    fn file_by_id_valid() {
+        let files = vec![
+            make_file(0, "/project/src/a.ts"),
+            make_file(1, "/project/src/b.ts"),
+        ];
+        let state = ProjectState::new(files, vec![]);
+        let file = state.file_by_id(FileId(0)).unwrap();
+        assert_eq!(file.path, PathBuf::from("/project/src/a.ts"));
+        assert_eq!(file.id, FileId(0));
+    }
+
+    #[test]
+    fn file_by_id_out_of_bounds() {
+        let files = vec![make_file(0, "/project/src/a.ts")];
+        let state = ProjectState::new(files, vec![]);
+        assert!(state.file_by_id(FileId(999)).is_none());
+    }
+
+    #[test]
+    fn workspace_for_file_out_of_bounds() {
+        let files = vec![make_file(0, "/project/src/a.ts")];
+        let workspaces = vec![make_workspace("app", "/project")];
+        let state = ProjectState::new(files, workspaces);
+        assert!(state.workspace_for_file(FileId(999)).is_none());
+    }
+
+    #[test]
+    fn empty_state() {
+        let state = ProjectState::new(vec![], vec![]);
+        assert!(state.files().is_empty());
+        assert!(state.workspaces().is_empty());
+        assert!(state.file_by_id(FileId(0)).is_none());
+        assert!(state.id_for_path(Path::new("/any")).is_none());
+        assert!(state.workspace_by_name("any").is_none());
+    }
+
+    #[test]
+    fn files_returns_all_files() {
+        let files = vec![
+            make_file(0, "/project/src/a.ts"),
+            make_file(1, "/project/src/b.ts"),
+        ];
+        let state = ProjectState::new(files, vec![]);
+        assert_eq!(state.files().len(), 2);
+        assert_eq!(state.files()[0].id, FileId(0));
+        assert_eq!(state.files()[1].id, FileId(1));
+    }
+
+    #[test]
+    fn workspaces_returns_all_workspaces() {
+        let workspaces = vec![
+            make_workspace("a", "/project/packages/a"),
+            make_workspace("b", "/project/packages/b"),
+        ];
+        let state = ProjectState::new(vec![], workspaces);
+        assert_eq!(state.workspaces().len(), 2);
+    }
+
+    #[test]
+    fn files_in_workspace_empty_when_no_match() {
+        let files = vec![make_file(0, "/other/path/file.ts")];
+        let workspaces = vec![make_workspace("ui", "/project/packages/ui")];
+        let state = ProjectState::new(files, workspaces);
+        let ws = state.workspace_by_name("ui").unwrap();
+        assert!(state.files_in_workspace(ws).is_empty());
+    }
+
+    #[test]
+    fn workspace_for_file_nested_workspaces() {
+        // When a file could match multiple workspaces, the first match wins.
+        // This tests the behavior with nested workspace roots.
+        let files = vec![make_file(0, "/project/packages/ui/components/Button.ts")];
+        let workspaces = vec![
+            make_workspace("root", "/project"),
+            make_workspace("ui", "/project/packages/ui"),
+        ];
+        let state = ProjectState::new(files, workspaces);
+        // Both workspaces match, but find() returns the first one
+        let ws = state.workspace_for_file(FileId(0)).unwrap();
+        assert_eq!(ws.name, "root");
+    }
 }

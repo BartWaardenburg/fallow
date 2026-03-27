@@ -603,4 +603,371 @@ mod tests {
         let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
         assert!(graph.modules[0].has_cjs_exports);
     }
+
+    #[test]
+    fn graph_edges_for_returns_targets() {
+        let graph = build_simple_graph();
+        let targets = graph.edges_for(FileId(0));
+        assert_eq!(targets, vec![FileId(1)]);
+    }
+
+    #[test]
+    fn graph_edges_for_no_imports() {
+        let graph = build_simple_graph();
+        // utils.ts has no outgoing imports
+        let targets = graph.edges_for(FileId(1));
+        assert!(targets.is_empty());
+    }
+
+    #[test]
+    fn graph_edges_for_out_of_bounds() {
+        let graph = build_simple_graph();
+        let targets = graph.edges_for(FileId(999));
+        assert!(targets.is_empty());
+    }
+
+    #[test]
+    fn graph_find_import_span_start_found() {
+        let graph = build_simple_graph();
+        let span_start = graph.find_import_span_start(FileId(0), FileId(1));
+        assert!(span_start.is_some());
+        assert_eq!(span_start.unwrap(), 0);
+    }
+
+    #[test]
+    fn graph_find_import_span_start_wrong_target() {
+        let graph = build_simple_graph();
+        // No edge from entry.ts to itself
+        let span_start = graph.find_import_span_start(FileId(0), FileId(0));
+        assert!(span_start.is_none());
+    }
+
+    #[test]
+    fn graph_find_import_span_start_source_out_of_bounds() {
+        let graph = build_simple_graph();
+        let span_start = graph.find_import_span_start(FileId(999), FileId(1));
+        assert!(span_start.is_none());
+    }
+
+    #[test]
+    fn graph_find_import_span_start_no_edges() {
+        let graph = build_simple_graph();
+        // utils.ts has no outgoing edges
+        let span_start = graph.find_import_span_start(FileId(1), FileId(0));
+        assert!(span_start.is_none());
+    }
+
+    #[test]
+    fn graph_reverse_deps_populated() {
+        let graph = build_simple_graph();
+        // utils.ts (FileId(1)) should be imported by entry.ts (FileId(0))
+        assert!(graph.reverse_deps[1].contains(&FileId(0)));
+        // entry.ts (FileId(0)) should not be imported by anyone
+        assert!(graph.reverse_deps[0].is_empty());
+    }
+
+    #[test]
+    fn graph_type_only_package_usage_tracked() {
+        let files = vec![DiscoveredFile {
+            id: FileId(0),
+            path: PathBuf::from("/project/entry.ts"),
+            size_bytes: 100,
+        }];
+        let entry_points = vec![EntryPoint {
+            path: PathBuf::from("/project/entry.ts"),
+            source: EntryPointSource::PackageJsonMain,
+        }];
+        let resolved_modules = vec![ResolvedModule {
+            file_id: FileId(0),
+            path: PathBuf::from("/project/entry.ts"),
+            exports: vec![],
+            re_exports: vec![],
+            resolved_imports: vec![
+                ResolvedImport {
+                    info: ImportInfo {
+                        source: "react".to_string(),
+                        imported_name: ImportedName::Named("FC".to_string()),
+                        local_name: "FC".to_string(),
+                        is_type_only: true,
+                        span: oxc_span::Span::new(0, 10),
+                        source_span: oxc_span::Span::default(),
+                    },
+                    target: ResolveResult::NpmPackage("react".to_string()),
+                },
+                ResolvedImport {
+                    info: ImportInfo {
+                        source: "react".to_string(),
+                        imported_name: ImportedName::Named("useState".to_string()),
+                        local_name: "useState".to_string(),
+                        is_type_only: false,
+                        span: oxc_span::Span::new(15, 30),
+                        source_span: oxc_span::Span::default(),
+                    },
+                    target: ResolveResult::NpmPackage("react".to_string()),
+                },
+            ],
+            resolved_dynamic_imports: vec![],
+            resolved_dynamic_patterns: vec![],
+            member_accesses: vec![],
+            whole_object_uses: vec![],
+            has_cjs_exports: false,
+            unused_import_bindings: FxHashSet::default(),
+        }];
+
+        let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
+        assert!(graph.package_usage.contains_key("react"));
+        assert!(graph.type_only_package_usage.contains_key("react"));
+    }
+
+    #[test]
+    fn graph_default_import_reference() {
+        let files = vec![
+            DiscoveredFile {
+                id: FileId(0),
+                path: PathBuf::from("/project/entry.ts"),
+                size_bytes: 100,
+            },
+            DiscoveredFile {
+                id: FileId(1),
+                path: PathBuf::from("/project/utils.ts"),
+                size_bytes: 50,
+            },
+        ];
+        let entry_points = vec![EntryPoint {
+            path: PathBuf::from("/project/entry.ts"),
+            source: EntryPointSource::PackageJsonMain,
+        }];
+        let resolved_modules = vec![
+            ResolvedModule {
+                file_id: FileId(0),
+                path: PathBuf::from("/project/entry.ts"),
+                exports: vec![],
+                re_exports: vec![],
+                resolved_imports: vec![ResolvedImport {
+                    info: ImportInfo {
+                        source: "./utils".to_string(),
+                        imported_name: ImportedName::Default,
+                        local_name: "Utils".to_string(),
+                        is_type_only: false,
+                        span: oxc_span::Span::new(0, 10),
+                        source_span: oxc_span::Span::default(),
+                    },
+                    target: ResolveResult::InternalModule(FileId(1)),
+                }],
+                resolved_dynamic_imports: vec![],
+                resolved_dynamic_patterns: vec![],
+                member_accesses: vec![],
+                whole_object_uses: vec![],
+                has_cjs_exports: false,
+                unused_import_bindings: FxHashSet::default(),
+            },
+            ResolvedModule {
+                file_id: FileId(1),
+                path: PathBuf::from("/project/utils.ts"),
+                exports: vec![fallow_types::extract::ExportInfo {
+                    name: ExportName::Default,
+                    local_name: None,
+                    is_type_only: false,
+                    is_public: false,
+                    span: oxc_span::Span::new(0, 20),
+                    members: vec![],
+                }],
+                re_exports: vec![],
+                resolved_imports: vec![],
+                resolved_dynamic_imports: vec![],
+                resolved_dynamic_patterns: vec![],
+                member_accesses: vec![],
+                whole_object_uses: vec![],
+                has_cjs_exports: false,
+                unused_import_bindings: FxHashSet::default(),
+            },
+        ];
+
+        let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
+        let utils = &graph.modules[1];
+        let default_export = utils
+            .exports
+            .iter()
+            .find(|e| matches!(e.name, ExportName::Default))
+            .unwrap();
+        assert!(!default_export.references.is_empty());
+        assert_eq!(
+            default_export.references[0].kind,
+            ReferenceKind::DefaultImport
+        );
+    }
+
+    #[test]
+    fn graph_side_effect_import_no_export_reference() {
+        let files = vec![
+            DiscoveredFile {
+                id: FileId(0),
+                path: PathBuf::from("/project/entry.ts"),
+                size_bytes: 100,
+            },
+            DiscoveredFile {
+                id: FileId(1),
+                path: PathBuf::from("/project/styles.ts"),
+                size_bytes: 50,
+            },
+        ];
+        let entry_points = vec![EntryPoint {
+            path: PathBuf::from("/project/entry.ts"),
+            source: EntryPointSource::PackageJsonMain,
+        }];
+        let resolved_modules = vec![
+            ResolvedModule {
+                file_id: FileId(0),
+                path: PathBuf::from("/project/entry.ts"),
+                exports: vec![],
+                re_exports: vec![],
+                resolved_imports: vec![ResolvedImport {
+                    info: ImportInfo {
+                        source: "./styles".to_string(),
+                        imported_name: ImportedName::SideEffect,
+                        local_name: String::new(),
+                        is_type_only: false,
+                        span: oxc_span::Span::new(0, 10),
+                        source_span: oxc_span::Span::default(),
+                    },
+                    target: ResolveResult::InternalModule(FileId(1)),
+                }],
+                resolved_dynamic_imports: vec![],
+                resolved_dynamic_patterns: vec![],
+                member_accesses: vec![],
+                whole_object_uses: vec![],
+                has_cjs_exports: false,
+                unused_import_bindings: FxHashSet::default(),
+            },
+            ResolvedModule {
+                file_id: FileId(1),
+                path: PathBuf::from("/project/styles.ts"),
+                exports: vec![fallow_types::extract::ExportInfo {
+                    name: ExportName::Named("primaryColor".to_string()),
+                    local_name: Some("primaryColor".to_string()),
+                    is_type_only: false,
+                    is_public: false,
+                    span: oxc_span::Span::new(0, 20),
+                    members: vec![],
+                }],
+                re_exports: vec![],
+                resolved_imports: vec![],
+                resolved_dynamic_imports: vec![],
+                resolved_dynamic_patterns: vec![],
+                member_accesses: vec![],
+                whole_object_uses: vec![],
+                has_cjs_exports: false,
+                unused_import_bindings: FxHashSet::default(),
+            },
+        ];
+
+        let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
+        // Side-effect import should create an edge but not reference specific exports
+        assert_eq!(graph.edge_count(), 1);
+        let styles = &graph.modules[1];
+        let export = &styles.exports[0];
+        // Side-effect import doesn't match any named export
+        assert!(
+            export.references.is_empty(),
+            "side-effect import should not reference named exports"
+        );
+    }
+
+    #[test]
+    fn graph_multiple_entry_points() {
+        let files = vec![
+            DiscoveredFile {
+                id: FileId(0),
+                path: PathBuf::from("/project/main.ts"),
+                size_bytes: 100,
+            },
+            DiscoveredFile {
+                id: FileId(1),
+                path: PathBuf::from("/project/worker.ts"),
+                size_bytes: 100,
+            },
+            DiscoveredFile {
+                id: FileId(2),
+                path: PathBuf::from("/project/shared.ts"),
+                size_bytes: 50,
+            },
+        ];
+        let entry_points = vec![
+            EntryPoint {
+                path: PathBuf::from("/project/main.ts"),
+                source: EntryPointSource::PackageJsonMain,
+            },
+            EntryPoint {
+                path: PathBuf::from("/project/worker.ts"),
+                source: EntryPointSource::PackageJsonMain,
+            },
+        ];
+        let resolved_modules = vec![
+            ResolvedModule {
+                file_id: FileId(0),
+                path: PathBuf::from("/project/main.ts"),
+                exports: vec![],
+                re_exports: vec![],
+                resolved_imports: vec![ResolvedImport {
+                    info: ImportInfo {
+                        source: "./shared".to_string(),
+                        imported_name: ImportedName::Named("helper".to_string()),
+                        local_name: "helper".to_string(),
+                        is_type_only: false,
+                        span: oxc_span::Span::new(0, 10),
+                        source_span: oxc_span::Span::default(),
+                    },
+                    target: ResolveResult::InternalModule(FileId(2)),
+                }],
+                resolved_dynamic_imports: vec![],
+                resolved_dynamic_patterns: vec![],
+                member_accesses: vec![],
+                whole_object_uses: vec![],
+                has_cjs_exports: false,
+                unused_import_bindings: FxHashSet::default(),
+            },
+            ResolvedModule {
+                file_id: FileId(1),
+                path: PathBuf::from("/project/worker.ts"),
+                exports: vec![],
+                re_exports: vec![],
+                resolved_imports: vec![],
+                resolved_dynamic_imports: vec![],
+                resolved_dynamic_patterns: vec![],
+                member_accesses: vec![],
+                whole_object_uses: vec![],
+                has_cjs_exports: false,
+                unused_import_bindings: FxHashSet::default(),
+            },
+            ResolvedModule {
+                file_id: FileId(2),
+                path: PathBuf::from("/project/shared.ts"),
+                exports: vec![fallow_types::extract::ExportInfo {
+                    name: ExportName::Named("helper".to_string()),
+                    local_name: Some("helper".to_string()),
+                    is_type_only: false,
+                    is_public: false,
+                    span: oxc_span::Span::new(0, 20),
+                    members: vec![],
+                }],
+                re_exports: vec![],
+                resolved_imports: vec![],
+                resolved_dynamic_imports: vec![],
+                resolved_dynamic_patterns: vec![],
+                member_accesses: vec![],
+                whole_object_uses: vec![],
+                has_cjs_exports: false,
+                unused_import_bindings: FxHashSet::default(),
+            },
+        ];
+
+        let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
+        assert!(graph.modules[0].is_entry_point);
+        assert!(graph.modules[1].is_entry_point);
+        assert!(!graph.modules[2].is_entry_point);
+        // All should be reachable — shared is reached from main
+        assert!(graph.modules[0].is_reachable);
+        assert!(graph.modules[1].is_reachable);
+        assert!(graph.modules[2].is_reachable);
+    }
 }
