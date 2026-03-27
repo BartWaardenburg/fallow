@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1774619068463,
+  "lastUpdate": 1774619552736,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
@@ -2720,6 +2720,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/1fd8e16996a80a6c2e3e90126c4874a521be7158"
         },
         "date": 1774619067838,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 87.8,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "9d66222b406e3269f91e1a813e6051a532ebab6c",
+          "message": "test: add suggestion block and grouping tests (54 → 63 tests)\n\nNew tests:\n- Unused export type field preserved for suggestion enrichment\n- Single export keeps type=unused-export (eligible for suggestion)\n- Multiple exports from same file grouped as unused-export-group\n- Grouped comment mentions export count\n- Review body clean state (no dead code, no duplication, marker)",
+          "timestamp": "2026-03-27T14:51:34+01:00",
+          "tree_id": "ed0c56b045999be32d0708f202da83180e92eec5",
+          "url": "https://github.com/fallow-rs/fallow/commit/9d66222b406e3269f91e1a813e6051a532ebab6c"
+        },
+        "date": 1774619551564,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
