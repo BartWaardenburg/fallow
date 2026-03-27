@@ -12,7 +12,7 @@ fn bench_parse_file(c: &mut Criterion) {
     let test_file = temp_dir.join("bench.ts");
     std::fs::write(
         &test_file,
-        r#"
+        r"
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import type { FC, ReactNode, MouseEvent } from 'react';
 import * as lodash from 'lodash';
@@ -83,7 +83,7 @@ export default function App({ name, age }: Props) {
 
     return null;
 }
-"#,
+",
     )
     .unwrap();
 
@@ -119,11 +119,11 @@ fn bench_full_pipeline(c: &mut Criterion) {
     // Create 10 source files
     for i in 0..10 {
         let content = format!(
-            r#"
+            r"
 export const value{i} = {i};
 export function fn{i}() {{ return {i}; }}
 export type Type{i} = {{ value: number }};
-"#
+"
         );
         std::fs::write(temp_dir.join(format!("src/module{i}.ts")), content).unwrap();
     }

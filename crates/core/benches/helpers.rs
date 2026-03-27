@@ -1,3 +1,4 @@
+use std::fmt::Write as _;
 use std::path::PathBuf;
 
 use fallow_config::{FallowConfig, OutputFormat};
@@ -52,12 +53,12 @@ pub fn create_synthetic_project_with_cache(
 
     for i in 0..file_count {
         let content = format!(
-            r#"
+            r"
 export const value{i} = {i};
 export function fn{i}() {{ return {i}; }}
 export type Type{i} = {{ value: number }};
 export const helper{i} = () => value{i} + 1;
-"#
+"
         );
         std::fs::write(temp_dir.join(format!("src/module{i}.ts")), content).unwrap();
     }
@@ -102,26 +103,32 @@ pub fn create_dupe_project(
     let blocks: Vec<String> = (0..dupe_groups)
         .map(|g| {
             let mut block = String::new();
-            block.push_str(&format!(
-                "export const processData_{g} = (input: string): Record<string, unknown> => {{\n"
-            ));
+            writeln!(
+                &mut block,
+                "export const processData_{g} = (input: string): Record<string, unknown> => {{"
+            )
+            .unwrap();
             block.push_str("  const result: Record<string, unknown> = {};\n");
             block.push_str("  const timestamp = Date.now();\n");
-            block.push_str(&format!("  const id = `item_${{timestamp}}_{g}`;\n"));
+            writeln!(&mut block, "  const id = `item_${{timestamp}}_{g}`;").unwrap();
             block.push_str("  if (!input) {\n");
-            block.push_str(&format!(
-                "    throw new Error('Input is required for group {g}');\n"
-            ));
+            writeln!(
+                &mut block,
+                "    throw new Error('Input is required for group {g}');"
+            )
+            .unwrap();
             block.push_str("  }\n");
             block.push_str("  result.id = id;\n");
             block.push_str("  result.status = 'active';\n");
             block.push_str("  result.createdAt = new Date(timestamp).toISOString();\n");
             block.push_str("  result.updatedAt = new Date(timestamp).toISOString();\n");
             for line in 0..18 {
-                block.push_str(&format!(
-                    "  result.field_{line} = String(input).slice(0, {});\n",
+                writeln!(
+                    &mut block,
+                    "  result.field_{line} = String(input).slice(0, {});",
                     10 + line * 3
-                ));
+                )
+                .unwrap();
             }
             block.push_str("  return result;\n};\n");
             block
@@ -133,9 +140,11 @@ pub fn create_dupe_project(
     for i in 0..file_count {
         let mut content = String::new();
         // Unique content
-        content.push_str(&format!(
-            "export const unique_{i} = (v: string): string => `${{v}}_{i}`;\n\n"
-        ));
+        writeln!(
+            &mut content,
+            "export const unique_{i} = (v: string): string => `${{v}}_{i}`;\n"
+        )
+        .unwrap();
         // Add dupe block if within dupe range
         if i < dupe_file_count && !blocks.is_empty() {
             let group = i % blocks.len();
@@ -143,7 +152,7 @@ pub fn create_dupe_project(
             content.push('\n');
         }
         // More unique filler
-        content.push_str(&format!("export const helper_{i} = {i};\n"));
+        writeln!(&mut content, "export const helper_{i} = {i};").unwrap();
         std::fs::write(temp_dir.join(format!("src/module{i}.ts")), content).unwrap();
     }
 

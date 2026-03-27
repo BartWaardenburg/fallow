@@ -185,6 +185,9 @@ pub fn promote_warns_to_errors(rules: &mut RulesConfig) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    type RuleFieldSetter = fn(&mut RulesConfig);
+    type ResultFieldCheck = fn(&AnalysisResults) -> bool;
     use fallow_core::extract::MemberKind;
     use fallow_core::results::*;
     use std::path::PathBuf;
@@ -316,8 +319,10 @@ mod tests {
     #[test]
     fn apply_rules_off_clears_that_issue_type() {
         let mut results = make_results();
-        let mut rules = RulesConfig::default();
-        rules.unused_files = Severity::Off;
+        let rules = RulesConfig {
+            unused_files: Severity::Off,
+            ..RulesConfig::default()
+        };
         let config = config_with_rules(rules);
         apply_rules(&mut results, &config);
         assert!(results.unused_files.is_empty());
@@ -328,8 +333,10 @@ mod tests {
     #[test]
     fn apply_rules_warn_preserves_issues() {
         let mut results = make_results();
-        let mut rules = RulesConfig::default();
-        rules.unused_exports = Severity::Warn;
+        let rules = RulesConfig {
+            unused_exports: Severity::Warn,
+            ..RulesConfig::default()
+        };
         let config = config_with_rules(rules);
         apply_rules(&mut results, &config);
         assert_eq!(results.unused_exports.len(), 1);
@@ -361,7 +368,7 @@ mod tests {
     #[test]
     fn apply_rules_off_each_type_individually() {
         // Verify every rule field maps to its corresponding results field
-        let field_setters: Vec<(fn(&mut RulesConfig), fn(&AnalysisResults) -> bool)> = vec![
+        let field_setters: Vec<(RuleFieldSetter, ResultFieldCheck)> = vec![
             (
                 |r| r.unused_files = Severity::Off,
                 |res| res.unused_files.is_empty(),
@@ -493,8 +500,10 @@ mod tests {
             col: 0,
             specifier_col: 0,
         });
-        let mut rules = RulesConfig::default();
-        rules.unresolved_imports = Severity::Off;
+        let rules = RulesConfig {
+            unresolved_imports: Severity::Off,
+            ..RulesConfig::default()
+        };
         // Other fields are default (Error) but have no issues
         assert!(!has_error_severity_issues(&results, &rules, None));
     }

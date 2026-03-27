@@ -601,7 +601,7 @@ mod tests {
         let diags = build_diagnostics(&results, &duplication, &root);
 
         let uri = Url::from_file_path(root.join("src/types.ts")).unwrap();
-        let file_diags = diags.get(&uri).unwrap();
+        let file_diags = &diags[&uri];
         assert_eq!(file_diags.len(), 1);
 
         let d = &file_diags[0];
@@ -625,7 +625,7 @@ mod tests {
         let diags = build_diagnostics(&results, &duplication, &root);
 
         let uri = Url::from_file_path(root.join("src/dead.ts")).unwrap();
-        let file_diags = diags.get(&uri).unwrap();
+        let file_diags = &diags[&uri];
         assert_eq!(file_diags.len(), 1);
 
         let d = &file_diags[0];
@@ -656,7 +656,7 @@ mod tests {
         let diags = build_diagnostics(&results, &duplication, &root);
 
         let uri = Url::from_file_path(root.join("src/app.ts")).unwrap();
-        let file_diags = diags.get(&uri).unwrap();
+        let file_diags = &diags[&uri];
         assert_eq!(file_diags.len(), 1);
 
         let d = &file_diags[0];
@@ -686,7 +686,7 @@ mod tests {
         let diags = build_diagnostics(&results, &duplication, &root);
 
         let uri = Url::from_file_path(root.join("package.json")).unwrap();
-        let file_diags = diags.get(&uri).unwrap();
+        let file_diags = &diags[&uri];
         assert_eq!(file_diags.len(), 1);
 
         let d = &file_diags[0];
@@ -710,7 +710,7 @@ mod tests {
         let diags = build_diagnostics(&results, &duplication, &root);
 
         let uri = Url::from_file_path(root.join("package.json")).unwrap();
-        let file_diags = diags.get(&uri).unwrap();
+        let file_diags = &diags[&uri];
         assert_eq!(file_diags.len(), 1);
 
         let d = &file_diags[0];
@@ -735,7 +735,7 @@ mod tests {
         let diags = build_diagnostics(&results, &duplication, &root);
 
         let uri = Url::from_file_path(root.join("package.json")).unwrap();
-        let file_diags = diags.get(&uri).unwrap();
+        let file_diags = &diags[&uri];
         assert_eq!(file_diags.len(), 1);
 
         let d = &file_diags[0];
@@ -761,7 +761,7 @@ mod tests {
         let diags = build_diagnostics(&results, &duplication, &root);
 
         let uri = Url::from_file_path(root.join("src/enums.ts")).unwrap();
-        let file_diags = diags.get(&uri).unwrap();
+        let file_diags = &diags[&uri];
         assert_eq!(file_diags.len(), 1);
 
         let d = &file_diags[0];
@@ -793,7 +793,7 @@ mod tests {
         let diags = build_diagnostics(&results, &duplication, &root);
 
         let uri = Url::from_file_path(root.join("src/service.ts")).unwrap();
-        let file_diags = diags.get(&uri).unwrap();
+        let file_diags = &diags[&uri];
         assert_eq!(file_diags.len(), 1);
 
         let d = &file_diags[0];
@@ -835,7 +835,7 @@ mod tests {
         let uri_utils = Url::from_file_path(&utils_path).unwrap();
         let uri_helpers = Url::from_file_path(&helpers_path).unwrap();
 
-        let utils_diags = diags.get(&uri_utils).unwrap();
+        let utils_diags = &diags[&uri_utils];
         assert_eq!(utils_diags.len(), 1);
         let d = &utils_diags[0];
         assert_eq!(d.severity, Some(DiagnosticSeverity::WARNING));
@@ -851,7 +851,7 @@ mod tests {
         assert_eq!(related[0].location.uri, uri_helpers);
         assert_eq!(related[0].message, "Also exported here");
 
-        let helpers_diags = diags.get(&uri_helpers).unwrap();
+        let helpers_diags = &diags[&uri_helpers];
         assert_eq!(helpers_diags.len(), 1);
         let dh = &helpers_diags[0];
         let related_h = dh.related_information.as_ref().unwrap();
@@ -903,7 +903,7 @@ mod tests {
 
         // File a.ts should have a diagnostic with related info pointing to b.ts
         let uri_a = Url::from_file_path(root.join("src/a.ts")).unwrap();
-        let diags_a = diags.get(&uri_a).unwrap();
+        let diags_a = &diags[&uri_a];
         assert_eq!(diags_a.len(), 1);
 
         let d = &diags_a[0];
@@ -927,7 +927,7 @@ mod tests {
 
         // File b.ts should have related info pointing to a.ts
         let uri_b = Url::from_file_path(root.join("src/b.ts")).unwrap();
-        let diags_b = diags.get(&uri_b).unwrap();
+        let diags_b = &diags[&uri_b];
         assert_eq!(diags_b.len(), 1);
         let related_b = diags_b[0].related_information.as_ref().unwrap();
         assert_eq!(related_b.len(), 1);
@@ -969,7 +969,7 @@ mod tests {
         let diags = build_diagnostics(&results, &duplication, &root);
 
         let uri = Url::from_file_path(&path).unwrap();
-        let file_diags = diags.get(&uri).unwrap();
+        let file_diags = &diags[&uri];
         assert_eq!(file_diags.len(), 3);
     }
 
@@ -1000,7 +1000,7 @@ mod tests {
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
 
-        for (_, file_diags) in &diags {
+        for file_diags in diags.values() {
             for d in file_diags {
                 assert_eq!(d.source, Some("fallow".to_string()));
             }
@@ -1026,7 +1026,7 @@ mod tests {
         let diags = build_diagnostics(&results, &duplication, &root);
 
         let uri = Url::from_file_path(root.join("src/edge.ts")).unwrap();
-        let d = &diags.get(&uri).unwrap()[0];
+        let d = &diags[&uri][0];
         assert_eq!(d.range.start.line, 0);
     }
 }

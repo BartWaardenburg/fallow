@@ -171,6 +171,7 @@ impl FallowConfig {
 impl ResolvedConfig {
     /// Resolve the effective rules for a given file path.
     /// Starts with base rules and applies matching overrides in order.
+    #[must_use]
     pub fn resolve_rules_for_path(&self, path: &Path) -> RulesConfig {
         if self.overrides.is_empty() {
             return self.rules.clone();

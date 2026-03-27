@@ -105,6 +105,7 @@ pub struct ExternalUsedExport {
 
 impl ExternalPluginDef {
     /// Generate JSON Schema for the external plugin format.
+    #[must_use]
     pub fn json_schema() -> serde_json::Value {
         serde_json::to_value(schemars::schema_for!(ExternalPluginDef)).unwrap_or_default()
     }
@@ -212,7 +213,7 @@ pub fn discover_external_plugins(
     // 3. Project root fallow-plugin-* files (.toml, .json, .jsonc)
     if let Ok(entries) = std::fs::read_dir(root) {
         let mut plugin_files: Vec<PathBuf> = entries
-            .filter_map(|e| e.ok())
+            .filter_map(Result::ok)
             .map(|e| e.path())
             .filter(|p| {
                 p.is_file()
@@ -244,7 +245,7 @@ fn load_plugins_from_dir(
 ) {
     if let Ok(entries) = std::fs::read_dir(dir) {
         let mut plugin_files: Vec<PathBuf> = entries
-            .filter_map(|e| e.ok())
+            .filter_map(Result::ok)
             .map(|e| e.path())
             .filter(|p| p.is_file() && is_plugin_file(p))
             .collect();

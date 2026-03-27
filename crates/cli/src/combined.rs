@@ -371,7 +371,7 @@ fn print_combined_sarif(
     }
 }
 
-/// Print combined CodeClimate output merging all analyses into one JSON array.
+/// Print combined `CodeClimate` output merging all analyses into one JSON array.
 fn print_combined_codeclimate(
     check: Option<&CheckResult>,
     dupes: Option<&DupesResult>,

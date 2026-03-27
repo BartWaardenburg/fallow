@@ -337,11 +337,11 @@ mod tests {
 
     #[test]
     fn resolve_config_flat_config_imports() {
-        let source = r#"
+        let source = r"
             import react from 'eslint-plugin-react';
             import tseslint from 'typescript-eslint';
             export default [{}];
-        "#;
+        ";
         let plugin = EslintPlugin;
         let result = plugin.resolve_config(
             std::path::Path::new("eslint.config.js"),

@@ -235,7 +235,7 @@ mod tests {
 
     #[test]
     fn strip_trailing_commas_array() {
-        assert_eq!(strip_trailing_commas(r#"[1, 2, 3,]"#), r#"[1, 2, 3]"#);
+        assert_eq!(strip_trailing_commas(r"[1, 2, 3,]"), r"[1, 2, 3]");
     }
 
     #[test]
@@ -373,7 +373,7 @@ mod tests {
 
         std::fs::write(
             temp_dir.join("tsconfig.json"),
-            r#"{ this is not valid json at all"#,
+            r"{ this is not valid json at all",
         )
         .unwrap();
 

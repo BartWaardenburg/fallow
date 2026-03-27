@@ -374,11 +374,11 @@ mod tests {
 
     #[test]
     fn resolve_config_no_page_extensions() {
-        let source = r#"
+        let source = r"
             export default {
                 reactStrictMode: true
             };
-        "#;
+        ";
         let plugin = NextJsPlugin;
         let result =
             plugin.resolve_config(Path::new("next.config.ts"), source, Path::new("/project"));

@@ -1281,7 +1281,7 @@ fn jsdoc_public_not_leaked_across_statements() {
 #[test]
 fn complexity_basic_if_else_for_while_switch() {
     let info = parse_source(
-        r#"function basic(x: number) {
+        r"function basic(x: number) {
             if (x > 10) {
                 return 'big';
             } else {
@@ -1293,7 +1293,7 @@ fn complexity_basic_if_else_for_while_switch() {
                     default: break;
                 }
             }
-        }"#,
+        }",
     );
     let f = info.complexity.iter().find(|c| c.name == "basic").unwrap();
     // 1 (base) + if + for + while + case + case = 6 (default: not counted)
@@ -1303,13 +1303,13 @@ fn complexity_basic_if_else_for_while_switch() {
 #[test]
 fn complexity_nested_if_in_for_loop() {
     let info = parse_source(
-        r#"function nested(items: number[]) {
+        r"function nested(items: number[]) {
             for (const item of items) {
                 if (item > 0) {
                     return item;
                 }
             }
-        }"#,
+        }",
     );
     let f = info.complexity.iter().find(|c| c.name == "nested").unwrap();
     // Cyclomatic: 1 + for_of + if = 3
@@ -1321,7 +1321,7 @@ fn complexity_nested_if_in_for_loop() {
 #[test]
 fn complexity_deeply_nested_three_levels() {
     let info = parse_source(
-        r#"function deep(a: boolean, b: boolean, c: boolean) {
+        r"function deep(a: boolean, b: boolean, c: boolean) {
             if (a) {
                 for (let i = 0; i < 10; i++) {
                     while (b) {
@@ -1331,7 +1331,7 @@ fn complexity_deeply_nested_three_levels() {
                     }
                 }
             }
-        }"#,
+        }",
     );
     let f = info.complexity.iter().find(|c| c.name == "deep").unwrap();
     // Cyclomatic: 1 + if + for + while + if = 5
@@ -1417,13 +1417,13 @@ fn complexity_nested_ternary() {
 #[test]
 fn complexity_try_catch() {
     let info = parse_source(
-        r#"function tryCatch() {
+        r"function tryCatch() {
             try {
                 riskyOp();
             } catch (e) {
                 handleError(e);
             }
-        }"#,
+        }",
     );
     let f = info
         .complexity
@@ -1439,13 +1439,13 @@ fn complexity_try_catch() {
 #[test]
 fn complexity_try_catch_with_nested_if() {
     let info = parse_source(
-        r#"function tryCatchNested(x: boolean) {
+        r"function tryCatchNested(x: boolean) {
             try {
                 if (x) { riskyOp(); }
             } catch (e) {
                 if (e instanceof Error) { log(e); }
             }
-        }"#,
+        }",
     );
     let f = info
         .complexity
@@ -1461,14 +1461,14 @@ fn complexity_try_catch_with_nested_if() {
 #[test]
 fn complexity_nested_functions_independent() {
     let info = parse_source(
-        r#"function outer(x: boolean) {
+        r"function outer(x: boolean) {
             if (x) {}
             function inner(y: boolean) {
                 if (y) {
                     if (y) {}
                 }
             }
-        }"#,
+        }",
     );
     let outer = info.complexity.iter().find(|c| c.name == "outer").unwrap();
     let inner = info.complexity.iter().find(|c| c.name == "inner").unwrap();
@@ -1483,14 +1483,14 @@ fn complexity_nested_functions_independent() {
 #[test]
 fn complexity_arrow_function_in_callback() {
     let info = parse_source(
-        r#"function process(items: number[]) {
+        r"function process(items: number[]) {
             items.map((item) => {
                 if (item > 0) {
                     return item * 2;
                 }
                 return 0;
             });
-        }"#,
+        }",
     );
     let outer = info
         .complexity
@@ -1513,10 +1513,10 @@ fn complexity_arrow_function_in_callback() {
 #[test]
 fn complexity_named_arrow_in_variable() {
     let info = parse_source(
-        r#"function process(items: number[]) {
+        r"function process(items: number[]) {
             const filter = (item: number) => item > 0;
             return items.filter(filter);
-        }"#,
+        }",
     );
     let arrow = info.complexity.iter().find(|c| c.name == "filter").unwrap();
     // Arrow with no decisions: base 1 cyclomatic, 0 cognitive
@@ -1527,7 +1527,7 @@ fn complexity_named_arrow_in_variable() {
 #[test]
 fn complexity_class_methods_independent() {
     let info = parse_source(
-        r#"class Parser {
+        r"class Parser {
             parse(input: string) {
                 if (input.length === 0) { return null; }
                 for (let i = 0; i < input.length; i++) {
@@ -1538,7 +1538,7 @@ fn complexity_class_methods_independent() {
             validate(input: string) {
                 return input ? true : false;
             }
-        }"#,
+        }",
     );
     let parse = info.complexity.iter().find(|c| c.name == "parse").unwrap();
     let validate = info
@@ -1559,12 +1559,12 @@ fn complexity_class_methods_independent() {
 #[test]
 fn complexity_class_property_arrow() {
     let info = parse_source(
-        r#"class Handler {
+        r"class Handler {
             handle = (x: number) => {
                 if (x > 0) { return x; }
                 return 0;
             };
-        }"#,
+        }",
     );
     let handle = info.complexity.iter().find(|c| c.name == "handle").unwrap();
     // 1 + if = 2
@@ -1649,11 +1649,11 @@ fn complexity_optional_chaining_cyclomatic_only() {
 #[test]
 fn complexity_do_while_loop() {
     let info = parse_source(
-        r#"function doWhile(x: number) {
+        r"function doWhile(x: number) {
             do {
                 x--;
             } while (x > 0);
-        }"#,
+        }",
     );
     let f = info
         .complexity
@@ -1669,11 +1669,11 @@ fn complexity_do_while_loop() {
 #[test]
 fn complexity_for_in_loop() {
     let info = parse_source(
-        r#"function forIn(obj: Record<string, number>) {
+        r"function forIn(obj: Record<string, number>) {
             for (const key in obj) {
                 if (obj[key] > 0) {}
             }
-        }"#,
+        }",
     );
     let f = info.complexity.iter().find(|c| c.name == "forIn").unwrap();
     // Cyclomatic: 1 + for-in + if = 3
@@ -1685,14 +1685,14 @@ fn complexity_for_in_loop() {
 #[test]
 fn complexity_switch_cognitive_is_flat() {
     let info = parse_source(
-        r#"function sw(x: number) {
+        r"function sw(x: number) {
             switch (x) {
                 case 1: return 'one';
                 case 2: return 'two';
                 case 3: return 'three';
                 default: return 'other';
             }
-        }"#,
+        }",
     );
     let f = info.complexity.iter().find(|c| c.name == "sw").unwrap();
     // Cyclomatic: 1 + case + case + case = 4 (default: not counted)
@@ -1704,7 +1704,7 @@ fn complexity_switch_cognitive_is_flat() {
 #[test]
 fn complexity_else_if_chain_cognitive_flat() {
     let info = parse_source(
-        r#"function elseIfChain(x: number) {
+        r"function elseIfChain(x: number) {
             if (x === 1) {
                 return 'one';
             } else if (x === 2) {
@@ -1714,7 +1714,7 @@ fn complexity_else_if_chain_cognitive_flat() {
             } else {
                 return 'other';
             }
-        }"#,
+        }",
     );
     let f = info
         .complexity
@@ -1730,7 +1730,7 @@ fn complexity_else_if_chain_cognitive_flat() {
 #[test]
 fn complexity_break_with_label() {
     let info = parse_source(
-        r#"function labeled() {
+        r"function labeled() {
             outer: for (let i = 0; i < 10; i++) {
                 for (let j = 0; j < 10; j++) {
                     if (i + j > 5) {
@@ -1738,7 +1738,7 @@ fn complexity_break_with_label() {
                     }
                 }
             }
-        }"#,
+        }",
     );
     let f = info
         .complexity
@@ -1754,7 +1754,7 @@ fn complexity_break_with_label() {
 #[test]
 fn complexity_continue_with_label() {
     let info = parse_source(
-        r#"function labeledContinue() {
+        r"function labeledContinue() {
             outer: for (let i = 0; i < 10; i++) {
                 for (let j = 0; j < 10; j++) {
                     if (j === 3) {
@@ -1762,7 +1762,7 @@ fn complexity_continue_with_label() {
                     }
                 }
             }
-        }"#,
+        }",
     );
     let f = info
         .complexity
@@ -1792,12 +1792,12 @@ fn complexity_mixed_boolean_with_nullish() {
 #[test]
 fn complexity_boolean_in_if_condition() {
     let info = parse_source(
-        r#"function boolInIf(a: boolean, b: boolean) {
+        r"function boolInIf(a: boolean, b: boolean) {
             if (a && b) {
                 return true;
             }
             return false;
-        }"#,
+        }",
     );
     let f = info
         .complexity
@@ -1813,11 +1813,11 @@ fn complexity_boolean_in_if_condition() {
 #[test]
 fn complexity_multiple_independent_functions() {
     let info = parse_source(
-        r#"
+        r"
         function a(x: boolean) { if (x) {} }
         function b(x: boolean, y: boolean) { if (x) { if (y) {} } }
         function c() {}
-        "#,
+        ",
     );
     let fa = info.complexity.iter().find(|c| c.name == "a").unwrap();
     let fb = info.complexity.iter().find(|c| c.name == "b").unwrap();
@@ -1847,12 +1847,12 @@ fn complexity_export_default_anonymous_function() {
 #[test]
 fn complexity_object_method_shorthand() {
     let info = parse_source(
-        r#"const obj = {
+        r"const obj = {
             process(x: number) {
                 if (x > 0) { return x; }
                 return 0;
             }
-        };"#,
+        };",
     );
     let f = info
         .complexity
@@ -1866,7 +1866,7 @@ fn complexity_object_method_shorthand() {
 #[test]
 fn complexity_catch_increases_nesting() {
     let info = parse_source(
-        r#"function tryCatchDeep() {
+        r"function tryCatchDeep() {
             try {
                 riskyOp();
             } catch (e) {
@@ -1876,7 +1876,7 @@ fn complexity_catch_increases_nesting() {
                     }
                 }
             }
-        }"#,
+        }",
     );
     let f = info
         .complexity
@@ -1956,11 +1956,11 @@ fn abstract_class_export_single_export() {
 #[test]
 fn abstract_class_with_concrete_members() {
     let info = parse_source(
-        r#"export abstract class Base {
+        r"export abstract class Base {
             abstract doWork(): void;
             getName() { return 'base'; }
             label: string = 'base';
-        }"#,
+        }",
     );
     assert_eq!(info.exports.len(), 1);
     let members: Vec<&str> = info.exports[0]
@@ -1977,12 +1977,12 @@ fn abstract_class_with_concrete_members() {
 #[test]
 fn class_private_members_excluded() {
     let info = parse_source(
-        r#"export class Svc {
+        r"export class Svc {
             private secret: string = '';
             private doSecret() {}
             public visible() {}
             name: string = '';
-        }"#,
+        }",
     );
     assert_eq!(info.exports.len(), 1);
     let names: Vec<&str> = info.exports[0]
@@ -2011,11 +2011,11 @@ fn class_private_members_excluded() {
 #[test]
 fn class_protected_members_excluded() {
     let info = parse_source(
-        r#"export class Base {
+        r"export class Base {
             protected internalMethod() {}
             protected internalProp: number = 0;
             publicMethod() {}
-        }"#,
+        }",
     );
     assert_eq!(info.exports.len(), 1);
     let names: Vec<&str> = info.exports[0]
@@ -2040,13 +2040,13 @@ fn class_protected_members_excluded() {
 #[test]
 fn class_decorated_members_tracked() {
     let info = parse_source(
-        r#"export class Controller {
+        r"export class Controller {
             @Get('/users')
             getUsers() { return []; }
             @Post('/users')
             createUser() {}
             plain() {}
-        }"#,
+        }",
     );
     assert_eq!(info.exports.len(), 1);
     let get_users = info.exports[0]
@@ -2081,13 +2081,13 @@ fn class_decorated_members_tracked() {
 #[test]
 fn class_decorated_properties_tracked() {
     let info = parse_source(
-        r#"export class Entity {
+        r"export class Entity {
             @Column()
             name: string = '';
             @Column()
             age: number = 0;
             undecorated: boolean = false;
-        }"#,
+        }",
     );
     assert_eq!(info.exports.len(), 1);
     let name_prop = info.exports[0]
@@ -2108,10 +2108,10 @@ fn class_decorated_properties_tracked() {
 #[test]
 fn class_member_kinds_correct() {
     let info = parse_source(
-        r#"export class MyClass {
+        r"export class MyClass {
             method() {}
             prop: string = '';
-        }"#,
+        }",
     );
     assert_eq!(info.exports.len(), 1);
     let method = info.exports[0]
@@ -2143,10 +2143,10 @@ fn function_overloads_different_names_not_deduplicated() {
 #[test]
 fn function_overloads_many_signatures_single_export() {
     let info = parse_source(
-        r#"export function create(): void;
+        r"export function create(): void;
 export function create(name: string): void;
 export function create(name: string, age: number): void;
-export function create(name?: string, age?: number): void {}"#,
+export function create(name?: string, age?: number): void {}",
     );
     assert_eq!(
         info.exports.len(),
@@ -2341,10 +2341,10 @@ fn interface_extending_another_type_only() {
 #[test]
 fn dynamic_import_then_destructuring_captures_member_accesses() {
     let info = parse_source(
-        r#"async function load() {
+        r"async function load() {
             const mod = await import('./service');
             const { handler, middleware } = mod;
-        }"#,
+        }",
     );
     assert_eq!(info.dynamic_imports.len(), 1);
     assert_eq!(info.dynamic_imports[0].local_name, Some("mod".to_string()));
@@ -2406,10 +2406,10 @@ fn export_default_object_expression() {
 #[test]
 fn class_static_method_tracked() {
     let info = parse_source(
-        r#"export class Factory {
+        r"export class Factory {
             static create() { return new Factory(); }
             instance() {}
-        }"#,
+        }",
     );
     assert_eq!(info.exports.len(), 1);
     let names: Vec<&str> = info.exports[0]
@@ -2427,10 +2427,10 @@ fn class_static_method_tracked() {
 #[test]
 fn class_getter_setter_tracked() {
     let info = parse_source(
-        r#"export class Config {
+        r"export class Config {
             get value() { return this._value; }
             set value(v: string) { this._value = v; }
-        }"#,
+        }",
     );
     assert_eq!(info.exports.len(), 1);
     let has_value = info.exports[0].members.iter().any(|m| m.name == "value");

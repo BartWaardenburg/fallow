@@ -712,7 +712,7 @@ mod tests {
                         fragment: "duplicated code".to_string(),
                     },
                     CloneInstance {
-                        file: path_b.clone(),
+                        file: path_b,
                         start_line: 20,
                         end_line: 25,
                         start_col: 4,
@@ -917,7 +917,7 @@ mod tests {
                         fragment: "code".to_string(),
                     },
                     CloneInstance {
-                        file: path_b.clone(),
+                        file: path_b,
                         start_line: 10,
                         end_line: 14,
                         start_col: 0,
@@ -925,7 +925,7 @@ mod tests {
                         fragment: "code".to_string(),
                     },
                     CloneInstance {
-                        file: path_c.clone(),
+                        file: path_c,
                         start_line: 20,
                         end_line: 24,
                         start_col: 0,

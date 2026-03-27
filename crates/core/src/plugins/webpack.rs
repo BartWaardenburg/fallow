@@ -242,7 +242,7 @@ mod tests {
 
     #[test]
     fn resolve_config_loaders() {
-        let source = r#"
+        let source = r"
             module.exports = {
                 module: {
                     rules: [
@@ -256,7 +256,7 @@ mod tests {
                     ]
                 }
             };
-        "#;
+        ";
         let plugin = WebpackPlugin;
         let result = plugin.resolve_config(
             std::path::Path::new("webpack.config.js"),
@@ -272,7 +272,7 @@ mod tests {
 
     #[test]
     fn resolve_config_one_of_loaders() {
-        let source = r#"
+        let source = r"
             module.exports = {
                 module: {
                     rules: [
@@ -283,7 +283,7 @@ mod tests {
                     ]
                 }
             };
-        "#;
+        ";
         let plugin = WebpackPlugin;
         let result = plugin.resolve_config(
             std::path::Path::new("webpack.config.js"),

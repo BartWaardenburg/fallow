@@ -137,7 +137,7 @@ mod tests {
 
     #[test]
     fn resolve_config_loaders() {
-        let source = r#"
+        let source = r"
             module.exports = {
                 module: {
                     rules: [
@@ -146,7 +146,7 @@ mod tests {
                     ]
                 }
             };
-        "#;
+        ";
         let plugin = RspackPlugin;
         let result = plugin.resolve_config(
             std::path::Path::new("rspack.config.js"),

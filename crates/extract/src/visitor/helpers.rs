@@ -18,8 +18,10 @@ pub fn extract_class_members(class: &Class<'_>) -> Vec<MemberInfo> {
                     if name_str != "constructor"
                         && !matches!(
                             method.accessibility,
-                            Some(oxc_ast::ast::TSAccessibility::Private)
-                                | Some(oxc_ast::ast::TSAccessibility::Protected)
+                            Some(
+                                oxc_ast::ast::TSAccessibility::Private
+                                    | oxc_ast::ast::TSAccessibility::Protected
+                            )
                         )
                     {
                         members.push(MemberInfo {
@@ -35,8 +37,10 @@ pub fn extract_class_members(class: &Class<'_>) -> Vec<MemberInfo> {
                 if let Some(name) = prop.key.static_name()
                     && !matches!(
                         prop.accessibility,
-                        Some(oxc_ast::ast::TSAccessibility::Private)
-                            | Some(oxc_ast::ast::TSAccessibility::Protected)
+                        Some(
+                            oxc_ast::ast::TSAccessibility::Private
+                                | oxc_ast::ast::TSAccessibility::Protected
+                        )
                     )
                 {
                     members.push(MemberInfo {

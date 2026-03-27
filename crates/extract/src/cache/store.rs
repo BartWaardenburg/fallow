@@ -18,6 +18,7 @@ pub struct CacheStore {
 
 impl CacheStore {
     /// Create a new empty cache.
+    #[must_use]
     pub fn new() -> Self {
         Self {
             version: CACHE_VERSION,
@@ -26,6 +27,7 @@ impl CacheStore {
     }
 
     /// Load cache from disk.
+    #[must_use]
     pub fn load(cache_dir: &Path) -> Option<Self> {
         let cache_file = cache_dir.join("cache.bin");
         let data = std::fs::read(&cache_file).ok()?;
@@ -45,6 +47,11 @@ impl CacheStore {
     }
 
     /// Save cache to disk.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error string when the cache directory cannot be created,
+    /// the cache cannot be serialized, or the cache file cannot be written.
     pub fn save(&self, cache_dir: &Path) -> Result<(), String> {
         std::fs::create_dir_all(cache_dir)
             .map_err(|e| format!("Failed to create cache dir: {e}"))?;
@@ -57,6 +64,7 @@ impl CacheStore {
 
     /// Look up a cached module by path and content hash.
     /// Returns None if not cached or hash mismatch.
+    #[must_use]
     pub fn get(&self, path: &Path, content_hash: u64) -> Option<&CachedModule> {
         let key = path.to_string_lossy().to_string();
         let entry = self.entries.get(&key)?;
@@ -79,6 +87,7 @@ impl CacheStore {
     /// almost certainly has not changed, so we can skip reading the file
     /// entirely. This turns a cache hit from `stat() + read() + hash`
     /// into just `stat()`.
+    #[must_use]
     pub fn get_by_metadata(
         &self,
         path: &Path,
@@ -97,6 +106,7 @@ impl CacheStore {
     /// Look up a cached module by path only (ignoring hash).
     /// Used to check whether a module's content hash matches without
     /// requiring the caller to know the hash upfront.
+    #[must_use]
     pub fn get_by_path_only(&self, path: &Path) -> Option<&CachedModule> {
         let key = path.to_string_lossy().to_string();
         self.entries.get(&key)
@@ -114,11 +124,13 @@ impl CacheStore {
     }
 
     /// Number of cached entries.
+    #[must_use]
     pub fn len(&self) -> usize {
         self.entries.len()
     }
 
     /// Whether cache is empty.
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }

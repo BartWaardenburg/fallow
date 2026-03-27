@@ -34,6 +34,7 @@ pub struct WorkspaceInfo {
 /// 1. `package.json` `workspaces` field
 /// 2. `pnpm-workspace.yaml` `packages` field
 /// 3. `tsconfig.json` `references` field (TypeScript project references)
+#[must_use]
 pub fn discover_workspaces(root: &Path) -> Vec<WorkspaceInfo> {
     let patterns = collect_workspace_patterns(root);
     let canonical_root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());

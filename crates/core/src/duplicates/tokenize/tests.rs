@@ -2007,7 +2007,7 @@ fn file_tokens_clone() {
         source: "null".to_string(),
         line_count: 1,
     };
-    let cloned = ft.clone();
+    let cloned = ft;
     assert_eq!(cloned.tokens.len(), 1);
     assert_eq!(cloned.source, "null");
     assert_eq!(cloned.line_count, 1);
@@ -2017,9 +2017,9 @@ fn file_tokens_clone() {
 
 #[test]
 fn token_kind_equality_and_hash() {
-    use std::collections::HashSet;
+    use rustc_hash::FxHashSet;
 
-    let mut set = HashSet::new();
+    let mut set = FxHashSet::default();
     set.insert(TokenKind::Keyword(KeywordType::Const));
     set.insert(TokenKind::Keyword(KeywordType::Let));
     set.insert(TokenKind::Keyword(KeywordType::Const)); // duplicate

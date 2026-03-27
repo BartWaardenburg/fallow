@@ -1267,7 +1267,7 @@ fn run_with_config_file_in_discovered_files() {
     // Create a vitest config file
     std::fs::write(
         root.join("vitest.config.ts"),
-        r#"
+        r"
 import { defineConfig } from 'vitest/config';
 export default defineConfig({
 test: {
@@ -1275,7 +1275,7 @@ test: {
     setupFiles: ['./test/setup.ts'],
 }
 });
-"#,
+",
     )
     .unwrap();
 

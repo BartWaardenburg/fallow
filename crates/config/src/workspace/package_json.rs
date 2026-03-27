@@ -43,6 +43,10 @@ pub struct PackageJson {
 
 impl PackageJson {
     /// Load from a package.json file.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error string when the file cannot be read or parsed as JSON.
     pub fn load(path: &std::path::Path) -> Result<Self, String> {
         let content = std::fs::read_to_string(path)
             .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
@@ -51,6 +55,7 @@ impl PackageJson {
     }
 
     /// Get all dependency names (production + dev + peer + optional).
+    #[must_use]
     pub fn all_dependency_names(&self) -> Vec<String> {
         let mut deps = Vec::new();
         if let Some(d) = &self.dependencies {
@@ -69,6 +74,7 @@ impl PackageJson {
     }
 
     /// Get production dependency names only.
+    #[must_use]
     pub fn production_dependency_names(&self) -> Vec<String> {
         self.dependencies
             .as_ref()
@@ -77,6 +83,7 @@ impl PackageJson {
     }
 
     /// Get dev dependency names only.
+    #[must_use]
     pub fn dev_dependency_names(&self) -> Vec<String> {
         self.dev_dependencies
             .as_ref()
@@ -85,6 +92,7 @@ impl PackageJson {
     }
 
     /// Get optional dependency names only.
+    #[must_use]
     pub fn optional_dependency_names(&self) -> Vec<String> {
         self.optional_dependencies
             .as_ref()
@@ -93,6 +101,7 @@ impl PackageJson {
     }
 
     /// Extract entry points from package.json fields.
+    #[must_use]
     pub fn entry_points(&self) -> Vec<String> {
         let mut entries = Vec::new();
 
@@ -153,6 +162,7 @@ impl PackageJson {
     }
 
     /// Extract workspace patterns from package.json.
+    #[must_use]
     pub fn workspace_patterns(&self) -> Vec<String> {
         match &self.workspaces {
             Some(serde_json::Value::Array(arr)) => arr
@@ -387,7 +397,7 @@ mod tests {
 
     #[test]
     fn package_json_missing_optional_fields() {
-        let pkg: PackageJson = serde_json::from_str(r#"{}"#).unwrap();
+        let pkg: PackageJson = serde_json::from_str(r"{}").unwrap();
         assert!(pkg.name.is_none());
         assert!(pkg.main.is_none());
         assert!(pkg.module.is_none());

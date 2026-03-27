@@ -158,7 +158,7 @@ pub(super) const KNIP_PLUGIN_KEYS: &[&str] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashSet;
+    use rustc_hash::FxHashSet;
 
     // -- KNIP_RULE_MAP --------------------------------------------------------
 
@@ -175,7 +175,7 @@ mod tests {
 
     #[test]
     fn rule_map_has_no_duplicate_knip_keys() {
-        let mut seen = HashSet::new();
+        let mut seen = FxHashSet::default();
         for (knip, _) in KNIP_RULE_MAP {
             assert!(
                 seen.insert(*knip),
@@ -186,7 +186,7 @@ mod tests {
 
     #[test]
     fn rule_map_has_no_duplicate_fallow_values() {
-        let mut seen = HashSet::new();
+        let mut seen = FxHashSet::default();
         for (_, fallow) in KNIP_RULE_MAP {
             assert!(
                 seen.insert(*fallow),
@@ -229,7 +229,7 @@ mod tests {
 
     #[test]
     fn unmappable_fields_do_not_overlap_with_rule_map_keys() {
-        let rule_keys: HashSet<&str> = KNIP_RULE_MAP.iter().map(|(k, _)| *k).collect();
+        let rule_keys: FxHashSet<&str> = KNIP_RULE_MAP.iter().map(|(k, _)| *k).collect();
         for (field, _, _) in KNIP_UNMAPPABLE_FIELDS {
             assert!(
                 !rule_keys.contains(field),
@@ -250,7 +250,7 @@ mod tests {
 
     #[test]
     fn unmappable_issue_types_do_not_overlap_with_rule_map_keys() {
-        let rule_keys: HashSet<&str> = KNIP_RULE_MAP.iter().map(|(k, _)| *k).collect();
+        let rule_keys: FxHashSet<&str> = KNIP_RULE_MAP.iter().map(|(k, _)| *k).collect();
         for issue_type in KNIP_UNMAPPABLE_ISSUE_TYPES {
             assert!(
                 !rule_keys.contains(issue_type),
@@ -294,7 +294,7 @@ mod tests {
 
     #[test]
     fn plugin_keys_have_no_duplicates() {
-        let mut seen = HashSet::new();
+        let mut seen = FxHashSet::default();
         for key in KNIP_PLUGIN_KEYS {
             assert!(
                 seen.insert(*key),
@@ -305,7 +305,8 @@ mod tests {
 
     #[test]
     fn plugin_keys_do_not_overlap_with_unmappable_fields() {
-        let unmappable: HashSet<&str> = KNIP_UNMAPPABLE_FIELDS.iter().map(|(f, _, _)| *f).collect();
+        let unmappable: FxHashSet<&str> =
+            KNIP_UNMAPPABLE_FIELDS.iter().map(|(f, _, _)| *f).collect();
         for key in KNIP_PLUGIN_KEYS {
             assert!(
                 !unmappable.contains(key),

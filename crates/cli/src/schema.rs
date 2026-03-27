@@ -42,7 +42,7 @@ pub fn build_cli_schema(cmd: &clap::Command) -> serde_json::Value {
         }
         commands.push(serde_json::json!({
             "name": sub.get_name(),
-            "description": sub.get_about().map(|s| s.to_string()),
+            "description": sub.get_about().map(std::string::ToString::to_string),
             "flags": flags,
         }));
     }
@@ -50,7 +50,7 @@ pub fn build_cli_schema(cmd: &clap::Command) -> serde_json::Value {
     serde_json::json!({
         "name": cmd.get_name(),
         "version": env!("CARGO_PKG_VERSION"),
-        "description": cmd.get_about().map(|s| s.to_string()),
+        "description": cmd.get_about().map(std::string::ToString::to_string),
         "global_flags": global_flags,
         "commands": commands,
         "default_command": null,
@@ -194,7 +194,7 @@ fn build_arg_schema(arg: &clap::Arg) -> serde_json::Value {
         "name": name,
         "type": arg_type,
         "required": arg.is_required_set(),
-        "description": arg.get_help().map(|s| s.to_string()),
+        "description": arg.get_help().map(std::string::ToString::to_string),
     });
 
     if let Some(short) = arg.get_short() {

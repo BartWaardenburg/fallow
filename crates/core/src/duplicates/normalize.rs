@@ -391,7 +391,7 @@ mod tests {
                 norm in arb_normalization(),
             ) {
                 let token = make_token(kind);
-                let first = normalize_and_hash_resolved(&[token.clone()], norm);
+                let first = normalize_and_hash_resolved(std::slice::from_ref(&token), norm);
                 // The hash is computed directly from the token kind + normalization flags.
                 // Running it again on the same input must yield the same hash.
                 let second = normalize_and_hash_resolved(&[token], norm);

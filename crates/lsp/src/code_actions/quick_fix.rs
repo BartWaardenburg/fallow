@@ -204,7 +204,7 @@ mod tests {
     fn unwrap_code_action(action: &CodeActionOrCommand) -> &CodeAction {
         match action {
             CodeActionOrCommand::CodeAction(ca) => ca,
-            _ => panic!("expected CodeAction, got Command"),
+            CodeActionOrCommand::Command(_) => panic!("expected CodeAction, got Command"),
         }
     }
 
@@ -609,9 +609,7 @@ mod tests {
         let uri_b = Url::from_file_path(&file_b).unwrap();
 
         let mut results = AnalysisResults::default();
-        results.unused_files.push(UnusedFile {
-            path: file_a.clone(),
-        });
+        results.unused_files.push(UnusedFile { path: file_a });
 
         let actions = build_delete_file_actions(&results, &file_b, &uri_b, &make_range(0, 10));
         assert!(actions.is_empty());
@@ -676,7 +674,7 @@ mod tests {
                     other => panic!("expected Delete op, got: {other:?}"),
                 }
             }
-            other => panic!("expected Operations, got: {other:?}"),
+            other @ DocumentChanges::Edits(_) => panic!("expected Operations, got: {other:?}"),
         }
     }
 

@@ -42,7 +42,7 @@ mod tests {
         // Only the target file should exist — no stray temp files
         let entries: Vec<_> = std::fs::read_dir(dir.path())
             .unwrap()
-            .filter_map(|e| e.ok())
+            .filter_map(Result::ok)
             .collect();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].file_name(), "test.ts");

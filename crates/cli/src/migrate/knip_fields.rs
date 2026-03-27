@@ -168,7 +168,7 @@ pub(super) fn warn_unmappable_fields(obj: &JsonMap, warnings: &mut Vec<Migration
                 source: "knip",
                 field: (*field).to_string(),
                 message: (*message).to_string(),
-                suggestion: suggestion.map(|s| s.to_string()),
+                suggestion: suggestion.map(std::string::ToString::to_string),
             });
         }
     }

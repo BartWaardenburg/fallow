@@ -312,6 +312,7 @@ fn is_builtin_command(cmd: &str) -> bool {
 }
 
 #[cfg(test)]
+#[expect(clippy::disallowed_types)]
 mod tests {
     use super::*;
 
@@ -577,9 +578,7 @@ mod tests {
     #[test]
     fn builtin_commands_not_tracked() {
         let scripts: HashMap<String, String> =
-            [("postinstall".to_string(), "echo done".to_string())]
-                .into_iter()
-                .collect();
+            std::iter::once(("postinstall".to_string(), "echo done".to_string())).collect();
         let result = analyze_scripts(&scripts, Path::new("/nonexistent"));
         assert!(result.used_packages.is_empty());
     }
@@ -604,11 +603,10 @@ mod tests {
 
     #[test]
     fn analyze_extracts_config_files() {
-        let scripts: HashMap<String, String> = [(
+        let scripts: HashMap<String, String> = std::iter::once((
             "build".to_string(),
             "webpack --config webpack.prod.js".to_string(),
-        )]
-        .into_iter()
+        ))
         .collect();
         let result = analyze_scripts(&scripts, Path::new("/nonexistent"));
         assert!(result.config_files.contains(&"webpack.prod.js".to_string()));
@@ -617,9 +615,7 @@ mod tests {
     #[test]
     fn analyze_extracts_entry_files() {
         let scripts: HashMap<String, String> =
-            [("seed".to_string(), "ts-node scripts/seed.ts".to_string())]
-                .into_iter()
-                .collect();
+            std::iter::once(("seed".to_string(), "ts-node scripts/seed.ts".to_string())).collect();
         let result = analyze_scripts(&scripts, Path::new("/nonexistent"));
         assert!(result.entry_files.contains(&"scripts/seed.ts".to_string()));
         // ts-node should be tracked as a used package
@@ -628,11 +624,10 @@ mod tests {
 
     #[test]
     fn analyze_cross_env_with_config() {
-        let scripts: HashMap<String, String> = [(
+        let scripts: HashMap<String, String> = std::iter::once((
             "build".to_string(),
             "cross-env NODE_ENV=production webpack --config webpack.prod.js".to_string(),
-        )]
-        .into_iter()
+        ))
         .collect();
         let result = analyze_scripts(&scripts, Path::new("/nonexistent"));
         assert!(result.used_packages.contains("cross-env"));
@@ -642,11 +637,10 @@ mod tests {
 
     #[test]
     fn analyze_complex_script() {
-        let scripts: HashMap<String, String> = [(
+        let scripts: HashMap<String, String> = std::iter::once((
             "ci".to_string(),
             "cross-env CI=true npm run build && jest --config jest.ci.js --coverage".to_string(),
-        )]
-        .into_iter()
+        ))
         .collect();
         let result = analyze_scripts(&scripts, Path::new("/nonexistent"));
         // cross-env is tracked, npm run is skipped, jest is tracked
@@ -833,8 +827,7 @@ mod tests {
                 name in "[a-z]{1,10}",
                 value in "[a-zA-Z0-9 _./@&|;=-]{1,100}",
             ) {
-                let scripts: HashMap<String, String> =
-                    [(name, value)].into_iter().collect();
+                let scripts: HashMap<String, String> = std::iter::once((name, value)).collect();
                 let _ = analyze_scripts(&scripts, Path::new("/nonexistent"));
             }
 

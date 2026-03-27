@@ -1,8 +1,7 @@
-#[expect(clippy::disallowed_types)]
-use std::collections::HashMap;
 use std::path::PathBuf;
 
 use oxc_span::Span;
+use rustc_hash::FxHashMap;
 
 use super::*;
 use crate::duplicates::normalize::HashedToken;
@@ -363,7 +362,7 @@ fn no_self_overlap() {
 
     // Verify that no clone instance overlaps with another in the same file.
     for group in &report.clone_groups {
-        let mut file_instances: HashMap<&PathBuf, Vec<(usize, usize)>> = HashMap::new();
+        let mut file_instances: FxHashMap<&PathBuf, Vec<(usize, usize)>> = FxHashMap::default();
         for inst in &group.instances {
             file_instances
                 .entry(&inst.file)
@@ -371,7 +370,7 @@ fn no_self_overlap() {
                 .push((inst.start_line, inst.end_line));
         }
         for (_file, mut ranges) in file_instances {
-            ranges.sort();
+            ranges.sort_unstable();
             for w in ranges.windows(2) {
                 assert!(
                     w[1].0 > w[0].1,

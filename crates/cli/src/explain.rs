@@ -303,6 +303,43 @@ pub fn health_meta() -> Value {
     })
 }
 
+/// Build the `_meta` object for `fallow dupes --format json --explain`.
+pub fn dupes_meta() -> Value {
+    json!({
+        "docs": DUPES_DOCS,
+        "metrics": {
+            "duplication_percentage": {
+                "name": "Duplication Percentage",
+                "description": "Fraction of total source tokens that appear in at least one clone group. Computed over the full analyzed file set.",
+                "range": "[0, 100]",
+                "interpretation": "lower is better"
+            },
+            "token_count": {
+                "name": "Token Count",
+                "description": "Number of normalized source tokens in the clone group. Tokens are language-aware (keywords, identifiers, operators, punctuation). Higher token count = larger duplicate.",
+                "range": "[1, \u{221e})",
+                "interpretation": "larger clones have higher refactoring value"
+            },
+            "line_count": {
+                "name": "Line Count",
+                "description": "Number of source lines spanned by the clone instance. Approximation of clone size for human readability.",
+                "range": "[1, \u{221e})",
+                "interpretation": "larger clones are more impactful to deduplicate"
+            },
+            "clone_groups": {
+                "name": "Clone Groups",
+                "description": "A set of code fragments with identical or near-identical normalized token sequences. Each group has 2+ instances across different locations.",
+                "interpretation": "each group is a single refactoring opportunity"
+            },
+            "clone_families": {
+                "name": "Clone Families",
+                "description": "Groups of clone groups that share the same set of files. Indicates systematic duplication patterns (e.g., mirrored directory structures).",
+                "interpretation": "families suggest extract-module refactoring opportunities"
+            }
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -369,7 +406,7 @@ mod tests {
 
     #[test]
     fn check_rules_no_duplicate_ids() {
-        let mut seen = std::collections::HashSet::new();
+        let mut seen = rustc_hash::FxHashSet::default();
         for rule in CHECK_RULES.iter().chain(HEALTH_RULES).chain(DUPES_RULES) {
             assert!(seen.insert(rule.id), "duplicate rule id: {}", rule.id);
         }
@@ -441,41 +478,4 @@ mod tests {
         assert!(metrics.contains_key("clone_groups"));
         assert!(metrics.contains_key("clone_families"));
     }
-}
-
-/// Build the `_meta` object for `fallow dupes --format json --explain`.
-pub fn dupes_meta() -> Value {
-    json!({
-        "docs": DUPES_DOCS,
-        "metrics": {
-            "duplication_percentage": {
-                "name": "Duplication Percentage",
-                "description": "Fraction of total source tokens that appear in at least one clone group. Computed over the full analyzed file set.",
-                "range": "[0, 100]",
-                "interpretation": "lower is better"
-            },
-            "token_count": {
-                "name": "Token Count",
-                "description": "Number of normalized source tokens in the clone group. Tokens are language-aware (keywords, identifiers, operators, punctuation). Higher token count = larger duplicate.",
-                "range": "[1, \u{221e})",
-                "interpretation": "larger clones have higher refactoring value"
-            },
-            "line_count": {
-                "name": "Line Count",
-                "description": "Number of source lines spanned by the clone instance. Approximation of clone size for human readability.",
-                "range": "[1, \u{221e})",
-                "interpretation": "larger clones are more impactful to deduplicate"
-            },
-            "clone_groups": {
-                "name": "Clone Groups",
-                "description": "A set of code fragments with identical or near-identical normalized token sequences. Each group has 2+ instances across different locations.",
-                "interpretation": "each group is a single refactoring opportunity"
-            },
-            "clone_families": {
-                "name": "Clone Families",
-                "description": "Groups of clone groups that share the same set of files. Indicates systematic duplication patterns (e.g., mirrored directory structures).",
-                "interpretation": "families suggest extract-module refactoring opportunities"
-            }
-        }
-    })
 }

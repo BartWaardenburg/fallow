@@ -590,7 +590,7 @@ fn validate_inputs(
 
     let threads = cli.threads.unwrap_or_else(|| {
         std::thread::available_parallelism()
-            .map(|n| n.get())
+            .map(std::num::NonZero::get)
             .unwrap_or(4)
     });
 
@@ -604,7 +604,7 @@ fn validate_inputs(
 }
 
 /// Apply CI defaults: if `--ci` is set, override format to SARIF (unless explicit),
-/// enable fail-on-issues, and set quiet. Returns (output, quiet, fail_on_issues).
+/// enable fail-on-issues, and set quiet. Returns (output, quiet, `fail_on_issues`).
 fn apply_ci_defaults(
     ci: bool,
     mut fail_on_issues: bool,

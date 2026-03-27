@@ -241,7 +241,7 @@ mod tests {
             .into_iter()
             .filter_map(|e| match e.name {
                 ExportName::Named(n) => Some(n),
-                _ => None,
+                ExportName::Default => None,
             })
             .collect()
     }

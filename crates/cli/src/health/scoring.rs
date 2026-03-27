@@ -355,7 +355,7 @@ mod tests {
         // fan_out_penalty = min(ln(11) * 4, 15) = min(9.59, 15) = 9.59
         // 100 - 15 - 6 - 9.59 = 69.41
         let result = compute_maintainability_index(0.5, 0.3, 10);
-        let expected = 100.0 - 15.0 - 6.0 - (11.0_f64.ln() * 4.0);
+        let expected = 11.0_f64.ln().mul_add(-4.0, 100.0 - 15.0 - 6.0);
         assert!((result - expected).abs() < 0.01);
     }
 

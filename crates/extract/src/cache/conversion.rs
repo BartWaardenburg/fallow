@@ -7,6 +7,7 @@ use crate::ExportName;
 use super::types::*;
 
 /// Reconstruct a [`ModuleInfo`](crate::ModuleInfo) from a [`CachedModule`].
+#[must_use]
 pub fn cached_to_module(
     cached: &CachedModule,
     file_id: fallow_types::discover::FileId,
@@ -138,6 +139,7 @@ pub fn cached_to_module(
 /// `mtime_secs` and `file_size` come from `std::fs::metadata()` at parse time
 /// and enable fast cache validation on subsequent runs (skip file read when
 /// mtime+size match).
+#[must_use]
 pub fn module_to_cached(
     module: &crate::ModuleInfo,
     mtime_secs: u64,
@@ -248,7 +250,9 @@ pub fn module_to_cached(
             .iter()
             .map(|s| CachedSuppression {
                 line: s.line,
-                kind: s.kind.map_or(0, |k| k.to_discriminant()),
+                kind: s
+                    .kind
+                    .map_or(0, crate::suppress::IssueKind::to_discriminant),
             })
             .collect(),
         line_offsets: module.line_offsets.clone(),

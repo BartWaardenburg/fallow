@@ -121,7 +121,7 @@ mod tests {
         assert_eq!(config.mode, DetectionMode::Mild);
         assert_eq!(config.min_tokens, 50);
         assert_eq!(config.min_lines, 5);
-        assert_eq!(config.threshold, 0.0);
+        assert!((config.threshold - 0.0).abs() < f64::EPSILON);
         assert!(config.ignore.is_empty());
         assert!(!config.skip_local);
         assert!(!config.cross_language);
@@ -180,7 +180,7 @@ ignore = ["**/*.generated.ts"]
         assert_eq!(config.mode, DetectionMode::Semantic);
         assert_eq!(config.min_tokens, 30);
         assert_eq!(config.min_lines, 3);
-        assert_eq!(config.threshold, 5.0);
+        assert!((config.threshold - 5.0).abs() < f64::EPSILON);
         assert!(config.skip_local);
         assert_eq!(config.ignore, vec!["**/*.generated.ts"]);
     }
@@ -197,18 +197,18 @@ ignore = ["**/*.generated.ts"]
 
     #[test]
     fn config_deserialize_cross_language() {
-        let toml_str = r#"crossLanguage = true"#;
+        let toml_str = r"crossLanguage = true";
         let config: DuplicatesConfig = toml::from_str(toml_str).unwrap();
         assert!(config.cross_language);
     }
 
     #[test]
     fn config_deserialize_normalization_overrides() {
-        let toml_str = r#"
+        let toml_str = r"
 [normalization]
 ignoreIdentifiers = true
 ignoreStringValues = false
-"#;
+";
         let config: DuplicatesConfig = toml::from_str(toml_str).unwrap();
         assert_eq!(config.normalization.ignore_identifiers, Some(true));
         assert_eq!(config.normalization.ignore_string_values, Some(false));

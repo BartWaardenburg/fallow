@@ -309,7 +309,7 @@ mod tests {
         };
         let vs = compute_vital_signs(&input);
         // avg of 2,4,6,8,10,12,14,16,18,20 = 11.0
-        assert_eq!(vs.avg_cyclomatic, 11.0);
+        assert!((vs.avg_cyclomatic - 11.0).abs() < f64::EPSILON);
         // p90 of sorted [2,4,6,8,10,12,14,16,18,20] at index ceil(10*0.9)-1 = 8 → value 18
         assert_eq!(vs.p90_cyclomatic, 18);
     }
@@ -436,7 +436,7 @@ mod tests {
         let content = std::fs::read_to_string(&saved_path).unwrap();
         let loaded: VitalSignsSnapshot = serde_json::from_str(&content).unwrap();
         assert_eq!(loaded.snapshot_schema_version, SNAPSHOT_SCHEMA_VERSION);
-        assert_eq!(loaded.vital_signs.avg_cyclomatic, 4.7);
+        assert!((loaded.vital_signs.avg_cyclomatic - 4.7).abs() < f64::EPSILON);
         assert_eq!(loaded.counts.total_files, 1200);
     }
 

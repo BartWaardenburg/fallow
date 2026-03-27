@@ -82,7 +82,8 @@ fn make_mixed_files(n_identical: usize, n_diverse: usize, tokens_per_file: usize
     data
 }
 
-fn profile_scenario(name: &str, data: DupeInput, runs: usize) {
+#[expect(clippy::print_stderr)]
+fn profile_scenario(name: &str, data: &DupeInput, runs: usize) {
     let total_tokens: usize = data.iter().map(|(_, h, _)| h.len()).sum();
     let n_files = data.len();
 
@@ -109,8 +110,7 @@ fn profile_scenario(name: &str, data: DupeInput, runs: usize) {
     let mean = times.iter().sum::<f64>() / times.len() as f64;
 
     eprintln!(
-        "  min={:.0}µs  median={:.0}µs  mean={:.0}µs  max={:.0}µs  groups={groups}",
-        min, median, mean, max
+        "  min={min:.0}µs  median={median:.0}µs  mean={mean:.0}µs  max={max:.0}µs  groups={groups}"
     );
     eprintln!(
         "  throughput: {:.0} tokens/ms",
@@ -131,17 +131,17 @@ fn profile_dupe_detection() {
 
     let runs = 10;
 
-    profile_scenario("2x500 identical", make_identical_files(2, 500), runs);
-    profile_scenario("2x1000 identical", make_identical_files(2, 1000), runs);
-    profile_scenario("2x2000 identical", make_identical_files(2, 2000), runs);
-    profile_scenario("2x5000 identical", make_identical_files(2, 5000), runs);
-    profile_scenario("10x500 identical", make_identical_files(10, 500), runs);
-    profile_scenario("20x200 identical", make_identical_files(20, 200), runs);
+    profile_scenario("2x500 identical", &make_identical_files(2, 500), runs);
+    profile_scenario("2x1000 identical", &make_identical_files(2, 1000), runs);
+    profile_scenario("2x2000 identical", &make_identical_files(2, 2000), runs);
+    profile_scenario("2x5000 identical", &make_identical_files(2, 5000), runs);
+    profile_scenario("10x500 identical", &make_identical_files(10, 500), runs);
+    profile_scenario("20x200 identical", &make_identical_files(20, 200), runs);
     profile_scenario(
         "100x200 mixed (20 identical + 80 diverse)",
-        make_mixed_files(20, 80, 200),
+        &make_mixed_files(20, 80, 200),
         runs,
     );
-    profile_scenario("50x200 diverse", make_mixed_files(0, 50, 200), runs);
-    profile_scenario("2x10000 identical", make_identical_files(2, 10000), runs);
+    profile_scenario("50x200 diverse", &make_mixed_files(0, 50, 200), runs);
+    profile_scenario("2x10000 identical", &make_identical_files(2, 10000), runs);
 }

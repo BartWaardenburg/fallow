@@ -367,7 +367,7 @@ mod tests {
             std::fs::write(src.join("data.json"), "{}").unwrap();
             std::fs::write(src.join("readme.md"), "# Hello").unwrap();
             std::fs::write(src.join("notes.txt"), "notes").unwrap();
-            std::fs::write(src.join("logo.png"), &[0u8; 8]).unwrap();
+            std::fs::write(src.join("logo.png"), [0u8; 8]).unwrap();
             std::fs::write(src.join("page.html"), "<html></html>").unwrap();
 
             let config = make_config(dir.path().to_path_buf(), false);

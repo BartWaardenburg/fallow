@@ -301,7 +301,7 @@ mod tests {
         }
     }
 
-    fn default_opts_for_config<'a>(root: &'a Path, mode: DupesMode) -> DupesOptions<'a> {
+    fn default_opts_for_config(root: &Path, mode: DupesMode) -> DupesOptions<'_> {
         DupesOptions {
             root,
             config_path: &None,
@@ -456,8 +456,10 @@ mod tests {
     fn build_config_always_enabled() {
         let root = PathBuf::from("/project");
         let opts = default_opts_for_config(&root, DupesMode::Mild);
-        let mut toml = DuplicatesConfig::default();
-        toml.enabled = false;
+        let toml = DuplicatesConfig {
+            enabled: false,
+            ..DuplicatesConfig::default()
+        };
         let config = build_dupes_config(&opts, &toml);
         // The dupes command always enables duplication detection
         assert!(config.enabled);
@@ -477,8 +479,10 @@ mod tests {
     fn build_config_cross_language_toml_true_with_cli_false() {
         let root = PathBuf::from("/project");
         let opts = default_opts_for_config(&root, DupesMode::Mild); // cross_language = false
-        let mut toml = DuplicatesConfig::default();
-        toml.cross_language = true;
+        let toml = DuplicatesConfig {
+            cross_language: true,
+            ..DuplicatesConfig::default()
+        };
         let config = build_dupes_config(&opts, &toml);
         // OR semantics: toml.cross_language || opts.cross_language
         assert!(config.cross_language);
@@ -497,8 +501,10 @@ mod tests {
     fn build_config_inherits_ignore_from_toml() {
         let root = PathBuf::from("/project");
         let opts = default_opts_for_config(&root, DupesMode::Mild);
-        let mut toml = DuplicatesConfig::default();
-        toml.ignore = vec!["**/*.generated.ts".to_string()];
+        let toml = DuplicatesConfig {
+            ignore: vec!["**/*.generated.ts".to_string()],
+            ..DuplicatesConfig::default()
+        };
         let config = build_dupes_config(&opts, &toml);
         assert_eq!(config.ignore, vec!["**/*.generated.ts"]);
     }
@@ -507,11 +513,13 @@ mod tests {
     fn build_config_inherits_normalization_from_toml() {
         let root = PathBuf::from("/project");
         let opts = default_opts_for_config(&root, DupesMode::Mild);
-        let mut toml = DuplicatesConfig::default();
-        toml.normalization = NormalizationConfig {
-            ignore_identifiers: Some(true),
-            ignore_string_values: None,
-            ignore_numeric_values: Some(false),
+        let toml = DuplicatesConfig {
+            normalization: NormalizationConfig {
+                ignore_identifiers: Some(true),
+                ignore_string_values: None,
+                ignore_numeric_values: Some(false),
+            },
+            ..DuplicatesConfig::default()
         };
         let config = build_dupes_config(&opts, &toml);
         assert_eq!(config.normalization.ignore_identifiers, Some(true));
@@ -584,7 +592,7 @@ mod tests {
             50,
             10,
         );
-        let report = make_report(vec![group.clone()], 10, 1000);
+        let report = make_report(vec![group], 10, 1000);
         let baseline = DuplicationBaselineData::from_report(&report, root);
 
         let filtered = filter_new_clone_groups(report, &baseline, root);
@@ -625,7 +633,7 @@ mod tests {
             filtered.clone_groups[0]
                 .instances
                 .iter()
-                .any(|i| i.file == PathBuf::from("/project/src/c.ts"))
+                .any(|i| i.file == std::path::Path::new("/project/src/c.ts"))
         );
     }
 
@@ -638,7 +646,7 @@ mod tests {
         assert_eq!(stats.clone_groups, 0);
         assert_eq!(stats.clone_instances, 0);
         assert_eq!(stats.duplicated_lines, 0);
-        assert_eq!(stats.duplication_percentage, 0.0);
+        assert!((stats.duplication_percentage - 0.0).abs() < f64::EPSILON);
     }
 
     #[test]
@@ -695,7 +703,7 @@ mod tests {
         let mut report = DuplicationReport::default();
         report.stats.total_lines = 0;
         let stats = recompute_stats(&report);
-        assert_eq!(stats.duplication_percentage, 0.0);
+        assert!((stats.duplication_percentage - 0.0).abs() < f64::EPSILON);
     }
 
     #[test]
@@ -745,7 +753,7 @@ mod tests {
         );
         let mut report = make_report(vec![group], 10, 1000);
         let changed: rustc_hash::FxHashSet<PathBuf> =
-            [PathBuf::from("src/a.ts")].into_iter().collect();
+            std::iter::once(PathBuf::from("src/a.ts")).collect();
 
         filter_by_changed_files(&mut report, &changed);
 
@@ -766,7 +774,7 @@ mod tests {
         );
         let mut report = make_report(vec![group], 10, 1000);
         let changed: rustc_hash::FxHashSet<PathBuf> =
-            [PathBuf::from("src/c.ts")].into_iter().collect();
+            std::iter::once(PathBuf::from("src/c.ts")).collect();
 
         filter_by_changed_files(&mut report, &changed);
 
@@ -789,7 +797,7 @@ mod tests {
         );
         let mut report = make_report(vec![group1, group2], 10, 1000);
         let changed: rustc_hash::FxHashSet<PathBuf> =
-            [PathBuf::from("src/a.ts")].into_iter().collect();
+            std::iter::once(PathBuf::from("src/a.ts")).collect();
 
         filter_by_changed_files(&mut report, &changed);
 
@@ -799,7 +807,7 @@ mod tests {
             report.clone_groups[0]
                 .instances
                 .iter()
-                .any(|i| i.file == PathBuf::from("src/a.ts"))
+                .any(|i| i.file == std::path::Path::new("src/a.ts"))
         );
     }
 
@@ -878,7 +886,7 @@ mod tests {
         report.stats.total_files = 10;
 
         let changed: rustc_hash::FxHashSet<PathBuf> =
-            [PathBuf::from("src/x.ts")].into_iter().collect();
+            std::iter::once(PathBuf::from("src/x.ts")).collect();
 
         filter_by_changed_files(&mut report, &changed);
 
@@ -886,7 +894,7 @@ mod tests {
         assert_eq!(report.stats.clone_groups, 0);
         assert_eq!(report.stats.clone_instances, 0);
         assert_eq!(report.stats.duplicated_lines, 0);
-        assert_eq!(report.stats.duplication_percentage, 0.0);
+        assert!((report.stats.duplication_percentage - 0.0).abs() < f64::EPSILON);
         // Pass-through fields are preserved from the original stats
         assert_eq!(report.stats.total_lines, 100);
         assert_eq!(report.stats.total_tokens, 5000);

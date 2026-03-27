@@ -806,7 +806,7 @@ mod tests {
             ("/project/src/a.ts", 1, 10),
             ("/project/src/b.ts", 5, 15),
         ]);
-        let report = make_duplication_report(vec![group.clone()]);
+        let report = make_duplication_report(vec![group]);
         let baseline = DuplicationBaselineData::from_report(&report, root);
         let filtered = filter_new_clone_groups(report, &baseline, root);
         assert!(
@@ -877,7 +877,7 @@ mod tests {
             },
         };
         let stats = super::recompute_stats(&report);
-        assert_eq!(stats.duplication_percentage, 0.0);
+        assert!((stats.duplication_percentage - 0.0).abs() < f64::EPSILON);
     }
 
     // ── HealthBaselineData ──────────────────────────────────────────

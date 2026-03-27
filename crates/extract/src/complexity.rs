@@ -664,7 +664,7 @@ mod tests {
     #[test]
     fn complex_function_cyclomatic() {
         let results = analyze(
-            r#"function complex(x, y) {
+            r"function complex(x, y) {
                 if (x > 0) {
                     for (let i = 0; i < x; i++) {
                         if (y && i > 5) {
@@ -677,7 +677,7 @@ mod tests {
                     }
                 }
                 return x ? true : false;
-            }"#,
+            }",
         );
         let f = find_fn(&results, "complex");
         // 1 + if + for + if + && + else-if + while + ternary = 8
@@ -763,13 +763,13 @@ mod tests {
     #[test]
     fn nested_function_resets_nesting() {
         let results = analyze(
-            r#"function outer(x) {
+            r"function outer(x) {
                 if (x) {
                     const inner = () => {
                         if (x) { return 1; }
                     };
                 }
-            }"#,
+            }",
         );
         let outer = find_fn(&results, "outer");
         let inner = find_fn(&results, "inner");
@@ -807,7 +807,7 @@ mod tests {
     #[test]
     fn deeply_nested_cognitive() {
         let results = analyze(
-            r#"function deep(a, b, c, d) {
+            r"function deep(a, b, c, d) {
                 if (a) {           // +1 (n=0) = 1
                     for (;;) {     // +1+1 (n=1) = 3
                         if (b) {   // +1+2 (n=2) = 6
@@ -817,7 +817,7 @@ mod tests {
                         }
                     }
                 }
-            }"#,
+            }",
         );
         let f = find_fn(&results, "deep");
         assert_eq!(f.cognitive, 15);

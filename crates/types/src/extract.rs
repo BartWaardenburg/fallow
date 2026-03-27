@@ -51,6 +51,7 @@ pub struct ModuleInfo {
 ///
 /// The returned vec contains one entry per line: `line_offsets[i]` is the byte
 /// offset where line `i` starts (0-indexed). The first entry is always `0`.
+#[must_use]
 pub fn compute_line_offsets(source: &str) -> Vec<u32> {
     let mut offsets = vec![0u32];
     for (i, byte) in source.bytes().enumerate() {
@@ -65,6 +66,7 @@ pub fn compute_line_offsets(source: &str) -> Vec<u32> {
 /// using a pre-computed line offset table (from [`compute_line_offsets`]).
 ///
 /// Uses binary search for O(log L) lookup where L is the number of lines.
+#[must_use]
 pub fn byte_offset_to_line_col(line_offsets: &[u32], byte_offset: u32) -> (u32, u32) {
     // Binary search: find the last line whose start is <= byte_offset
     let line_idx = match line_offsets.binary_search(&byte_offset) {
@@ -85,9 +87,9 @@ pub struct FunctionComplexity {
     pub line: u32,
     /// 0-based byte column where the function starts.
     pub col: u32,
-    /// McCabe cyclomatic complexity (1 + decision points).
+    /// `McCabe` cyclomatic complexity (1 + decision points).
     pub cyclomatic: u16,
-    /// SonarSource cognitive complexity (structural + nesting penalty).
+    /// `SonarSource` cognitive complexity (structural + nesting penalty).
     pub cognitive: u16,
     /// Number of lines in the function body.
     pub line_count: u32,
@@ -184,6 +186,7 @@ pub enum ExportName {
 
 impl ExportName {
     /// Compare against a string without allocating (avoids `to_string()`).
+    #[must_use]
     pub fn matches_str(&self, s: &str) -> bool {
         match self {
             Self::Named(n) => n == s,

@@ -31,6 +31,7 @@ pub enum IssueKind {
 
 impl IssueKind {
     /// Parse an issue kind from the string tokens used in CLI output and suppression comments.
+    #[must_use]
     pub fn parse(s: &str) -> Option<Self> {
         match s {
             "unused-file" => Some(Self::UnusedFile),
@@ -50,6 +51,7 @@ impl IssueKind {
     }
 
     /// Convert to a u8 discriminant for compact cache storage.
+    #[must_use]
     pub const fn to_discriminant(self) -> u8 {
         match self {
             Self::UnusedFile => 1,
@@ -68,6 +70,7 @@ impl IssueKind {
     }
 
     /// Reconstruct from a cache discriminant.
+    #[must_use]
     pub const fn from_discriminant(d: u8) -> Option<Self> {
         match d {
             1 => Some(Self::UnusedFile),

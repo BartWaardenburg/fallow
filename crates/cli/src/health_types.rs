@@ -498,8 +498,11 @@ mod tests {
             RecommendationCategory::ExtractComplexFunctions,
             RecommendationCategory::ExtractDependencies,
         ];
-        let labels: Vec<&str> = categories.iter().map(|c| c.label()).collect();
-        let unique: std::collections::HashSet<&&str> = labels.iter().collect();
+        let labels: Vec<&str> = categories
+            .iter()
+            .map(super::RecommendationCategory::label)
+            .collect();
+        let unique: rustc_hash::FxHashSet<&&str> = labels.iter().collect();
         assert_eq!(labels.len(), unique.len(), "category labels must be unique");
     }
 
@@ -567,7 +570,7 @@ mod tests {
         };
         let json = serde_json::to_string(&vs).unwrap();
         let deserialized: VitalSigns = serde_json::from_str(&json).unwrap();
-        assert_eq!(deserialized.avg_cyclomatic, 4.7);
+        assert!((deserialized.avg_cyclomatic - 4.7).abs() < f64::EPSILON);
         assert_eq!(deserialized.p90_cyclomatic, 12);
         assert_eq!(deserialized.hotspot_count, Some(5));
         // duplication_pct should be absent in JSON and None after deser

@@ -82,7 +82,7 @@ pub(super) fn migrate_jscpd(
     let mut dupes = serde_json::Map::new();
 
     // minTokens -> duplicates.minTokens
-    if let Some(min_tokens) = obj.get("minTokens").and_then(|v| v.as_u64()) {
+    if let Some(min_tokens) = obj.get("minTokens").and_then(serde_json::Value::as_u64) {
         dupes.insert(
             "minTokens".to_string(),
             serde_json::Value::Number(min_tokens.into()),
@@ -90,7 +90,7 @@ pub(super) fn migrate_jscpd(
     }
 
     // minLines -> duplicates.minLines
-    if let Some(min_lines) = obj.get("minLines").and_then(|v| v.as_u64()) {
+    if let Some(min_lines) = obj.get("minLines").and_then(serde_json::Value::as_u64) {
         dupes.insert(
             "minLines".to_string(),
             serde_json::Value::Number(min_lines.into()),
@@ -98,7 +98,7 @@ pub(super) fn migrate_jscpd(
     }
 
     // threshold -> duplicates.threshold
-    if let Some(threshold) = obj.get("threshold").and_then(|v| v.as_f64())
+    if let Some(threshold) = obj.get("threshold").and_then(serde_json::Value::as_f64)
         && let Some(n) = serde_json::Number::from_f64(threshold)
     {
         dupes.insert("threshold".to_string(), serde_json::Value::Number(n));
@@ -141,7 +141,7 @@ pub(super) fn migrate_jscpd(
     }
 
     // skipLocal -> duplicates.skipLocal
-    if let Some(skip_local) = obj.get("skipLocal").and_then(|v| v.as_bool()) {
+    if let Some(skip_local) = obj.get("skipLocal").and_then(serde_json::Value::as_bool) {
         dupes.insert("skipLocal".to_string(), serde_json::Value::Bool(skip_local));
     }
 
@@ -169,7 +169,7 @@ pub(super) fn migrate_jscpd(
                 source: "jscpd",
                 field: (*field).to_string(),
                 message: (*message).to_string(),
-                suggestion: suggestion.map(|s| s.to_string()),
+                suggestion: suggestion.map(std::string::ToString::to_string),
             });
         }
     }

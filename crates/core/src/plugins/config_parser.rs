@@ -703,11 +703,11 @@ mod tests {
 
     #[test]
     fn extract_imports_basic() {
-        let source = r#"
+        let source = r"
             import foo from 'foo-pkg';
             import { bar } from '@scope/bar';
             export default {};
-        "#;
+        ";
         let imports = extract_imports(source, &js_path());
         assert_eq!(imports, vec!["foo-pkg", "@scope/bar"]);
     }
@@ -795,7 +795,7 @@ mod tests {
 
     #[test]
     fn object_keys_postcss_plugins() {
-        let source = r#"
+        let source = r"
             module.exports = {
                 plugins: {
                     autoprefixer: {},
@@ -803,14 +803,14 @@ mod tests {
                     'postcss-import': {}
                 }
             };
-        "#;
+        ";
         let keys = extract_config_object_keys(source, &js_path(), &["plugins"]);
         assert_eq!(keys, vec!["autoprefixer", "tailwindcss", "postcss-import"]);
     }
 
     #[test]
     fn object_keys_nested_path() {
-        let source = r#"
+        let source = r"
             export default {
                 build: {
                     plugins: {
@@ -819,14 +819,14 @@ mod tests {
                     }
                 }
             };
-        "#;
+        ";
         let keys = extract_config_object_keys(source, &js_path(), &["build", "plugins"]);
         assert_eq!(keys, vec!["minify", "compress"]);
     }
 
     #[test]
     fn object_keys_empty_object() {
-        let source = r#"export default { plugins: {} };"#;
+        let source = r"export default { plugins: {} };";
         let keys = extract_config_object_keys(source, &js_path(), &["plugins"]);
         assert!(keys.is_empty());
     }
@@ -883,7 +883,7 @@ mod tests {
 
     #[test]
     fn string_or_array_template_literal() {
-        let source = r#"export default { entry: `./src/index.js` };"#;
+        let source = r"export default { entry: `./src/index.js` };";
         let result = extract_config_string_or_array(source, &js_path(), &["entry"]);
         assert_eq!(result, vec!["./src/index.js"]);
     }
@@ -892,35 +892,35 @@ mod tests {
 
     #[test]
     fn require_strings_array() {
-        let source = r#"
+        let source = r"
             module.exports = {
                 plugins: [
                     require('autoprefixer'),
                     require('postcss-import')
                 ]
             };
-        "#;
+        ";
         let deps = extract_config_require_strings(source, &js_path(), "plugins");
         assert_eq!(deps, vec!["autoprefixer", "postcss-import"]);
     }
 
     #[test]
     fn require_strings_with_tuples() {
-        let source = r#"
+        let source = r"
             module.exports = {
                 plugins: [
                     require('autoprefixer'),
                     [require('postcss-preset-env'), { stage: 3 }]
                 ]
             };
-        "#;
+        ";
         let deps = extract_config_require_strings(source, &js_path(), "plugins");
         assert_eq!(deps, vec!["autoprefixer", "postcss-preset-env"]);
     }
 
     #[test]
     fn require_strings_empty_array() {
-        let source = r#"module.exports = { plugins: [] };"#;
+        let source = r"module.exports = { plugins: [] };";
         let deps = extract_config_require_strings(source, &js_path(), "plugins");
         assert!(deps.is_empty());
     }

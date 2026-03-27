@@ -391,7 +391,7 @@ mod tests {
         let a_findings: Vec<_> = result
             .combined_findings
             .iter()
-            .filter(|f| f.clone_instance.file == PathBuf::from("src/a.ts"))
+            .filter(|f| f.clone_instance.file == std::path::Path::new("src/a.ts"))
             .collect();
         assert_eq!(a_findings.len(), 1);
         assert_eq!(a_findings[0].dead_code_kind, DeadCodeKind::UnusedFile);

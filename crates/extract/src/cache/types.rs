@@ -75,7 +75,7 @@ pub struct CachedExport {
     pub is_default: bool,
     /// Whether this is a type-only export.
     pub is_type_only: bool,
-    /// Whether this export has a `@public` JSDoc tag.
+    /// Whether this export has a `@public` `JSDoc` tag.
     pub is_public: bool,
     /// The local binding name, if different.
     pub local_name: Option<String>,

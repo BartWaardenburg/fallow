@@ -127,7 +127,6 @@ impl<'a> CanonicalFallback<'a> {
 mod tests {
     use super::*;
     use fallow_types::discover::DiscoveredFile;
-    use std::path::PathBuf;
 
     #[test]
     fn canonical_fallback_returns_none_for_empty_files() {

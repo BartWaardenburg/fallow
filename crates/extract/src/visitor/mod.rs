@@ -1007,12 +1007,12 @@ mod tests {
     #[test]
     fn extracts_public_class_methods_and_properties() {
         let info = parse(
-            r#"
+            r"
             export class MyService {
                 name: string;
                 getValue() { return 1; }
             }
-            "#,
+            ",
         );
         let class_export = info
             .exports
@@ -1037,12 +1037,12 @@ mod tests {
     #[test]
     fn skips_constructor_in_class_members() {
         let info = parse(
-            r#"
+            r"
             export class Foo {
                 constructor() {}
                 doWork() {}
             }
-            "#,
+            ",
         );
         let class_export = info
             .exports
@@ -1059,13 +1059,13 @@ mod tests {
     #[test]
     fn skips_private_and_protected_members() {
         let info = parse(
-            r#"
+            r"
             export class Foo {
                 private secret: string;
                 protected internal(): void {}
                 public visible: number;
             }
-            "#,
+            ",
         );
         let class_export = info
             .exports
@@ -1089,13 +1089,13 @@ mod tests {
     #[test]
     fn class_member_with_decorator_flagged() {
         let info = parse(
-            r#"
+            r"
             function Injectable() { return (target: any) => target; }
             export class Service {
                 @Injectable()
                 handler() {}
             }
-            "#,
+            ",
         );
         let class_export = info
             .exports
@@ -1115,14 +1115,14 @@ mod tests {
     #[test]
     fn extracts_enum_members() {
         let info = parse(
-            r#"
+            r"
             export enum Direction {
                 Up,
                 Down,
                 Left,
                 Right
             }
-            "#,
+            ",
         );
         let enum_export = info
             .exports
@@ -1179,12 +1179,12 @@ mod tests {
     #[test]
     fn this_member_access_tracked() {
         let info = parse(
-            r#"
+            r"
             export class Foo {
                 bar: number;
                 baz() { return this.bar; }
             }
-            "#,
+            ",
         );
         assert!(
             info.member_accesses
@@ -1197,12 +1197,12 @@ mod tests {
     #[test]
     fn this_assignment_tracked() {
         let info = parse(
-            r#"
+            r"
             export class Foo {
                 bar: number;
                 init() { this.bar = 42; }
             }
-            "#,
+            ",
         );
         assert!(
             info.member_accesses
@@ -1217,11 +1217,11 @@ mod tests {
     #[test]
     fn instance_member_access_mapped_to_class() {
         let info = parse(
-            r#"
+            r"
             import { MyService } from './service';
             const svc = new MyService();
             svc.greet();
-            "#,
+            ",
         );
         // svc.greet() should produce a MemberAccess for MyService.greet
         assert!(
@@ -1236,11 +1236,11 @@ mod tests {
     #[test]
     fn instance_property_access_mapped_to_class() {
         let info = parse(
-            r#"
+            r"
             import { MyClass } from './class';
             const obj = new MyClass();
             console.log(obj.name);
-            "#,
+            ",
         );
         assert!(
             info.member_accesses
@@ -1254,11 +1254,11 @@ mod tests {
     #[test]
     fn instance_whole_object_use_mapped_to_class() {
         let info = parse(
-            r#"
+            r"
             import { MyClass } from './class';
             const obj = new MyClass();
             Object.keys(obj);
-            "#,
+            ",
         );
         assert!(
             info.whole_object_uses.contains(&"MyClass".to_string()),
@@ -1270,10 +1270,10 @@ mod tests {
     #[test]
     fn non_instance_binding_not_mapped() {
         let info = parse(
-            r#"
+            r"
             const obj = { greet() {} };
             obj.greet();
-            "#,
+            ",
         );
         // obj is not a `new` binding, so no class mapping should exist.
         assert!(
@@ -1289,10 +1289,10 @@ mod tests {
     #[test]
     fn instance_binding_with_no_access_produces_nothing() {
         let info = parse(
-            r#"
+            r"
             import { Foo } from './foo';
             const x = new Foo();
-            "#,
+            ",
         );
         // Binding exists but no x.method() calls — no synthetic accesses should be emitted.
         assert!(
@@ -1310,12 +1310,12 @@ mod tests {
     #[test]
     fn builtin_constructor_not_tracked() {
         let info = parse(
-            r#"
+            r"
             const url = new URL('https://example.com');
             url.href;
             const m = new Map();
             m.get('key');
-            "#,
+            ",
         );
         // Built-in constructors should not create instance bindings
         assert!(
@@ -1333,13 +1333,13 @@ mod tests {
     #[test]
     fn multiple_instances_same_class() {
         let info = parse(
-            r#"
+            r"
             import { Svc } from './svc';
             const a = new Svc();
             const b = new Svc();
             a.foo();
             b.bar();
-            "#,
+            ",
         );
         assert!(
             info.member_accesses

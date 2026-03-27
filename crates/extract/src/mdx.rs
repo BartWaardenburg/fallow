@@ -22,6 +22,7 @@ use fallow_types::discover::FileId;
 ///
 /// NOTE: CSS/SCSS `@apply` is handled in `parse_css_to_module()`, not here.
 /// MDX import/export extraction only handles JS/TS `import`/`export` statements.
+#[must_use]
 pub fn extract_mdx_statements(source: &str) -> String {
     let mut statements = Vec::new();
     let mut in_multiline = false;
@@ -241,8 +242,7 @@ mod tests {
         // Braces balanced on one line — should NOT enter multiline mode
         let source = "import { A } from './a'\n# Title\n";
         let result = extract_mdx_statements(source);
-        let lines: Vec<&str> = result.lines().collect();
-        assert_eq!(lines.len(), 1);
+        assert_eq!(result.lines().count(), 1);
     }
 
     // ── Multi-line import is extracted as one statement ──────────
@@ -282,7 +282,6 @@ mod tests {
             "prose should not be extracted"
         );
         // Only 2 lines total
-        let lines: Vec<&str> = result.lines().collect();
-        assert_eq!(lines.len(), 2);
+        assert_eq!(result.lines().count(), 2);
     }
 }

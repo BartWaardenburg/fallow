@@ -104,14 +104,14 @@ mod tests {
 
     #[test]
     fn resolve_config_object_and_require() {
-        let source = r#"
+        let source = r"
             module.exports = {
                 plugins: {
                     autoprefixer: {},
                     tailwindcss: {}
                 }
             };
-        "#;
+        ";
         let plugin = PostCssPlugin;
         let result = plugin.resolve_config(
             std::path::Path::new("postcss.config.js"),

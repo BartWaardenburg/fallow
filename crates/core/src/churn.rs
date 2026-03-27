@@ -531,7 +531,7 @@ mod tests {
         let output = "1700000000\n10\t5\tsrc/index.ts\n";
         let result = parse_git_log(output, root);
         assert_eq!(result.len(), 1);
-        let churn = result.get(&PathBuf::from("/project/src/index.ts")).unwrap();
+        let churn = &result[&PathBuf::from("/project/src/index.ts")];
         assert_eq!(churn.commits, 1);
         assert_eq!(churn.lines_added, 10);
         assert_eq!(churn.lines_deleted, 5);
@@ -543,7 +543,7 @@ mod tests {
         let output = "1700000000\n10\t5\tsrc/index.ts\n\n1700100000\n3\t2\tsrc/index.ts\n";
         let result = parse_git_log(output, root);
         assert_eq!(result.len(), 1);
-        let churn = result.get(&PathBuf::from("/project/src/index.ts")).unwrap();
+        let churn = &result[&PathBuf::from("/project/src/index.ts")];
         assert_eq!(churn.commits, 2);
         assert_eq!(churn.lines_added, 13);
         assert_eq!(churn.lines_deleted, 7);
@@ -585,7 +585,7 @@ mod tests {
             .as_secs();
         let output = format!("{now_secs}\n10\t5\tsrc/a.ts\n");
         let result = parse_git_log(&output, root);
-        let churn = result.get(&PathBuf::from("/project/src/a.ts")).unwrap();
+        let churn = &result[&PathBuf::from("/project/src/a.ts")];
         assert!(
             churn.weighted_commits > 0.0,
             "weighted_commits should be positive for recent commits"

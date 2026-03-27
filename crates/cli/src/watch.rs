@@ -26,6 +26,16 @@ pub struct WatchOptions<'a> {
     pub explain: bool,
 }
 
+type LoadConfigFn = fn(
+    root: &Path,
+    config_path: &Option<PathBuf>,
+    output: OutputFormat,
+    no_cache: bool,
+    threads: usize,
+    production: bool,
+    quiet: bool,
+) -> Result<fallow_config::ResolvedConfig, ExitCode>;
+
 fn is_relevant_source(path: &Path) -> bool {
     path.extension()
         .and_then(|s| s.to_str())
@@ -81,9 +91,129 @@ fn print_waiting() {
     );
 }
 
+fn analyze_and_report(config: &fallow_config::ResolvedConfig, opts: &WatchOptions<'_>) -> ExitCode {
+    let start = Instant::now();
+    let results = match fallow_core::analyze(config) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("Analysis error: {e}");
+            return ExitCode::from(2);
+        }
+    };
+    let elapsed = start.elapsed();
+    let report_code = report::print_results(&results, config, elapsed, opts.quiet, opts.explain);
+    if report_code != ExitCode::SUCCESS {
+        eprintln!("Warning: report output failed");
+    }
+    ExitCode::SUCCESS
+}
+
+fn reload_config_or_keep_previous(
+    config: &mut fallow_config::ResolvedConfig,
+    opts: &WatchOptions<'_>,
+    load: LoadConfigFn,
+) {
+    match load(
+        opts.root,
+        opts.config_path,
+        opts.output.clone(),
+        opts.no_cache,
+        opts.threads,
+        opts.production,
+        opts.quiet,
+    ) {
+        Ok(reloaded) => {
+            *config = reloaded;
+        }
+        Err(_) => {
+            eprintln!("Warning: failed to reload config, using previous configuration");
+        }
+    }
+}
+
+pub fn run_watch(opts: &WatchOptions<'_>) -> ExitCode {
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    let mut config = match load_config(
+        opts.root,
+        opts.config_path,
+        opts.output.clone(),
+        opts.no_cache,
+        opts.threads,
+        opts.production,
+        opts.quiet,
+    ) {
+        Ok(c) => c,
+        Err(code) => return code,
+    };
+
+    // Run initial analysis
+    let initial_status = analyze_and_report(&config, opts);
+    if initial_status != ExitCode::SUCCESS {
+        return initial_status;
+    }
+    print_waiting();
+
+    // Set up file watcher
+    let (tx, rx) = mpsc::channel();
+    let mut debouncer = match new_debouncer(Duration::from_millis(500), tx) {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("Failed to create file watcher: {e}");
+            return ExitCode::from(2);
+        }
+    };
+
+    if let Err(e) = debouncer
+        .watcher()
+        .watch(opts.root.as_ref(), notify::RecursiveMode::Recursive)
+    {
+        eprintln!("Failed to watch directory: {e}");
+        return ExitCode::from(2);
+    }
+
+    loop {
+        match rx.recv() {
+            Ok(Ok(events)) => {
+                let changed = collect_changed_paths(&events, opts.root);
+                if changed.is_empty() {
+                    continue;
+                }
+
+                if opts.clear_screen && std::io::stderr().is_terminal() {
+                    eprint!("{CLEAR_SCREEN}");
+                }
+
+                // Show which files changed
+                for path in &changed {
+                    eprintln!("{} {path}", "Changed:".dimmed());
+                }
+                eprintln!();
+
+                reload_config_or_keep_previous(&mut config, opts, load_config);
+
+                let status = analyze_and_report(&config, opts);
+                if status != ExitCode::SUCCESS {
+                    eprintln!("Watch analysis failed; continuing to watch for changes");
+                }
+                print_waiting();
+            }
+            Ok(Err(e)) => {
+                eprintln!("Watch error: {e:?}");
+            }
+            Err(e) => {
+                eprintln!("Channel error: {e}");
+                return ExitCode::from(2);
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use fallow_config::FallowConfig;
     use notify_debouncer_mini::{DebouncedEvent, DebouncedEventKind};
 
     // ── is_relevant_source ───────────────────────────────────────────
@@ -223,117 +353,86 @@ mod tests {
         let paths = collect_changed_paths(&events, &root);
         assert_eq!(paths, vec!["src/deep/nested/file.tsx"]);
     }
-}
 
-pub fn run_watch(opts: &WatchOptions<'_>) -> ExitCode {
-    use std::sync::mpsc;
-    use std::time::Duration;
-
-    let config = match load_config(
-        opts.root,
-        opts.config_path,
-        opts.output.clone(),
-        opts.no_cache,
-        opts.threads,
-        opts.production,
-        opts.quiet,
-    ) {
-        Ok(c) => c,
-        Err(code) => return code,
-    };
-
-    // Run initial analysis
-    let start = Instant::now();
-    let results = match fallow_core::analyze(&config) {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!("Analysis error: {e}");
-            return ExitCode::from(2);
+    fn make_config(
+        root: &Path,
+        output: OutputFormat,
+        threads: usize,
+        quiet: bool,
+    ) -> fallow_config::ResolvedConfig {
+        FallowConfig {
+            schema: None,
+            extends: vec![],
+            entry: vec![],
+            ignore_patterns: vec![],
+            framework: vec![],
+            workspaces: None,
+            ignore_dependencies: vec![],
+            ignore_exports: vec![],
+            duplicates: fallow_config::DuplicatesConfig::default(),
+            health: fallow_config::HealthConfig::default(),
+            rules: fallow_config::RulesConfig::default(),
+            production: false,
+            plugins: vec![],
+            overrides: vec![],
         }
-    };
-    let elapsed = start.elapsed();
-    let report_code = report::print_results(&results, &config, elapsed, opts.quiet, opts.explain);
-    if report_code != ExitCode::SUCCESS {
-        eprintln!("Warning: report output failed");
-    }
-    print_waiting();
-
-    // Set up file watcher
-    let (tx, rx) = mpsc::channel();
-    let mut debouncer = match new_debouncer(Duration::from_millis(500), tx) {
-        Ok(d) => d,
-        Err(e) => {
-            eprintln!("Failed to create file watcher: {e}");
-            return ExitCode::from(2);
-        }
-    };
-
-    if let Err(e) = debouncer
-        .watcher()
-        .watch(opts.root.as_ref(), notify::RecursiveMode::Recursive)
-    {
-        eprintln!("Failed to watch directory: {e}");
-        return ExitCode::from(2);
+        .resolve(root.to_path_buf(), output, threads, false, quiet)
     }
 
-    loop {
-        match rx.recv() {
-            Ok(Ok(events)) => {
-                let changed = collect_changed_paths(&events, opts.root);
-                if changed.is_empty() {
-                    continue;
-                }
-
-                if opts.clear_screen && std::io::stderr().is_terminal() {
-                    eprint!("{CLEAR_SCREEN}");
-                }
-
-                // Show which files changed
-                for path in &changed {
-                    eprintln!("{} {path}", "Changed:".dimmed());
-                }
-                eprintln!();
-
-                let Ok(config) = load_config(
-                    opts.root,
-                    opts.config_path,
-                    opts.output.clone(),
-                    opts.no_cache,
-                    opts.threads,
-                    opts.production,
-                    opts.quiet,
-                ) else {
-                    eprintln!("Warning: failed to reload config, using previous configuration");
-                    continue;
-                };
-                let start = Instant::now();
-                match fallow_core::analyze(&config) {
-                    Ok(results) => {
-                        let elapsed = start.elapsed();
-                        let report_code = report::print_results(
-                            &results,
-                            &config,
-                            elapsed,
-                            opts.quiet,
-                            opts.explain,
-                        );
-                        if report_code != ExitCode::SUCCESS {
-                            eprintln!("Warning: report output failed");
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("Analysis error: {e}");
-                    }
-                }
-                print_waiting();
-            }
-            Ok(Err(e)) => {
-                eprintln!("Watch error: {e:?}");
-            }
-            Err(e) => {
-                eprintln!("Channel error: {e}");
-                return ExitCode::from(2);
-            }
+    fn make_watch_options(
+        root: &Path,
+        output: OutputFormat,
+        threads: usize,
+        quiet: bool,
+    ) -> WatchOptions<'_> {
+        WatchOptions {
+            root,
+            config_path: &None,
+            output,
+            no_cache: false,
+            threads,
+            quiet,
+            production: false,
+            clear_screen: false,
+            explain: false,
         }
+    }
+
+    #[test]
+    fn reload_config_successfully_replaces_previous_config() {
+        let root = Path::new("/project");
+        let mut config = make_config(root, OutputFormat::Human, 1, false);
+        let opts = make_watch_options(root, OutputFormat::Json, 8, true);
+
+        reload_config_or_keep_previous(
+            &mut config,
+            &opts,
+            |_root, _config_path, output, _no_cache, threads, _production, quiet| {
+                Ok(make_config(Path::new("/project"), output, threads, quiet))
+            },
+        );
+
+        assert!(matches!(config.output, OutputFormat::Json));
+        assert_eq!(config.threads, 8);
+        assert!(config.quiet);
+    }
+
+    #[test]
+    fn reload_config_failure_keeps_previous_config() {
+        let root = Path::new("/project");
+        let mut config = make_config(root, OutputFormat::Human, 1, false);
+        let opts = make_watch_options(root, OutputFormat::Json, 8, true);
+
+        reload_config_or_keep_previous(
+            &mut config,
+            &opts,
+            |_root, _config_path, _output, _no_cache, _threads, _production, _quiet| {
+                Err(ExitCode::from(2))
+            },
+        );
+
+        assert!(matches!(config.output, OutputFormat::Human));
+        assert_eq!(config.threads, 1);
+        assert!(!config.quiet);
     }
 }

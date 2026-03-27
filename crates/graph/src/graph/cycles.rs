@@ -784,7 +784,7 @@ mod tests {
             succ_ranges: &succ_ranges,
             modules: &modules,
         };
-        let scc_set: FxHashSet<usize> = [0].into_iter().collect();
+        let scc_set: FxHashSet<usize> = std::iter::once(0).collect();
         let mut seen = FxHashSet::default();
         let mut cycles = Vec::new();
 
@@ -1103,7 +1103,7 @@ mod tests {
             succ_ranges: &succ_ranges,
             modules: &modules,
         };
-        let scc_set: FxHashSet<usize> = [0].into_iter().collect();
+        let scc_set: FxHashSet<usize> = std::iter::once(0).collect();
         let mut seen = FxHashSet::default();
         let mut cycles = Vec::new();
 

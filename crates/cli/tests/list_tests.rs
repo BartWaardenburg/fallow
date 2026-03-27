@@ -6,15 +6,16 @@ fn fallow_bin() -> PathBuf {
     // When running under `cargo test`, CARGO_BIN_EXE_fallow resolves to the
     // fallow binary built by the current test compilation.
     // Fallback to target/debug/fallow if the env var is not set.
-    std::env::var_os("CARGO_BIN_EXE_fallow")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
+    std::env::var_os("CARGO_BIN_EXE_fallow").map_or_else(
+        || {
             let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
             path.pop(); // crates/
             path.pop(); // project root
             path.push("target/debug/fallow");
             path
-        })
+        },
+        PathBuf::from,
+    )
 }
 
 /// Returns the absolute path to a test fixture directory.
@@ -542,7 +543,7 @@ fn list_json_files_are_sorted_alphabetically() {
         .collect();
 
     let mut sorted = files.clone();
-    sorted.sort();
+    sorted.sort_unstable();
     assert_eq!(files, sorted, "files should be in sorted order");
 }
 
@@ -610,7 +611,11 @@ fn list_cjs_project_discovers_js_files() {
         .collect();
 
     assert!(
-        files.iter().any(|f| f.ends_with(".js")),
+        files.iter().any(|f| {
+            std::path::Path::new(f)
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("js"))
+        }),
         "cjs-project should discover .js files. Got: {files:?}"
     );
 }
@@ -631,7 +636,11 @@ fn list_vue_project_discovers_vue_files() {
         .collect();
 
     assert!(
-        files.iter().any(|f| f.ends_with(".vue")),
+        files.iter().any(|f| {
+            std::path::Path::new(f)
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("vue"))
+        }),
         "vue-project should discover .vue files. Got: {files:?}"
     );
 }

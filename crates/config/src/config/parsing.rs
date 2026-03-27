@@ -161,6 +161,10 @@ impl FallowConfig {
     ///
     /// Supports `extends` for config inheritance. Extended configs are loaded
     /// and deep-merged before this config's values are applied.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the config file cannot be read, merged, or deserialized.
     pub fn load(path: &Path) -> Result<Self, miette::Report> {
         let mut visited = FxHashSet::default();
         let merged = resolve_extends(path, &mut visited, 0)?;
@@ -184,6 +188,10 @@ impl FallowConfig {
     ///
     /// Returns `Ok(Some(...))` if a config was found and parsed, `Ok(None)` if
     /// no config file exists, and `Err(...)` if a config file exists but fails to parse.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error string when a discovered config file exists but fails to load.
     pub fn find_and_load(start: &Path) -> Result<Option<(Self, PathBuf)>, String> {
         let mut dir = start;
         loop {
@@ -211,6 +219,7 @@ impl FallowConfig {
     }
 
     /// Generate JSON Schema for the configuration format.
+    #[must_use]
     pub fn json_schema() -> serde_json::Value {
         serde_json::to_value(schemars::schema_for!(FallowConfig)).unwrap_or_default()
     }
@@ -485,9 +494,9 @@ entry = ["src/main.ts"]
 
     #[test]
     fn fallow_config_denies_unknown_fields() {
-        let toml_str = r#"
+        let toml_str = r"
 unknown_field = true
-"#;
+";
         let result: Result<FallowConfig, _> = toml::from_str(toml_str);
         assert!(result.is_err());
     }

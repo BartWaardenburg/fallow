@@ -180,10 +180,10 @@ mod tests {
 
     #[test]
     fn resolve_config_adapter_import() {
-        let source = r#"
+        let source = r"
             import adapter from '@sveltejs/adapter-node';
             export default { kit: { adapter: adapter() } };
-        "#;
+        ";
         let plugin = SvelteKitPlugin;
         let result = plugin.resolve_config(
             std::path::Path::new("svelte.config.js"),
@@ -199,11 +199,11 @@ mod tests {
 
     #[test]
     fn resolve_config_preprocess_import() {
-        let source = r#"
+        let source = r"
             import adapter from '@sveltejs/adapter-auto';
             import { vitePreprocess } from '@sveltejs/vite-plugin-svelte';
             export default { preprocess: vitePreprocess(), kit: { adapter: adapter() } };
-        "#;
+        ";
         let plugin = SvelteKitPlugin;
         let result = plugin.resolve_config(
             std::path::Path::new("svelte.config.js"),

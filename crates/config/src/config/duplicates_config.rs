@@ -108,6 +108,7 @@ pub struct ResolvedNormalization {
 
 impl ResolvedNormalization {
     /// Resolve normalization from a detection mode and optional overrides.
+    #[must_use]
     pub fn resolve(mode: DetectionMode, overrides: &NormalizationConfig) -> Self {
         let (default_ids, default_strings, default_numbers) = match mode {
             DetectionMode::Strict | DetectionMode::Mild => (false, false, false),
@@ -182,7 +183,7 @@ mod tests {
         assert_eq!(config.mode, DetectionMode::Mild);
         assert_eq!(config.min_tokens, 50);
         assert_eq!(config.min_lines, 5);
-        assert_eq!(config.threshold, 0.0);
+        assert!((config.threshold - 0.0).abs() < f64::EPSILON);
         assert!(config.ignore.is_empty());
         assert!(!config.skip_local);
         assert!(!config.cross_language);
@@ -343,7 +344,7 @@ mod tests {
         assert_eq!(config.mode, DetectionMode::Semantic);
         assert_eq!(config.min_tokens, 100);
         assert_eq!(config.min_lines, 10);
-        assert_eq!(config.threshold, 5.0);
+        assert!((config.threshold - 5.0).abs() < f64::EPSILON);
         assert_eq!(config.ignore, vec!["**/vendor/**"]);
         assert!(config.skip_local);
         assert!(config.cross_language);

@@ -42,6 +42,14 @@ fn empty_sets() -> SkipDepSets {
     )
 }
 
+type SharedSets = (
+    FxHashSet<&'static str>,
+    FxHashSet<&'static str>,
+    FxHashSet<&'static str>,
+    FxHashSet<&'static str>,
+    FxHashSet<&'static str>,
+);
+
 #[test]
 fn skip_dep_returns_false_when_no_guard_matches() {
     let (root_flagged, script_used, plugin_referenced, ignore_deps, workspace_names) = empty_sets();
@@ -1948,13 +1956,7 @@ fn plugin_tooling_dev_deps_not_flagged() {
 
 // ---- collect_unused_for_category unit tests ----
 
-fn empty_shared_sets() -> (
-    FxHashSet<&'static str>,
-    FxHashSet<&'static str>,
-    FxHashSet<&'static str>,
-    FxHashSet<&'static str>,
-    FxHashSet<&'static str>,
-) {
+fn empty_shared_sets() -> SharedSets {
     (
         FxHashSet::default(),
         FxHashSet::default(),

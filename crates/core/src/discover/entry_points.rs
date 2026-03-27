@@ -811,7 +811,7 @@ mod tests {
                 },
                 DiscoveredFile {
                     id: FileId(1),
-                    path: index_b.clone(),
+                    path: index_b,
                     size_bytes: 10,
                 },
             ];

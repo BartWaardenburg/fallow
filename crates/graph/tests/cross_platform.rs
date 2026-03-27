@@ -4,6 +4,7 @@
 //! long paths, relative path resolution, and dotfile/hidden directory handling.
 
 use std::ffi::OsStr;
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 use fallow_graph::resolve::{extract_package_name, is_path_alias};
@@ -134,7 +135,7 @@ fn node_modules_path_with_spaces_in_project_name() {
 
 #[test]
 fn discovered_file_with_spaces_sorts_deterministically() {
-    let mut files = vec![
+    let mut files = [
         DiscoveredFile {
             id: FileId(0),
             path: PathBuf::from("/project/src/z file.ts"),
@@ -202,7 +203,7 @@ fn unicode_path_in_node_modules() {
 
 #[test]
 fn unicode_discovered_files_sort_stably() {
-    let mut files = vec![
+    let mut files = [
         DiscoveredFile {
             id: FileId(0),
             path: PathBuf::from("/project/\u{00E9}tude.ts"),
@@ -228,7 +229,7 @@ fn long_path_does_not_panic() {
     // Generate a path approaching common OS limits (260 on Windows, 4096 on Linux/macOS)
     let mut long_path = String::from("/project");
     for i in 0..50 {
-        long_path.push_str(&format!("/deeply_nested_directory_{i:03}"));
+        write!(&mut long_path, "/deeply_nested_directory_{i:03}").unwrap();
     }
     long_path.push_str("/index.ts");
 
@@ -652,7 +653,7 @@ fn pnpm_path_with_peer_deps_suffix() {
 
 #[test]
 fn file_id_assignment_is_deterministic_by_path_sort() {
-    let mut files = vec![
+    let mut files = [
         DiscoveredFile {
             id: FileId(0),
             path: PathBuf::from("/project/src/z.ts"),
