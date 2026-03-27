@@ -8,7 +8,7 @@ def file_link(path; start; end_line):
   if (repo | length) > 0 and (sha | length) > 0 then
     "[`\(path):\(start)-\(end_line)`](https://github.com/\(repo)/blob/\(sha)/\(prefix)\(path)#L\(start)-L\(end_line))"
   else "`\(path):\(start)-\(end_line)`" end;
-def footer: "\n\n---\n<sub>\ud83c\udf3f <a href=\"https://docs.fallow.tools/explanations/duplication\">code-duplication</a> \u00b7 Add <code>// fallow-ignore-next-line</code> to suppress</sub>";
+def footer: "\n\n---\n<sub><a href=\"https://docs.fallow.tools/explanations/duplication\">Docs</a> \u00b7 Disagree? <a href=\"https://docs.fallow.tools/configuration/suppression\">Configure or suppress</a></sub>";
 [
   (.clone_families // [])[] | . as $family |
     ($family.suggestions // []) as $suggestions |
@@ -22,6 +22,6 @@ def footer: "\n\n---\n<sub>\ud83c\udf3f <a href=\"https://docs.fallow.tools/expl
         path: (prefix + $this_path),
         start_line: $inst.start_line,
         line: $inst.end_line,
-        body: ":warning: **Code duplication**\n\n**\($group.line_count) duplicated lines** \u00b7 \($group.token_count) tokens \u00b7 \($count) instances\n\nAlso found in:\n\($others)\n\n\(if $inst.fragment then "<details>\n<summary>View duplicated code</summary>\n\n```ts\n\($inst.fragment)\n```\n</details>\n\n" else "" end)\(if ($suggestions | length) > 0 then ($suggestions | map(":bulb: **\(.kind):** \(.description)\(if .estimated_savings then " (\(.estimated_savings) lines saved)" else "" end)") | join("\n")) + "\n" else "**Action:** Extract a shared function to eliminate this duplication.\n" end)\(footer)"
+        body: ":warning: **Code duplication**\n\n**\($group.line_count) duplicated lines** \u00b7 \($group.token_count) tokens \u00b7 \($count) instances\n\nAlso found in:\n\($others)\n\n\(if $inst.fragment then "<details>\n<summary>View duplicated code</summary>\n\n```ts\n\($inst.fragment)\n```\n</details>\n\n" else "" end)\(if ($suggestions | length) > 0 then ($suggestions | map(":bulb: **Suggestion:** \(.description)\(if .estimated_savings then " (~\(.estimated_savings) lines saved)" else "" end)") | join("\n")) + "\n" else "**Action:** Extract a shared function to keep both code paths in sync and eliminate duplication.\n" end)\(footer)"
       }
 ] | .[:($ENV.MAX | tonumber)]
