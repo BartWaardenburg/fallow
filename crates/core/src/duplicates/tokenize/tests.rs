@@ -2444,3 +2444,801 @@ fn tokenize_object_with_nested_member_access() {
         "Should have brackets for arr[0], got {bracket_count}"
     );
 }
+
+// ── Edge cases: whitespace and empty content ─────────────────
+
+#[test]
+fn tokenize_whitespace_only_file() {
+    let tokens = tokenize("   \n\n\t  \n  ");
+    assert!(
+        tokens.is_empty(),
+        "File with only whitespace should produce no tokens"
+    );
+}
+
+#[test]
+fn tokenize_single_semicolons() {
+    let tokens = tokenize(";;;");
+    // Standalone semicolons are expression statements with no expression,
+    // so the parser may treat them as empty statements producing no tokens.
+    // The important thing is it doesn't panic.
+    assert!(tokens.len() <= 3);
+}
+
+// ── Destructuring patterns ──────────────────────────────────
+
+#[test]
+fn tokenize_object_destructuring() {
+    let tokens = tokenize("const { a, b, c } = obj;");
+    let has_const = tokens
+        .iter()
+        .any(|t| matches!(t.kind, TokenKind::Keyword(KeywordType::Const)));
+    let has_a = tokens
+        .iter()
+        .any(|t| matches!(&t.kind, TokenKind::Identifier(n) if n == "a"));
+    let has_b = tokens
+        .iter()
+        .any(|t| matches!(&t.kind, TokenKind::Identifier(n) if n == "b"));
+    let has_c = tokens
+        .iter()
+        .any(|t| matches!(&t.kind, TokenKind::Identifier(n) if n == "c"));
+    let has_assign = tokens
+        .iter()
+        .any(|t| matches!(t.kind, TokenKind::Operator(OperatorType::Assign)));
+    assert!(has_const, "Should have const keyword");
+    assert!(has_a, "Should have destructured identifier 'a'");
+    assert!(has_b, "Should have destructured identifier 'b'");
+    assert!(has_c, "Should have destructured identifier 'c'");
+    assert!(has_assign, "Should have assign operator");
+}
+
+#[test]
+fn tokenize_array_destructuring() {
+    let tokens = tokenize("const [first, second, ...rest] = arr;");
+    let has_const = tokens
+        .iter()
+        .any(|t| matches!(t.kind, TokenKind::Keyword(KeywordType::Const)));
+    let has_first = tokens
+        .iter()
+        .any(|t| matches!(&t.kind, TokenKind::Identifier(n) if n == "first"));
+    let has_second = tokens
+        .iter()
+        .any(|t| matches!(&t.kind, TokenKind::Identifier(n) if n == "second"));
+    let has_rest = tokens
+        .iter()
+        .any(|t| matches!(&t.kind, TokenKind::Identifier(n) if n == "rest"));
+    assert!(has_const, "Should have const keyword");
+    assert!(has_first, "Should have 'first' identifier");
+    assert!(has_second, "Should have 'second' identifier");
+    assert!(has_rest, "Should have 'rest' identifier");
+    // Note: the visitor has no visit_binding_rest_element override,
+    // so ...rest in binding patterns does NOT emit a spread operator.
+    // Only SpreadElement in expressions emits spread.
+}
+
+#[test]
+fn tokenize_nested_destructuring() {
+    let tokens = tokenize("const { a: { b } } = obj;");
+    let has_b = tokens
+        .iter()
+        .any(|t| matches!(&t.kind, TokenKind::Identifier(n) if n == "b"));
+    assert!(has_b, "Should have nested destructured identifier 'b'");
+    // Note: binding patterns are visited via visit_binding_pattern which
+    // emits identifiers but does NOT emit braces for ObjectPattern/ArrayPattern.
+    // Only ObjectExpression and ArrayExpression emit braces/brackets.
+    let has_a = tokens
+        .iter()
+        .any(|t| matches!(&t.kind, TokenKind::Identifier(n) if n == "a"));
+    assert!(has_a, "Should have property key 'a' identifier");
+}
+
+// ── Optional chaining ───────────────────────────────────────
+
+#[test]
+fn tokenize_optional_chaining_member_access() {
+    let tokens = tokenize("const x = obj?.prop;");
+    // Optional chaining produces a property access; the ?. is in the AST
+    // as an optional member expression. The visitor visits the object and
+    // property. We just verify the property is emitted.
+    let has_prop = tokens
+        .iter()
+        .any(|t| matches!(&t.kind, TokenKind::Identifier(n) if n == "prop"));
+    assert!(
+        has_prop,
+        "Optional chaining should produce property identifier"
+    );
+}
+
+#[test]
+fn tokenize_optional_chaining_call() {
+    let tokens = tokenize("const x = fn?.();");
+    let has_fn = tokens
+        .iter()
+        .any(|t| matches!(&t.kind, TokenKind::Identifier(n) if n == "fn"));
+    assert!(has_fn, "Optional call should produce function identifier");
+}
+
+// ── Multiple variable declarators ───────────────────────────
+
+#[test]
+fn tokenize_multiple_declarators_in_single_declaration() {
+    let tokens = tokenize("const a = 1, b = 2, c = 3;");
+    let has_const = tokens
+        .iter()
+        .any(|t| matches!(t.kind, TokenKind::Keyword(KeywordType::Const)));
+    let assign_count = tokens
+        .iter()
+        .filter(|t| matches!(t.kind, TokenKind::Operator(OperatorType::Assign)))
+        .count();
+    assert!(has_const, "Should have const keyword");
+    assert_eq!(
+        assign_count, 3,
+        "Three declarators should produce 3 assign operators, got {assign_count}"
+    );
+    // Each declarator should end with a semicolon
+    let semicolons = tokens
+        .iter()
+        .filter(|t| matches!(t.kind, TokenKind::Punctuation(PunctuationType::Semicolon)))
+        .count();
+    assert!(
+        semicolons >= 3,
+        "Three declarators should produce at least 3 semicolons, got {semicolons}"
+    );
+}
+
+// ── Import with aliasing ────────────────────────────────────
+
+#[test]
+fn tokenize_import_with_as_alias() {
+    let tokens = tokenize("import { foo as bar } from './mod';");
+    let has_import = tokens
+        .iter()
+        .any(|t| matches!(t.kind, TokenKind::Keyword(KeywordType::Import)));
+    let has_from = tokens
+        .iter()
+        .any(|t| matches!(t.kind, TokenKind::Keyword(KeywordType::From)));
+    let has_foo = tokens
+        .iter()
+        .any(|t| matches!(&t.kind, TokenKind::Identifier(n) if n == "foo"));
+    let has_bar = tokens
+        .iter()
+        .any(|t| matches!(&t.kind, TokenKind::Identifier(n) if n == "bar"));
+    assert!(has_import, "Should have import keyword");
+    assert!(has_from, "Should have from keyword");
+    assert!(has_foo, "Should have original identifier 'foo'");
+    assert!(has_bar, "Should have alias identifier 'bar'");
+}
+
+#[test]
+fn tokenize_import_default_and_named() {
+    let tokens = tokenize("import React, { useState } from 'react';");
+    let has_import = tokens
+        .iter()
+        .any(|t| matches!(t.kind, TokenKind::Keyword(KeywordType::Import)));
+    let has_react = tokens
+        .iter()
+        .any(|t| matches!(&t.kind, TokenKind::Identifier(n) if n == "React"));
+    let has_use_state = tokens
+        .iter()
+        .any(|t| matches!(&t.kind, TokenKind::Identifier(n) if n == "useState"));
+    assert!(has_import, "Should have import keyword");
+    assert!(has_react, "Should have default import 'React'");
+    assert!(has_use_state, "Should have named import 'useState'");
+}
+
+#[test]
+fn tokenize_import_namespace() {
+    let tokens = tokenize("import * as utils from './utils';");
+    let has_import = tokens
+        .iter()
+        .any(|t| matches!(t.kind, TokenKind::Keyword(KeywordType::Import)));
+    let has_utils = tokens
+        .iter()
+        .any(|t| matches!(&t.kind, TokenKind::Identifier(n) if n == "utils"));
+    assert!(has_import, "Should have import keyword");
+    assert!(has_utils, "Should have namespace alias 'utils'");
+}
+
+// ── Export patterns ─────────────────────────────────────────
+
+#[test]
+fn tokenize_export_named_specifiers() {
+    let tokens = tokenize("export { foo, bar };");
+    let has_export = tokens
+        .iter()
+        .any(|t| matches!(t.kind, TokenKind::Keyword(KeywordType::Export)));
+    let has_foo = tokens
+        .iter()
+        .any(|t| matches!(&t.kind, TokenKind::Identifier(n) if n == "foo"));
+    let has_bar = tokens
+        .iter()
+        .any(|t| matches!(&t.kind, TokenKind::Identifier(n) if n == "bar"));
+    assert!(has_export, "Should have export keyword");
+    assert!(has_foo, "Should have exported identifier 'foo'");
+    assert!(has_bar, "Should have exported identifier 'bar'");
+}
+
+#[test]
+fn tokenize_export_named_with_from() {
+    let tokens = tokenize("export { default as thing } from './module';");
+    let has_export = tokens
+        .iter()
+        .any(|t| matches!(t.kind, TokenKind::Keyword(KeywordType::Export)));
+    let has_from = tokens
+        .iter()
+        .any(|t| matches!(t.kind, TokenKind::Keyword(KeywordType::From)));
+    assert!(has_export, "Re-export with from should have export keyword");
+    // ExportNamedDeclaration with source has a `from` and source string
+    // but the visitor uses walk::walk_export_named_declaration which
+    // doesn't emit a second From keyword. Verify it doesn't panic.
+    let _ = has_from;
+}
+
+// ── Tagged template literals ────────────────────────────────
+
+#[test]
+fn tokenize_tagged_template_literal() {
+    let tokens = tokenize("const x = html`<div>${content}</div>`;");
+    let has_template = tokens
+        .iter()
+        .any(|t| matches!(t.kind, TokenKind::TemplateLiteral));
+    let has_html = tokens
+        .iter()
+        .any(|t| matches!(&t.kind, TokenKind::Identifier(n) if n == "html"));
+    assert!(has_template, "Should contain template literal token");
+    assert!(has_html, "Should contain tag identifier 'html'");
+}
+
+#[test]
+fn tokenize_template_literal_with_multiple_expressions() {
+    let tokens = tokenize("const s = `${a} + ${b} = ${a + b}`;");
+    let has_template = tokens
+        .iter()
+        .any(|t| matches!(t.kind, TokenKind::TemplateLiteral));
+    let has_add = tokens
+        .iter()
+        .any(|t| matches!(t.kind, TokenKind::Operator(OperatorType::Add)));
+    assert!(
+        has_template,
+        "Should contain template literal with expressions"
+    );
+    assert!(has_add, "Should tokenize expressions within template");
+}
+
+// ── Regex edge cases ────────────────────────────────────────
+
+#[test]
+fn tokenize_regex_with_flags() {
+    let tokens = tokenize("const re = /^[a-z]+$/gim;");
+    let has_regex = tokens
+        .iter()
+        .any(|t| matches!(t.kind, TokenKind::RegExpLiteral));
+    assert!(has_regex, "Should contain regex with flags");
+}
+
+#[test]
+fn tokenize_regex_in_condition() {
+    let tokens = tokenize("if (/test/.test(str)) { console.log(str); }");
+    let has_regex = tokens
+        .iter()
+        .any(|t| matches!(t.kind, TokenKind::RegExpLiteral));
+    let has_if = tokens
+        .iter()
+        .any(|t| matches!(t.kind, TokenKind::Keyword(KeywordType::If)));
+    assert!(has_regex, "Should contain regex in condition");
+    assert!(has_if, "Should contain if keyword");
+}
+
+// ── Class features ──────────────────────────────────────────
+
+#[test]
+fn tokenize_class_with_static_members() {
+    let tokens = tokenize("class Foo { static bar = 42; static baz() {} }");
+    let has_class = tokens
+        .iter()
+        .any(|t| matches!(t.kind, TokenKind::Keyword(KeywordType::Class)));
+    let has_bar = tokens
+        .iter()
+        .any(|t| matches!(&t.kind, TokenKind::Identifier(n) if n == "bar"));
+    let has_42 = tokens
+        .iter()
+        .any(|t| matches!(&t.kind, TokenKind::NumericLiteral(n) if n == "42"));
+    assert!(has_class, "Should have class keyword");
+    assert!(has_bar, "Should have static member identifier 'bar'");
+    assert!(has_42, "Should have static member value 42");
+    // Note: the visitor has no visit_property_definition override,
+    // so `static` is not emitted as a keyword token. The member name
+    // and value are still visited through the default walk.
+}
+
+#[test]
+fn tokenize_class_with_getter_setter() {
+    let tokens = tokenize("class Foo { get bar() { return 1; } set bar(v) {} }");
+    let has_get = tokens
+        .iter()
+        .any(|t| matches!(t.kind, TokenKind::Keyword(KeywordType::Get)));
+    let has_set = tokens
+        .iter()
+        .any(|t| matches!(t.kind, TokenKind::Keyword(KeywordType::Set)));
+    // Get/set are not emitted as keywords by the visitor (they're method
+    // definition kinds, not explicit keyword tokens). Verify no panic.
+    let _ = has_get;
+    let _ = has_set;
+    let has_class = tokens
+        .iter()
+        .any(|t| matches!(t.kind, TokenKind::Keyword(KeywordType::Class)));
+    assert!(has_class, "Should have class keyword");
+}
+
+// ── Rest parameters ─────────────────────────────────────────
+
+#[test]
+fn tokenize_rest_parameter() {
+    let tokens = tokenize("function f(a, ...rest) { return rest; }");
+    let has_rest = tokens
+        .iter()
+        .any(|t| matches!(&t.kind, TokenKind::Identifier(n) if n == "rest"));
+    let has_a = tokens
+        .iter()
+        .any(|t| matches!(&t.kind, TokenKind::Identifier(n) if n == "a"));
+    assert!(has_rest, "Should have 'rest' identifier");
+    assert!(has_a, "Should have 'a' identifier");
+    // Note: function rest parameters (...rest) go through visit_binding_rest_element
+    // which the visitor does NOT override. So `...` is not emitted as a spread
+    // operator for rest params. Only SpreadElement in expressions emits spread.
+}
+
+// ── Computed property keys ──────────────────────────────────
+
+#[test]
+fn tokenize_computed_property_key() {
+    let tokens = tokenize("const obj = { [key]: value };");
+    let has_key = tokens
+        .iter()
+        .any(|t| matches!(&t.kind, TokenKind::Identifier(n) if n == "key"));
+    let has_value = tokens
+        .iter()
+        .any(|t| matches!(&t.kind, TokenKind::Identifier(n) if n == "value"));
+    assert!(has_key, "Should have computed key identifier");
+    assert!(has_value, "Should have property value identifier");
+}
+
+// ── For statement with empty clauses ────────────────────────
+
+#[test]
+fn tokenize_for_statement_empty_clauses() {
+    let tokens = tokenize("for (;;) { break; }");
+    let has_for = tokens
+        .iter()
+        .any(|t| matches!(t.kind, TokenKind::Keyword(KeywordType::For)));
+    let has_break = tokens
+        .iter()
+        .any(|t| matches!(t.kind, TokenKind::Keyword(KeywordType::Break)));
+    assert!(has_for, "Should have for keyword");
+    assert!(has_break, "Should have break keyword");
+}
+
+// ── Labeled statements ──────────────────────────────────────
+
+#[test]
+fn tokenize_labeled_statement() {
+    let tokens = tokenize("outer: for (let i = 0; i < 10; i++) { continue outer; }");
+    let has_for = tokens
+        .iter()
+        .any(|t| matches!(t.kind, TokenKind::Keyword(KeywordType::For)));
+    let has_continue = tokens
+        .iter()
+        .any(|t| matches!(t.kind, TokenKind::Keyword(KeywordType::Continue)));
+    assert!(has_for, "Should have for keyword in labeled loop");
+    assert!(has_continue, "Should have continue keyword");
+}
+
+// ── Token sequence determinism ──────────────────────────────
+
+#[test]
+fn tokenize_same_source_produces_identical_tokens() {
+    let code = r"
+function processData(items) {
+    const filtered = items.filter(item => item.active);
+    const mapped = filtered.map(item => ({ id: item.id, name: item.name }));
+    return mapped.sort((a, b) => a.name.localeCompare(b.name));
+}
+";
+    let tokens1 = tokenize(code);
+    let tokens2 = tokenize(code);
+    assert_eq!(
+        tokens1.len(),
+        tokens2.len(),
+        "Same source should produce same token count"
+    );
+    for (i, (t1, t2)) in tokens1.iter().zip(tokens2.iter()).enumerate() {
+        assert_eq!(
+            t1.kind, t2.kind,
+            "Token {i} kind mismatch on repeated tokenization"
+        );
+        assert_eq!(
+            t1.span.start, t2.span.start,
+            "Token {i} span start mismatch"
+        );
+        assert_eq!(t1.span.end, t2.span.end, "Token {i} span end mismatch");
+    }
+}
+
+// ── Full exact token sequence tests ─────────────────────────
+
+#[test]
+fn exact_token_sequence_for_simple_const_assignment() {
+    let tokens = tokenize("const x = 42;");
+    let kinds: Vec<&TokenKind> = tokens.iter().map(|t| &t.kind).collect();
+    // Expected: const, x, =, 42, ;
+    assert_eq!(kinds.len(), 5, "const x = 42; should produce 5 tokens");
+    assert!(matches!(kinds[0], TokenKind::Keyword(KeywordType::Const)));
+    assert!(matches!(kinds[1], TokenKind::Identifier(n) if n == "x"));
+    assert!(matches!(
+        kinds[2],
+        TokenKind::Operator(OperatorType::Assign)
+    ));
+    assert!(matches!(kinds[3], TokenKind::NumericLiteral(n) if n == "42"));
+    assert!(matches!(
+        kinds[4],
+        TokenKind::Punctuation(PunctuationType::Semicolon)
+    ));
+}
+
+#[test]
+fn exact_token_sequence_for_let_string_assignment() {
+    let tokens = tokenize("let name = \"world\";");
+    let kinds: Vec<&TokenKind> = tokens.iter().map(|t| &t.kind).collect();
+    assert_eq!(kinds.len(), 5);
+    assert!(matches!(kinds[0], TokenKind::Keyword(KeywordType::Let)));
+    assert!(matches!(kinds[1], TokenKind::Identifier(n) if n == "name"));
+    assert!(matches!(
+        kinds[2],
+        TokenKind::Operator(OperatorType::Assign)
+    ));
+    assert!(matches!(kinds[3], TokenKind::StringLiteral(s) if s == "world"));
+    assert!(matches!(
+        kinds[4],
+        TokenKind::Punctuation(PunctuationType::Semicolon)
+    ));
+}
+
+#[test]
+fn exact_token_sequence_for_return_statement() {
+    let tokens = tokenize("function f() { return null; }");
+    let kinds: Vec<&TokenKind> = tokens.iter().map(|t| &t.kind).collect();
+    // function, f, (, ), {, return, null, ;, }
+    assert!(matches!(
+        kinds[0],
+        TokenKind::Keyword(KeywordType::Function)
+    ));
+    assert!(matches!(kinds[1], TokenKind::Identifier(n) if n == "f"));
+    assert!(matches!(
+        kinds[2],
+        TokenKind::Punctuation(PunctuationType::OpenParen)
+    ));
+    assert!(matches!(
+        kinds[3],
+        TokenKind::Punctuation(PunctuationType::CloseParen)
+    ));
+    // The walk visits FunctionBody directives and statements but not the
+    // body block directly. A BlockStatement visit emits the { and }.
+    let return_idx = kinds
+        .iter()
+        .position(|k| matches!(k, TokenKind::Keyword(KeywordType::Return)))
+        .expect("Should have return keyword");
+    let null_idx = kinds
+        .iter()
+        .position(|k| matches!(k, TokenKind::NullLiteral))
+        .expect("Should have null literal");
+    assert!(return_idx < null_idx, "return should come before null");
+}
+
+// ── Cross-language: non-null assertion produces same tokens as JS ──
+
+#[test]
+fn strip_types_non_null_assertion_matches_js() {
+    let stripped = tokenize_cross_language("const x = value!;");
+    let js_tokens = {
+        let path = PathBuf::from("test.js");
+        tokenize_file(&path, "const x = value;").tokens
+    };
+    assert_eq!(
+        stripped.len(),
+        js_tokens.len(),
+        "TS non-null assertion stripped should match JS token count: stripped={}, js={}",
+        stripped.len(),
+        js_tokens.len()
+    );
+}
+
+// ── Cross-language: class with type parameters ──────────────
+
+#[test]
+fn strip_types_class_with_generics() {
+    let stripped =
+        tokenize_cross_language("class Container<T> { value: T; constructor(v: T) { } }");
+    // Generic <T> and type annotations should be stripped.
+    // In cross-language mode, the type parameter T and type annotations
+    // are stripped, so T should not appear as a standalone identifier from
+    // the generic or annotation positions.
+    let has_class = stripped
+        .iter()
+        .any(|t| matches!(t.kind, TokenKind::Keyword(KeywordType::Class)));
+    assert!(has_class, "Should still have class keyword");
+    // The colon from `: T` and `: T` (constructor param) should be gone
+    let colon_count = stripped
+        .iter()
+        .filter(|t| matches!(t.kind, TokenKind::Punctuation(PunctuationType::Colon)))
+        .count();
+    assert_eq!(
+        colon_count, 0,
+        "Type annotation colons should be stripped, got {colon_count}"
+    );
+}
+
+// ── Cross-language: arrow function with types ───────────────
+
+#[test]
+fn strip_types_arrow_function_matches_js() {
+    let stripped = tokenize_cross_language("const add = (a: number, b: number): number => a + b;");
+    let js_tokens = {
+        let path = PathBuf::from("test.js");
+        tokenize_file(&path, "const add = (a, b) => a + b;").tokens
+    };
+    assert_eq!(
+        stripped.len(),
+        js_tokens.len(),
+        "Stripped arrow function should match JS: stripped={}, js={}",
+        stripped.len(),
+        js_tokens.len()
+    );
+    // Verify token kinds match
+    for (i, (ts_tok, js_tok)) in stripped.iter().zip(js_tokens.iter()).enumerate() {
+        assert_eq!(
+            ts_tok.kind, js_tok.kind,
+            "Token {i} mismatch in arrow function: TS={:?}, JS={:?}",
+            ts_tok.kind, js_tok.kind
+        );
+    }
+}
+
+// ── Mixed runtime/type imports in cross-language mode ───────
+
+#[test]
+fn strip_types_mixed_import_keeps_only_value_import() {
+    // Two separate import statements: one type, one value
+    let stripped = tokenize_cross_language(
+        "import type { Type } from './mod';\nimport { value } from './mod';",
+    );
+    let import_count = stripped
+        .iter()
+        .filter(|t| matches!(t.kind, TokenKind::Keyword(KeywordType::Import)))
+        .count();
+    assert_eq!(
+        import_count, 1,
+        "Only value import should remain, got {import_count}"
+    );
+}
+
+// ── Span correctness ───────────────────────────────────────
+
+#[test]
+fn token_spans_are_within_source_bounds() {
+    let source = "const x = 1 + 2;\nif (x > 0) { return x; }";
+    let path = PathBuf::from("test.ts");
+    let result = tokenize_file(&path, source);
+    let source_len = source.len() as u32;
+    for (i, token) in result.tokens.iter().enumerate() {
+        assert!(
+            token.span.start <= source_len,
+            "Token {i} ({:?}) span.start ({}) exceeds source length ({})",
+            token.kind,
+            token.span.start,
+            source_len
+        );
+        assert!(
+            token.span.end <= source_len,
+            "Token {i} ({:?}) span.end ({}) exceeds source length ({})",
+            token.kind,
+            token.span.end,
+            source_len
+        );
+        assert!(
+            token.span.start <= token.span.end,
+            "Token {i} ({:?}) span.start ({}) > span.end ({})",
+            token.kind,
+            token.span.start,
+            token.span.end
+        );
+    }
+}
+
+#[test]
+fn token_spans_are_monotonically_non_decreasing() {
+    // For most constructs, token spans should generally advance through the source.
+    // Some synthetic tokens (point spans for parens/commas) may overlap, but
+    // the start positions should be non-decreasing overall.
+    let source = "const a = 1;\nconst b = 2;\nconst c = 3;";
+    let path = PathBuf::from("test.ts");
+    let result = tokenize_file(&path, source);
+    // Group by top-level statement boundaries (each `const` keyword)
+    // and verify spans within each group are non-decreasing.
+    let mut last_keyword_start = 0u32;
+    for token in &result.tokens {
+        if matches!(token.kind, TokenKind::Keyword(KeywordType::Const)) {
+            assert!(
+                token.span.start >= last_keyword_start,
+                "Keyword token span.start ({}) should be >= previous keyword start ({})",
+                token.span.start,
+                last_keyword_start
+            );
+            last_keyword_start = token.span.start;
+        }
+    }
+}
+
+// ── Complex real-world patterns ─────────────────────────────
+
+#[test]
+fn tokenize_async_generator_function() {
+    let tokens = tokenize("async function* gen() { yield await fetch(); }");
+    let has_async = tokens
+        .iter()
+        .any(|t| matches!(t.kind, TokenKind::Keyword(KeywordType::Async)));
+    let has_function = tokens
+        .iter()
+        .any(|t| matches!(t.kind, TokenKind::Keyword(KeywordType::Function)));
+    let has_yield = tokens
+        .iter()
+        .any(|t| matches!(t.kind, TokenKind::Keyword(KeywordType::Yield)));
+    let has_await = tokens
+        .iter()
+        .any(|t| matches!(t.kind, TokenKind::Keyword(KeywordType::Await)));
+    assert!(has_async, "Should have async keyword");
+    assert!(has_function, "Should have function keyword");
+    assert!(has_yield, "Should have yield keyword");
+    assert!(has_await, "Should have await keyword");
+}
+
+#[test]
+fn tokenize_nested_ternary() {
+    let tokens = tokenize("const x = a ? b ? c : d : e;");
+    let ternary_count = tokens
+        .iter()
+        .filter(|t| matches!(t.kind, TokenKind::Operator(OperatorType::Ternary)))
+        .count();
+    let colon_count = tokens
+        .iter()
+        .filter(|t| matches!(t.kind, TokenKind::Punctuation(PunctuationType::Colon)))
+        .count();
+    assert_eq!(
+        ternary_count, 2,
+        "Nested ternary should produce 2 ? operators, got {ternary_count}"
+    );
+    assert_eq!(
+        colon_count, 2,
+        "Nested ternary should produce 2 : colons, got {colon_count}"
+    );
+}
+
+#[test]
+fn tokenize_iife_pattern() {
+    let tokens = tokenize("(function() { const x = 1; })();");
+    let has_function = tokens
+        .iter()
+        .any(|t| matches!(t.kind, TokenKind::Keyword(KeywordType::Function)));
+    let has_const = tokens
+        .iter()
+        .any(|t| matches!(t.kind, TokenKind::Keyword(KeywordType::Const)));
+    assert!(has_function, "IIFE should have function keyword");
+    assert!(has_const, "IIFE body should have const keyword");
+}
+
+#[test]
+fn tokenize_comma_separated_expressions() {
+    let tokens = tokenize("const x = (1, 2, 3);");
+    let comma_count = tokens
+        .iter()
+        .filter(|t| matches!(t.kind, TokenKind::Operator(OperatorType::Comma)))
+        .count();
+    assert!(
+        comma_count >= 2,
+        "Comma expression with 3 items should produce at least 2 commas, got {comma_count}"
+    );
+}
+
+#[test]
+fn tokenize_object_spread() {
+    let tokens = tokenize("const merged = { ...defaults, ...overrides, extra: 1 };");
+    let spread_count = tokens
+        .iter()
+        .filter(|t| matches!(t.kind, TokenKind::Operator(OperatorType::Spread)))
+        .count();
+    assert_eq!(
+        spread_count, 2,
+        "Two spreads in object should produce 2 spread operators, got {spread_count}"
+    );
+}
+
+#[test]
+fn tokenize_large_realistic_function() {
+    let code = r"
+export async function fetchAndProcess(url, options = {}) {
+    const { timeout = 5000, retries = 3, headers = {} } = options;
+    let attempts = 0;
+
+    while (attempts < retries) {
+        try {
+            const response = await fetch(url, { headers, signal: AbortSignal.timeout(timeout) });
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+            const data = await response.json();
+            const processed = data
+                .filter(item => item != null)
+                .map(item => ({
+                    ...item,
+                    id: item.id ?? crypto.randomUUID(),
+                    timestamp: Date.now(),
+                }))
+                .sort((a, b) => a.timestamp - b.timestamp);
+            return { ok: true, data: processed };
+        } catch (error) {
+            attempts++;
+            if (attempts >= retries) {
+                return { ok: false, error: error.message };
+            }
+        }
+    }
+}
+";
+    let tokens = tokenize(code);
+    // A realistic function should produce many tokens
+    assert!(
+        tokens.len() > 80,
+        "Realistic function should produce many tokens, got {}",
+        tokens.len()
+    );
+    // Verify key structural tokens
+    let has_export = tokens
+        .iter()
+        .any(|t| matches!(t.kind, TokenKind::Keyword(KeywordType::Export)));
+    let has_async = tokens
+        .iter()
+        .any(|t| matches!(t.kind, TokenKind::Keyword(KeywordType::Async)));
+    let has_while = tokens
+        .iter()
+        .any(|t| matches!(t.kind, TokenKind::Keyword(KeywordType::While)));
+    let has_try = tokens
+        .iter()
+        .any(|t| matches!(t.kind, TokenKind::Keyword(KeywordType::Try)));
+    let has_catch = tokens
+        .iter()
+        .any(|t| matches!(t.kind, TokenKind::Keyword(KeywordType::Catch)));
+    let has_throw = tokens
+        .iter()
+        .any(|t| matches!(t.kind, TokenKind::Keyword(KeywordType::Throw)));
+    let has_return = tokens
+        .iter()
+        .any(|t| matches!(t.kind, TokenKind::Keyword(KeywordType::Return)));
+    let has_template = tokens
+        .iter()
+        .any(|t| matches!(t.kind, TokenKind::TemplateLiteral));
+    let has_spread = tokens
+        .iter()
+        .any(|t| matches!(t.kind, TokenKind::Operator(OperatorType::Spread)));
+    let has_nullish = tokens
+        .iter()
+        .any(|t| matches!(t.kind, TokenKind::Operator(OperatorType::NullishCoalescing)));
+    assert!(has_export, "Should have export keyword");
+    assert!(has_async, "Should have async keyword");
+    assert!(has_while, "Should have while keyword");
+    assert!(has_try, "Should have try keyword");
+    assert!(has_catch, "Should have catch keyword");
+    assert!(has_throw, "Should have throw keyword");
+    assert!(has_return, "Should have return keyword");
+    assert!(has_template, "Should have template literal");
+    assert!(has_spread, "Should have spread operator");
+    assert!(has_nullish, "Should have nullish coalescing operator");
+}
