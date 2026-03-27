@@ -49,4 +49,4 @@ def merge_same_line:
   ];
 
 # Pipeline
-group_unused_exports | dedup_clones | drop_targets | merge_same_line | .[:($ENV.MAX | tonumber)]
+group_unused_exports | dedup_clones | drop_targets | merge_same_line | .[:($max // 50)]

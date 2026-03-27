@@ -55,13 +55,16 @@ case "$FALLOW_COMMAND" in
     rm -rf "$TMPDIR" ;;
 esac
 
+# Post-process: group unused exports, dedup clones, drop refactoring targets, merge same-line
+MERGED=$(echo "$COMMENTS" | jq --argjson max "$MAX" -f "${ACTION_JQ_DIR}/merge-comments.jq" 2>&1) && COMMENTS="$MERGED" || echo "Merge warning: $MERGED"
+
 TOTAL=$(echo "$COMMENTS" | jq 'length')
 if [ "$TOTAL" -eq 0 ]; then
   echo "No review comments to post"
   exit 0
 fi
 
-echo "Posting $TOTAL review comments..."
+echo "Posting $TOTAL review comments (after merging)..."
 
 # Generate rich review body from the analysis results
 REVIEW_BODY=$(jq -r -f "${ACTION_JQ_DIR}/review-body.jq" fallow-results.json 2>/dev/null) || \
