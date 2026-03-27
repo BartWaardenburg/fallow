@@ -239,4 +239,95 @@ mod tests {
         assert_eq!(suppressions[0].line, 0);
         assert!(suppressions[0].kind.is_none());
     }
+
+    #[test]
+    fn is_suppressed_multiple_suppressions_different_kinds() {
+        let suppressions = vec![
+            Suppression {
+                line: 5,
+                kind: Some(IssueKind::UnusedExport),
+            },
+            Suppression {
+                line: 5,
+                kind: Some(IssueKind::UnusedType),
+            },
+        ];
+        assert!(is_suppressed(&suppressions, 5, IssueKind::UnusedExport));
+        assert!(is_suppressed(&suppressions, 5, IssueKind::UnusedType));
+        assert!(!is_suppressed(&suppressions, 5, IssueKind::UnusedFile));
+    }
+
+    #[test]
+    fn is_suppressed_file_wide_blanket_and_specific_coexist() {
+        let suppressions = vec![
+            Suppression {
+                line: 0,
+                kind: Some(IssueKind::UnusedExport),
+            },
+            Suppression {
+                line: 5,
+                kind: None, // blanket suppress on line 5
+            },
+        ];
+        // File-wide suppression only covers UnusedExport
+        assert!(is_suppressed(&suppressions, 10, IssueKind::UnusedExport));
+        assert!(!is_suppressed(&suppressions, 10, IssueKind::UnusedType));
+
+        // Line 5 blanket suppression covers everything on line 5
+        assert!(is_suppressed(&suppressions, 5, IssueKind::UnusedType));
+        assert!(is_suppressed(&suppressions, 5, IssueKind::UnusedExport));
+    }
+
+    #[test]
+    fn is_file_suppressed_blanket_suppresses_all_kinds() {
+        let suppressions = vec![Suppression {
+            line: 0,
+            kind: None, // blanket file-wide
+        }];
+        assert!(is_file_suppressed(&suppressions, IssueKind::UnusedFile));
+        assert!(is_file_suppressed(&suppressions, IssueKind::UnusedExport));
+        assert!(is_file_suppressed(&suppressions, IssueKind::UnusedType));
+        assert!(is_file_suppressed(
+            &suppressions,
+            IssueKind::CircularDependency
+        ));
+        assert!(is_file_suppressed(
+            &suppressions,
+            IssueKind::CodeDuplication
+        ));
+    }
+
+    #[test]
+    fn is_file_suppressed_empty_list() {
+        assert!(!is_file_suppressed(&[], IssueKind::UnusedFile));
+    }
+
+    #[test]
+    fn parse_multiple_next_line_suppressions() {
+        let source = "// fallow-ignore-next-line unused-export\nexport const foo = 1;\n// fallow-ignore-next-line unused-type\nexport type Bar = string;\n";
+        let suppressions = parse_suppressions_from_source(source);
+        assert_eq!(suppressions.len(), 2);
+        assert_eq!(suppressions[0].line, 2);
+        assert_eq!(suppressions[0].kind, Some(IssueKind::UnusedExport));
+        assert_eq!(suppressions[1].line, 4);
+        assert_eq!(suppressions[1].kind, Some(IssueKind::UnusedType));
+    }
+
+    #[test]
+    fn parse_code_duplication_suppression() {
+        let source = "// fallow-ignore-file code-duplication\nexport const foo = 1;\n";
+        let suppressions = parse_suppressions_from_source(source);
+        assert_eq!(suppressions.len(), 1);
+        assert_eq!(suppressions[0].line, 0);
+        assert_eq!(suppressions[0].kind, Some(IssueKind::CodeDuplication));
+    }
+
+    #[test]
+    fn parse_circular_dependency_suppression() {
+        let source = "// fallow-ignore-file circular-dependency\nimport { x } from './x';\n";
+        let suppressions = parse_suppressions_from_source(source);
+        assert_eq!(suppressions.len(), 1);
+        assert_eq!(suppressions[0].line, 0);
+        assert_eq!(suppressions[0].kind, Some(IssueKind::CircularDependency));
+    }
 }

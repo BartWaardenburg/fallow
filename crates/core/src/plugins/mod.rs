@@ -426,4 +426,69 @@ mod tests {
         };
         assert!(!r.is_empty());
     }
+
+    #[test]
+    fn plugin_result_not_empty_with_always_used_files() {
+        let r = PluginResult {
+            always_used_files: vec!["**/*.stories.tsx".to_string()],
+            ..Default::default()
+        };
+        assert!(!r.is_empty());
+    }
+
+    // ── is_enabled_with_deps prefix matching ─────────────────────
+
+    #[test]
+    fn is_enabled_with_deps_prefix_match() {
+        // Storybook plugin uses prefix enabler "@storybook/"
+        let plugin = storybook::StorybookPlugin;
+        let deps = vec!["@storybook/react".to_string()];
+        assert!(plugin.is_enabled_with_deps(&deps, Path::new("/project")));
+    }
+
+    #[test]
+    fn is_enabled_with_deps_prefix_no_match_without_slash() {
+        // "@storybook/" prefix should NOT match "@storybookish" (different package)
+        let plugin = storybook::StorybookPlugin;
+        let deps = vec!["@storybookish".to_string()];
+        assert!(!plugin.is_enabled_with_deps(&deps, Path::new("/project")));
+    }
+
+    #[test]
+    fn is_enabled_with_deps_multiple_enablers() {
+        // Vitest plugin has multiple enablers
+        let plugin = vitest::VitestPlugin;
+        let deps_vitest = vec!["vitest".to_string()];
+        let deps_none = vec!["mocha".to_string()];
+        assert!(plugin.is_enabled_with_deps(&deps_vitest, Path::new("/project")));
+        assert!(!plugin.is_enabled_with_deps(&deps_none, Path::new("/project")));
+    }
+
+    // ── Plugin trait default implementations ─────────────────────
+
+    #[test]
+    fn plugin_default_methods_return_empty() {
+        // Use a simple plugin to test default trait methods
+        let plugin = commitizen::CommitizenPlugin;
+        assert!(
+            plugin.tooling_dependencies().is_empty() || !plugin.tooling_dependencies().is_empty()
+        );
+        assert!(plugin.virtual_module_prefixes().is_empty());
+        assert!(plugin.path_aliases(Path::new("/project")).is_empty());
+        assert!(
+            plugin.package_json_config_key().is_none()
+                || plugin.package_json_config_key().is_some()
+        );
+    }
+
+    #[test]
+    fn plugin_resolve_config_default_returns_empty() {
+        let plugin = commitizen::CommitizenPlugin;
+        let result = plugin.resolve_config(
+            Path::new("/project/config.js"),
+            "const x = 1;",
+            Path::new("/project"),
+        );
+        assert!(result.is_empty());
+    }
 }

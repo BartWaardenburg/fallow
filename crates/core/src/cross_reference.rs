@@ -435,4 +435,124 @@ mod tests {
             DeadCodeKind::UnusedType { type_name } if type_name == "OldInterface"
         ));
     }
+
+    #[test]
+    fn empty_result_methods() {
+        let result = CrossReferenceResult {
+            combined_findings: vec![],
+            clones_in_unused_files: 0,
+            clones_with_unused_exports: 0,
+        };
+        assert_eq!(result.total(), 0);
+        assert!(!result.has_findings());
+        assert!(result.affected_group_indices().is_empty());
+    }
+
+    #[test]
+    fn multiple_groups_with_findings() {
+        let duplication = DuplicationReport {
+            clone_groups: vec![
+                make_group(vec![
+                    make_instance("src/a.ts", 1, 10),
+                    make_instance("src/b.ts", 1, 10),
+                ]),
+                make_group(vec![
+                    make_instance("src/c.ts", 5, 15),
+                    make_instance("src/d.ts", 5, 15),
+                ]),
+                make_group(vec![
+                    make_instance("src/e.ts", 1, 10),
+                    make_instance("src/f.ts", 1, 10),
+                ]),
+            ],
+            clone_families: vec![],
+            stats: crate::duplicates::types::DuplicationStats {
+                total_files: 6,
+                files_with_clones: 6,
+                total_lines: 60,
+                duplicated_lines: 30,
+                total_tokens: 300,
+                duplicated_tokens: 150,
+                clone_groups: 3,
+                clone_instances: 6,
+                duplication_percentage: 50.0,
+            },
+        };
+        let mut dead_code = AnalysisResults::default();
+        dead_code.unused_files.push(UnusedFile {
+            path: PathBuf::from("src/a.ts"),
+        });
+        dead_code.unused_exports.push(UnusedExport {
+            path: PathBuf::from("src/c.ts"),
+            export_name: "helper".to_string(),
+            is_type_only: false,
+            line: 10,
+            col: 0,
+            span_start: 0,
+            is_re_export: false,
+        });
+
+        let result = cross_reference(&duplication, &dead_code);
+        assert_eq!(result.total(), 2);
+        assert_eq!(result.clones_in_unused_files, 1);
+        assert_eq!(result.clones_with_unused_exports, 1);
+
+        let affected = result.affected_group_indices();
+        assert!(affected.contains(&0)); // Group 0 has clone in unused file
+        assert!(affected.contains(&1)); // Group 1 has clone overlapping unused export
+        assert!(!affected.contains(&2)); // Group 2 unaffected
+    }
+
+    #[test]
+    fn clone_instance_outside_export_line_range() {
+        // Clone instance at lines 1-5, unused export at line 10
+        // They don't overlap, so no finding
+        let duplication = DuplicationReport {
+            clone_groups: vec![make_group(vec![
+                make_instance("src/a.ts", 1, 5),
+                make_instance("src/b.ts", 1, 5),
+            ])],
+            clone_families: vec![],
+            stats: crate::duplicates::types::DuplicationStats::default(),
+        };
+        let mut dead_code = AnalysisResults::default();
+        dead_code.unused_exports.push(UnusedExport {
+            path: PathBuf::from("src/a.ts"),
+            export_name: "fn".to_string(),
+            is_type_only: false,
+            line: 10,
+            col: 0,
+            span_start: 0,
+            is_re_export: false,
+        });
+
+        let result = cross_reference(&duplication, &dead_code);
+        assert!(!result.has_findings());
+    }
+
+    #[test]
+    fn clone_in_different_file_than_unused_export() {
+        // Clone is in src/a.ts, unused export is in src/x.ts
+        let duplication = DuplicationReport {
+            clone_groups: vec![make_group(vec![
+                make_instance("src/a.ts", 5, 15),
+                make_instance("src/b.ts", 5, 15),
+            ])],
+            clone_families: vec![],
+            stats: crate::duplicates::types::DuplicationStats::default(),
+        };
+        let mut dead_code = AnalysisResults::default();
+        dead_code.unused_exports.push(UnusedExport {
+            path: PathBuf::from("src/x.ts"), // different file
+            export_name: "fn".to_string(),
+            is_type_only: false,
+            line: 10,
+            col: 0,
+            span_start: 0,
+            is_re_export: false,
+        });
+
+        let result = cross_reference(&duplication, &dead_code);
+        assert!(!result.has_findings());
+    }
 }

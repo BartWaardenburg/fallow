@@ -273,4 +273,170 @@ mod tests {
             RefactoringKind::ExtractFunction
         );
     }
+
+    #[test]
+    fn estimated_savings_for_extract_function() {
+        let groups = vec![CloneGroup {
+            instances: vec![
+                instance("src/a.ts", 1, 10),
+                instance("src/b.ts", 1, 10),
+                instance("src/c.ts", 1, 10),
+            ],
+            token_count: 30,
+            line_count: 10,
+        }];
+
+        let families = group_into_families(&groups);
+        assert_eq!(families.len(), 1);
+        // 3 instances, line_count = 10, savings = 10 * (3 - 1) = 20
+        assert_eq!(families[0].suggestions[0].estimated_savings, 20);
+    }
+
+    #[test]
+    fn estimated_savings_for_extract_module() {
+        // Total lines >= 50, so it gets ExtractModule suggestion
+        let groups = vec![
+            CloneGroup {
+                instances: vec![instance("src/a.ts", 1, 30), instance("lib/b.ts", 1, 30)],
+                token_count: 100,
+                line_count: 30,
+            },
+            CloneGroup {
+                instances: vec![instance("src/a.ts", 40, 65), instance("lib/b.ts", 40, 65)],
+                token_count: 80,
+                line_count: 26,
+            },
+        ];
+
+        let families = group_into_families(&groups);
+        assert_eq!(families.len(), 1);
+        // Total savings: 30 * (2 - 1) + 26 * (2 - 1) = 56
+        assert_eq!(families[0].suggestions[0].estimated_savings, 56);
+    }
+
+    #[test]
+    fn same_directory_files_get_specific_location_hint() {
+        // Both files in same directory
+        let groups = vec![
+            CloneGroup {
+                instances: vec![
+                    instance("src/utils/a.ts", 1, 30),
+                    instance("src/utils/b.ts", 1, 30),
+                ],
+                token_count: 100,
+                line_count: 30,
+            },
+            CloneGroup {
+                instances: vec![
+                    instance("src/utils/a.ts", 40, 65),
+                    instance("src/utils/b.ts", 40, 65),
+                ],
+                token_count: 80,
+                line_count: 26,
+            },
+        ];
+
+        let families = group_into_families(&groups);
+        assert_eq!(families.len(), 1);
+        assert_eq!(
+            families[0].suggestions[0].kind,
+            RefactoringKind::ExtractModule
+        );
+        // Should mention the specific directory, not "a shared directory"
+        assert!(
+            !families[0].suggestions[0]
+                .description
+                .contains("a shared directory"),
+            "Same-directory clones should mention the specific directory"
+        );
+    }
+
+    #[test]
+    fn cross_directory_files_get_shared_directory_hint() {
+        // Files in different directories
+        let groups = vec![
+            CloneGroup {
+                instances: vec![instance("src/a.ts", 1, 30), instance("lib/b.ts", 1, 30)],
+                token_count: 100,
+                line_count: 30,
+            },
+            CloneGroup {
+                instances: vec![instance("src/a.ts", 40, 65), instance("lib/b.ts", 40, 65)],
+                token_count: 80,
+                line_count: 26,
+            },
+        ];
+
+        let families = group_into_families(&groups);
+        assert_eq!(families.len(), 1);
+        assert!(
+            families[0].suggestions[0]
+                .description
+                .contains("a shared directory"),
+            "Cross-directory clones should suggest a shared directory"
+        );
+    }
+
+    #[test]
+    fn total_duplicated_tokens_is_sum() {
+        let groups = vec![
+            CloneGroup {
+                instances: vec![instance("src/a.ts", 1, 10), instance("src/b.ts", 1, 10)],
+                token_count: 30,
+                line_count: 10,
+            },
+            CloneGroup {
+                instances: vec![instance("src/a.ts", 20, 30), instance("src/b.ts", 20, 30)],
+                token_count: 45,
+                line_count: 11,
+            },
+        ];
+
+        let families = group_into_families(&groups);
+        assert_eq!(families.len(), 1);
+        assert_eq!(families[0].total_duplicated_tokens, 75);
+    }
+
+    #[test]
+    fn multiple_small_groups_each_get_function_suggestion() {
+        let groups = vec![
+            CloneGroup {
+                instances: vec![instance("src/a.ts", 1, 10), instance("src/b.ts", 1, 10)],
+                token_count: 30,
+                line_count: 10,
+            },
+            CloneGroup {
+                instances: vec![instance("src/a.ts", 20, 30), instance("src/b.ts", 20, 30)],
+                token_count: 30,
+                line_count: 11,
+            },
+        ];
+
+        let families = group_into_families(&groups);
+        // Total lines = 10 + 11 = 21 < 50, so each group gets a function suggestion
+        assert_eq!(families.len(), 1);
+        assert_eq!(families[0].suggestions.len(), 2);
+        assert!(
+            families[0]
+                .suggestions
+                .iter()
+                .all(|s| s.kind == RefactoringKind::ExtractFunction)
+        );
+    }
+
+    #[test]
+    fn single_instance_group_zero_savings() {
+        // A group with only 1 instance shouldn't happen in practice,
+        // but test the saturating_sub behavior
+        let groups = vec![CloneGroup {
+            instances: vec![instance("src/a.ts", 1, 10)],
+            token_count: 30,
+            line_count: 10,
+        }];
+
+        let families = group_into_families(&groups);
+        assert_eq!(families.len(), 1);
+        // savings = 10 * (1 - 1) = 0
+        assert_eq!(families[0].suggestions[0].estimated_savings, 0);
+    }
 }

@@ -65,3 +65,189 @@ fn has_reachable_importer(file_id: FileId, graph: &ModuleGraph) -> bool {
         dep_idx < graph.modules.len() && graph.modules[dep_idx].is_reachable
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::discover::{DiscoveredFile, EntryPoint, EntryPointSource};
+    use crate::graph::ModuleGraph;
+    use crate::resolve::ResolvedModule;
+    use rustc_hash::FxHashSet;
+    use std::path::PathBuf;
+
+    fn build_graph(file_specs: &[(&str, bool)]) -> ModuleGraph {
+        let files: Vec<DiscoveredFile> = file_specs
+            .iter()
+            .enumerate()
+            .map(|(i, (path, _))| DiscoveredFile {
+                id: FileId(i as u32),
+                path: PathBuf::from(path),
+                size_bytes: 0,
+            })
+            .collect();
+
+        let entry_points: Vec<EntryPoint> = file_specs
+            .iter()
+            .filter(|(_, is_entry)| *is_entry)
+            .map(|(path, _)| EntryPoint {
+                path: PathBuf::from(path),
+                source: EntryPointSource::ManualEntry,
+            })
+            .collect();
+
+        let resolved_modules: Vec<ResolvedModule> = files
+            .iter()
+            .map(|f| ResolvedModule {
+                file_id: f.id,
+                path: f.path.clone(),
+                exports: vec![],
+                re_exports: vec![],
+                resolved_imports: vec![],
+                resolved_dynamic_imports: vec![],
+                resolved_dynamic_patterns: vec![],
+                member_accesses: vec![],
+                whole_object_uses: vec![],
+                has_cjs_exports: false,
+                unused_import_bindings: FxHashSet::default(),
+            })
+            .collect();
+
+        ModuleGraph::build(&resolved_modules, &entry_points, &files)
+    }
+
+    // ---- has_reachable_importer tests ----
+
+    #[test]
+    fn has_reachable_importer_out_of_bounds_file_id() {
+        let graph = build_graph(&[("/src/entry.ts", true)]);
+        // FileId 999 is out of bounds for reverse_deps
+        assert!(!has_reachable_importer(FileId(999), &graph));
+    }
+
+    #[test]
+    fn has_reachable_importer_empty_reverse_deps() {
+        let graph = build_graph(&[("/src/entry.ts", true), ("/src/orphan.ts", false)]);
+        // orphan has no importers
+        assert!(!has_reachable_importer(FileId(1), &graph));
+    }
+
+    #[test]
+    fn has_reachable_importer_with_unreachable_importer() {
+        let graph = build_graph(&[
+            ("/src/entry.ts", true),
+            ("/src/a.ts", false),
+            ("/src/b.ts", false),
+        ]);
+        // Both a and b are unreachable, so even if b imports a,
+        // b is not reachable so has_reachable_importer should be false for a
+        // In this test, there are no import edges so reverse_deps is empty for all
+        assert!(!has_reachable_importer(FileId(1), &graph));
+    }
+
+    // ---- find_unused_files tests ----
+
+    #[test]
+    fn find_unused_files_empty_graph() {
+        let graph = build_graph(&[]);
+        let result = find_unused_files(&graph, &FxHashMap::default());
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn find_unused_files_entry_point_never_flagged() {
+        let graph = build_graph(&[("/src/entry.ts", true)]);
+        let result = find_unused_files(&graph, &FxHashMap::default());
+        assert!(result.is_empty(), "entry point should never be flagged");
+    }
+
+    #[test]
+    fn find_unused_files_skips_declaration_files() {
+        let graph = build_graph(&[("/src/entry.ts", true), ("/src/types/global.d.ts", false)]);
+        let result = find_unused_files(&graph, &FxHashMap::default());
+        assert!(
+            !result
+                .iter()
+                .any(|f| f.path.to_string_lossy().contains(".d.ts")),
+            "declaration files should be skipped"
+        );
+    }
+
+    #[test]
+    fn find_unused_files_skips_config_files() {
+        let graph = build_graph(&[("/src/entry.ts", true), ("/jest.config.ts", false)]);
+        let result = find_unused_files(&graph, &FxHashMap::default());
+        assert!(
+            !result
+                .iter()
+                .any(|f| f.path.to_string_lossy().contains("jest.config")),
+            "config files should be skipped"
+        );
+    }
+
+    #[test]
+    fn find_unused_files_skips_suppressed_files() {
+        // Create a temp file that exists on disk
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let orphan_path = dir.path().join("orphan.ts");
+        std::fs::write(&orphan_path, "export const unused = 1;").expect("write temp file");
+
+        let files = vec![
+            DiscoveredFile {
+                id: FileId(0),
+                path: dir.path().join("entry.ts"),
+                size_bytes: 0,
+            },
+            DiscoveredFile {
+                id: FileId(1),
+                path: orphan_path,
+                size_bytes: 0,
+            },
+        ];
+        let entry_points = vec![EntryPoint {
+            path: dir.path().join("entry.ts"),
+            source: EntryPointSource::ManualEntry,
+        }];
+        let resolved_modules: Vec<ResolvedModule> = files
+            .iter()
+            .map(|f| ResolvedModule {
+                file_id: f.id,
+                path: f.path.clone(),
+                exports: vec![],
+                re_exports: vec![],
+                resolved_imports: vec![],
+                resolved_dynamic_imports: vec![],
+                resolved_dynamic_patterns: vec![],
+                member_accesses: vec![],
+                whole_object_uses: vec![],
+                has_cjs_exports: false,
+                unused_import_bindings: FxHashSet::default(),
+            })
+            .collect();
+        let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
+
+        // Suppress unused-file for file 1
+        let supps = vec![Suppression {
+            line: 0,
+            kind: Some(IssueKind::UnusedFile),
+        }];
+        let supps_slice: &[Suppression] = &supps;
+        let mut suppressions_by_file: FxHashMap<FileId, &[Suppression]> = FxHashMap::default();
+        suppressions_by_file.insert(FileId(1), supps_slice);
+
+        let result = find_unused_files(&graph, &suppressions_by_file);
+        assert!(result.is_empty(), "suppressed file should not be flagged");
+    }
+
+    #[test]
+    fn find_unused_files_skips_nonexistent_files() {
+        let graph = build_graph(&[("/src/entry.ts", true), ("/nonexistent/phantom.ts", false)]);
+        let result = find_unused_files(&graph, &FxHashMap::default());
+        // phantom.ts doesn't exist on disk, should not be reported
+        assert!(
+            !result
+                .iter()
+                .any(|f| f.path.to_string_lossy().contains("phantom")),
+            "non-existent files should be filtered out"
+        );
+    }
+}

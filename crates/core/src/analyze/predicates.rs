@@ -1296,4 +1296,167 @@ mod tests {
     fn not_declaration_file_d_ts_in_middle() {
         assert!(!is_declaration_file(std::path::Path::new("my.d.ts.backup")));
     }
+
+    // ---------------------------------------------------------------
+    // is_barrel_with_reachable_sources tests
+    // ---------------------------------------------------------------
+
+    use crate::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
+    use crate::graph::{ExportSymbol, ModuleGraph, ReExportEdge};
+    use crate::resolve::ResolvedModule;
+
+    fn build_graph(file_specs: &[(&str, bool)]) -> ModuleGraph {
+        let files: Vec<DiscoveredFile> = file_specs
+            .iter()
+            .enumerate()
+            .map(|(i, (path, _))| DiscoveredFile {
+                id: FileId(i as u32),
+                path: std::path::PathBuf::from(path),
+                size_bytes: 0,
+            })
+            .collect();
+
+        let entry_points: Vec<EntryPoint> = file_specs
+            .iter()
+            .filter(|(_, is_entry)| *is_entry)
+            .map(|(path, _)| EntryPoint {
+                path: std::path::PathBuf::from(path),
+                source: EntryPointSource::ManualEntry,
+            })
+            .collect();
+
+        let resolved_modules: Vec<ResolvedModule> = files
+            .iter()
+            .map(|f| ResolvedModule {
+                file_id: f.id,
+                path: f.path.clone(),
+                exports: vec![],
+                re_exports: vec![],
+                resolved_imports: vec![],
+                resolved_dynamic_imports: vec![],
+                resolved_dynamic_patterns: vec![],
+                member_accesses: vec![],
+                whole_object_uses: vec![],
+                has_cjs_exports: false,
+                unused_import_bindings: rustc_hash::FxHashSet::default(),
+            })
+            .collect();
+
+        ModuleGraph::build(&resolved_modules, &entry_points, &files)
+    }
+
+    /// Module with no re-exports is not a barrel.
+    #[test]
+    fn barrel_no_re_exports_returns_false() {
+        let graph = build_graph(&[("/src/entry.ts", true), ("/src/utils.ts", false)]);
+        let module = &graph.modules[1];
+        assert!(!is_barrel_with_reachable_sources(module, &graph));
+    }
+
+    /// Module with re-exports but also local exports is not a pure barrel.
+    #[test]
+    fn barrel_with_local_exports_returns_false() {
+        let mut graph = build_graph(&[
+            ("/src/entry.ts", true),
+            ("/src/index.ts", false),
+            ("/src/utils.ts", false),
+        ]);
+        graph.modules[2].is_reachable = true;
+        // Add a re-export
+        graph.modules[1].re_exports = vec![ReExportEdge {
+            source_file: FileId(2),
+            imported_name: "helper".to_string(),
+            exported_name: "helper".to_string(),
+            is_type_only: false,
+        }];
+        // Add a local export with a real span (non-zero)
+        graph.modules[1].exports = vec![ExportSymbol {
+            name: crate::extract::ExportName::Named("localFn".to_string()),
+            is_type_only: false,
+            is_public: false,
+            span: oxc_span::Span::new(10, 50),
+            references: vec![],
+            members: vec![],
+        }];
+        assert!(!is_barrel_with_reachable_sources(&graph.modules[1], &graph));
+    }
+
+    /// Module with re-exports and CJS exports is not a pure barrel.
+    #[test]
+    fn barrel_with_cjs_exports_returns_false() {
+        let mut graph = build_graph(&[
+            ("/src/entry.ts", true),
+            ("/src/index.ts", false),
+            ("/src/utils.ts", false),
+        ]);
+        graph.modules[2].is_reachable = true;
+        graph.modules[1].re_exports = vec![ReExportEdge {
+            source_file: FileId(2),
+            imported_name: "helper".to_string(),
+            exported_name: "helper".to_string(),
+            is_type_only: false,
+        }];
+        graph.modules[1].has_cjs_exports = true;
+        assert!(!is_barrel_with_reachable_sources(&graph.modules[1], &graph));
+    }
+
+    /// Pure barrel with reachable source returns true.
+    #[test]
+    fn barrel_pure_with_reachable_source_returns_true() {
+        let mut graph = build_graph(&[
+            ("/src/entry.ts", true),
+            ("/src/index.ts", false),
+            ("/src/utils.ts", false),
+        ]);
+        graph.modules[2].is_reachable = true;
+        // Only re-exports, no local exports, no CJS
+        graph.modules[1].re_exports = vec![ReExportEdge {
+            source_file: FileId(2),
+            imported_name: "helper".to_string(),
+            exported_name: "helper".to_string(),
+            is_type_only: false,
+        }];
+        // Only synthetic exports (span 0..0), which are from re-exports
+        graph.modules[1].exports = vec![ExportSymbol {
+            name: crate::extract::ExportName::Named("helper".to_string()),
+            is_type_only: false,
+            is_public: false,
+            span: oxc_span::Span::new(0, 0),
+            references: vec![],
+            members: vec![],
+        }];
+        assert!(is_barrel_with_reachable_sources(&graph.modules[1], &graph));
+    }
+
+    /// Pure barrel where all sources are unreachable returns false.
+    #[test]
+    fn barrel_all_sources_unreachable_returns_false() {
+        let mut graph = build_graph(&[
+            ("/src/entry.ts", true),
+            ("/src/index.ts", false),
+            ("/src/utils.ts", false),
+        ]);
+        // utils (source) is NOT reachable
+        graph.modules[1].re_exports = vec![ReExportEdge {
+            source_file: FileId(2),
+            imported_name: "helper".to_string(),
+            exported_name: "helper".to_string(),
+            is_type_only: false,
+        }];
+        assert!(!is_barrel_with_reachable_sources(&graph.modules[1], &graph));
+    }
+
+    /// Barrel with out-of-bounds source FileId doesn't panic, returns false.
+    #[test]
+    fn barrel_out_of_bounds_source_returns_false() {
+        let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/index.ts", false)]);
+        graph.modules[1].re_exports = vec![ReExportEdge {
+            source_file: FileId(999), // out of bounds
+            imported_name: "helper".to_string(),
+            exported_name: "helper".to_string(),
+            is_type_only: false,
+        }];
+        // Should not panic, should return false
+        assert!(!is_barrel_with_reachable_sources(&graph.modules[1], &graph));
+    }
 }
