@@ -25,6 +25,10 @@ editors/
   vscode/   — VS Code extension (LSP client, tree views, status bar, auto-download)
 npm/
   fallow/   — npm wrapper package with optionalDependencies pattern
+action/       — GitHub Action (composite)
+  jq/         — jq scripts for summaries, annotations, review comments, merging
+  scripts/    — Bash scripts (install, analyze, annotate, comment, review, summary)
+  tests/      — Unit tests for jq scripts (run: bash action/tests/run.sh)
 tests/
   fixtures/ — Integration test fixtures
 ```
