@@ -7,29 +7,22 @@ set -eo pipefail
 
 MAX="${MAX_COMMENTS:-50}"
 
-# Clean up previous fallow reviews and their inline comments
-PREV_REVIEW_IDS=$(gh api \
-  "repos/${GH_REPO}/pulls/${PR_NUMBER}/reviews" --paginate \
-  --jq '.[] | select(.user.login == "github-actions[bot]" and (.body | contains("<!-- fallow-review -->"))) | .id' \
-  2>/dev/null)
+# Clean up ALL previous review comments from github-actions[bot]
+# This handles both batch reviews (with marker body) and individual fallback reviews (empty body)
+CLEANED=0
+gh api "repos/${GH_REPO}/pulls/${PR_NUMBER}/comments" --paginate \
+  --jq '.[] | select(.user.login == "github-actions[bot]") | .id' 2>/dev/null | while read -r CID; do
+  gh api "repos/${GH_REPO}/pulls/comments/${CID}" --method DELETE > /dev/null 2>&1 || true
+  CLEANED=$((CLEANED + 1))
+done
 
-for REVIEW_ID in $PREV_REVIEW_IDS; do
-  # Delete all inline comments from this review
-  COMMENT_IDS=$(gh api \
-    "repos/${GH_REPO}/pulls/${PR_NUMBER}/reviews/${REVIEW_ID}/comments" --paginate \
-    --jq '.[].id' 2>/dev/null)
-  for CID in $COMMENT_IDS; do
-    gh api "repos/${GH_REPO}/pulls/comments/${CID}" --method DELETE > /dev/null 2>&1 || true
-  done
-  # Dismiss the review itself
-  gh api "repos/${GH_REPO}/pulls/${PR_NUMBER}/reviews/${REVIEW_ID}" \
+# Dismiss previous fallow reviews
+gh api "repos/${GH_REPO}/pulls/${PR_NUMBER}/reviews" --paginate \
+  --jq '.[] | select(.user.login == "github-actions[bot]" and .state != "DISMISSED") | .id' 2>/dev/null | while read -r RID; do
+  gh api "repos/${GH_REPO}/pulls/${PR_NUMBER}/reviews/${RID}" \
     --method PUT --field event=DISMISS \
     --field message="Superseded by new analysis" > /dev/null 2>&1 || true
 done
-
-if [ -n "$PREV_REVIEW_IDS" ]; then
-  echo "Cleaned up previous fallow reviews"
-fi
 
 # Prefix for paths: if root is not ".", prepend it
 PREFIX=""
