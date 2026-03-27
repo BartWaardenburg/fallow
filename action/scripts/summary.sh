@@ -16,4 +16,10 @@ select_summary_script() {
 }
 
 JQ_FILE=$(select_summary_script)
-jq -r -f "$JQ_FILE" fallow-results.json >> "$GITHUB_STEP_SUMMARY"
+if [ ! -f "$JQ_FILE" ]; then
+  echo "::warning::Summary script not found: ${JQ_FILE}"
+  exit 0
+fi
+if ! jq -r -f "$JQ_FILE" fallow-results.json >> "$GITHUB_STEP_SUMMARY"; then
+  echo "::warning::Failed to generate job summary"
+fi

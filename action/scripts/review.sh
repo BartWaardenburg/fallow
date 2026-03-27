@@ -6,15 +6,22 @@ set -eo pipefail
 #   MAX_COMMENTS, ACTION_JQ_DIR
 
 MAX="${MAX_COMMENTS:-50}"
+if ! [[ "$MAX" =~ ^[0-9]+$ ]]; then
+  echo "::warning::max-annotations must be a positive integer, got: ${MAX_COMMENTS}. Using default: 50"
+  MAX=50
+fi
+
+# Reject path traversal in root
+if [[ "${FALLOW_ROOT:-}" =~ \.\. ]]; then
+  echo "::error::root input contains path traversal sequence"
+  exit 2
+fi
 
 # Clean up ALL previous review comments from github-actions[bot]
-# This handles both batch reviews (with marker body) and individual fallback reviews (empty body)
-CLEANED=0
-gh api "repos/${GH_REPO}/pulls/${PR_NUMBER}/comments" --paginate \
-  --jq '.[] | select(.user.login == "github-actions[bot]") | .id' 2>/dev/null | while read -r CID; do
+while read -r CID; do
   gh api "repos/${GH_REPO}/pulls/comments/${CID}" --method DELETE > /dev/null 2>&1 || true
-  CLEANED=$((CLEANED + 1))
-done
+done < <(gh api "repos/${GH_REPO}/pulls/${PR_NUMBER}/comments" --paginate \
+  --jq '.[] | select(.user.login == "github-actions[bot]") | .id' 2>/dev/null)
 
 # Dismiss previous fallow reviews
 gh api "repos/${GH_REPO}/pulls/${PR_NUMBER}/reviews" --paginate \
@@ -44,15 +51,15 @@ case "$FALLOW_COMMAND" in
     COMMENTS=$(jq -f "${ACTION_JQ_DIR}/review-comments-health.jq" fallow-results.json 2>&1) || { echo "jq health error: $COMMENTS"; COMMENTS="[]"; } ;;
   "")
     # Combined: extract each section and run through its jq script
-    TMPDIR=$(mktemp -d)
-    jq '.check // {}' fallow-results.json > "$TMPDIR/check.json" 2>/dev/null
-    jq '.dupes // {}' fallow-results.json > "$TMPDIR/dupes.json" 2>/dev/null
-    jq '.health // {}' fallow-results.json > "$TMPDIR/health.json" 2>/dev/null
-    CHECK=$(jq -f "${ACTION_JQ_DIR}/review-comments-check.jq" "$TMPDIR/check.json" 2>/dev/null || echo "[]")
-    DUPES=$(jq -f "${ACTION_JQ_DIR}/review-comments-dupes.jq" "$TMPDIR/dupes.json" 2>/dev/null || echo "[]")
-    HEALTH=$(jq -f "${ACTION_JQ_DIR}/review-comments-health.jq" "$TMPDIR/health.json" 2>/dev/null || echo "[]")
+    WORK_DIR=$(mktemp -d)
+    jq '.check // {}' fallow-results.json > "$WORK_DIR/check.json" 2>/dev/null
+    jq '.dupes // {}' fallow-results.json > "$WORK_DIR/dupes.json" 2>/dev/null
+    jq '.health // {}' fallow-results.json > "$WORK_DIR/health.json" 2>/dev/null
+    CHECK=$(jq -f "${ACTION_JQ_DIR}/review-comments-check.jq" "$WORK_DIR/check.json" 2>/dev/null || echo "[]")
+    DUPES=$(jq -f "${ACTION_JQ_DIR}/review-comments-dupes.jq" "$WORK_DIR/dupes.json" 2>/dev/null || echo "[]")
+    HEALTH=$(jq -f "${ACTION_JQ_DIR}/review-comments-health.jq" "$WORK_DIR/health.json" 2>/dev/null || echo "[]")
     COMMENTS=$(echo "$CHECK" "$DUPES" "$HEALTH" | jq -s 'add | .[:'"$MAX"']')
-    rm -rf "$TMPDIR" ;;
+    rm -rf "$WORK_DIR" ;;
 esac
 
 # Post-process: group unused exports, dedup clones, drop refactoring targets, merge same-line
