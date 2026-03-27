@@ -7,15 +7,28 @@ set -eo pipefail
 
 MAX="${MAX_COMMENTS:-50}"
 
-# Dismiss previous fallow review to avoid stacking
-PREV_REVIEW_ID=$(gh api \
-  "repos/${GH_REPO}/pulls/${PR_NUMBER}/reviews" \
+# Clean up previous fallow reviews and their inline comments
+PREV_REVIEW_IDS=$(gh api \
+  "repos/${GH_REPO}/pulls/${PR_NUMBER}/reviews" --paginate \
   --jq '.[] | select(.user.login == "github-actions[bot]" and (.body | contains("<!-- fallow-review -->"))) | .id' \
-  2>/dev/null | head -1)
-if [ -n "$PREV_REVIEW_ID" ]; then
-  gh api "repos/${GH_REPO}/pulls/${PR_NUMBER}/reviews/${PREV_REVIEW_ID}" \
+  2>/dev/null)
+
+for REVIEW_ID in $PREV_REVIEW_IDS; do
+  # Delete all inline comments from this review
+  COMMENT_IDS=$(gh api \
+    "repos/${GH_REPO}/pulls/${PR_NUMBER}/reviews/${REVIEW_ID}/comments" --paginate \
+    --jq '.[].id' 2>/dev/null)
+  for CID in $COMMENT_IDS; do
+    gh api "repos/${GH_REPO}/pulls/comments/${CID}" --method DELETE > /dev/null 2>&1 || true
+  done
+  # Dismiss the review itself
+  gh api "repos/${GH_REPO}/pulls/${PR_NUMBER}/reviews/${REVIEW_ID}" \
     --method PUT --field event=DISMISS \
     --field message="Superseded by new analysis" > /dev/null 2>&1 || true
+done
+
+if [ -n "$PREV_REVIEW_IDS" ]; then
+  echo "Cleaned up previous fallow reviews"
 fi
 
 # Prefix for paths: if root is not ".", prepend it
