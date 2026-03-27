@@ -145,20 +145,18 @@ async fn run_fallow_stderr_is_trimmed_in_error_message() {
 #[test]
 #[expect(unsafe_code)]
 fn resolve_binary_behavior() {
-    // SAFETY: test-only, sequential env access within this single test function.
-    // Both set_var and remove_var are unsafe in Rust 2024 edition due to
-    // potential data races; combining into one test avoids parallelism issues.
-
     // 1. Without FALLOW_BIN, defaults to "fallow" or a sibling path
+    // SAFETY: test-only, sequential env access within this single test function
     unsafe { std::env::remove_var("FALLOW_BIN") };
     let bin = resolve_binary();
     assert!(bin.contains("fallow"));
 
     // 2. With FALLOW_BIN set, uses the custom path
+    // SAFETY: test-only, sequential env access within this single test function
     unsafe { std::env::set_var("FALLOW_BIN", "/custom/path/fallow") };
     let bin = resolve_binary();
     assert_eq!(bin, "/custom/path/fallow");
 
-    // Cleanup
+    // SAFETY: test-only cleanup
     unsafe { std::env::remove_var("FALLOW_BIN") };
 }
