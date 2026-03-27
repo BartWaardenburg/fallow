@@ -166,6 +166,37 @@ assert_contains "$OUT" "Fallow Review" "has review title"
 assert_contains "$OUT" "fallow-review" "has marker comment"
 assert_contains "$OUT" "Maintainability" "shows metrics"
 
+# --- Suggestion block tests ---
+
+echo ""
+echo "=== Suggestion blocks ==="
+
+echo "  unused-export type field:"
+OUT=$(jq -f "$JQ_DIR/review-comments-check.jq" "$FIXTURES/check.json" 2>&1)
+TYPES=$(echo "$OUT" | jq -r '[.[].type] | unique | join(",")')
+assert_contains "$TYPES" "unused-export" "exports have type field for suggestion enrichment"
+
+echo "  single export keeps type:"
+SINGLE='{"total_issues":1,"unused_files":[],"unused_exports":[{"path":"x.ts","export_name":"foo","is_type_only":false,"line":5,"col":0,"span_start":0,"is_re_export":false}],"unused_types":[],"unused_dependencies":[],"unused_dev_dependencies":[],"unused_optional_dependencies":[],"unused_enum_members":[],"unused_class_members":[],"unresolved_imports":[],"unlisted_dependencies":[],"duplicate_exports":[],"circular_dependencies":[],"type_only_dependencies":[]}'
+OUT=$(echo "$SINGLE" | jq -f "$JQ_DIR/review-comments-check.jq" 2>&1)
+assert_json_length "$OUT" "1" "single export produces 1 comment"
+SINGLE_TYPE=$(echo "$OUT" | jq -r '.[0].type')
+[ "$SINGLE_TYPE" = "unused-export" ] && pass "type is unused-export (not grouped)" || fail "type is unused-export" "got $SINGLE_TYPE"
+
+echo "  grouped exports get different type:"
+MULTI='{"total_issues":2,"unused_files":[],"unused_exports":[{"path":"x.ts","export_name":"foo","is_type_only":false,"line":5,"col":0,"span_start":0,"is_re_export":false},{"path":"x.ts","export_name":"bar","is_type_only":false,"line":10,"col":0,"span_start":0,"is_re_export":false}],"unused_types":[],"unused_dependencies":[],"unused_dev_dependencies":[],"unused_optional_dependencies":[],"unused_enum_members":[],"unused_class_members":[],"unresolved_imports":[],"unlisted_dependencies":[],"duplicate_exports":[],"circular_dependencies":[],"type_only_dependencies":[]}'
+OUT=$(echo "$MULTI" | jq -f "$JQ_DIR/review-comments-check.jq" | jq --argjson max 50 -f "$JQ_DIR/merge-comments.jq" 2>&1)
+assert_json_length "$OUT" "1" "2 exports from same file grouped into 1"
+GROUP_TYPE=$(echo "$OUT" | jq -r '.[0].type')
+[ "$GROUP_TYPE" = "unused-export-group" ] && pass "grouped type is unused-export-group" || fail "grouped type" "got $GROUP_TYPE"
+assert_contains "$OUT" "2 unused exports" "grouped comment mentions count"
+
+echo "  review-body clean state:"
+OUT_CLEAN=$(jq -r -f "$JQ_DIR/review-body.jq" "$FIXTURES/combined-clean.json" 2>&1)
+assert_contains "$OUT_CLEAN" "No dead code" "clean: no dead code"
+assert_contains "$OUT_CLEAN" "No duplication" "clean: no duplication"
+assert_contains "$OUT_CLEAN" "fallow-review" "clean: has marker"
+
 # --- Merge script tests ---
 
 echo ""
