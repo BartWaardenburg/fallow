@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1774630038520,
+  "lastUpdate": 1774637183857,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Binary Size": [
@@ -1101,6 +1101,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "Binary Size (fallow)",
             "value": 120920600,
+            "unit": "bytes"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "71607c663bf77959a6df31a588ca3340f24bb29c",
+          "message": "fix: remove unnecessary raw string hashes in plugin test",
+          "timestamp": "2026-03-27T19:39:40+01:00",
+          "tree_id": "7e1b4ee0a1b35446c0d8872e798cb9ac8297b792",
+          "url": "https://github.com/fallow-rs/fallow/commit/71607c663bf77959a6df31a588ca3340f24bb29c"
+        },
+        "date": 1774637183442,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Binary Size (fallow)",
+            "value": 120921152,
             "unit": "bytes"
           }
         ]
