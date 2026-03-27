@@ -424,12 +424,13 @@ runs:
         cat > "$FALLOW_TMP/annotations-dupes.jq" << 'JQEOF'
         def san: gsub("\n"; " ") | gsub("\r"; " ") | gsub("%"; "%25");
         def nl: "%0A";
+        def short_path: split("/") | if length > 3 then .[-3:] | join("/") else join("/") end;
         [
           (.clone_groups // [])[] | . as $group |
             ($group.instances | length) as $count |
-            .instances[]? |
-              ($group.instances | map(select(.file != ($group.instances[0].file) or .start_line != ($group.instances[0].start_line))) | if length == 0 then $group.instances[1:] else . end) as $others |
-              "::warning file=\(.file | san),line=\(.start_line),endLine=\(.end_line),col=\(.start_col + 1),title=Code duplication::Duplicated code block (\($group.line_count) lines, \($group.token_count) tokens, \($count) instances)\(nl)\(nl)Also found in:\($others | map(nl + "  \u2022 " + (.file | san) + ":" + (.start_line | tostring) + "-" + (.end_line | tostring)) | join(""))\(nl)\(nl)Consider extracting a shared function to eliminate duplication.\(if .fragment then nl + nl + "Fragment: " + (.fragment | san)[:200] else "" end)"
+            .instances[]? | . as $inst |
+              ($group.instances | map(select(. != $inst))) as $others |
+              "::warning file=\(.file | san),line=\(.start_line),endLine=\(.end_line),col=\(.start_col + 1),title=Code duplication::\($group.line_count) duplicated lines (\($group.token_count) tokens)\(nl)\(nl)\($count) instances found. Also in:\($others | map(nl + "  \u2192 " + (.file | short_path) + ":" + (.start_line | tostring) + "-" + (.end_line | tostring)) | join(""))\(nl)\(nl)Extract a shared function to eliminate this duplication."
         ] | .[]
         JQEOF
 
