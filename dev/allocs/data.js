@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1774596271531,
+  "lastUpdate": 1774597385957,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
@@ -2189,6 +2189,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Total Allocations",
             "value": 11953,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 420346,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 5168,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "46f631633f91e246dabdb1956c009221c39bae94",
+          "message": "fix: run cargo fmt on entry_points test path normalization",
+          "timestamp": "2026-03-27T08:41:36+01:00",
+          "tree_id": "5a0ba06b24e125b28524417591bc2b6648f9e93c",
+          "url": "https://github.com/fallow-rs/fallow/commit/46f631633f91e246dabdb1956c009221c39bae94"
+        },
+        "date": 1774597385351,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 3024722,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 11937,
             "unit": "allocations"
           },
           {
