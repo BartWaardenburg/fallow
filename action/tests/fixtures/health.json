@@ -1,0 +1,187 @@
+{
+  "schema_version": 3,
+  "version": "2.2.2",
+  "elapsed_ms": 26,
+  "findings": [],
+  "summary": {
+    "files_analyzed": 12,
+    "functions_analyzed": 17,
+    "functions_above_threshold": 2,
+    "max_cyclomatic_threshold": 20,
+    "max_cognitive_threshold": 15,
+    "files_scored": 6,
+    "average_maintainability": 86.8
+  },
+  "vital_signs": {
+    "dead_file_pct": 0.0,
+    "dead_export_pct": 41.2,
+    "avg_cyclomatic": 7.1,
+    "p90_cyclomatic": 34,
+    "hotspot_count": 0,
+    "maintainability_avg": 86.8,
+    "unused_dep_count": 3,
+    "circular_dep_count": 0
+  },
+  "file_scores": [
+    {
+      "path": "src/helpers/content-parser.ts",
+      "fan_in": 1,
+      "fan_out": 0,
+      "dead_code_ratio": 0.5,
+      "complexity_density": 0.46,
+      "maintainability_index": 76.2,
+      "total_cyclomatic": 103,
+      "total_cognitive": 135,
+      "function_count": 5,
+      "lines": 224
+    },
+    {
+      "path": "src/helpers/format.ts",
+      "fan_in": 1,
+      "fan_out": 0,
+      "dead_code_ratio": 0.75,
+      "complexity_density": 0.21,
+      "maintainability_index": 78.7,
+      "total_cyclomatic": 7,
+      "total_cognitive": 3,
+      "function_count": 4,
+      "lines": 33
+    },
+    {
+      "path": "src/helpers/api.ts",
+      "fan_in": 1,
+      "fan_out": 0,
+      "dead_code_ratio": 0.75,
+      "complexity_density": 0.19,
+      "maintainability_index": 79.3,
+      "total_cyclomatic": 6,
+      "total_cognitive": 2,
+      "function_count": 4,
+      "lines": 31
+    },
+    {
+      "path": "src/app/page.tsx",
+      "fan_in": 0,
+      "fan_out": 3,
+      "dead_code_ratio": 0.0,
+      "complexity_density": 0.05,
+      "maintainability_index": 93.0,
+      "total_cyclomatic": 1,
+      "total_cognitive": 0,
+      "function_count": 1,
+      "lines": 21
+    },
+    {
+      "path": "src/app/layout.tsx",
+      "fan_in": 0,
+      "fan_out": 1,
+      "dead_code_ratio": 0.0,
+      "complexity_density": 0.06,
+      "maintainability_index": 95.4,
+      "total_cyclomatic": 1,
+      "total_cognitive": 0,
+      "function_count": 1,
+      "lines": 18
+    },
+    {
+      "path": "next.config.ts",
+      "fan_in": 0,
+      "fan_out": 0,
+      "dead_code_ratio": 0.0,
+      "complexity_density": 0.07,
+      "maintainability_index": 97.9,
+      "total_cyclomatic": 3,
+      "total_cognitive": 1,
+      "function_count": 2,
+      "lines": 45
+    }
+  ],
+  "targets": [
+    {
+      "path": "src/helpers/content-parser.ts",
+      "priority": 26.8,
+      "efficiency": 13.4,
+      "recommendation": "Extract parseContentBlocks (cognitive: 107) into smaller functions",
+      "category": "extract_complex_functions",
+      "effort": "medium",
+      "confidence": "high",
+      "factors": [
+        {
+          "metric": "complexity_density",
+          "value": 0.46,
+          "threshold": 0.3,
+          "detail": "density 0.46 exceeds 0.3"
+        },
+        {
+          "metric": "cognitive_complexity",
+          "value": 107.0,
+          "threshold": 30.0,
+          "detail": "parseContentBlocks has cognitive complexity 107"
+        }
+      ],
+      "evidence": {
+        "complex_functions": [
+          {
+            "name": "parseContentBlocks",
+            "line": 27,
+            "cognitive": 107
+          }
+        ]
+      }
+    },
+    {
+      "path": "src/helpers/format.ts",
+      "priority": 24.3,
+      "efficiency": 12.2,
+      "recommendation": "Remove 3 unused exports to reduce surface area (75% dead)",
+      "category": "remove_dead_code",
+      "effort": "medium",
+      "confidence": "high",
+      "factors": [
+        {
+          "metric": "dead_code_ratio",
+          "value": 0.75,
+          "threshold": 0.5,
+          "detail": "3 unused of 4 value exports (75%)"
+        }
+      ],
+      "evidence": {
+        "unused_exports": [
+          "formatCurrency",
+          "formatPercentage",
+          "formatRelativeTime"
+        ]
+      }
+    },
+    {
+      "path": "src/helpers/api.ts",
+      "priority": 23.7,
+      "efficiency": 11.9,
+      "recommendation": "Remove 3 unused exports to reduce surface area (75% dead)",
+      "category": "remove_dead_code",
+      "effort": "medium",
+      "confidence": "high",
+      "factors": [
+        {
+          "metric": "dead_code_ratio",
+          "value": 0.75,
+          "threshold": 0.5,
+          "detail": "3 unused of 4 value exports (75%)"
+        }
+      ],
+      "evidence": {
+        "unused_exports": [
+          "fetchFromApi",
+          "fetchNavigation",
+          "fetchFromCms"
+        ]
+      }
+    }
+  ],
+  "target_thresholds": {
+    "fan_in_p95": 5.0,
+    "fan_in_p75": 3.0,
+    "fan_out_p95": 8.0,
+    "fan_out_p90": 5
+  }
+}

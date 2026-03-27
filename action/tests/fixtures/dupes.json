@@ -1,0 +1,140 @@
+{
+  "schema_version": 3,
+  "version": "2.2.2",
+  "elapsed_ms": 1,
+  "clone_groups": [
+    {
+      "instances": [
+        {
+          "file": "/Users/bartwaardenburg/Sites/acorn/website/src/helpers/content-parser.ts",
+          "start_line": 27,
+          "end_line": 50,
+          "start_col": 13,
+          "end_col": 26,
+          "fragment": "parseContentBlocks = (\n    blocks: ContentBlock[],\n    options: Partial<ParseOptions> = {},\n): string => {\n    const opts: ParseOptions = {\n        allowHtml: options.allowHtml ?? false,\n        maxDepth: options.maxDepth ?? 10,\n        stripEmptyBlocks: options.stripEmptyBlocks ?? true,\n        transformUrls: options.transformUrls ?? false,\n        baseUrl: options.baseUrl ?? '',\n        lazyLoadImages: options.lazyLoadImages ?? true,\n        addAnchors: options.addAnchors ?? false,\n        wrapTables: options.wrapTables ?? true,\n    };\n\n    const results: string[] = [];\n\n    for (const block of blocks) {\n        if (opts.stripEmptyBlocks && !block.content && !block.src && !block.items && !block.rows) {\n            continue;\n        }\n\n        switch (block.type) {\n            case 'heading'"
+        },
+        {
+          "file": "/Users/bartwaardenburg/Sites/acorn/website/src/helpers/content-parser.ts",
+          "start_line": 168,
+          "end_line": 191,
+          "start_col": 13,
+          "end_col": 26,
+          "fragment": "parseContentToText = (\n    blocks: ContentBlock[],\n    options: Partial<ParseOptions> = {},\n): string => {\n    const opts: ParseOptions = {\n        allowHtml: options.allowHtml ?? false,\n        maxDepth: options.maxDepth ?? 10,\n        stripEmptyBlocks: options.stripEmptyBlocks ?? true,\n        transformUrls: options.transformUrls ?? false,\n        baseUrl: options.baseUrl ?? '',\n        lazyLoadImages: options.lazyLoadImages ?? true,\n        addAnchors: options.addAnchors ?? false,\n        wrapTables: options.wrapTables ?? true,\n    };\n\n    const results: string[] = [];\n\n    for (const block of blocks) {\n        if (opts.stripEmptyBlocks && !block.content && !block.src && !block.items && !block.rows) {\n            continue;\n        }\n\n        switch (block.type) {\n            case 'heading'"
+        }
+      ],
+      "token_count": 125,
+      "line_count": 24
+    },
+    {
+      "instances": [
+        {
+          "file": "/Users/bartwaardenburg/Sites/acorn/website/src/helpers/api.ts",
+          "start_line": 3,
+          "end_line": 11,
+          "start_col": 13,
+          "end_col": 1,
+          "fragment": "fetchFromApi = async <T>(endpoint: string): Promise<T> => {\n    const response = await fetch(`${API_URL}/${endpoint}`);\n\n    if (!response.ok) {\n        throw new Error(`API error: ${response.status}`);\n    }\n\n    return response.json() as Promise<T>;\n}"
+        },
+        {
+          "file": "/Users/bartwaardenburg/Sites/acorn/website/src/helpers/api.ts",
+          "start_line": 22,
+          "end_line": 30,
+          "start_col": 13,
+          "end_col": 1,
+          "fragment": "fetchFromCms = async <T>(endpoint: string): Promise<T> => {\n    const response = await fetch(`${API_URL}/${endpoint}`);\n\n    if (!response.ok) {\n        throw new Error(`API error: ${response.status}`);\n    }\n\n    return response.json() as Promise<T>;\n}"
+        }
+      ],
+      "token_count": 55,
+      "line_count": 9
+    }
+  ],
+  "clone_families": [
+    {
+      "files": [
+        "/Users/bartwaardenburg/Sites/acorn/website/src/helpers/content-parser.ts"
+      ],
+      "groups": [
+        {
+          "instances": [
+            {
+              "file": "/Users/bartwaardenburg/Sites/acorn/website/src/helpers/content-parser.ts",
+              "start_line": 27,
+              "end_line": 50,
+              "start_col": 13,
+              "end_col": 26,
+              "fragment": "parseContentBlocks = (\n    blocks: ContentBlock[],\n    options: Partial<ParseOptions> = {},\n): string => {\n    const opts: ParseOptions = {\n        allowHtml: options.allowHtml ?? false,\n        maxDepth: options.maxDepth ?? 10,\n        stripEmptyBlocks: options.stripEmptyBlocks ?? true,\n        transformUrls: options.transformUrls ?? false,\n        baseUrl: options.baseUrl ?? '',\n        lazyLoadImages: options.lazyLoadImages ?? true,\n        addAnchors: options.addAnchors ?? false,\n        wrapTables: options.wrapTables ?? true,\n    };\n\n    const results: string[] = [];\n\n    for (const block of blocks) {\n        if (opts.stripEmptyBlocks && !block.content && !block.src && !block.items && !block.rows) {\n            continue;\n        }\n\n        switch (block.type) {\n            case 'heading'"
+            },
+            {
+              "file": "/Users/bartwaardenburg/Sites/acorn/website/src/helpers/content-parser.ts",
+              "start_line": 168,
+              "end_line": 191,
+              "start_col": 13,
+              "end_col": 26,
+              "fragment": "parseContentToText = (\n    blocks: ContentBlock[],\n    options: Partial<ParseOptions> = {},\n): string => {\n    const opts: ParseOptions = {\n        allowHtml: options.allowHtml ?? false,\n        maxDepth: options.maxDepth ?? 10,\n        stripEmptyBlocks: options.stripEmptyBlocks ?? true,\n        transformUrls: options.transformUrls ?? false,\n        baseUrl: options.baseUrl ?? '',\n        lazyLoadImages: options.lazyLoadImages ?? true,\n        addAnchors: options.addAnchors ?? false,\n        wrapTables: options.wrapTables ?? true,\n    };\n\n    const results: string[] = [];\n\n    for (const block of blocks) {\n        if (opts.stripEmptyBlocks && !block.content && !block.src && !block.items && !block.rows) {\n            continue;\n        }\n\n        switch (block.type) {\n            case 'heading'"
+            }
+          ],
+          "token_count": 125,
+          "line_count": 24
+        }
+      ],
+      "total_duplicated_lines": 24,
+      "total_duplicated_tokens": 125,
+      "suggestions": [
+        {
+          "kind": "ExtractFunction",
+          "description": "Extract shared function (24 lines) from content-parser.ts, content-parser.ts",
+          "estimated_savings": 24
+        }
+      ]
+    },
+    {
+      "files": [
+        "/Users/bartwaardenburg/Sites/acorn/website/src/helpers/api.ts"
+      ],
+      "groups": [
+        {
+          "instances": [
+            {
+              "file": "/Users/bartwaardenburg/Sites/acorn/website/src/helpers/api.ts",
+              "start_line": 3,
+              "end_line": 11,
+              "start_col": 13,
+              "end_col": 1,
+              "fragment": "fetchFromApi = async <T>(endpoint: string): Promise<T> => {\n    const response = await fetch(`${API_URL}/${endpoint}`);\n\n    if (!response.ok) {\n        throw new Error(`API error: ${response.status}`);\n    }\n\n    return response.json() as Promise<T>;\n}"
+            },
+            {
+              "file": "/Users/bartwaardenburg/Sites/acorn/website/src/helpers/api.ts",
+              "start_line": 22,
+              "end_line": 30,
+              "start_col": 13,
+              "end_col": 1,
+              "fragment": "fetchFromCms = async <T>(endpoint: string): Promise<T> => {\n    const response = await fetch(`${API_URL}/${endpoint}`);\n\n    if (!response.ok) {\n        throw new Error(`API error: ${response.status}`);\n    }\n\n    return response.json() as Promise<T>;\n}"
+            }
+          ],
+          "token_count": 55,
+          "line_count": 9
+        }
+      ],
+      "total_duplicated_lines": 9,
+      "total_duplicated_tokens": 55,
+      "suggestions": [
+        {
+          "kind": "ExtractFunction",
+          "description": "Extract shared function (9 lines) from api.ts, api.ts",
+          "estimated_savings": 9
+        }
+      ]
+    }
+  ],
+  "stats": {
+    "total_files": 9,
+    "files_with_clones": 2,
+    "total_lines": 478,
+    "duplicated_lines": 66,
+    "total_tokens": 2328,
+    "duplicated_tokens": 180,
+    "clone_groups": 2,
+    "clone_instances": 4,
+    "duplication_percentage": 13.807531380753138
+  }
+}

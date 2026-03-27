@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "version": "2.2.3",
+  "elapsed_ms": 8,
+  "clone_groups": [],
+  "clone_families": [],
+  "stats": {
+    "total_files": 5,
+    "files_with_clones": 0,
+    "total_lines": 100,
+    "duplicated_lines": 0,
+    "total_tokens": 500,
+    "duplicated_tokens": 0,
+    "clone_groups": 0,
+    "clone_instances": 0,
+    "duplication_percentage": 0
+  }
+}

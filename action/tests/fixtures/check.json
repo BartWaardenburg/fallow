@@ -1,0 +1,102 @@
+{
+  "schema_version": 3,
+  "version": "2.2.2",
+  "elapsed_ms": 4,
+  "total_issues": 10,
+  "unused_files": [],
+  "unused_exports": [
+    {
+      "path": "src/helpers/api.ts",
+      "export_name": "fetchFromApi",
+      "is_type_only": false,
+      "line": 3,
+      "col": 13,
+      "span_start": 94,
+      "is_re_export": false
+    },
+    {
+      "path": "src/helpers/api.ts",
+      "export_name": "fetchNavigation",
+      "is_type_only": false,
+      "line": 17,
+      "col": 13,
+      "span_start": 471,
+      "is_re_export": false
+    },
+    {
+      "path": "src/helpers/api.ts",
+      "export_name": "fetchFromCms",
+      "is_type_only": false,
+      "line": 22,
+      "col": 13,
+      "span_start": 653,
+      "is_re_export": false
+    },
+    {
+      "path": "src/helpers/content-parser.ts",
+      "export_name": "parseContentBlocks",
+      "is_type_only": false,
+      "line": 27,
+      "col": 13,
+      "span_start": 596,
+      "is_re_export": false
+    },
+    {
+      "path": "src/helpers/format.ts",
+      "export_name": "formatCurrency",
+      "is_type_only": false,
+      "line": 9,
+      "col": 13,
+      "span_start": 195,
+      "is_re_export": false
+    },
+    {
+      "path": "src/helpers/format.ts",
+      "export_name": "formatPercentage",
+      "is_type_only": false,
+      "line": 16,
+      "col": 13,
+      "span_start": 378,
+      "is_re_export": false
+    },
+    {
+      "path": "src/helpers/format.ts",
+      "export_name": "formatRelativeTime",
+      "is_type_only": false,
+      "line": 20,
+      "col": 13,
+      "span_start": 486,
+      "is_re_export": false
+    }
+  ],
+  "unused_types": [],
+  "unused_dependencies": [
+    {
+      "package_name": "react",
+      "location": "dependencies",
+      "path": "package.json",
+      "line": 24
+    },
+    {
+      "package_name": "jotai",
+      "location": "dependencies",
+      "path": "package.json",
+      "line": 22
+    },
+    {
+      "package_name": "styled-components",
+      "location": "dependencies",
+      "path": "package.json",
+      "line": 26
+    }
+  ],
+  "unused_dev_dependencies": [],
+  "unused_optional_dependencies": [],
+  "unused_enum_members": [],
+  "unused_class_members": [],
+  "unresolved_imports": [],
+  "unlisted_dependencies": [],
+  "duplicate_exports": [],
+  "type_only_dependencies": [],
+  "circular_dependencies": []
+}
