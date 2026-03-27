@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1774611143235,
+  "lastUpdate": 1774611247908,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
@@ -2430,6 +2430,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/91e8882dcb496cd04a2e21fe48e4aba59161be5c"
         },
         "date": 1774611142540,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 87.7,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "d3bab5f365cd95979ca14894dd88958929dec064",
+          "message": "fix: export PREFIX/MAX env vars and use temp files for combined jq pipeline",
+          "timestamp": "2026-03-27T12:33:15+01:00",
+          "tree_id": "b19f600d5d57e0ef1dcf40f22227afd62893a8ec",
+          "url": "https://github.com/fallow-rs/fallow/commit/d3bab5f365cd95979ca14894dd88958929dec064"
+        },
+        "date": 1774611247316,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
