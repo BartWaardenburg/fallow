@@ -310,6 +310,7 @@ mod tests {
         }
 
         /// Helper to collect discovered file names (relative to root) for assertions.
+        /// Normalizes path separators to `/` for cross-platform test consistency.
         fn file_names(files: &[DiscoveredFile], root: &std::path::Path) -> Vec<String> {
             files
                 .iter()
@@ -318,7 +319,7 @@ mod tests {
                         .strip_prefix(root)
                         .unwrap_or(&f.path)
                         .to_string_lossy()
-                        .into_owned()
+                        .replace('\\', "/")
                 })
                 .collect()
         }

@@ -618,7 +618,7 @@ mod tests {
             assert!(result.is_some(), "should resolve dist/ path to src/");
             let ep = result.unwrap();
             assert!(
-                ep.path.to_string_lossy().contains("src/utils.ts"),
+                ep.path.to_string_lossy().replace('\\', "/").contains("src/utils.ts"),
                 "should map ./dist/utils.js to src/utils.ts"
             );
         }
@@ -641,7 +641,7 @@ mod tests {
             assert!(result.is_some(), "should map build/ output to src/");
             let ep = result.unwrap();
             assert!(
-                ep.path.to_string_lossy().contains("src/index.tsx"),
+                ep.path.to_string_lossy().replace('\\', "/").contains("src/index.tsx"),
                 "should map ./build/index.js to src/index.tsx"
             );
         }
@@ -679,7 +679,7 @@ mod tests {
 
             let result = try_output_to_source_path(dir.path(), "./dist/utils.js");
             assert!(result.is_some());
-            assert!(result.unwrap().to_string_lossy().contains("src/utils.ts"));
+            assert!(result.unwrap().to_string_lossy().replace('\\', "/").contains("src/utils.ts"));
         }
 
         #[test]
@@ -715,6 +715,7 @@ mod tests {
                 result
                     .unwrap()
                     .to_string_lossy()
+                    .replace('\\', "/")
                     .contains("modules/src/helper.ts")
             );
         }
