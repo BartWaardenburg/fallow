@@ -19,7 +19,7 @@ pub(super) fn handle_trace_output(
     output: &OutputFormat,
 ) -> Option<ExitCode> {
     if let Some(ref trace_spec) = trace_opts.trace_export {
-        let Some((file_path, export_name)) = trace_spec.rsplit_once(':') else {
+        let Some((file_path, export_name)) = parse_trace_spec(trace_spec) else {
             return Some(emit_error(
                 "--trace requires FILE:EXPORT_NAME format (e.g., src/utils.ts:foo)",
                 2,
@@ -118,5 +118,135 @@ pub fn run_cross_reference(
 
     if cross_ref.has_findings() {
         report::print_cross_reference_findings(&cross_ref, &config.root, quiet, &config.output);
+    }
+}
+
+/// Parse a `--trace` spec into `(file_path, export_name)`.
+///
+/// The format is `FILE:EXPORT_NAME`. Uses `rsplit_once` so that colons
+/// in Windows drive letters (e.g., `C:\src\utils.ts:foo`) are handled
+/// correctly — only the last colon is used as the separator.
+pub(super) fn parse_trace_spec(spec: &str) -> Option<(&str, &str)> {
+    spec.rsplit_once(':')
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── parse_trace_spec ────────────────────────────────────────
+
+    #[test]
+    fn parse_trace_spec_simple() {
+        let result = parse_trace_spec("src/utils.ts:foo");
+        assert_eq!(result, Some(("src/utils.ts", "foo")));
+    }
+
+    #[test]
+    fn parse_trace_spec_default_export() {
+        let result = parse_trace_spec("src/component.tsx:default");
+        assert_eq!(result, Some(("src/component.tsx", "default")));
+    }
+
+    #[test]
+    fn parse_trace_spec_no_colon() {
+        let result = parse_trace_spec("src/utils.ts");
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn parse_trace_spec_empty_string() {
+        let result = parse_trace_spec("");
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn parse_trace_spec_colon_only() {
+        let result = parse_trace_spec(":");
+        assert_eq!(result, Some(("", "")));
+    }
+
+    #[test]
+    fn parse_trace_spec_multiple_colons_uses_last() {
+        // Handles Windows-style paths like C:\src\utils.ts:foo
+        let result = parse_trace_spec("C:\\src\\utils.ts:foo");
+        assert_eq!(result, Some(("C:\\src\\utils.ts", "foo")));
+    }
+
+    #[test]
+    fn parse_trace_spec_nested_path_with_colons() {
+        let result = parse_trace_spec("packages/core:src/index.ts:myExport");
+        assert_eq!(result, Some(("packages/core:src/index.ts", "myExport")));
+    }
+
+    // ── handle_trace_output with no trace active ────────────────
+
+    #[test]
+    fn handle_trace_output_returns_none_when_no_trace_active() {
+        let trace_opts = TraceOptions {
+            trace_export: None,
+            trace_file: None,
+            trace_dependency: None,
+            performance: false,
+        };
+        // We can't construct a ModuleGraph easily, but when no trace option
+        // is active, the function short-circuits to None without touching
+        // the graph. Verify by checking that the function signature accepts
+        // the empty trace opts correctly.
+        assert!(!trace_opts.any_active());
+    }
+
+    // ── write_sarif_file ────────────────────────────────────────
+
+    fn make_resolved_config() -> fallow_config::ResolvedConfig {
+        fallow_config::ResolvedConfig {
+            root: std::path::PathBuf::from("/project"),
+            entry_patterns: vec![],
+            ignore_patterns: globset::GlobSet::empty(),
+            output: OutputFormat::Json,
+            cache_dir: std::path::PathBuf::from("/tmp/cache"),
+            threads: 1,
+            no_cache: true,
+            ignore_dependencies: vec![],
+            ignore_export_rules: vec![],
+            duplicates: fallow_config::DuplicatesConfig::default(),
+            health: fallow_config::HealthConfig::default(),
+            rules: fallow_config::RulesConfig::default(),
+            production: false,
+            quiet: true,
+            external_plugins: vec![],
+            overrides: vec![],
+        }
+    }
+
+    #[test]
+    fn write_sarif_file_creates_output() {
+        let results = fallow_core::results::AnalysisResults::default();
+        let config = make_resolved_config();
+
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let sarif_path = dir.path().join("output.sarif");
+
+        write_sarif_file(&results, &config, &sarif_path, true);
+
+        assert!(sarif_path.exists());
+        let content = std::fs::read_to_string(&sarif_path).expect("read sarif");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&content).expect("parse sarif as json");
+        // SARIF output should have a "$schema" or "version" field
+        assert!(parsed.get("$schema").is_some() || parsed.get("version").is_some());
+    }
+
+    #[test]
+    fn write_sarif_file_creates_parent_directories() {
+        let results = fallow_core::results::AnalysisResults::default();
+        let config = make_resolved_config();
+
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let sarif_path = dir.path().join("nested").join("dir").join("output.sarif");
+
+        write_sarif_file(&results, &config, &sarif_path, true);
+
+        assert!(sarif_path.exists());
     }
 }

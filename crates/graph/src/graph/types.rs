@@ -100,3 +100,286 @@ const _: () = assert!(std::mem::size_of::<ReExportEdge>() == 56);
 // PathBuf has different sizes on Unix vs Windows, so restrict to Unix.
 #[cfg(all(target_pointer_width = "64", unix))]
 const _: () = assert!(std::mem::size_of::<ModuleNode>() == 96);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── ReferenceKind ───────────────────────────────────────────
+
+    #[test]
+    fn reference_kind_equality() {
+        assert_eq!(ReferenceKind::NamedImport, ReferenceKind::NamedImport);
+        assert_ne!(ReferenceKind::NamedImport, ReferenceKind::DefaultImport);
+    }
+
+    #[test]
+    fn reference_kind_all_variants_are_distinct() {
+        let all = [
+            ReferenceKind::NamedImport,
+            ReferenceKind::DefaultImport,
+            ReferenceKind::NamespaceImport,
+            ReferenceKind::ReExport,
+            ReferenceKind::DynamicImport,
+            ReferenceKind::SideEffectImport,
+        ];
+        for (i, a) in all.iter().enumerate() {
+            for (j, b) in all.iter().enumerate() {
+                if i == j {
+                    assert_eq!(a, b);
+                } else {
+                    assert_ne!(a, b);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn reference_kind_clone() {
+        let original = ReferenceKind::NamespaceImport;
+        let cloned = original.clone();
+        assert_eq!(original, cloned);
+    }
+
+    #[test]
+    fn reference_kind_debug_format() {
+        let kind = ReferenceKind::DynamicImport;
+        let debug_str = format!("{kind:?}");
+        assert_eq!(debug_str, "DynamicImport");
+    }
+
+    // ── SymbolReference ─────────────────────────────────────────
+
+    #[test]
+    fn symbol_reference_construction() {
+        let reference = SymbolReference {
+            from_file: FileId(42),
+            kind: ReferenceKind::NamedImport,
+            import_span: oxc_span::Span::new(10, 30),
+        };
+        assert_eq!(reference.from_file, FileId(42));
+        assert_eq!(reference.kind, ReferenceKind::NamedImport);
+        assert_eq!(reference.import_span.start, 10);
+        assert_eq!(reference.import_span.end, 30);
+    }
+
+    #[test]
+    fn symbol_reference_clone_preserves_all_fields() {
+        let reference = SymbolReference {
+            from_file: FileId(7),
+            kind: ReferenceKind::ReExport,
+            import_span: oxc_span::Span::new(5, 25),
+        };
+        let cloned = reference.clone();
+        // Verify the clone matches the original
+        assert_eq!(cloned.from_file, reference.from_file);
+        assert_eq!(cloned.kind, reference.kind);
+        assert_eq!(cloned.import_span.start, reference.import_span.start);
+        assert_eq!(cloned.import_span.end, reference.import_span.end);
+    }
+
+    // ── ReExportEdge ────────────────────────────────────────────
+
+    #[test]
+    fn re_export_edge_construction() {
+        let edge = ReExportEdge {
+            source_file: FileId(3),
+            imported_name: "*".to_string(),
+            exported_name: "*".to_string(),
+            is_type_only: false,
+        };
+        assert_eq!(edge.source_file, FileId(3));
+        assert_eq!(edge.imported_name, "*");
+        assert_eq!(edge.exported_name, "*");
+        assert!(!edge.is_type_only);
+    }
+
+    #[test]
+    fn re_export_edge_type_only() {
+        let edge = ReExportEdge {
+            source_file: FileId(1),
+            imported_name: "MyType".to_string(),
+            exported_name: "MyType".to_string(),
+            is_type_only: true,
+        };
+        assert!(edge.is_type_only);
+    }
+
+    #[test]
+    fn re_export_edge_renamed() {
+        let edge = ReExportEdge {
+            source_file: FileId(2),
+            imported_name: "internal".to_string(),
+            exported_name: "public".to_string(),
+            is_type_only: false,
+        };
+        assert_ne!(edge.imported_name, edge.exported_name);
+        assert_eq!(edge.imported_name, "internal");
+        assert_eq!(edge.exported_name, "public");
+    }
+
+    // ── ExportSymbol ────────────────────────────────────────────
+
+    #[test]
+    fn export_symbol_named() {
+        let sym = ExportSymbol {
+            name: ExportName::Named("myFunction".to_string()),
+            is_type_only: false,
+            is_public: false,
+            span: oxc_span::Span::new(0, 50),
+            references: vec![],
+            members: vec![],
+        };
+        assert!(matches!(sym.name, ExportName::Named(ref n) if n == "myFunction"));
+        assert!(!sym.is_type_only);
+        assert!(!sym.is_public);
+    }
+
+    #[test]
+    fn export_symbol_default() {
+        let sym = ExportSymbol {
+            name: ExportName::Default,
+            is_type_only: false,
+            is_public: false,
+            span: oxc_span::Span::new(0, 20),
+            references: vec![],
+            members: vec![],
+        };
+        assert!(matches!(sym.name, ExportName::Default));
+    }
+
+    #[test]
+    fn export_symbol_public_tag() {
+        let sym = ExportSymbol {
+            name: ExportName::Named("api".to_string()),
+            is_type_only: false,
+            is_public: true,
+            span: oxc_span::Span::new(0, 10),
+            references: vec![],
+            members: vec![],
+        };
+        assert!(sym.is_public);
+    }
+
+    #[test]
+    fn export_symbol_type_only() {
+        let sym = ExportSymbol {
+            name: ExportName::Named("MyInterface".to_string()),
+            is_type_only: true,
+            is_public: false,
+            span: oxc_span::Span::new(0, 30),
+            references: vec![],
+            members: vec![],
+        };
+        assert!(sym.is_type_only);
+    }
+
+    #[test]
+    fn export_symbol_with_references() {
+        let sym = ExportSymbol {
+            name: ExportName::Named("helper".to_string()),
+            is_type_only: false,
+            is_public: false,
+            span: oxc_span::Span::new(0, 20),
+            references: vec![
+                SymbolReference {
+                    from_file: FileId(1),
+                    kind: ReferenceKind::NamedImport,
+                    import_span: oxc_span::Span::new(0, 10),
+                },
+                SymbolReference {
+                    from_file: FileId(2),
+                    kind: ReferenceKind::ReExport,
+                    import_span: oxc_span::Span::new(5, 15),
+                },
+            ],
+            members: vec![],
+        };
+        assert_eq!(sym.references.len(), 2);
+        assert_eq!(sym.references[0].from_file, FileId(1));
+        assert_eq!(sym.references[1].kind, ReferenceKind::ReExport);
+    }
+
+    // ── ModuleNode ──────────────────────────────────────────────
+
+    #[test]
+    fn module_node_construction() {
+        let node = ModuleNode {
+            file_id: FileId(0),
+            path: PathBuf::from("/project/src/index.ts"),
+            edge_range: 0..5,
+            exports: vec![],
+            re_exports: vec![],
+            is_entry_point: true,
+            is_reachable: true,
+            has_cjs_exports: false,
+        };
+        assert_eq!(node.file_id, FileId(0));
+        assert!(node.is_entry_point);
+        assert!(node.is_reachable);
+        assert!(!node.has_cjs_exports);
+        assert_eq!(node.edge_range, 0..5);
+    }
+
+    #[test]
+    fn module_node_non_entry_unreachable() {
+        let node = ModuleNode {
+            file_id: FileId(5),
+            path: PathBuf::from("/project/src/orphan.ts"),
+            edge_range: 0..0,
+            exports: vec![],
+            re_exports: vec![],
+            is_entry_point: false,
+            is_reachable: false,
+            has_cjs_exports: false,
+        };
+        assert!(!node.is_entry_point);
+        assert!(!node.is_reachable);
+        assert!(node.edge_range.is_empty());
+    }
+
+    #[test]
+    fn module_node_cjs_exports() {
+        let node = ModuleNode {
+            file_id: FileId(2),
+            path: PathBuf::from("/project/lib/legacy.js"),
+            edge_range: 3..7,
+            exports: vec![],
+            re_exports: vec![],
+            is_entry_point: false,
+            is_reachable: true,
+            has_cjs_exports: true,
+        };
+        assert!(node.has_cjs_exports);
+        assert_eq!(node.edge_range.len(), 4);
+    }
+
+    #[test]
+    fn module_node_with_exports_and_re_exports() {
+        let node = ModuleNode {
+            file_id: FileId(1),
+            path: PathBuf::from("/project/src/barrel.ts"),
+            edge_range: 0..3,
+            exports: vec![ExportSymbol {
+                name: ExportName::Named("localFn".to_string()),
+                is_type_only: false,
+                is_public: false,
+                span: oxc_span::Span::new(0, 20),
+                references: vec![],
+                members: vec![],
+            }],
+            re_exports: vec![ReExportEdge {
+                source_file: FileId(2),
+                imported_name: "*".to_string(),
+                exported_name: "*".to_string(),
+                is_type_only: false,
+            }],
+            is_entry_point: false,
+            is_reachable: true,
+            has_cjs_exports: false,
+        };
+        assert_eq!(node.exports.len(), 1);
+        assert_eq!(node.re_exports.len(), 1);
+        assert_eq!(node.re_exports[0].source_file, FileId(2));
+    }
+}

@@ -486,3 +486,345 @@ pub fn print_health_result(result: &HealthResult, quiet: bool, explain: bool) ->
 
     ExitCode::SUCCESS
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use fallow_core::extract::ModuleInfo;
+    use fallow_types::discover::FileId;
+    use fallow_types::extract::FunctionComplexity;
+    use rustc_hash::{FxHashMap, FxHashSet};
+    use std::path::{Path, PathBuf};
+
+    /// Build a minimal `ModuleInfo` with only the fields `collect_findings` needs.
+    fn make_module(file_id: FileId, complexity: Vec<FunctionComplexity>) -> ModuleInfo {
+        ModuleInfo {
+            file_id,
+            exports: vec![],
+            imports: vec![],
+            re_exports: vec![],
+            dynamic_imports: vec![],
+            dynamic_import_patterns: vec![],
+            require_calls: vec![],
+            member_accesses: vec![],
+            whole_object_uses: vec![],
+            has_cjs_exports: false,
+            content_hash: 0,
+            suppressions: vec![],
+            unused_import_bindings: vec![],
+            line_offsets: vec![0],
+            complexity,
+        }
+    }
+
+    fn make_fc(name: &str, cyclomatic: u16, cognitive: u16, line_count: u32) -> FunctionComplexity {
+        FunctionComplexity {
+            name: name.to_string(),
+            line: 1,
+            col: 0,
+            cyclomatic,
+            cognitive,
+            line_count,
+        }
+    }
+
+    // ── build_ignore_set ────────────────────────────────────────
+
+    #[test]
+    fn build_ignore_set_empty_patterns() {
+        let set = build_ignore_set(&[]);
+        assert!(set.is_empty());
+    }
+
+    #[test]
+    fn build_ignore_set_matches_glob() {
+        let patterns = vec!["src/generated/**".to_string()];
+        let set = build_ignore_set(&patterns);
+        assert!(set.is_match(Path::new("src/generated/types.ts")));
+        assert!(!set.is_match(Path::new("src/utils.ts")));
+    }
+
+    #[test]
+    fn build_ignore_set_multiple_patterns() {
+        let patterns = vec!["*.test.ts".to_string(), "dist/**".to_string()];
+        let set = build_ignore_set(&patterns);
+        assert!(set.is_match(Path::new("foo.test.ts")));
+        assert!(set.is_match(Path::new("dist/index.js")));
+        assert!(!set.is_match(Path::new("src/index.ts")));
+    }
+
+    #[test]
+    fn build_ignore_set_skips_invalid_patterns() {
+        // "[invalid" is not a valid glob — should be skipped, not panic
+        let patterns = vec!["[invalid".to_string(), "*.js".to_string()];
+        let set = build_ignore_set(&patterns);
+        // The valid pattern should still work
+        assert!(set.is_match(Path::new("foo.js")));
+    }
+
+    // ── collect_findings ────────────────────────────────────────
+
+    #[test]
+    fn collect_findings_empty_modules() {
+        let (findings, files, functions) = collect_findings(
+            &[],
+            &FxHashMap::default(),
+            Path::new("/project"),
+            &globset::GlobSet::empty(),
+            None,
+            20,
+            15,
+        );
+        assert!(findings.is_empty());
+        assert_eq!(files, 0);
+        assert_eq!(functions, 0);
+    }
+
+    #[test]
+    fn collect_findings_below_threshold() {
+        let path = PathBuf::from("/project/src/a.ts");
+        let modules = vec![make_module(FileId(0), vec![make_fc("doStuff", 5, 3, 10)])];
+        let mut file_paths = FxHashMap::default();
+        file_paths.insert(FileId(0), &path);
+
+        let (findings, files, functions) = collect_findings(
+            &modules,
+            &file_paths,
+            Path::new("/project"),
+            &globset::GlobSet::empty(),
+            None,
+            20,
+            15,
+        );
+        assert!(findings.is_empty());
+        assert_eq!(files, 1);
+        assert_eq!(functions, 1);
+    }
+
+    #[test]
+    fn collect_findings_exceeds_cyclomatic_only() {
+        let path = PathBuf::from("/project/src/a.ts");
+        let modules = vec![make_module(
+            FileId(0),
+            vec![make_fc("complexFn", 25, 5, 50)],
+        )];
+        let mut file_paths = FxHashMap::default();
+        file_paths.insert(FileId(0), &path);
+
+        let (findings, _, _) = collect_findings(
+            &modules,
+            &file_paths,
+            Path::new("/project"),
+            &globset::GlobSet::empty(),
+            None,
+            20,
+            15,
+        );
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].cyclomatic, 25);
+        assert!(matches!(
+            findings[0].exceeded,
+            ExceededThreshold::Cyclomatic
+        ));
+    }
+
+    #[test]
+    fn collect_findings_exceeds_cognitive_only() {
+        let path = PathBuf::from("/project/src/a.ts");
+        let modules = vec![make_module(FileId(0), vec![make_fc("nestedFn", 5, 20, 30)])];
+        let mut file_paths = FxHashMap::default();
+        file_paths.insert(FileId(0), &path);
+
+        let (findings, _, _) = collect_findings(
+            &modules,
+            &file_paths,
+            Path::new("/project"),
+            &globset::GlobSet::empty(),
+            None,
+            20,
+            15,
+        );
+        assert_eq!(findings.len(), 1);
+        assert!(matches!(findings[0].exceeded, ExceededThreshold::Cognitive));
+    }
+
+    #[test]
+    fn collect_findings_exceeds_both() {
+        let path = PathBuf::from("/project/src/a.ts");
+        let modules = vec![make_module(
+            FileId(0),
+            vec![make_fc("terribleFn", 25, 20, 100)],
+        )];
+        let mut file_paths = FxHashMap::default();
+        file_paths.insert(FileId(0), &path);
+
+        let (findings, _, _) = collect_findings(
+            &modules,
+            &file_paths,
+            Path::new("/project"),
+            &globset::GlobSet::empty(),
+            None,
+            20,
+            15,
+        );
+        assert_eq!(findings.len(), 1);
+        assert!(matches!(findings[0].exceeded, ExceededThreshold::Both));
+    }
+
+    #[test]
+    fn collect_findings_multiple_functions_per_file() {
+        let path = PathBuf::from("/project/src/a.ts");
+        let modules = vec![make_module(
+            FileId(0),
+            vec![
+                make_fc("ok", 5, 3, 10),
+                make_fc("bad", 25, 20, 50),
+                make_fc("also_bad", 21, 5, 30),
+            ],
+        )];
+        let mut file_paths = FxHashMap::default();
+        file_paths.insert(FileId(0), &path);
+
+        let (findings, files, functions) = collect_findings(
+            &modules,
+            &file_paths,
+            Path::new("/project"),
+            &globset::GlobSet::empty(),
+            None,
+            20,
+            15,
+        );
+        assert_eq!(findings.len(), 2);
+        assert_eq!(files, 1);
+        assert_eq!(functions, 3);
+    }
+
+    #[test]
+    fn collect_findings_ignores_matching_files() {
+        let path = PathBuf::from("/project/src/generated/types.ts");
+        let modules = vec![make_module(FileId(0), vec![make_fc("genFn", 25, 20, 50)])];
+        let mut file_paths = FxHashMap::default();
+        file_paths.insert(FileId(0), &path);
+
+        let ignore_set = build_ignore_set(&["src/generated/**".to_string()]);
+        let (findings, files, _) = collect_findings(
+            &modules,
+            &file_paths,
+            Path::new("/project"),
+            &ignore_set,
+            None,
+            20,
+            15,
+        );
+        assert!(findings.is_empty());
+        assert_eq!(files, 0);
+    }
+
+    #[test]
+    fn collect_findings_filters_by_changed_files() {
+        let path_a = PathBuf::from("/project/src/a.ts");
+        let path_b = PathBuf::from("/project/src/b.ts");
+        let modules = vec![
+            make_module(FileId(0), vec![make_fc("fnA", 25, 20, 50)]),
+            make_module(FileId(1), vec![make_fc("fnB", 25, 20, 50)]),
+        ];
+        let mut file_paths = FxHashMap::default();
+        file_paths.insert(FileId(0), &path_a);
+        file_paths.insert(FileId(1), &path_b);
+
+        let mut changed = FxHashSet::default();
+        changed.insert(PathBuf::from("/project/src/a.ts"));
+
+        let (findings, files, _) = collect_findings(
+            &modules,
+            &file_paths,
+            Path::new("/project"),
+            &globset::GlobSet::empty(),
+            Some(&changed),
+            20,
+            15,
+        );
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].name, "fnA");
+        assert_eq!(files, 1);
+    }
+
+    #[test]
+    fn collect_findings_skips_module_without_path() {
+        // Module with FileId(99) has no entry in file_paths
+        let modules = vec![make_module(FileId(99), vec![make_fc("orphan", 25, 20, 50)])];
+        let file_paths = FxHashMap::default();
+
+        let (findings, files, _) = collect_findings(
+            &modules,
+            &file_paths,
+            Path::new("/project"),
+            &globset::GlobSet::empty(),
+            None,
+            20,
+            15,
+        );
+        assert!(findings.is_empty());
+        assert_eq!(files, 0);
+    }
+
+    #[test]
+    fn collect_findings_at_exact_threshold_not_reported() {
+        let path = PathBuf::from("/project/src/a.ts");
+        let modules = vec![make_module(
+            FileId(0),
+            // Exactly at thresholds — should NOT be reported (> not >=)
+            vec![make_fc("borderline", 20, 15, 20)],
+        )];
+        let mut file_paths = FxHashMap::default();
+        file_paths.insert(FileId(0), &path);
+
+        let (findings, _, _) = collect_findings(
+            &modules,
+            &file_paths,
+            Path::new("/project"),
+            &globset::GlobSet::empty(),
+            None,
+            20,
+            15,
+        );
+        assert!(findings.is_empty());
+    }
+
+    #[test]
+    fn collect_findings_preserves_function_metadata() {
+        let path = PathBuf::from("/project/src/a.ts");
+        let modules = vec![make_module(
+            FileId(0),
+            vec![FunctionComplexity {
+                name: "processData".to_string(),
+                line: 42,
+                col: 8,
+                cyclomatic: 25,
+                cognitive: 18,
+                line_count: 75,
+            }],
+        )];
+        let mut file_paths = FxHashMap::default();
+        file_paths.insert(FileId(0), &path);
+
+        let (findings, _, _) = collect_findings(
+            &modules,
+            &file_paths,
+            Path::new("/project"),
+            &globset::GlobSet::empty(),
+            None,
+            20,
+            15,
+        );
+        assert_eq!(findings.len(), 1);
+        let f = &findings[0];
+        assert_eq!(f.name, "processData");
+        assert_eq!(f.line, 42);
+        assert_eq!(f.col, 8);
+        assert_eq!(f.cyclomatic, 25);
+        assert_eq!(f.cognitive, 18);
+        assert_eq!(f.line_count, 75);
+        assert_eq!(f.path, PathBuf::from("/project/src/a.ts"));
+    }
+}

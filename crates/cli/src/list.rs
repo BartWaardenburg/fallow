@@ -30,7 +30,7 @@ pub fn run_list(opts: &ListOptions<'_>) -> ExitCode {
         Err(code) => return code,
     };
 
-    let show_all = !opts.entry_points && !opts.files && !opts.plugins;
+    let show_all = should_show_all(opts.entry_points, opts.files, opts.plugins);
 
     // Run plugin detection to find active plugins (including workspace packages)
     let plugin_result = if opts.plugins || show_all {
@@ -63,7 +63,7 @@ pub fn run_list(opts: &ListOptions<'_>) -> ExitCode {
     };
 
     // Discover files once if needed by either files or entry_points
-    let need_files = opts.files || show_all || opts.entry_points;
+    let need_files = needs_file_discovery(opts.files, show_all, opts.entry_points);
     let discovered = if need_files {
         Some(fallow_core::discover::discover_files(&config))
     } else {
@@ -177,4 +177,125 @@ pub fn run_list(opts: &ListOptions<'_>) -> ExitCode {
     }
 
     ExitCode::SUCCESS
+}
+
+/// Determine whether all listing modes should be shown.
+///
+/// When none of `--entry-points`, `--files`, or `--plugins` is specified,
+/// the command defaults to showing everything.
+const fn should_show_all(entry_points: bool, files: bool, plugins: bool) -> bool {
+    !entry_points && !files && !plugins
+}
+
+/// Determine whether file discovery is needed.
+///
+/// Files must be discovered when showing files, when showing all,
+/// or when computing entry points (which need the file list).
+const fn needs_file_discovery(files: bool, show_all: bool, entry_points: bool) -> bool {
+    files || show_all || entry_points
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── should_show_all ─────────────────────────────────────────
+
+    #[test]
+    fn show_all_when_no_flags_set() {
+        assert!(should_show_all(false, false, false));
+    }
+
+    #[test]
+    fn not_show_all_when_entry_points_set() {
+        assert!(!should_show_all(true, false, false));
+    }
+
+    #[test]
+    fn not_show_all_when_files_set() {
+        assert!(!should_show_all(false, true, false));
+    }
+
+    #[test]
+    fn not_show_all_when_plugins_set() {
+        assert!(!should_show_all(false, false, true));
+    }
+
+    #[test]
+    fn not_show_all_when_all_flags_set() {
+        assert!(!should_show_all(true, true, true));
+    }
+
+    #[test]
+    fn not_show_all_when_two_flags_set() {
+        assert!(!should_show_all(true, true, false));
+        assert!(!should_show_all(true, false, true));
+        assert!(!should_show_all(false, true, true));
+    }
+
+    // ── needs_file_discovery ────────────────────────────────────
+
+    #[test]
+    fn needs_discovery_when_files_requested() {
+        assert!(needs_file_discovery(true, false, false));
+    }
+
+    #[test]
+    fn needs_discovery_when_show_all() {
+        assert!(needs_file_discovery(false, true, false));
+    }
+
+    #[test]
+    fn needs_discovery_when_entry_points_requested() {
+        assert!(needs_file_discovery(false, false, true));
+    }
+
+    #[test]
+    fn no_discovery_when_only_plugins() {
+        // plugins=true but show_all=false, files=false, entry_points=false
+        assert!(!needs_file_discovery(false, false, false));
+    }
+
+    // ── ListOptions construction ────────────────────────────────
+
+    #[test]
+    fn list_options_default_flags() {
+        let opts = ListOptions {
+            root: std::path::Path::new("/project"),
+            config_path: &None,
+            output: OutputFormat::Human,
+            threads: 4,
+            no_cache: false,
+            entry_points: false,
+            files: false,
+            plugins: false,
+            production: false,
+        };
+        assert!(should_show_all(opts.entry_points, opts.files, opts.plugins));
+    }
+
+    #[test]
+    fn list_options_single_flag() {
+        let opts = ListOptions {
+            root: std::path::Path::new("/project"),
+            config_path: &None,
+            output: OutputFormat::Json,
+            threads: 1,
+            no_cache: true,
+            entry_points: true,
+            files: false,
+            plugins: false,
+            production: false,
+        };
+        assert!(!should_show_all(
+            opts.entry_points,
+            opts.files,
+            opts.plugins
+        ));
+        assert!(needs_file_discovery(
+            opts.files,
+            should_show_all(opts.entry_points, opts.files, opts.plugins),
+            opts.entry_points
+        ));
+    }
 }
