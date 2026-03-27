@@ -8,6 +8,7 @@ rules:
   superfluous-actions:
     ignore:
       - action.yml
+      - release.yml
   # Caching in release workflow is acceptable — tags are immutable
   cache-poisoning:
     ignore:
