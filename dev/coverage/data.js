@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1774723260184,
+  "lastUpdate": 1774723465920,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
@@ -3126,6 +3126,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/8e04e73aa6ff54683886ba6af4a3f39e018ff6e6"
         },
         "date": 1774723259171,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 90.9,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "5b17d92e1b8378597aba50c279dca682a12d170e",
+          "message": "docs: document safety invariants for u32 bounds and interval merging",
+          "timestamp": "2026-03-28T19:43:20+01:00",
+          "tree_id": "dfebe92b9327f4e4a19dfaaa67ed89fb6b2f7272",
+          "url": "https://github.com/fallow-rs/fallow/commit/5b17d92e1b8378597aba50c279dca682a12d170e"
+        },
+        "date": 1774723465522,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
