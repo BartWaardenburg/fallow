@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1774655835208,
+  "lastUpdate": 1774656469696,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
@@ -3113,6 +3113,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Total Allocations",
             "value": 15639,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 534634,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 5820,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "14945524c744dd0cc4defe847daef5213b7a5437",
+          "message": "docs: update --score docs to reflect default-on behavior\n\nThe score is shown by default when no section flags are set.\n--save-snapshot now automatically includes the score.\nUpdate CLI help, AGENTS.md, and companion repos to match.",
+          "timestamp": "2026-03-28T01:06:27+01:00",
+          "tree_id": "97cd8d662e4fb9e9d09d539bf0d96acbabec0f94",
+          "url": "https://github.com/fallow-rs/fallow/commit/14945524c744dd0cc4defe847daef5213b7a5437"
+        },
+        "date": 1774656468988,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 3579092,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 15667,
             "unit": "allocations"
           },
           {
