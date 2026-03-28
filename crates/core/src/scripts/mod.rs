@@ -9,6 +9,7 @@
 //! runners (`npx`, `pnpm exec`, `yarn dlx`), and Node.js runners (`node`, `tsx`,
 //! `ts-node`). Shell operators (`&&`, `||`, `;`, `|`, `&`) are split correctly.
 
+pub mod ci;
 mod resolve;
 mod shell;
 

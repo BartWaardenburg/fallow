@@ -191,6 +191,11 @@ pub fn analyze_with_parse_result(
             }
         }
     }
+
+    // Stage 1.7: Analyze CI config files for binary invocations
+    let ci_packages = scripts::ci::analyze_ci_files(&config.root);
+    plugin_result.script_used_packages.extend(ci_packages);
+
     let scripts_ms = t.elapsed().as_secs_f64() * 1000.0;
 
     // Stage 2: SKIPPED — using pre-parsed modules from caller
@@ -410,6 +415,11 @@ fn analyze_full(
             }
         }
     }
+
+    // Stage 1.7: Analyze CI config files for binary invocations
+    let ci_packages = scripts::ci::analyze_ci_files(&config.root);
+    plugin_result.script_used_packages.extend(ci_packages);
+
     let scripts_ms = t.elapsed().as_secs_f64() * 1000.0;
 
     // Stage 2: Parse all files in parallel and extract imports/exports

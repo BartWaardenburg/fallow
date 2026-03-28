@@ -167,6 +167,33 @@ impl Plugin for EslintPlugin {
                 .push(resolve_eslint_plugin_name(key));
         }
 
+        // settings["import/resolver"] → resolver package dependencies
+        // Handles three formats:
+        //   Object: { typescript: { project: "..." } } → eslint-import-resolver-typescript
+        //   String: "typescript" → eslint-import-resolver-typescript
+        //   Array:  ["typescript", "node"] → eslint-import-resolver-typescript
+        let resolver_path = &["settings", "import/resolver"];
+        let resolver_keys =
+            config_parser::extract_config_object_keys(&parse_source, parse_path, resolver_path);
+        for key in &resolver_keys {
+            if let Some(dep) = resolve_eslint_resolver_name(key) {
+                result.referenced_dependencies.push(dep);
+            }
+        }
+        if let Some(resolver) =
+            config_parser::extract_config_string(&parse_source, parse_path, resolver_path)
+            && let Some(dep) = resolve_eslint_resolver_name(&resolver)
+        {
+            result.referenced_dependencies.push(dep);
+        }
+        let resolver_strings =
+            config_parser::extract_config_string_array(&parse_source, parse_path, resolver_path);
+        for resolver in &resolver_strings {
+            if let Some(dep) = resolve_eslint_resolver_name(resolver) {
+                result.referenced_dependencies.push(dep);
+            }
+        }
+
         result
     }
 }
@@ -245,6 +272,22 @@ fn resolve_eslint_extends_name(name: &str) -> Option<String> {
         Some(name.to_string())
     } else {
         Some(format!("eslint-config-{name}"))
+    }
+}
+
+/// Resolve ESLint import resolver name to a package dependency.
+///
+/// - `"typescript"` → `"eslint-import-resolver-typescript"`
+/// - `"node"` → `None` (built-in to eslint-plugin-import)
+/// - `"eslint-import-resolver-typescript"` → `"eslint-import-resolver-typescript"` (already full)
+fn resolve_eslint_resolver_name(name: &str) -> Option<String> {
+    if matches!(name, "node" | "webpack") {
+        // Built-in resolvers provided by eslint-plugin-import
+        None
+    } else if name.starts_with("eslint-import-resolver-") {
+        Some(name.to_string())
+    } else {
+        Some(format!("eslint-import-resolver-{name}"))
     }
 }
 
@@ -490,5 +533,134 @@ mod tests {
         let (source, path) = super::read_package_entry(root, "modern-pkg").unwrap();
         assert!(source.contains("some-dep"));
         assert!(path.ends_with("dist/index.mjs"));
+    }
+
+    // ── ESLint resolver name resolution ────────────────────────────
+
+    #[test]
+    fn resolver_short_name() {
+        assert_eq!(
+            resolve_eslint_resolver_name("typescript"),
+            Some("eslint-import-resolver-typescript".to_string())
+        );
+    }
+
+    #[test]
+    fn resolver_node_builtin() {
+        assert_eq!(resolve_eslint_resolver_name("node"), None);
+    }
+
+    #[test]
+    fn resolver_webpack_builtin() {
+        assert_eq!(resolve_eslint_resolver_name("webpack"), None);
+    }
+
+    #[test]
+    fn resolver_already_full_name() {
+        assert_eq!(
+            resolve_eslint_resolver_name("eslint-import-resolver-typescript"),
+            Some("eslint-import-resolver-typescript".to_string())
+        );
+    }
+
+    // ── ESLint resolver config integration ─────────────────────────
+
+    #[test]
+    fn resolve_config_resolver_object_keys() {
+        let source = r#"
+            module.exports = {
+                settings: {
+                    "import/resolver": {
+                        typescript: { project: "./tsconfig.json" },
+                        node: { extensions: [".js", ".ts"] }
+                    }
+                }
+            };
+        "#;
+        let plugin = EslintPlugin;
+        let result = plugin.resolve_config(
+            std::path::Path::new(".eslintrc.js"),
+            source,
+            std::path::Path::new("/project"),
+        );
+
+        let deps = &result.referenced_dependencies;
+        assert!(
+            deps.contains(&"eslint-import-resolver-typescript".to_string()),
+            "should resolve typescript resolver"
+        );
+        // "node" is built-in, should NOT be added
+        assert!(
+            !deps.iter().any(|d| d == "eslint-import-resolver-node"),
+            "node resolver is built-in"
+        );
+    }
+
+    #[test]
+    fn resolve_config_resolver_string() {
+        let source = r#"
+            module.exports = {
+                settings: {
+                    "import/resolver": "typescript"
+                }
+            };
+        "#;
+        let plugin = EslintPlugin;
+        let result = plugin.resolve_config(
+            std::path::Path::new(".eslintrc.js"),
+            source,
+            std::path::Path::new("/project"),
+        );
+
+        assert!(
+            result
+                .referenced_dependencies
+                .contains(&"eslint-import-resolver-typescript".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_config_resolver_json() {
+        let source =
+            r#"{"settings": {"import/resolver": {"typescript": {"project": "./tsconfig.json"}}}}"#;
+        let plugin = EslintPlugin;
+        let result = plugin.resolve_config(
+            std::path::Path::new(".eslintrc.json"),
+            source,
+            std::path::Path::new("/project"),
+        );
+
+        assert!(
+            result
+                .referenced_dependencies
+                .contains(&"eslint-import-resolver-typescript".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_config_resolver_flat_config() {
+        // Flat configs that use defineConfig() can have settings extracted
+        let source = r#"
+            import { defineConfig } from 'eslint/config';
+            export default defineConfig({
+                settings: {
+                    "import/resolver": {
+                        typescript: { alwaysTryTypes: true }
+                    }
+                }
+            });
+        "#;
+        let plugin = EslintPlugin;
+        let result = plugin.resolve_config(
+            std::path::Path::new("eslint.config.mjs"),
+            source,
+            std::path::Path::new("/project"),
+        );
+
+        assert!(
+            result
+                .referenced_dependencies
+                .contains(&"eslint-import-resolver-typescript".to_string())
+        );
     }
 }

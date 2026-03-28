@@ -82,6 +82,30 @@ pub fn extract_config_shallow_strings(source: &str, path: &Path, key: &str) -> V
     .unwrap_or_default()
 }
 
+/// Extract shallow strings from an array property inside a nested object path.
+///
+/// Navigates `outer_path` to find a nested object, then extracts shallow strings
+/// from the `key` property. Useful for configs like Vitest where reporters are at
+/// `test.reporters`: `{ test: { reporters: ["default", ["vitest-sonar-reporter", {...}]] } }`.
+pub fn extract_config_nested_shallow_strings(
+    source: &str,
+    path: &Path,
+    outer_path: &[&str],
+    key: &str,
+) -> Vec<String> {
+    extract_from_source(source, path, |program| {
+        let obj = find_config_object(program)?;
+        let nested = get_nested_expression(obj, outer_path)?;
+        if let Expression::ObjectExpression(nested_obj) = nested {
+            let prop = find_property(nested_obj, key)?;
+            Some(collect_shallow_string_values(&prop.value))
+        } else {
+            None
+        }
+    })
+    .unwrap_or_default()
+}
+
 /// Public wrapper for `find_config_object` for plugins that need manual AST walking.
 pub fn find_config_object_pub<'a>(program: &'a Program) -> Option<&'a ObjectExpression<'a>> {
     find_config_object(program)
@@ -1062,6 +1086,52 @@ mod tests {
     fn shallow_strings_missing_key() {
         let source = r#"export default { other: "val" };"#;
         let values = extract_config_shallow_strings(source, &js_path(), "missing");
+        assert!(values.is_empty());
+    }
+
+    // ── extract_config_nested_shallow_strings tests ──────────────
+
+    #[test]
+    fn nested_shallow_strings_vitest_reporters() {
+        let source = r#"
+            export default {
+                test: {
+                    reporters: ["default", "vitest-sonar-reporter"]
+                }
+            };
+        "#;
+        let values =
+            extract_config_nested_shallow_strings(source, &js_path(), &["test"], "reporters");
+        assert_eq!(values, vec!["default", "vitest-sonar-reporter"]);
+    }
+
+    #[test]
+    fn nested_shallow_strings_tuple_format() {
+        let source = r#"
+            export default {
+                test: {
+                    reporters: ["default", ["vitest-sonar-reporter", { outputFile: "report.xml" }]]
+                }
+            };
+        "#;
+        let values =
+            extract_config_nested_shallow_strings(source, &js_path(), &["test"], "reporters");
+        assert_eq!(values, vec!["default", "vitest-sonar-reporter"]);
+    }
+
+    #[test]
+    fn nested_shallow_strings_missing_outer() {
+        let source = r"export default { other: {} };";
+        let values =
+            extract_config_nested_shallow_strings(source, &js_path(), &["test"], "reporters");
+        assert!(values.is_empty());
+    }
+
+    #[test]
+    fn nested_shallow_strings_missing_inner() {
+        let source = r#"export default { test: { include: ["**/*.test.ts"] } };"#;
+        let values =
+            extract_config_nested_shallow_strings(source, &js_path(), &["test"], "reporters");
         assert!(values.is_empty());
     }
 
