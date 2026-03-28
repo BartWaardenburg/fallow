@@ -32,6 +32,7 @@ pub struct AnalysisOutput {
     pub results: AnalysisResults,
     pub timings: Option<PipelineTimings>,
     pub graph: Option<graph::ModuleGraph>,
+    pub project: Option<project::ProjectState>,
 }
 
 /// Update cache: write freshly parsed modules and refresh stale mtime/size entries.
@@ -300,6 +301,7 @@ pub fn analyze_with_parse_result(
         results: result,
         timings,
         graph: Some(graph),
+        project: None,
     })
 }
 
@@ -558,6 +560,7 @@ fn analyze_full(
         results: result,
         timings,
         graph: if retain { Some(graph) } else { None },
+        project: if retain { Some(project) } else { None },
     })
 }
 

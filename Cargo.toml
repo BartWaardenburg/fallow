@@ -72,6 +72,9 @@ fixedbitset = "0.5"
 tower-lsp = "0.20"
 tokio = { version = "1", features = ["full"] }
 
+# Browser
+open = "5"
+
 # File watching
 notify = "8"
 notify-debouncer-mini = "0.7"

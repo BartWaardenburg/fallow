@@ -1,6 +1,7 @@
 [files]
 extend-exclude = [
     "editors/vscode/dist/",
+    "crates/cli/viz-assets/",
     "*.js.map",
     "tests/fixtures/",
     "reference/",
