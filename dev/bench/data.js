@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1774732280252,
+  "lastUpdate": 1774734245555,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Benchmarks": [
@@ -9311,6 +9311,102 @@ window.BENCHMARK_DATA = {
             "name": "dupe_detect_2x5000_identical",
             "value": 2497537,
             "range": "± 14479",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "b5d12c934e03f448e4beaeafb44b44f512194735",
+          "message": "fix: track enum usage in Record<Enum, T> and keyof typeof mapped types",
+          "timestamp": "2026-03-28T22:32:45+01:00",
+          "tree_id": "e144545d50fbc8cf1c71a6dda73a59ebb0b7b670",
+          "url": "https://github.com/fallow-rs/fallow/commit/b5d12c934e03f448e4beaeafb44b44f512194735"
+        },
+        "date": 1774734245147,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "parse_single_file",
+            "value": 44589,
+            "range": "± 1630",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "full_pipeline_10_files",
+            "value": 1622228,
+            "range": "± 27033",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "full_pipeline_100_files",
+            "value": 2984460,
+            "range": "± 164832",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "full_pipeline_1000_files",
+            "value": 15346558,
+            "range": "± 100569",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "resolve_re_export_chains",
+            "value": 101945,
+            "range": "± 4435",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cache_round_trip",
+            "value": 1989,
+            "range": "± 18",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dupe_detect_2x500_identical",
+            "value": 209920,
+            "range": "± 8760",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dupe_detect_2x2000_identical",
+            "value": 911045,
+            "range": "± 10414",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dupe_detect_10x500_identical",
+            "value": 1718191,
+            "range": "± 80010",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dupe_detect_50x200_diverse",
+            "value": 515291,
+            "range": "± 38638",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dupe_detect_100x200_mixed",
+            "value": 4184756,
+            "range": "± 44001",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dupe_detect_2x5000_identical",
+            "value": 2515065,
+            "range": "± 11312",
             "unit": "ns/iter"
           }
         ]
