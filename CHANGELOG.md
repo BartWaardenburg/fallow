@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.5.3] - 2026-03-28
+
+### Fixed
+
+- **Type-only imports with `@types/` no longer flagged as unlisted** -- `import type { Feature } from 'geojson'` is no longer reported as an unlisted dependency when `@types/geojson` is in devDependencies. TypeScript erases type-only imports at compile time, so the bare package doesn't need to be installed. Scoped packages are handled via the DefinitelyTyped convention (`@scope/pkg` → `@types/scope__pkg`). Value imports still require the real package.
+- **Unused enum member false positives in type-level usage** -- enum members used via TypeScript qualified names in type position (e.g., `type X = Status.Active`) are now detected as used. Enums used as mapped type constraints (e.g., `{ [K in Direction]: string }`) mark all members as used.
+
 ## [2.5.2] - 2026-03-28
 
 ### Fixed
@@ -589,7 +596,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.5.2...HEAD
+[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.5.3...HEAD
+[2.5.3]: https://github.com/fallow-rs/fallow/compare/v2.5.2...v2.5.3
 [2.5.2]: https://github.com/fallow-rs/fallow/compare/v2.5.1...v2.5.2
 [2.5.1]: https://github.com/fallow-rs/fallow/compare/v2.5.0...v2.5.1
 [2.5.0]: https://github.com/fallow-rs/fallow/compare/v2.4.0...v2.5.0
