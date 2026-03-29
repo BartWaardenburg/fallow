@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1774737620421,
+  "lastUpdate": 1774776011878,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
@@ -3358,6 +3358,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/9a10769adcd44174a91945238758424486f8d81e"
         },
         "date": 1774737619848,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 91,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "0bf57c0b30c309ba5c716c6f74772e27b9331e55",
+          "message": "fix: gate entire sfc/astro/mdx test modules under Miri\n\nThe previous per-test gating only removed 11 parser-invoking tests but\nleft 83 regex/string tests that still take ~10s each under Miri,\nexceeding the 30-minute timeout. These modules exercise regex-based\nstring extraction with no unsafe code — no Miri-specific value.\n\nOnly suppress, css, and visitor/helpers tests run under Miri now (~87\ntests, ~15 minutes).",
+          "timestamp": "2026-03-29T11:19:02+02:00",
+          "tree_id": "9351ec1d4dc2a5ce9ed26db84c27faf8be0e2754",
+          "url": "https://github.com/fallow-rs/fallow/commit/0bf57c0b30c309ba5c716c6f74772e27b9331e55"
+        },
+        "date": 1774776010831,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
