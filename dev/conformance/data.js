@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1774680632935,
+  "lastUpdate": 1774767497217,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Conformance": [
@@ -103,6 +103,73 @@ window.BENCHMARK_DATA = {
           {
             "name": "Fallow Total",
             "value": 7403,
+            "unit": "issues"
+          },
+          {
+            "name": "Knip Total",
+            "value": 670,
+            "unit": "issues"
+          },
+          {
+            "name": "fastify Agreement",
+            "value": 3,
+            "unit": "%"
+          },
+          {
+            "name": "preact Agreement",
+            "value": 3.4,
+            "unit": "%"
+          },
+          {
+            "name": "query Agreement",
+            "value": 0,
+            "unit": "%"
+          },
+          {
+            "name": "svelte Agreement",
+            "value": 0.3,
+            "unit": "%"
+          },
+          {
+            "name": "zod Agreement",
+            "value": 9.1,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg",
+            "email": "bart@waardenburg.dev"
+          },
+          "committer": {
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg",
+            "email": "bart@waardenburg.dev"
+          },
+          "id": "9a10769adcd44174a91945238758424486f8d81e",
+          "message": "fix: gate parser-invoking extract tests with #[cfg(not(miri))]\n\nThe sfc, astro, and mdx parse_*_to_module tests invoke the Oxc parser\nwhich is ~1000x slower under Miri, causing the 30-minute CI timeout.\nGate these 11 tests so only string-extraction tests run under Miri.",
+          "timestamp": "2026-03-28T22:39:21Z",
+          "url": "https://github.com/fallow-rs/fallow/commit/9a10769adcd44174a91945238758424486f8d81e"
+        },
+        "date": 1774767496764,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Agreement Rate",
+            "value": 1.9,
+            "unit": "%"
+          },
+          {
+            "name": "Agreed Issues",
+            "value": 147,
+            "unit": "issues"
+          },
+          {
+            "name": "Fallow Total",
+            "value": 7395,
             "unit": "issues"
           },
           {
