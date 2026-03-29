@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1774684362092,
+  "lastUpdate": 1774771141770,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Real-World Benchmarks": [
@@ -203,6 +203,108 @@ window.BENCHMARK_DATA = {
           {
             "name": "next.js (warm)",
             "value": 1777,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg",
+            "email": "bart@waardenburg.dev"
+          },
+          "committer": {
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg",
+            "email": "bart@waardenburg.dev"
+          },
+          "id": "9a10769adcd44174a91945238758424486f8d81e",
+          "message": "fix: gate parser-invoking extract tests with #[cfg(not(miri))]\n\nThe sfc, astro, and mdx parse_*_to_module tests invoke the Oxc parser\nwhich is ~1000x slower under Miri, causing the 30-minute CI timeout.\nGate these 11 tests so only string-extraction tests run under Miri.",
+          "timestamp": "2026-03-28T22:39:21Z",
+          "url": "https://github.com/fallow-rs/fallow/commit/9a10769adcd44174a91945238758424486f8d81e"
+        },
+        "date": 1774771141146,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "preact (cold)",
+            "value": 43,
+            "unit": "ms"
+          },
+          {
+            "name": "preact (warm)",
+            "value": 34,
+            "unit": "ms"
+          },
+          {
+            "name": "fastify (cold)",
+            "value": 54,
+            "unit": "ms"
+          },
+          {
+            "name": "fastify (warm)",
+            "value": 47,
+            "unit": "ms"
+          },
+          {
+            "name": "zod (cold)",
+            "value": 40,
+            "unit": "ms"
+          },
+          {
+            "name": "zod (warm)",
+            "value": 31,
+            "unit": "ms"
+          },
+          {
+            "name": "vue-core (cold)",
+            "value": 116,
+            "unit": "ms"
+          },
+          {
+            "name": "vue-core (warm)",
+            "value": 100,
+            "unit": "ms"
+          },
+          {
+            "name": "svelte (cold)",
+            "value": 439,
+            "unit": "ms"
+          },
+          {
+            "name": "svelte (warm)",
+            "value": 427,
+            "unit": "ms"
+          },
+          {
+            "name": "query (cold)",
+            "value": 346,
+            "unit": "ms"
+          },
+          {
+            "name": "query (warm)",
+            "value": 330,
+            "unit": "ms"
+          },
+          {
+            "name": "vite (cold)",
+            "value": 224,
+            "unit": "ms"
+          },
+          {
+            "name": "vite (warm)",
+            "value": 219,
+            "unit": "ms"
+          },
+          {
+            "name": "next.js (cold)",
+            "value": 1900,
+            "unit": "ms"
+          },
+          {
+            "name": "next.js (warm)",
+            "value": 1820,
             "unit": "ms"
           }
         ]
