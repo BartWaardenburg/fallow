@@ -47,3 +47,5 @@ editors/vscode/.test-dist/
 .claude/*
 !.claude/settings.json
 !.claude/skills/
+!.claude/rules/
+!.claude/agents/
