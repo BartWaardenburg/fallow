@@ -175,6 +175,57 @@ fn guard_human_reports_zone_and_suppress_hint() {
     );
 }
 
+fn write_required_coverage_project(root: &std::path::Path) {
+    write_base_project(root);
+    std::fs::create_dir_all(root.join("src/generated")).expect("create generated dir");
+    std::fs::write(
+        root.join(".fallowrc.json"),
+        r#"{
+  "boundaries": {
+    "zones": [
+      { "name": "domain", "patterns": ["src/domain/**"] }
+    ],
+    "coverage": {
+      "requireAllFiles": true,
+      "allowUnmatched": ["src/generated/**"]
+    }
+  }
+}
+"#,
+    )
+    .expect("write config");
+}
+
+#[test]
+fn guard_human_states_coverage_requirement_for_unzoned_file() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    write_required_coverage_project(dir.path());
+
+    let required = run_guard(dir.path(), &["src/app/page.ts", "--quiet"]);
+
+    assert_eq!(required.code, 0, "stderr: {}", required.stderr);
+    assert!(
+        required.stdout.contains("requireAllFiles")
+            && required.stdout.contains("boundary-coverage"),
+        "human output must state the coverage requirement: {}",
+        required.stdout
+    );
+    assert!(
+        !required.stdout.contains("unrestricted for boundary checks"),
+        "the unrestricted note must not claim to cover the coverage check: {}",
+        required.stdout
+    );
+
+    let exempt = run_guard(dir.path(), &["src/generated/client.ts", "--quiet"]);
+
+    assert_eq!(exempt.code, 0, "stderr: {}", exempt.stderr);
+    assert!(
+        !exempt.stdout.contains("requireAllFiles"),
+        "allowUnmatched paths must not state a coverage requirement: {}",
+        exempt.stdout
+    );
+}
+
 #[test]
 fn guard_json_reports_unrestricted_when_no_boundaries_or_packs_configured() {
     let dir = tempfile::tempdir().expect("tempdir");
