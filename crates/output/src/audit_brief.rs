@@ -903,6 +903,37 @@ mod tests {
     }
 
     #[test]
+    fn the_coordination_gap_is_never_capped() {
+        // The human brief routes a reader to `--format json` for the gaps and
+        // their symbols. That promise holds only while this constructor stores
+        // both whole, alongside two fields it does deliberately cap.
+        let symbols: Vec<String> = (0..40).map(|i| format!("symbol{i:02}")).collect();
+        let gaps: Vec<CoordinationGapFact> = (0..60)
+            .map(|i| CoordinationGapFact {
+                changed_file: "src/core.ts".to_string(),
+                consumer_file: format!("src/consumer{i:02}.ts"),
+                consumed_symbols: symbols.clone(),
+                note: String::new(),
+            })
+            .collect();
+        let facts = ImpactClosureFacts::new(&affected(40, 3), gaps);
+
+        assert_eq!(facts.coordination_gap.len(), 60);
+        assert!(
+            facts
+                .coordination_gap
+                .iter()
+                .all(|gap| gap.consumed_symbols.len() == 40),
+            "every consumed symbol survives, or the brief's json route is a lie"
+        );
+        assert!(
+            facts.affected_not_shown.len() < facts.affected_count
+                && facts.affected_by_dir_omitted > 0,
+            "the fixture must show the sibling fields really are capped"
+        );
+    }
+
+    #[test]
     fn root_level_files_roll_up_under_the_empty_directory() {
         let facts =
             ImpactClosureFacts::new(&["play.ts".to_string(), "setup.ts".to_string()], Vec::new());

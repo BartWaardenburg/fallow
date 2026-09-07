@@ -759,20 +759,131 @@ fn affected_lines(closure: &ImpactClosureFacts) -> Vec<String> {
     lines
 }
 
+/// How many coordination gaps the human brief spells out before it collapses
+/// the rest into a count. Each one costs two lines, as a branching split does,
+/// but a gap is Stage 3's headline signal rather than a supporting metric, so it
+/// gets one item more than `branching_human_lines` shows. The JSON carries every
+/// gap; this is the reading order, not the record.
+const MAX_HUMAN_COORDINATION_GAPS: usize = 3;
+
+/// Join symbol names until they no longer fit `budget`, returning the rendered
+/// text and how many names it left out. A gap on a barrel file can consume two
+/// dozen symbols, and the reader needs to recognise the contract, not enumerate
+/// it.
+fn summarize_symbols(symbols: &[String], budget: usize) -> (String, usize) {
+    let mut shown = 0usize;
+    let mut width = 0usize;
+    for symbol in symbols {
+        let separator = usize::from(shown > 0) * 2;
+        let remaining = symbols.len() - shown - 1;
+        // Keep room for the suffix the omitted symbols will need.
+        let suffix = if remaining == 0 {
+            0
+        } else {
+            format!(" +{remaining} more").chars().count()
+        };
+        let next = width + separator + symbol.chars().count();
+        if shown > 0 && next + suffix > budget {
+            break;
+        }
+        width = next;
+        shown += 1;
+    }
+    // The first symbol always renders, elided if it alone overruns the budget.
+    let shown = shown.max(1).min(symbols.len());
+    let joined = symbols[..shown].join(", ");
+    let omitted = symbols.len() - shown;
+    if omitted == 0 {
+        return (elide_symbol(&joined, budget), 0);
+    }
+    let suffix = format!(" +{omitted} more");
+    let head = elide_symbol(&joined, budget.saturating_sub(suffix.chars().count()));
+    (format!("{head}{suffix}"), omitted)
+}
+
+/// Shorten a symbol list from the right, unlike `elide_path`, which keeps the
+/// tail: a symbol's leading characters are what identifies it.
+fn elide_symbol(text: &str, budget: usize) -> String {
+    if text.chars().count() <= budget {
+        return text.to_string();
+    }
+    let head: String = text.chars().take(budget.saturating_sub(3)).collect();
+    format!("{head}...")
+}
+
+/// The coordination-gap lines: how many consumers sit outside the diff, then a
+/// capped walk through the widest of them, one consumer per pair of lines.
+///
+/// Split out from the printer so the wording and the width are testable, the
+/// way `affected_lines` and `branching_human_lines` are: every line has to hold
+/// under 80 columns. Two paths and a symbol list cannot share one line at that
+/// width, so the consumer gets its own line and the contract it consumes gets
+/// the continuation, matching how a branching split renders.
+///
+/// The walk is ordered by how many symbols the consumer takes, not by path.
+/// Unlike `affected_by_dir`, the JSON gap list is path-sorted and carries no
+/// ranking of its own, so an alphabetical prefix would spell out whichever
+/// consumers sort first and collapse a barrel consumer taking two dozen symbols
+/// behind the remainder. The header states the total either way.
+///
+/// The header claims only what `collect_coordination_gaps` establishes: the
+/// consumer uses an export of a file in the diff. It never verifies that the
+/// export itself changed, so the line must not say the contract changed.
+fn coordination_gap_lines(gaps: &[CoordinationGapFact]) -> Vec<String> {
+    if gaps.is_empty() {
+        return Vec::new();
+    }
+    let mut lines = vec![format!(
+        "  coordination gap: {} consumer{} outside the diff use{} exports of changed files",
+        gaps.len(),
+        crate::report::plural(gaps.len()),
+        if gaps.len() == 1 { "s" } else { "" },
+    )];
+    let mut widest: Vec<&CoordinationGapFact> = gaps.iter().collect();
+    widest.sort_by(|a, b| {
+        b.consumed_symbols
+            .len()
+            .cmp(&a.consumed_symbols.len())
+            .then_with(|| a.consumer_file.cmp(&b.consumer_file))
+    });
+
+    let mut symbols_omitted = 0usize;
+    for gap in widest.iter().take(MAX_HUMAN_COORDINATION_GAPS) {
+        debug_assert!(
+            !gap.consumed_symbols.is_empty(),
+            "a gap exists because a symbol is consumed, so the list is never empty"
+        );
+        let (symbols, omitted) = summarize_symbols(&gap.consumed_symbols, 24);
+        symbols_omitted += omitted;
+        lines.push(format!("         {}", elide_path(&gap.consumer_file, 71)));
+        lines.push(format!(
+            "           consumes {symbols} from {}",
+            elide_path(&gap.changed_file, 28),
+        ));
+    }
+
+    let remaining = gaps.len().saturating_sub(MAX_HUMAN_COORDINATION_GAPS);
+    if remaining > 0 {
+        lines.push(format!(
+            "         and {remaining} more consumer{} (--format json for full list)",
+            crate::report::plural(remaining),
+        ));
+    } else if symbols_omitted > 0 {
+        // A `+N more` with no route on screen leaves the reader nowhere to go.
+        lines.push("         (--format json for every consumed symbol)".to_string());
+    }
+    lines
+}
+
 /// Print the Stage 3 impact-closure summary on the human brief: the blast
-/// radius and its heaviest directory, then each coordination gap (the precise
+/// radius and its heaviest directory, then the coordination gaps (the precise
 /// inter-module attention pointer). Caller has already gated on `!quiet`.
 fn print_impact_closure_human(closure: &ImpactClosureFacts) {
     for line in affected_lines(closure) {
         eprintln!("{line}");
     }
-    for gap in &closure.coordination_gap {
-        eprintln!(
-            "  coordination gap: {} consumes {} from {} (not in this diff)",
-            gap.consumer_file,
-            gap.consumed_symbols.join(", "),
-            gap.changed_file,
-        );
+    for line in coordination_gap_lines(&closure.coordination_gap) {
+        eprintln!("{line}");
     }
 }
 
@@ -1603,6 +1714,166 @@ mod tests {
             lines,
             vec!["  impact closure: 2 files affected beyond the diff".to_string()],
             "naming the one directory would repeat what the count said"
+        );
+    }
+
+    fn gap(consumer: &str, changed: &str, symbols: &[&str]) -> CoordinationGapFact {
+        CoordinationGapFact {
+            changed_file: changed.to_string(),
+            consumer_file: consumer.to_string(),
+            consumed_symbols: symbols.iter().map(|s| (*s).to_string()).collect(),
+            note: COORDINATION_GAP_NOTE.to_string(),
+        }
+    }
+
+    #[test]
+    fn coordination_gap_lines_fit_eighty_columns() {
+        // The widest line in the section is the consumer path, so the fixture
+        // has to overrun its budget or the assertion proves nothing.
+        let symbols: Vec<String> = (0..26)
+            .map(|i| format!("safeParseAsyncVariant{i:02}"))
+            .collect();
+        let symbol_refs: Vec<&str> = symbols.iter().map(String::as_str).collect();
+        let gaps: Vec<CoordinationGapFact> = (0..1234)
+            .map(|i| {
+                gap(
+                    &format!(
+                        "packages/platform/features/checkout/pricing/discounts/seasonal/regional/tiers/consumer{i:04}.ts"
+                    ),
+                    "packages/platform/features/checkout/pricing/discounts/parse.ts",
+                    &symbol_refs,
+                )
+            })
+            .collect();
+        let lines = coordination_gap_lines(&gaps);
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains(".../") && line.chars().count() == 80),
+            "the fixture must drive the consumer line to the 80-column ceiling: {lines:?}"
+        );
+        assert!(
+            lines[0].contains("1234 consumers") && lines.last().is_some_and(|l| l.contains("1231")),
+            "four-digit counts must render on both the header and the remainder: {lines:?}"
+        );
+        for line in lines {
+            assert!(
+                line.chars().count() <= 80,
+                "brief lines hold under 80 columns: {} chars in {line:?}",
+                line.chars().count()
+            );
+        }
+    }
+
+    #[test]
+    fn the_widest_consumers_are_the_ones_spelled_out() {
+        // The JSON gap list is path-sorted with no ranking, so an alphabetical
+        // prefix would collapse the barrel consumer behind the remainder.
+        let mut gaps: Vec<CoordinationGapFact> = (0..5)
+            .map(|i| gap(&format!("src/a{i}.ts"), "src/core.ts", &["parse"]))
+            .collect();
+        gaps.push(gap(
+            "src/zz-barrel.ts",
+            "src/core.ts",
+            &["parse", "decode", "encode"],
+        ));
+        let lines = coordination_gap_lines(&gaps);
+        assert!(
+            lines[1].contains("src/zz-barrel.ts"),
+            "the consumer taking the most symbols leads: {lines:?}"
+        );
+    }
+
+    #[test]
+    fn coordination_gaps_beyond_the_cap_are_counted_not_dropped_silently() {
+        let gaps: Vec<CoordinationGapFact> = (0..7)
+            .map(|i| gap(&format!("src/c{i}.ts"), "src/core.ts", &["parse"]))
+            .collect();
+        let lines = coordination_gap_lines(&gaps);
+        assert!(
+            lines[0].starts_with(
+                "  coordination gap: 7 consumers outside the diff use exports of changed files"
+            ),
+            "{lines:?}"
+        );
+        assert_eq!(
+            lines.len(),
+            1 + MAX_HUMAN_COORDINATION_GAPS * 2 + 1,
+            "a header, two lines per shown gap, then the remainder: {lines:?}"
+        );
+        assert!(
+            lines
+                .last()
+                .expect("a remainder line")
+                .contains("and 4 more consumers (--format json for full list)"),
+            "{lines:?}"
+        );
+    }
+
+    #[test]
+    fn a_single_coordination_gap_reads_as_singular_and_needs_no_remainder() {
+        let lines = coordination_gap_lines(&[gap("src/app.ts", "src/core.ts", &["parse"])]);
+        assert_eq!(
+            lines,
+            vec![
+                "  coordination gap: 1 consumer outside the diff uses exports of changed files"
+                    .to_string(),
+                "         src/app.ts".to_string(),
+                "           consumes parse from src/core.ts".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn an_over_budget_first_symbol_does_not_swallow_the_more_suffix() {
+        let long = "aVeryLongExportedSymbolNameIndeed";
+        let (text, omitted) = summarize_symbols(&[long.to_string(), "parse".to_string()], 24);
+        assert_eq!(omitted, 1);
+        assert!(text.ends_with(" +1 more"), "{text:?}");
+        assert!(
+            text.chars().count() <= 24,
+            "{} chars in {text:?}",
+            text.chars().count()
+        );
+    }
+
+    #[test]
+    fn an_elided_symbol_list_still_gets_a_route_without_a_remainder_line() {
+        let symbols: Vec<String> = (0..30).map(|i| format!("symbolNumber{i:02}")).collect();
+        let symbol_refs: Vec<&str> = symbols.iter().map(String::as_str).collect();
+        let lines = coordination_gap_lines(&[gap("src/app.ts", "src/core.ts", &symbol_refs)]);
+        assert!(
+            lines[2].contains('+'),
+            "the fixture must elide symbols: {lines:?}"
+        );
+        assert_eq!(
+            lines.last().map(String::as_str),
+            Some("         (--format json for every consumed symbol)"),
+            "a `+N more` with no remainder line still needs somewhere to go: {lines:?}"
+        );
+    }
+
+    #[test]
+    fn no_gaps_prints_nothing() {
+        assert!(coordination_gap_lines(&[]).is_empty());
+    }
+
+    #[test]
+    fn a_symbol_list_that_fits_is_printed_whole() {
+        assert_eq!(
+            summarize_symbols(&["a".into(), "b".into()], 24),
+            ("a, b".to_string(), 0)
+        );
+    }
+
+    #[test]
+    fn a_single_symbol_wider_than_the_budget_is_elided_not_dropped() {
+        let (one, omitted) = summarize_symbols(&["aRidiculouslyLongExportedSymbolName".into()], 24);
+        assert_eq!(omitted, 0);
+        assert_eq!(one.chars().count(), 24, "{one:?}");
+        assert!(
+            one.starts_with("aRidiculously") && one.ends_with("..."),
+            "{one:?}"
         );
     }
 
