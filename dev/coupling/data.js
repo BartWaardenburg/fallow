@@ -1,57 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788786434775,
+  "lastUpdate": 1788787667817,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Module Coupling": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "aed49b4addf9549b6271997b0c0a2e38dfe14b08",
-          "message": "perf(benchmarks): cover warm coverage gaps",
-          "timestamp": "2026-08-19T20:03:53+02:00",
-          "tree_id": "b03c21c46732dd8858caa5eccf4f8258be7cd6ac",
-          "url": "https://github.com/fallow-rs/fallow/commit/aed49b4addf9549b6271997b0c0a2e38dfe14b08"
-        },
-        "date": 1787162710920,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Max Fan-In (non-framework)",
-            "value": 47,
-            "unit": "deps"
-          },
-          {
-            "name": "Max Fan-Out (non-framework)",
-            "value": 28,
-            "unit": "deps"
-          },
-          {
-            "name": "Modules >20 Fan-In (%)",
-            "value": 1.32,
-            "unit": "%"
-          },
-          {
-            "name": "Total Modules",
-            "value": 455,
-            "unit": "count"
-          },
-          {
-            "name": "Total Edges",
-            "value": 1231,
-            "unit": "count"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4874,6 +4825,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/a6afda2f0136f645cea233b546a150ac79011115"
         },
         "date": 1788786431307,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Max Fan-In (non-framework)",
+            "value": 52,
+            "unit": "deps"
+          },
+          {
+            "name": "Max Fan-Out (non-framework)",
+            "value": 29,
+            "unit": "deps"
+          },
+          {
+            "name": "Modules >20 Fan-In (%)",
+            "value": 1.27,
+            "unit": "%"
+          },
+          {
+            "name": "Total Modules",
+            "value": 472,
+            "unit": "count"
+          },
+          {
+            "name": "Total Edges",
+            "value": 1284,
+            "unit": "count"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "4503f09c0f324f4c55e2cff6c581f7fd92c36d6f",
+          "message": "fix(guard): state the coverage requirement for unzoned files\n\nAn unzoned file under boundaries.coverage.requireAllFiles was told it was\nunrestricted while an analysis run would report it as a boundary-coverage\nviolation. guard_notes never read coverage_required, which the JSON already\ncarried, so the human output contradicted the JSON for the same file.\n\nThe unrestricted note now names what it actually covers, import and call\nchecks, and a second note states the coverage requirement when it applies.\nPaths exempted by allowUnmatched keep the old single note.",
+          "timestamp": "2026-09-07T15:19:35+02:00",
+          "tree_id": "10fefeb404697cc57b5fa643833ee776d735b09b",
+          "url": "https://github.com/fallow-rs/fallow/commit/4503f09c0f324f4c55e2cff6c581f7fd92c36d6f"
+        },
+        "date": 1788787664445,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
