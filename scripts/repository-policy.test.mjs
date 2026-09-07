@@ -2,6 +2,10 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import {
+  QUERY_OPERATIONS,
+  WIRE_PROTOCOL_VERSION,
+} from "../tools/type-aware-sidecar/src/generated-protocol.mjs";
 import { checkRepositorySigningKeyParity } from "./signing-key-parity.mjs";
 
 const readJson = (path) => JSON.parse(readFileSync(path, "utf8"));
@@ -405,7 +409,19 @@ test("type-aware public surfaces expose only the stable protocol", () => {
   assert.doesNotMatch(protocol, /class-member-uses|operation === "batch"/u);
   assert.doesNotMatch(cli, /class-member-uses|operation === "batch"/u);
   assert.match(guide, /first stable semantic wire contract is version 6/u);
-  assert.match(readme, /Protocol\nv6 accepts/u);
+  for (const operation of QUERY_OPERATIONS) {
+    assert.ok(
+      readme.includes(`\`${operation}\``),
+      `README must name the ${operation} query the sidecar accepts`,
+    );
+  }
+  for (const [, version] of readme.matchAll(/\bprotocol\s+v?(\d+)/giu)) {
+    assert.equal(
+      Number(version),
+      WIRE_PROTOCOL_VERSION,
+      "README states a protocol version the sidecar no longer accepts",
+    );
+  }
 
   for (const surface of [guide, readme, readFileSync("README.md", "utf8")]) {
     assert.doesNotMatch(surface, /proof[- ]of[- ]concept|\bpoc\b/iu);

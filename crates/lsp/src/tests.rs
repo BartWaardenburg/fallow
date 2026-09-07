@@ -2031,19 +2031,141 @@ fn merge_test_source_with_all_fields() -> AnalysisResults {
                 },
             ),
         ],
-        unprovided_injects: vec![],
-        unrendered_components: vec![],
-        unused_component_props: vec![],
-        unused_component_emits: vec![],
-        unused_component_inputs: vec![],
-        unused_component_outputs: vec![],
-        unused_svelte_events: vec![],
-        unused_server_actions: vec![],
-        unused_load_data_keys: vec![],
-        unused_load_data_keys_global_abstain: false,
-        prop_drilling_chains: vec![],
-        thin_wrappers: vec![],
-        duplicate_prop_shapes: vec![],
+        unprovided_injects: vec![
+            fallow_api::editor_results::UnprovidedInjectFinding::with_actions(
+                fallow_api::editor_results::UnprovidedInject {
+                    path: "/Comp.vue".into(),
+                    key_name: "ApiKey".to_string(),
+                    framework: "vue".to_string(),
+                    line: 25,
+                    col: 0,
+                },
+            ),
+        ],
+        unrendered_components: vec![
+            fallow_api::editor_results::UnrenderedComponentFinding::with_actions(
+                fallow_api::editor_results::UnrenderedComponent {
+                    path: "/Widget.vue".into(),
+                    component_name: "Widget".to_string(),
+                    framework: "vue".to_string(),
+                    reachable_via: None,
+                    line: 26,
+                    col: 0,
+                },
+            ),
+        ],
+        unused_component_props: vec![
+            fallow_api::editor_results::UnusedComponentPropFinding::with_actions(
+                fallow_api::editor_results::UnusedComponentProp {
+                    path: "/Widget.vue".into(),
+                    component_name: "Widget".to_string(),
+                    prop_name: "size".to_string(),
+                    line: 27,
+                    col: 0,
+                },
+            ),
+        ],
+        unused_component_emits: vec![
+            fallow_api::editor_results::UnusedComponentEmitFinding::with_actions(
+                fallow_api::editor_results::UnusedComponentEmit {
+                    path: "/Widget.vue".into(),
+                    component_name: "Widget".to_string(),
+                    emit_name: "change".to_string(),
+                    line: 28,
+                    col: 0,
+                },
+            ),
+        ],
+        unused_component_inputs: vec![
+            fallow_api::editor_results::UnusedComponentInputFinding::with_actions(
+                fallow_api::editor_results::UnusedComponentInput {
+                    path: "/widget.component.ts".into(),
+                    component_name: "WidgetComponent".to_string(),
+                    input_name: "size".to_string(),
+                    line: 29,
+                    col: 0,
+                },
+            ),
+        ],
+        unused_component_outputs: vec![
+            fallow_api::editor_results::UnusedComponentOutputFinding::with_actions(
+                fallow_api::editor_results::UnusedComponentOutput {
+                    path: "/widget.component.ts".into(),
+                    component_name: "WidgetComponent".to_string(),
+                    output_name: "change".to_string(),
+                    line: 30,
+                    col: 0,
+                },
+            ),
+        ],
+        unused_svelte_events: vec![
+            fallow_api::editor_results::UnusedSvelteEventFinding::with_actions(
+                fallow_api::editor_results::UnusedSvelteEvent {
+                    path: "/Child.svelte".into(),
+                    component_name: "Child".to_string(),
+                    event_name: "dead".to_string(),
+                    line: 31,
+                    col: 0,
+                },
+            ),
+        ],
+        unused_server_actions: vec![
+            fallow_api::editor_results::UnusedServerActionFinding::with_actions(
+                fallow_api::editor_results::UnusedServerAction {
+                    path: "/app/actions.ts".into(),
+                    action_name: "createUser".to_string(),
+                    line: 32,
+                    col: 0,
+                },
+            ),
+        ],
+        unused_load_data_keys: vec![
+            fallow_api::editor_results::UnusedLoadDataKeyFinding::with_actions(
+                fallow_api::editor_results::UnusedLoadDataKey {
+                    path: "/src/routes/blog/+page.server.ts".into(),
+                    key_name: "posts".to_string(),
+                    line: 33,
+                    col: 0,
+                    route_dir: None,
+                },
+            ),
+        ],
+        unused_load_data_keys_global_abstain: true,
+        prop_drilling_chains: vec![
+            fallow_api::editor_results::PropDrillingChainFinding::with_actions(
+                fallow_api::editor_results::PropDrillingChain {
+                    prop: "user".to_string(),
+                    depth: 1,
+                    hops: vec![fallow_api::editor_results::PropDrillHop {
+                        file: "/Hop.tsx".into(),
+                        line: 34,
+                        component: "Hop".to_string(),
+                    }],
+                },
+            ),
+        ],
+        thin_wrappers: vec![
+            fallow_api::editor_results::ThinWrapperFinding::with_actions(
+                fallow_api::editor_results::ThinWrapper {
+                    file: "/Wrapper.tsx".into(),
+                    line: 35,
+                    component: "Wrapper".to_string(),
+                    child_component: "Child".to_string(),
+                },
+            ),
+        ],
+        duplicate_prop_shapes: vec![
+            fallow_api::editor_results::DuplicatePropShapeFinding::with_actions(
+                fallow_api::editor_results::DuplicatePropShape {
+                    file: "/Card.tsx".into(),
+                    line: 36,
+                    component: "Card".to_string(),
+                    shape: vec!["subtitle".to_string(), "title".to_string()],
+                    group_size: 2,
+                    sharing_components: vec![],
+                },
+            ),
+        ],
         route_collisions: vec![
             fallow_api::editor_results::RouteCollisionFinding::with_actions(
                 fallow_api::editor_results::RouteCollision {
@@ -2069,7 +2191,13 @@ fn merge_test_source_with_all_fields() -> AnalysisResults {
         ],
         suppression_count: 1,
         unused_component_props_exempted: 1,
-        active_suppressions: Vec::new(),
+        active_suppressions: vec![fallow_api::editor_results::ActiveSuppression {
+            path: "/f.ts".into(),
+            kind: Some("unused-export".to_string()),
+            is_file_level: false,
+            reason: None,
+            comment_line: 37,
+        }],
         feature_flags: vec![fallow_api::editor_results::FeatureFlag {
             path: "/f.ts".into(),
             flag_name: "ENABLE_X".to_string(),
@@ -2110,7 +2238,7 @@ fn merge_test_source_with_all_fields() -> AnalysisResults {
             runtime: None,
         }],
         security_unresolved_edge_files: 2,
-        security_unresolved_callee_sites: 0,
+        security_unresolved_callee_sites: 3,
         security_unresolved_callee_diagnostics: vec![
             fallow_api::editor_results::SecurityUnresolvedCalleeDiagnostic {
                 path: "/client.tsx".into(),
@@ -2143,7 +2271,14 @@ fn merge_test_source_with_all_fields() -> AnalysisResults {
             hooks: fallow_api::editor_results::ReactHookSummary::default(),
             props: Vec::new(),
         }],
-        semantic_framework_contracts: vec![],
+        semantic_framework_contracts: vec![fallow_types::semantic::SemanticFrameworkContract {
+            framework: "lit".to_string(),
+            package: "lit".to_string(),
+            heritage_symbol: "LitElement".to_string(),
+            heritage_names: vec!["LitElement".to_string()],
+            relation: fallow_types::semantic::SemanticFrameworkRelation::Extends,
+            members: vec!["render".to_string()],
+        }],
     }
 }
 
@@ -2198,6 +2333,27 @@ fn merge_results_covers_all_fields() {
         Some(3)
     );
     assert_eq!(target.react_component_intel.len(), 1);
+    assert_eq!(target.dev_dependencies_in_production.len(), 1);
+    assert_eq!(target.boundary_coverage_violations.len(), 1);
+    assert_eq!(target.route_collisions.len(), 1);
+    assert_eq!(target.dynamic_segment_name_conflicts.len(), 1);
+    assert_eq!(target.unprovided_injects.len(), 1);
+    assert_eq!(target.unrendered_components.len(), 1);
+    assert_eq!(target.unused_component_props.len(), 1);
+    assert_eq!(target.unused_component_emits.len(), 1);
+    assert_eq!(target.unused_component_inputs.len(), 1);
+    assert_eq!(target.unused_component_outputs.len(), 1);
+    assert_eq!(target.unused_svelte_events.len(), 1);
+    assert_eq!(target.unused_server_actions.len(), 1);
+    assert_eq!(target.unused_load_data_keys.len(), 1);
+    assert!(target.unused_load_data_keys_global_abstain);
+    assert_eq!(target.prop_drilling_chains.len(), 1);
+    assert_eq!(target.thin_wrappers.len(), 1);
+    assert_eq!(target.duplicate_prop_shapes.len(), 1);
+    assert_eq!(target.active_suppressions.len(), 1);
+    assert_eq!(target.semantic_framework_contracts.len(), 1);
+    assert_eq!(target.security_unresolved_callee_sites, 3);
+    assert_eq!(target.unused_component_props_exempted, 1);
 }
 
 #[test]

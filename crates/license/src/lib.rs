@@ -83,7 +83,9 @@ pub struct LicenseClaims {
     pub features: Vec<String>,
     /// Issued-at, seconds since UNIX epoch.
     pub iat: i64,
-    /// Expiration, seconds since UNIX epoch.
+    /// Expiration, seconds since UNIX epoch. A `0` here is not "expired at the
+    /// epoch": [`grace_state`] treats it as no expiry at all. See that
+    /// function for the open question about what the issuer means by it.
     pub exp: i64,
     /// Unique JWT ID (used for refresh + revocation).
     pub jti: String,
@@ -366,6 +368,15 @@ pub fn verify_jwt_with_skew(
 
 /// Map a verified [`LicenseClaims`] to a [`LicenseStatus`] using the 7/cap/hard-fail
 /// ladder.
+///
+/// `exp == 0` is a special case: the `i64::from(claims.exp != 0)` factor forces
+/// `delta_seconds` to 0, so the status is `Valid { days_until_expiry: 0 }` at
+/// any `now`, and [`LicenseStatus::permits`] therefore keeps returning true
+/// indefinitely. That branch has been here since the crate was scaffolded and
+/// nothing in this repository states whether the issuer ever signs `exp = 0`,
+/// so it is documented as-is rather than reinterpreted. Whether `exp == 0`
+/// means a perpetual license or a malformed claim is a question for the
+/// issuer; this function does not decide it.
 #[must_use]
 pub fn grace_state(claims: LicenseClaims, now: i64, hard_fail_days: u64) -> LicenseStatus {
     let delta_seconds = i64::from(claims.exp != 0) * (claims.exp - now);

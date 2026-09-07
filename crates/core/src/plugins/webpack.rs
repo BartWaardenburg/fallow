@@ -96,7 +96,7 @@ pub(super) fn parse_webpack_loaders(source: &str, path: &Path, result: &mut Plug
     let alloc = Allocator::default();
     let parsed = Parser::new(&alloc, source, source_type).parse();
 
-    let Some(obj) = config_parser::find_config_object_pub(&parsed.program) else {
+    let Some(obj) = config_parser::find_config_object(&parsed.program) else {
         return;
     };
 

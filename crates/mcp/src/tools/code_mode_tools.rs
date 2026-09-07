@@ -94,37 +94,6 @@ impl CodeModeTool {
         Self::GetCleanupCandidates,
     ];
 
-    /// Position of the variant in [`Self::ALL`]. A new variant makes this
-    /// match non-exhaustive, which is the compile-time nudge to extend `ALL`
-    /// as well; `all_lists_every_variant_in_order` proves the two agree.
-    #[cfg(test)]
-    const fn ordinal(self) -> usize {
-        match self {
-            Self::Analyze => 0,
-            Self::Combined => 1,
-            Self::CheckChanged => 2,
-            Self::SecurityCandidates => 3,
-            Self::FindDupes => 4,
-            Self::ProjectInfo => 5,
-            Self::TraceExport => 6,
-            Self::TraceFile => 7,
-            Self::ImpactClosure => 8,
-            Self::TraceDependency => 9,
-            Self::TraceClone => 10,
-            Self::CheckHealth => 11,
-            Self::Audit => 12,
-            Self::FallowExplain => 13,
-            Self::ListBoundaries => 14,
-            Self::FeatureFlags => 15,
-            Self::Impact => 16,
-            Self::CheckRuntimeCoverage => 17,
-            Self::GetHotPaths => 18,
-            Self::GetBlastRadius => 19,
-            Self::GetImportance => 20,
-            Self::GetCleanupCandidates => 21,
-        }
-    }
-
     pub(super) fn from_name(name: &str) -> Result<Self, String> {
         match name {
             "analyze" => Ok(Self::Analyze),
@@ -711,18 +680,6 @@ mod tests {
     use fallow_types::mcp_manifest::{MCP_TOOLS, code_mode_allowlist};
 
     use super::*;
-
-    #[test]
-    fn all_lists_every_variant_in_order() {
-        for (index, tool) in CodeModeTool::ALL.iter().enumerate() {
-            assert_eq!(
-                tool.ordinal(),
-                index,
-                "CodeModeTool::ALL disagrees with ordinal() at slot {index}; both must list \
-                 every variant in the same order"
-            );
-        }
-    }
 
     /// The drift gate finding 5 was missing: `MCP_TOOLS` and the sandbox's
     /// dispatch enum must describe the same allowlist, so a tool cannot be

@@ -3,11 +3,11 @@
 Optional TypeScript-Go semantic refinement sidecar for Fallow. It accepts one
 versioned JSON request on stdin and writes one JSON response to stdout.
 
-The sidecar is deliberately narrower than a general type-aware linter. Protocol
-v6 accepts a bounded set of tagged `symbol-use`, `symbol-trace`, `api-surface`,
-`symbol-impact`, and `type-coupling` queries. Each selected TypeScript project
-creates one Program. Symbol use, trace, and impact queries share one indexed
-source traversal per Program.
+The sidecar is deliberately narrower than a general type-aware linter. The wire
+protocol accepts a bounded set of tagged `symbol-use`, `symbol-trace`,
+`api-surface`, `symbol-impact`, and `type-coupling` queries. Each selected
+TypeScript project creates one Program. Symbol use, trace, and impact queries
+share one indexed source traversal per Program.
 
 Symbol identities include the canonical project-relative path, value or type
 namespace, declaration kind, exported and local name, one-based line,

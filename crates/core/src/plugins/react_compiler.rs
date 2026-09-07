@@ -36,7 +36,7 @@ pub(super) fn extract_dependencies(
     plugin_array_paths: &[&[&str]],
 ) -> Vec<String> {
     config_parser::extract_from_source(source, path, |program| {
-        let config = config_parser::find_config_object_pub(program)?;
+        let config = config_parser::find_config_object(program)?;
         let locals = collect_locals(program);
         let mut deps = Vec::new();
 

@@ -12,7 +12,7 @@ use crate::module_graph::RetainedModuleGraph;
     reason = "engine owns a copied trace implementation whose internal pub uses serve its tests"
 )]
 #[path = "trace_impl.rs"]
-mod trace_impl;
+pub(crate) mod trace_impl;
 
 /// Engine alias for [`fallow_types::trace::ClassMemberTrace`].
 pub type ClassMemberTrace = fallow_types::trace::ClassMemberTrace;

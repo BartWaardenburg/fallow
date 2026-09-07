@@ -40,12 +40,8 @@ impl ExtractionResult {
         });
     }
 
-    /// Map an extracted-buffer byte offset back to the original source.
-    #[must_use]
-    pub fn original_offset(&self, offset: u32) -> Option<u32> {
-        self.original_offset_start_biased(offset)
-    }
-
+    /// Map an extracted-buffer byte offset back to the original source, taking
+    /// the fragment that begins at `offset` when two fragments meet there.
     fn original_offset_start_biased(&self, offset: u32) -> Option<u32> {
         let idx = self
             .fragments
@@ -60,6 +56,8 @@ impl ExtractionResult {
         }
     }
 
+    /// Map an extracted-buffer byte offset back to the original source, taking
+    /// the fragment that ends at `offset` when two fragments meet there.
     fn original_offset_end_biased(&self, offset: u32) -> Option<u32> {
         let idx = self
             .fragments
@@ -80,12 +78,71 @@ impl ExtractionResult {
         if span.start == 0 && span.end == 0 {
             return span;
         }
-        let Some(start) = self.original_offset(span.start) else {
+        let Some(start) = self.original_offset_start_biased(span.start) else {
             return span;
         };
         let Some(end) = self.original_offset_end_biased(span.end) else {
             return span;
         };
         Span::new(start, end)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Two adjacent fragments: `"ab"` from original offset 10, `"cd"` from 100.
+    /// Generated offset 2 is the seam between them.
+    fn two_fragments() -> ExtractionResult {
+        let mut result = ExtractionResult::default();
+        result.push_mapped("ab", 10);
+        result.push_mapped("cd", 100);
+        result
+    }
+
+    #[test]
+    fn start_biased_lookup_takes_the_fragment_beginning_at_the_offset() {
+        let result = two_fragments();
+        assert_eq!(result.original_offset_start_biased(0), Some(10));
+        assert_eq!(result.original_offset_start_biased(1), Some(11));
+        // The seam belongs to the second fragment for a span start.
+        assert_eq!(result.original_offset_start_biased(2), Some(100));
+    }
+
+    #[test]
+    fn end_biased_lookup_takes_the_fragment_ending_at_the_offset() {
+        let result = two_fragments();
+        // The same seam stays in the first fragment for a span end.
+        assert_eq!(result.original_offset_end_biased(2), Some(12));
+        assert_eq!(result.original_offset_end_biased(4), Some(102));
+        // Nothing precedes offset 0, so an end-biased lookup finds no fragment.
+        assert_eq!(result.original_offset_end_biased(0), None);
+    }
+
+    #[test]
+    fn a_fragment_end_maps_but_an_offset_past_it_does_not() {
+        let result = ExtractionResult::contiguous("abcde", 100);
+        assert_eq!(result.original_offset_start_biased(5), Some(105));
+        assert_eq!(result.original_offset_end_biased(5), Some(105));
+        assert_eq!(result.original_offset_start_biased(6), None);
+        assert_eq!(result.original_offset_end_biased(6), None);
+    }
+
+    #[test]
+    fn an_empty_result_maps_nothing() {
+        let result = ExtractionResult::default();
+        assert_eq!(result.original_offset_start_biased(0), None);
+        assert_eq!(result.original_offset_end_biased(0), None);
+    }
+
+    #[test]
+    fn remap_span_pairs_the_start_biased_and_end_biased_lookups() {
+        let result = two_fragments();
+        assert_eq!(result.remap_span(Span::new(1, 4)), Span::new(11, 102));
+        // A zero span is returned untouched.
+        assert_eq!(result.remap_span(Span::new(0, 0)), Span::new(0, 0));
+        // An unmappable endpoint leaves the whole span untouched.
+        assert_eq!(result.remap_span(Span::new(1, 9)), Span::new(1, 9));
     }
 }

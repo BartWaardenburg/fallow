@@ -170,7 +170,7 @@ fn ultracite_selector_binding(program: &Program<'_>) -> Option<String> {
 }
 
 fn wired_js_plugins_binding(program: &Program<'_>) -> Option<String> {
-    let config = config_parser::find_config_object_pub(program)?;
+    let config = config_parser::find_config_object(program)?;
     if function_scoped_config_object(program, config) {
         return None;
     }

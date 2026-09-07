@@ -5,14 +5,14 @@ import { fileURLToPath } from "node:url";
 
 const rowId = ({ anchor, key, label }) => `${label}\t${key}\t${anchor}`;
 
-const SUMMARY_PROBLEM_KEYS = [
-  "githubMissing",
-  "gitlabMissing",
-  "githubExtra",
-  "gitlabExtra",
-  "parityMissingFromGithub",
-  "parityMissingFromGitlab",
-];
+// The four registry diffs are the whole verdict. If all four are empty then
+// the GitHub row set and the GitLab row set both equal the registry set, so
+// the two parity diffs are empty as well; and any row a parity diff could
+// contain is in the registry (making it a *Missing row) or is not (making it
+// a *Extra row). The parity fields therefore stay on the result object and in
+// the report, where they state the cross-provider direction, but they cannot
+// decide pass or fail.
+const SUMMARY_PROBLEM_KEYS = ["githubMissing", "gitlabMissing", "githubExtra", "gitlabExtra"];
 
 const sortRows = (rows) => rows.toSorted((a, b) => rowId(a).localeCompare(rowId(b)));
 

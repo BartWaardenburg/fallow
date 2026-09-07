@@ -22,6 +22,19 @@ pub fn project_uses_rsc_directives(declared_deps: &FxHashSet<String>) -> bool {
         .any(|dep| declared_deps.contains(*dep))
 }
 
+/// Whether the project declares a React-family runtime dependency. Single home
+/// for the gate at the top of the React-only detectors (component intel, render
+/// fan-in, unused component props, thin wrappers, duplicate prop shapes, prop
+/// drilling), which all receive the same `declared_deps` set. The Vue / Svelte /
+/// Angular gates deliberately differ per detector and are NOT part of this
+/// catalogue.
+pub(in crate::analyze) fn declares_react_runtime(declared_deps: &FxHashSet<String>) -> bool {
+    const REACT_RUNTIME_DEPS: &[&str] = &["react", "react-dom", "next", "preact"];
+    REACT_RUNTIME_DEPS
+        .iter()
+        .any(|dep| declared_deps.contains(*dep))
+}
+
 /// Check if an import specifier is a virtual module that does not correspond to a real file.
 ///
 /// The `virtual:` prefix is a convention established by Vite and widely adopted across

@@ -8,6 +8,7 @@ use fallow_api::{
     EditorAnalysisResults as AnalysisResults, EditorDuplicationReport as DuplicationReport,
 };
 
+use crate::code_lens::{pluralize, react_hook_segment};
 use crate::diagnostics::security::security_label;
 use crate::markdown::format_inline_code;
 use crate::position::{PositionMapper, line_range_from_byte_col};
@@ -934,63 +935,26 @@ fn check_react_component_intel(
 
 /// Build the component summary line for the hover, matching the code-lens
 /// title format: `rendered 12x (8 parents) · 5 props · 9 hooks (4 state, ...)`.
-/// Zero segments are omitted; singular/plural is honored.
+/// Zero segments are omitted; singular/plural is honored. The hook segment and
+/// the pluralization come from `code_lens`, so the lens title and this line
+/// cannot describe the same component differently; only the empty-state string
+/// is surface-specific.
 fn react_component_summary(intel: &fallow_api::editor_results::ReactComponentIntel) -> String {
     let mut segments: Vec<String> = Vec::new();
     if intel.render_sites > 0 {
-        let parents = intel_pluralize(intel.distinct_parents, "parent");
+        let parents = pluralize(intel.distinct_parents, "parent");
         segments.push(format!("rendered {}x ({parents})", intel.render_sites));
     }
     if intel.prop_count > 0 {
-        segments.push(intel_pluralize(u32::from(intel.prop_count), "prop"));
+        segments.push(pluralize(u32::from(intel.prop_count), "prop"));
     }
-    if let Some(hooks) = intel_hook_segment(&intel.hooks) {
+    if let Some(hooks) = react_hook_segment(&intel.hooks) {
         segments.push(hooks);
     }
     if segments.is_empty() {
         return "rendered nowhere, no props, no hooks".to_string();
     }
     segments.join(" · ")
-}
-
-/// `N hooks (a state, b effect, ...)` or `None` when the component uses no
-/// hooks (kind sub-counts omitted when zero).
-fn intel_hook_segment(hooks: &fallow_api::editor_results::ReactHookSummary) -> Option<String> {
-    let total = u32::from(hooks.state)
-        + u32::from(hooks.effect)
-        + u32::from(hooks.memo)
-        + u32::from(hooks.callback)
-        + u32::from(hooks.custom);
-    if total == 0 {
-        return None;
-    }
-    let mut breakdown: Vec<String> = Vec::new();
-    for (count, label) in [
-        (hooks.state, "state"),
-        (hooks.effect, "effect"),
-        (hooks.memo, "memo"),
-        (hooks.callback, "callback"),
-        (hooks.custom, "custom"),
-    ] {
-        if count > 0 {
-            breakdown.push(format!("{count} {label}"));
-        }
-    }
-    let head = intel_pluralize(total, "hook");
-    if breakdown.is_empty() {
-        Some(head)
-    } else {
-        Some(format!("{head} ({})", breakdown.join(", ")))
-    }
-}
-
-/// `count + " " + noun`, appending `s` when count is not 1.
-fn intel_pluralize(count: u32, noun: &str) -> String {
-    if count == 1 {
-        format!("1 {noun}")
-    } else {
-        format!("{count} {noun}s")
-    }
 }
 
 /// Check if the position is on an unresolved import.

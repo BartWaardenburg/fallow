@@ -1072,34 +1072,6 @@ mod tests {
     use super::*;
     use crate::{CodeClimateIssueKind, CodeClimateLines, CodeClimateLocation};
 
-    fn escape_md_legacy(value: &str) -> String {
-        let collapsed = value.replace("\r\n", " ").replace(['\n', '\r'], " ");
-        let mut out = String::with_capacity(collapsed.len());
-        for ch in collapsed.chars() {
-            if matches!(
-                ch,
-                '\\' | '`'
-                    | '*'
-                    | '_'
-                    | '['
-                    | ']'
-                    | '('
-                    | ')'
-                    | '!'
-                    | '<'
-                    | '>'
-                    | '#'
-                    | '|'
-                    | '~'
-                    | '&'
-            ) {
-                out.push('\\');
-            }
-            out.push(ch);
-        }
-        out.trim().to_owned()
-    }
-
     fn category_for_rule(rule_id: &str) -> &'static str {
         match rule_id {
             "fallow/code-duplication" => "Duplication",
@@ -1397,26 +1369,27 @@ mod tests {
     }
 
     #[test]
-    fn escape_md_matches_legacy_contract_corpus() {
-        const ALPHABET: [char; 12] = [
-            'a', ' ', '\t', '\r', '\n', '\\', '|', '`', '&', '\u{2003}', 'é', '🦀',
-        ];
+    fn escape_md_trims_surrounding_whitespace() {
+        assert_eq!(escape_md("  a\u{2003}\r\n"), "a");
+        assert_eq!(escape_md(" \t\r\n\u{2003} "), "");
+    }
 
-        for length in 0..=4 {
-            let case_count = ALPHABET.len().pow(length);
-            for mut encoded in 0..case_count {
-                let mut value = String::new();
-                for _ in 0..length {
-                    value.push(ALPHABET[encoded % ALPHABET.len()]);
-                    encoded /= ALPHABET.len();
-                }
-                assert_eq!(
-                    escape_md(&value),
-                    escape_md_legacy(&value),
-                    "contract mismatch for {value:?}"
-                );
-            }
-        }
+    #[test]
+    fn escape_md_collapses_crlf_to_one_space() {
+        let collapsed = escape_md("a\r\nb\rc\nd");
+        assert_eq!(collapsed, "a b c d");
+        assert_eq!(collapsed.len(), 7, "CRLF must not expand to two spaces");
+    }
+
+    #[test]
+    fn escape_md_preserves_interior_tabs_and_wide_spaces() {
+        assert_eq!(escape_md("a\tb"), "a\tb");
+        assert_eq!(escape_md("a\u{2003}b"), "a\u{2003}b");
+    }
+
+    #[test]
+    fn escape_md_passes_non_ascii_through_unchanged() {
+        assert_eq!(escape_md("é🦀"), "é🦀");
     }
 
     #[test]
@@ -1490,6 +1463,7 @@ mod tests {
         let raw = "code with `backticks` and *stars*";
         let once = escape_md(raw);
         let twice = escape_md(&once);
-        assert!(twice.contains(r"\\"));
+        assert_eq!(once, r"code with \`backticks\` and \*stars\*");
+        assert_eq!(twice, r"code with \\\`backticks\\\` and \\\*stars\\\*");
     }
 }

@@ -117,7 +117,7 @@ impl Drop for WindowsJobGuard {
 pub struct ProcessTree {
     #[cfg(unix)]
     process_group_id: i32,
-    #[cfg(unix)]
+    #[cfg(all(unix, target_vendor = "apple"))]
     leader_exit_observed: std::sync::atomic::AtomicBool,
     #[cfg(windows)]
     job: WindowsHandle,
@@ -180,6 +180,7 @@ impl ProcessTree {
             .map_err(|_| io::Error::other(format!("invalid fallow subprocess PID {pid}")))?;
         Ok(Self {
             process_group_id,
+            #[cfg(target_vendor = "apple")]
             leader_exit_observed: std::sync::atomic::AtomicBool::new(false),
         })
     }
@@ -313,6 +314,8 @@ impl ProcessTree {
         // SAFETY: waitid initialized the siginfo_t on success. A zero si_pid
         // means WNOHANG observed no state change yet.
         let exited = unsafe { info.assume_init().si_pid() } != 0;
+        // Only the apple EPERM branch of `terminate` reads this cache.
+        #[cfg(target_vendor = "apple")]
         if exited {
             self.leader_exit_observed
                 .store(true, std::sync::atomic::Ordering::Relaxed);

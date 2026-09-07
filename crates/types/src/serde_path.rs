@@ -111,11 +111,10 @@ mod tests {
     }
 
     /// Property tests that drive the real `serialize` / `serialize_option` /
-    /// `serialize_vec`
-    /// functions through `serde_json`, rather than the `normalize` proxy the
-    /// example tests above use. The forward-slash output is a load-bearing
-    /// cross-platform invariant for JSON/SARIF, and the input space (arbitrary
-    /// separators) is unbounded, so it is encoded as properties.
+    /// `serialize_vec` functions through `serde_json`. The forward-slash output
+    /// is a load-bearing cross-platform invariant for JSON/SARIF, and the input
+    /// space (arbitrary separators) is unbounded, so it is encoded as
+    /// properties.
     mod proptests {
         use proptest::prelude::*;
         use serde::Serialize;

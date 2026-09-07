@@ -807,27 +807,12 @@ fn first_quoted_subject(message: &str) -> Option<&str> {
     (!subject.is_empty()).then_some(subject)
 }
 
-/// Map fallow severity to CodeClimate severity.
-#[cfg(test)]
-fn severity_to_codeclimate(s: Severity) -> CodeClimateSeverity {
-    match s {
-        Severity::Error => CodeClimateSeverity::Major,
-        Severity::Warn => CodeClimateSeverity::Minor,
-        Severity::Off => unreachable!(),
-    }
-}
-
 /// Compute a relative path string with forward-slash normalization.
 ///
 /// Uses `normalize_uri` to ensure forward slashes on all platforms
 /// and percent-encode brackets for Next.js dynamic routes.
 fn cc_path(path: &Path, root: &Path) -> String {
     normalize_uri(&relative_path(path, root).display().to_string())
-}
-
-#[cfg(test)]
-fn fingerprint_hash(parts: &[&str]) -> String {
-    codeclimate_fingerprint_hash(parts)
 }
 
 /// Fetch CodeClimate issues from the API-owned dead-code output builder.
@@ -1760,64 +1745,16 @@ mod tests {
         assert_eq!(output[0]["location"]["lines"]["begin"], 1);
     }
 
-    #[test]
-    fn fingerprint_hash_different_inputs_differ() {
-        let h1 = fingerprint_hash(&["a", "b"]);
-        let h2 = fingerprint_hash(&["a", "c"]);
-        assert_ne!(h1, h2);
-    }
-
-    #[test]
-    fn fingerprint_hash_order_matters() {
-        let h1 = fingerprint_hash(&["a", "b"]);
-        let h2 = fingerprint_hash(&["b", "a"]);
-        assert_ne!(h1, h2);
-    }
-
-    #[test]
-    fn fingerprint_hash_separator_prevents_collision() {
-        let h1 = fingerprint_hash(&["ab", "c"]);
-        let h2 = fingerprint_hash(&["a", "bc"]);
-        assert_ne!(h1, h2);
-    }
-
-    #[test]
-    fn fingerprint_hash_is_16_hex_chars() {
-        let h = fingerprint_hash(&["test"]);
-        assert_eq!(h.len(), 16);
-        assert!(h.chars().all(|c| c.is_ascii_hexdigit()));
-    }
-
-    #[test]
-    fn severity_error_maps_to_major() {
-        assert_eq!(
-            severity_to_codeclimate(Severity::Error),
-            CodeClimateSeverity::Major
-        );
-    }
-
-    #[test]
-    fn severity_warn_maps_to_minor() {
-        assert_eq!(
-            severity_to_codeclimate(Severity::Warn),
-            CodeClimateSeverity::Minor
-        );
-    }
-
-    #[test]
-    #[should_panic(expected = "internal error: entered unreachable code")]
-    fn severity_off_is_unreachable() {
-        let _ = severity_to_codeclimate(Severity::Off);
-    }
-
     /// Production-mode regression: rules can flip to `Severity::Off` while
     /// the matching findings slice arrives empty (the analyzer's own off-
     /// rule short-circuit clears the vec, but the generic-iterator helpers
-    /// in `codeclimate.rs` previously called `severity_to_codeclimate`
-    /// before checking emptiness and panicked at `Severity::Off`).
+    /// previously called `severity_to_codeclimate` before checking
+    /// emptiness and panicked at `Severity::Off`).
     /// `fallow dead-code --format codeclimate --production` on any project
     /// with a `--production`-suppressed dep / export / member rule used to
-    /// exit 101 with `entered unreachable code` at `ci/severity.rs:28`.
+    /// exit 101 with `entered unreachable code` at the `Severity::Off` arm
+    /// of `severity_to_codeclimate`. Both those helpers and that mapper now
+    /// live in `crates/api/src/dead_code_codeclimate.rs`.
     /// This test exercises all three previously-vulnerable helpers
     /// (`push_dep_cc_issues`, `push_unused_export_issues`,
     /// `push_unused_member_issues`) through `api_codeclimate_issues`.

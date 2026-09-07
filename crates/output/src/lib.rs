@@ -92,10 +92,9 @@ pub use audit_brief::{
     serialize_walkthrough_guide_json_output, serialize_walkthrough_validation_json_output,
 };
 pub use audit_decision_surface::{
-    ALL_CATEGORIES, DECISION_SURFACE_SCHEMA_VERSION, Decision, DecisionAction, DecisionActionType,
+    DECISION_SURFACE_SCHEMA_VERSION, Decision, DecisionAction, DecisionActionType,
     DecisionCategory, DecisionSurface, DecisionSurfaceOutput, DecisionSurfaceSchemaVersion,
-    DecisionWithActions, TruncationNote, build_decision_surface_output, decision_actions,
-    suppress_comment,
+    DecisionWithActions, TruncationNote, build_decision_surface_output, suppress_comment,
 };
 pub use audit_focus::{ConfidenceFlag, FocusLabel, FocusMap, FocusScore, FocusUnit};
 pub use audit_render::{
@@ -113,9 +112,8 @@ pub use audit_weakening::{WeakeningKind, WeakeningSignal};
 pub use check::{
     CHECK_SCHEMA_VERSION, CheckGroupedEntry, CheckGroupedOutput, CheckOutput, CheckOutputInput,
     GroupByMode, apply_config_fixable_to_duplicate_exports, build_check_output,
-    build_check_summary, harmonize_dead_code_health_suppress_line_actions,
-    harmonize_multi_kind_suppress_line_actions, serialize_check_grouped_json_output,
-    serialize_check_json_output,
+    harmonize_dead_code_health_suppress_line_actions, harmonize_multi_kind_suppress_line_actions,
+    serialize_check_grouped_json_output, serialize_check_json_output,
 };
 pub use ci_output::{
     CiIssue, CiLocation, CiProvider, GroupedReviewIssues, MARKER_PREFIX_V2, MARKER_SUFFIX_V2,
@@ -146,7 +144,6 @@ pub use coverage_envelopes::{
 pub use dead_code_sarif::build_dead_code_sarif;
 pub use diff::{
     DiffIndex, MAX_ADDED_LINES, MAX_DIFF_BYTES, parse_new_hunk_start, relative_to_diff_path,
-    strip_path_component_prefix,
 };
 pub use doctor::{
     DOCTOR_SCHEMA_VERSION, DoctorCheck, DoctorCheckCategory, DoctorCheckId, DoctorCheckStatus,
@@ -154,9 +151,8 @@ pub use doctor::{
 };
 pub use dupes::{
     CloneFamilyAction, CloneFamilyActionType, CloneGroupAction, CloneGroupActionType,
-    DUPES_PROGRAMMATIC_SCHEMA_VERSION, DUPES_SCHEMA_VERSION, DUPES_SUPPRESS_COMMENT,
-    DUPES_SUPPRESS_DESCRIPTION, DupesOutput, DupesOutputInput, build_dupes_output,
-    clone_family_actions, clone_group_actions, serialize_dupes_json_output,
+    DUPES_PROGRAMMATIC_SCHEMA_VERSION, DUPES_SCHEMA_VERSION, DupesOutput, DupesOutputInput,
+    build_dupes_output, clone_family_actions, clone_group_actions, serialize_dupes_json_output,
 };
 pub use error_envelope::ErrorOutput;
 pub use fallow_types::envelope;
@@ -171,13 +167,10 @@ pub use feature_flags::{
     FeatureFlagsOutputInput, build_feature_flags_output, feature_flags_meta,
     serialize_feature_flags_json_output,
 };
-pub use fix::{
-    FixJsonOutput, FixJsonOutputInput, build_fix_json_output, count_applied_fixes,
-    count_reported_fix_skips, serialize_fix_json_output,
-};
+pub use fix::{FixJsonOutput, FixJsonOutputInput, count_applied_fixes, serialize_fix_json_output};
 pub use health::{
     HEALTH_SCHEMA_VERSION, HealthJsonOutputInput, HealthOutput, HealthOutputInput,
-    build_health_output, serialize_health_json_output,
+    serialize_health_json_output,
 };
 pub use health_actions::HealthActionsMeta;
 pub use health_coverage::CoverageModel;
@@ -208,8 +201,7 @@ pub use health_diagnostics::{
 };
 pub use health_findings::{
     HealthActionContext, HealthActionOptions, HealthFinding, HotspotFinding,
-    RefactoringTargetFinding, SFC_TEMPLATE_SUPPRESS_COMMENT, SFC_TEMPLATE_SUPPRESS_DESCRIPTION,
-    build_health_finding_actions,
+    RefactoringTargetFinding, SFC_TEMPLATE_SUPPRESS_COMMENT, build_health_finding_actions,
 };
 pub use health_grouped::{HealthGroup, HealthGrouping};
 pub use health_report::HealthReport;
@@ -225,9 +217,9 @@ pub use health_runtime_coverage::{
 pub use health_scores::{
     COGNITIVE_EXTRACTION_THRESHOLD, ComplexityViolation, ComponentRollup, ContributorEntry,
     ContributorIdentifierFormat, CoverageSource, CoverageSourceConsistency, CoverageTier,
-    DEFAULT_COGNITIVE_CRITICAL, DEFAULT_COGNITIVE_HIGH, DEFAULT_CRAP_CRITICAL, DEFAULT_CRAP_HIGH,
-    DEFAULT_CYCLOMATIC_CRITICAL, DEFAULT_CYCLOMATIC_HIGH, DEFAULT_MAX_UNIT_SIZE, ExceededThreshold,
-    FileHealthScore, FindingSeverity, HEALTH_SCORE_FORMULA_VERSION, HOTSPOT_SCORE_THRESHOLD,
+    DEFAULT_COGNITIVE_CRITICAL, DEFAULT_COGNITIVE_HIGH, DEFAULT_CYCLOMATIC_CRITICAL,
+    DEFAULT_CYCLOMATIC_HIGH, DEFAULT_MAX_UNIT_SIZE, ExceededThreshold, FileHealthScore,
+    FindingSeverity, HEALTH_SCORE_FORMULA_VERSION, HOTSPOT_SCORE_THRESHOLD,
     HealthBaselineStaleness, HealthConfiguredThresholds, HealthEffectiveThresholds, HealthScore,
     HealthScorePenalties, HealthSummary, HotspotEntry, HotspotSummary, LargeFunctionEntry,
     MI_DENSITY_MIN_LINES, OwnershipMetrics, OwnershipState, ReactHookProfile,
@@ -294,20 +286,18 @@ pub use pr_summary::{
     PrSummaryStatus, render_pr_summary,
 };
 pub use report_contract::{
-    COVERAGE_ANALYZE_DOCS, COVERAGE_SETUP_DOCS, DUPES_DOCS, HEALTH_DOCS, SECURITY_DOCS,
-    SecurityRuleMeta, coverage_analyze_meta, coverage_setup_meta, dupes_meta, health_meta,
-    security_meta,
+    COVERAGE_ANALYZE_DOCS, COVERAGE_SETUP_DOCS, DUPES_DOCS, HEALTH_DOCS, SecurityRuleMeta,
+    coverage_analyze_meta, coverage_setup_meta, dupes_meta, health_meta, security_meta,
 };
 pub use review_envelopes::{
     GitHubReviewComment, GitHubReviewSide, GitLabReviewComment, GitLabReviewPosition,
-    GitLabReviewPositionType, MARKER_REGEX_FLAGS_V2, MARKER_REGEX_V2, REVIEW_ID_MARKER_PREFIX,
-    ReviewCheckConclusion, ReviewComment, ReviewEnvelopeEvent, ReviewEnvelopeMeta,
-    ReviewEnvelopeOutput, ReviewEnvelopeSchema, ReviewEnvelopeSummary, ReviewEnvelopeWireOutput,
-    ReviewId, ReviewProvider, ReviewReconcileOutput, ReviewReconcileSchema, body_matches_review_id,
-    default_marker_regex, default_marker_regex_flags, is_false, parse_review_id_marker,
-    review_id_marker, serialize_review_envelope_json_output,
-    serialize_review_reconcile_json_output, serialize_scoped_review_envelope_json_output,
-    validate_review_body_scope,
+    GitLabReviewPositionType, MARKER_REGEX_V2, ReviewCheckConclusion, ReviewComment,
+    ReviewEnvelopeEvent, ReviewEnvelopeMeta, ReviewEnvelopeOutput, ReviewEnvelopeSchema,
+    ReviewEnvelopeSummary, ReviewEnvelopeWireOutput, ReviewId, ReviewProvider,
+    ReviewReconcileOutput, ReviewReconcileSchema, body_matches_review_id, default_marker_regex,
+    default_marker_regex_flags, is_false, parse_review_id_marker, review_id_marker,
+    serialize_review_envelope_json_output, serialize_review_reconcile_json_output,
+    serialize_scoped_review_envelope_json_output, validate_review_body_scope,
 };
 pub use root_envelopes::{
     AUDIT_SCHEMA_VERSION, AuditCommand, AuditOutput, COMBINED_SCHEMA_VERSION, CombinedMeta,
@@ -318,9 +308,8 @@ pub use root_envelopes::{
 pub use sarif::{
     GHAS_SARIF_FINGERPRINT_KEY, SARIF_FINGERPRINT_KEY, SarifDocumentInput, SarifFindingFields,
     SarifFindingInput, SarifResultInput, SarifRuleInput, SarifSourceSnippetCache,
-    append_sarif_findings, build_sarif_document, build_sarif_finding, build_sarif_result,
-    build_sarif_result_with_snippet, build_sarif_rule, normalize_sarif_snippet,
-    sarif_finding_fingerprint,
+    append_sarif_findings, build_sarif_document, build_sarif_result,
+    build_sarif_result_with_snippet, build_sarif_rule, sarif_finding_fingerprint,
 };
 pub use saved_health::health_report_from_saved_value;
 pub use security::{
@@ -333,9 +322,9 @@ pub use security::{
     SecuritySurvivorsSchemaVersion, SecuritySurvivorsSummary, SecurityUnresolvedCalleeDiagnostics,
     SecurityUnresolvedCalleeReasonCount, SecurityUnresolvedCalleeSample,
     SecurityUnresolvedCalleeTopFile, SecurityVerifierVerdict, SecurityVerifierVerdictStatus,
-    build_security_summary, serialize_security_blind_spots_json_output,
-    serialize_security_json_output, serialize_security_summary_json_output,
-    serialize_security_survivors_json_output, validate_saved_security_envelope,
+    serialize_security_blind_spots_json_output, serialize_security_json_output,
+    serialize_security_summary_json_output, serialize_security_survivors_json_output,
+    validate_saved_security_envelope,
 };
 pub use similar_code::{
     SIMILAR_CODE_CACHE_CLEAR_SCHEMA_VERSION, SIMILAR_CODE_INSPECT_SCHEMA_VERSION,

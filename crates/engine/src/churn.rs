@@ -11,6 +11,8 @@ use std::sync::OnceLock;
 
 use serde::Deserialize;
 
+use crate::changed_files::git_path_from_bytes;
+
 pub use fallow_types::churn::ChurnTrend;
 
 /// Function pointer signature used by `set_spawn_hook` to intercept the
@@ -946,19 +948,6 @@ impl<'a> GitLogEventParser<'a> {
     }
 }
 
-#[cfg(unix)]
-fn git_path_from_bytes(path: &[u8]) -> PathBuf {
-    use std::ffi::OsString;
-    use std::os::unix::ffi::OsStringExt;
-
-    PathBuf::from(OsString::from_vec(path.to_vec()))
-}
-
-#[cfg(windows)]
-fn git_path_from_bytes(path: &[u8]) -> PathBuf {
-    PathBuf::from(String::from_utf8_lossy(path).replace('/', "\\"))
-}
-
 /// Aggregate one file's raw commit events into a [`FileChurn`], applying
 /// recency weighting, trend detection, and per-author accumulation.
 #[expect(
@@ -1817,15 +1806,6 @@ mod tests {
             .into_event_state();
 
         assert!(warm.files.contains_key(&invalid_path));
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn git_path_bytes_use_windows_separators() {
-        assert_eq!(
-            git_path_from_bytes(b"src/nested/file.ts"),
-            PathBuf::from(r"src\nested\file.ts")
-        );
     }
 
     #[test]

@@ -135,7 +135,7 @@ fn collect_config(source: &str, config_path: &Path) -> CollectedConfig {
 
     let mut collector = ConfigCollector::default();
 
-    if let Some(config) = config_parser::find_config_object_pub(&parsed.program) {
+    if let Some(config) = config_parser::find_config_object(&parsed.program) {
         collector.root_dir = config_parser::find_property(config, "root")
             .and_then(|prop| config_parser::expression_to_path_string(&prop.value));
         collector.output_data = config_parser::find_property(config, "output")

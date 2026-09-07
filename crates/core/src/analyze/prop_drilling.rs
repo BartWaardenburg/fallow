@@ -37,7 +37,7 @@ use crate::graph::ModuleGraph;
 use crate::resolve::ResolvedModule;
 use crate::results::{PropDrillHop, PropDrillingChain};
 
-use super::predicates::is_react_file;
+use super::predicates::{declares_react_runtime, is_react_file};
 use super::react_resolve::{ChildResolver, CompKey};
 use super::{LineOffsetsMap, byte_offset_to_line_col};
 
@@ -124,11 +124,7 @@ pub fn find_prop_drilling_chains(
     declared_deps: &FxHashSet<String>,
     line_offsets_by_file: &LineOffsetsMap<'_>,
 ) -> PropDrillingScan {
-    let gated = declared_deps.contains("react")
-        || declared_deps.contains("react-dom")
-        || declared_deps.contains("next")
-        || declared_deps.contains("preact");
-    if !gated {
+    if !declares_react_runtime(declared_deps) {
         return PropDrillingScan::default();
     }
 

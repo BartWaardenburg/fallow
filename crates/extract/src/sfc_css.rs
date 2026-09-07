@@ -125,42 +125,31 @@ pub fn scoped_unused_classes(source: &str) -> Vec<String> {
 /// callers run the standard `.css` metric path on Vue/Svelte component styles.
 #[must_use]
 pub fn sfc_virtual_stylesheet(source: &str) -> Option<String> {
-    let mut out = String::new();
-    let mut current_line: usize = 1;
-    let mut found = false;
-    for caps in STYLE_BLOCK_RE.captures_iter(source) {
-        let attrs = caps.name("attrs").map_or("", |m| m.as_str());
-        if has_non_css_lang(attrs) {
-            continue;
-        }
-        let Some(body) = caps.name("body") else {
-            continue;
-        };
-        found = true;
-        let block_line = 1 + source[..body.start()]
-            .bytes()
-            .filter(|&b| b == b'\n')
-            .count();
-        while current_line < block_line {
-            out.push('\n');
-            current_line += 1;
-        }
-        out.push_str(body.as_str());
-        current_line += body.as_str().bytes().filter(|&b| b == b'\n').count();
-    }
-    found.then_some(out)
+    virtual_stylesheet(source, |attrs| !has_non_css_lang(attrs))
 }
 
 /// Build a virtual stylesheet from SFC preprocessor `<style>` blocks that the
 /// health layer can conservatively lower before CSS analytics.
 #[must_use]
 pub fn sfc_preprocessor_virtual_stylesheet(source: &str) -> Option<String> {
+    virtual_stylesheet(source, has_preprocessor_lang)
+}
+
+/// Build a virtual stylesheet from the `<style>` blocks whose opening-tag
+/// attribute string satisfies `keep`. Each kept body is placed at its real line
+/// in the SFC via blank-line padding, so CSS metric line numbers map straight
+/// back onto the SFC. Returns `None` when `keep` selected no block.
+///
+/// The two callers' predicates are deliberately not complements: a
+/// `lang="stylus"` or `lang="postcss"` block is rejected by both, so neither
+/// predicate may be rewritten as the negation of the other.
+fn virtual_stylesheet(source: &str, keep: impl Fn(&str) -> bool) -> Option<String> {
     let mut out = String::new();
     let mut current_line: usize = 1;
     let mut found = false;
     for caps in STYLE_BLOCK_RE.captures_iter(source) {
         let attrs = caps.name("attrs").map_or("", |m| m.as_str());
-        if !has_preprocessor_lang(attrs) {
+        if !keep(attrs) {
             continue;
         }
         let Some(body) = caps.name("body") else {
@@ -340,6 +329,27 @@ mod tests {
             .filter(|&b| b == b'\n')
             .count();
         assert_eq!(line_of_a, sfc_line_of_a, "vcss={vcss:?}");
+    }
+
+    #[test]
+    fn stylus_and_postcss_blocks_reach_neither_virtual_stylesheet() {
+        // `has_non_css_lang` keeps stylus and postcss out of the plain-CSS
+        // sheet, and `has_preprocessor_lang` does not select them for the
+        // preprocessor sheet, so the two predicates are not complements and
+        // neither may be rewritten as the negation of the other.
+        for source in [
+            "<template>\n  <div/>\n</template>\n<style lang=\"stylus\">\n.a\n  color red\n</style>",
+            "<template>\n  <div/>\n</template>\n<style lang=\"postcss\">\n.a { color: red; }\n</style>",
+        ] {
+            assert!(
+                super::sfc_virtual_stylesheet(source).is_none(),
+                "plain-CSS sheet must skip it: {source:?}"
+            );
+            assert!(
+                super::sfc_preprocessor_virtual_stylesheet(source).is_none(),
+                "preprocessor sheet must skip it: {source:?}"
+            );
+        }
     }
 
     #[test]

@@ -783,8 +783,37 @@ mod tests {
     fn discriminant_out_of_range() {
         // Pin exact discriminants so an inserted or reordered variant that
         // shifts wire values is caught. `ALL` is not discriminant-ordered, so
-        // the mapping is spelled out explicitly.
+        // the mapping is spelled out explicitly, and the row count is checked
+        // against `ALL` below so a new variant cannot be added without a row.
         let cases: &[(u8, IssueKind)] = &[
+            (1, IssueKind::UnusedFile),
+            (2, IssueKind::UnusedExport),
+            (3, IssueKind::UnusedType),
+            (4, IssueKind::PrivateTypeLeak),
+            (5, IssueKind::UnusedDependency),
+            (6, IssueKind::UnusedDevDependency),
+            (7, IssueKind::UnusedEnumMember),
+            (8, IssueKind::UnusedClassMember),
+            (9, IssueKind::UnresolvedImport),
+            (10, IssueKind::UnlistedDependency),
+            (11, IssueKind::DuplicateExport),
+            (12, IssueKind::CodeDuplication),
+            (13, IssueKind::CircularDependency),
+            (14, IssueKind::TypeOnlyDependency),
+            (15, IssueKind::TestOnlyDependency),
+            (16, IssueKind::BoundaryViolation),
+            (17, IssueKind::CoverageGaps),
+            (18, IssueKind::FeatureFlag),
+            (19, IssueKind::Complexity),
+            (20, IssueKind::StaleSuppression),
+            (21, IssueKind::PnpmCatalogEntry),
+            (22, IssueKind::UnresolvedCatalogReference),
+            (23, IssueKind::UnusedDependencyOverride),
+            (24, IssueKind::MisconfiguredDependencyOverride),
+            (25, IssueKind::EmptyCatalogGroup),
+            (26, IssueKind::ReExportCycle),
+            (27, IssueKind::SecurityClientServerLeak),
+            (28, IssueKind::SecuritySink),
             (29, IssueKind::PolicyViolation),
             (30, IssueKind::InvalidClientExport),
             (31, IssueKind::MixedClientServerBarrel),
