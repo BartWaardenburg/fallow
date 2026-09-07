@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788783127036,
+  "lastUpdate": 1788786909690,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "2ed7d02a94c6ff2d3578406a2dc269f31ce3667f",
-          "message": "perf(benchmarks): cover audit impact closure",
-          "timestamp": "2026-08-19T13:54:04+02:00",
-          "tree_id": "1647e61081d7d2497306d0e0d9ff4f2171407e7a",
-          "url": "https://github.com/fallow-rs/fallow/commit/2ed7d02a94c6ff2d3578406a2dc269f31ce3667f"
-        },
-        "date": 1787140685645,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9688985,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 49128,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1178137,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8378,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8091,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "a6afda2f0136f645cea233b546a150ac79011115",
+          "message": "feat(review): replace the duplicated blast-radius list with a count and a rollup (#2563)\n\nThe review-brief envelope carried the impact closure's affected-but-not-in-diff paths twice, in full: graph_facts.reachable_from was a verbatim clone of impact_closure.affected_not_shown, and neither was capped. On a one-file change to colinhacks/zod the two lists were 28,372 of 52,676 bytes while the focus map and decision surface were 1,276.\n\ngraph_facts.reachable_from is removed; it had no reader. impact_closure now reports affected_count (exact, computed before capping), a ten-path sorted-prefix sample, and affected_by_dir: {dir, count} rows heaviest first, capped at 25 with affected_by_dir_omitted counting the rest. A prefix sample alone would mislead: on a 20-file zod diff a 25-path prefix covers one of 24 directories while the weight sits in two others.\n\nBoth human renderers read affected_count, so their totals are unchanged. Decisions, ranks, verdicts and exit codes are untouched; the decision surface takes its blast metric from the uncapped engine closure. Brief schema_version moves to 9.\n\nEnvelope on the same reproduction: 52,676 -> 25,818 bytes.",
+          "timestamp": "2026-09-07T15:01:24+02:00",
+          "tree_id": "9caf7344e24e187a754859e296c4a9f8888f158e",
+          "url": "https://github.com/fallow-rs/fallow/commit/a6afda2f0136f645cea233b546a150ac79011115"
+        },
+        "date": 1788786905213,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 9812243,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 50594,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1176572,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8374,
             "unit": "allocations"
           }
         ]
