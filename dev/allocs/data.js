@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788795197403,
+  "lastUpdate": 1788799851368,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "1881f4d5fe0a9410f807e6c236d23537279a1a7b",
-          "message": "perf(benchmarks): cover inspect evidence bundle\n\n* perf(benchmarks): cover inspect evidence bundle\n\n* perf(benchmarks): bound inspect simulation corpus",
-          "timestamp": "2026-08-20T09:41:01+02:00",
-          "tree_id": "36252efcca8f4b75152b56a06c9e7b891022acd3",
-          "url": "https://github.com/fallow-rs/fallow/commit/1881f4d5fe0a9410f807e6c236d23537279a1a7b"
-        },
-        "date": 1787211938167,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9714107,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 49217,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1184463,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8430,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8369,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "ca508ed0aaca90e0ac3d23bb61d8f60f943ed935",
+          "message": "refactor: replace copied helpers with one definition each\n\nFour report surfaces in the graph crate each carried a byte-identical\nrelativize, and their doc comments named the other copies as the thing to\nkeep in sync. A cross-platform key invariant shared by four outputs was\nenforced by prose. One pub(super) helper now owns it.\n\nranges_to_gaps and push_region were copied whole from sfc into astro, which\nalready imports SourceRegion from sfc. The sorted-input precondition the\nfunction depends on was implied only by the sort call sitting above it, so it\nis now written down.\n\nline_range_from_byte_col was defined twice, and hover wrapped\nutf16_col_span in a forwarder that added nothing. Both move to position.rs,\nwhich already owns the byte-column to UTF-16 boundary.",
+          "timestamp": "2026-09-07T18:46:01+02:00",
+          "tree_id": "4e1407a84e73c484101ba6e0d89ec4709332933c",
+          "url": "https://github.com/fallow-rs/fallow/commit/ca508ed0aaca90e0ac3d23bb61d8f60f943ed935"
+        },
+        "date": 1788799847275,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 9871165,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 50687,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1196299,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8452,
             "unit": "allocations"
           }
         ]
