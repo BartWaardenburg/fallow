@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788799851368,
+  "lastUpdate": 1788801973425,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "9450f933307dcbad05b7ee2e80df5251221d8ebf",
-          "message": "perf(benchmarks): cover list boundaries",
-          "timestamp": "2026-08-20T10:14:48+02:00",
-          "tree_id": "c7534b59d2992a42abe31ae713b31cd36ab90199",
-          "url": "https://github.com/fallow-rs/fallow/commit/9450f933307dcbad05b7ee2e80df5251221d8ebf"
-        },
-        "date": 1787213995240,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9746115,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 49218,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1186637,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8405,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8452,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "f63c4dbff717c1e9037d3290174d425d282340e7",
+          "message": "fix(cli): wrap the decision-surface and focus lines to eighty columns (#2566)\n\nThe two sections the brief leads with were the two that wrapped unpredictably in a terminal. The decision surface printed its question, trade-off and expert list on single unbounded lines: on zod, a question naming every widened export ran to 159 columns. The focus map put an un-elided path and an unbounded reason on one row, reaching 103.\n\nBoth now wrap under a hanging indent. Prose is re-flowed rather than cut: a decision question ends in the actual ask, so truncating it would drop the question. Only a single word that alone overruns its line is shortened, from whichever end identifies it: a path keeps its tail, an owner identity keeps its head. The continuation indents give the block a 2 / 5 / 7 hierarchy so column 5 stays the key column.\n\nTwo defects found in review and fixed: the trailing blank line after a populated decision block was dropped, so the apex ran straight into the drill-down header; and the ask line double-counted its bus-factor reservation and elided owner identities from the wrong end, rendering a 52-character email as '.../ame.lastname@engineering.example.com' with fifteen columns free.\n\nRendering only; no field, format or schema moves. Zero lines over eighty across three fixtures, in both focus branches.",
+          "timestamp": "2026-09-07T19:17:01+02:00",
+          "tree_id": "9821252e4f154e68aaaf5b19df1d0b7dfdd9b64d",
+          "url": "https://github.com/fallow-rs/fallow/commit/f63c4dbff717c1e9037d3290174d425d282340e7"
+        },
+        "date": 1788801970070,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 9861933,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 50674,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1185376,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8406,
             "unit": "allocations"
           }
         ]
