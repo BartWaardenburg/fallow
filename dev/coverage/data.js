@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788783332589,
+  "lastUpdate": 1788784214361,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "e65a9083ee5117be29e69091ff0b7de9554de1b7",
-          "message": "docs(skills): list every workspace diagnostic kind and the audit config coverage fallback\n\n## What changed\n\n- The `--workspaces` paragraph of the vendored CLI reference now lists every `workspace_diagnostics[].kind` value, including `bun-lockb-override-resolution-skipped` from #2362 (the kind list is curated prose that `npm run generate:contracts` does not regenerate).\n- The `fallow audit` flag rows for `--coverage` and `--coverage-root` document the `health.coverage` / `health.coverageRoot` fallback from #2361.\n- The `.agents` source copy and its generated `.claude` adapter carry the same kind list.\n\nThe canonical fallow-skills copy is synced immediately after this lands (content plus `source-lock.json` repin and plugin version bump), so the Public skills contract gate is red only for that window.\n\nRefs #2358, #2359",
-          "timestamp": "2026-08-22T15:10:52+02:00",
-          "tree_id": "3f9beef41bc3f5215a9cd2f0ac086205b089d5f9",
-          "url": "https://github.com/fallow-rs/fallow/commit/e65a9083ee5117be29e69091ff0b7de9554de1b7"
-        },
-        "date": 1787405139960,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.5,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/cdc5c0ee05031c77cb420b635de403164733d958"
         },
         "date": 1788783328768,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.3,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "d5cb80f405d611772a2da634ac851a71c796ca1b",
+          "message": "fix(brand): round the icon badge to the logo.svg radius\n\nThe standalone icon drew its badge as a hard square while logo.svg rounds the\nsame badge at rx 10 of 64, so the two brand assets disagreed wherever the icon\nappears unmasked, such as the VS Code marketplace.\n\nApply the same 15.6% radius and re-render the rasters. Consumers that mask the\navatar themselves are unaffected.",
+          "timestamp": "2026-09-07T14:23:04+02:00",
+          "tree_id": "dd22fd4201d32c80fa2c5af7739af505742b9679",
+          "url": "https://github.com/fallow-rs/fallow/commit/d5cb80f405d611772a2da634ac851a71c796ca1b"
+        },
+        "date": 1788784211251,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
