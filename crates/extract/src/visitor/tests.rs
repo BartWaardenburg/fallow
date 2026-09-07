@@ -1940,6 +1940,34 @@ fn skips_constructor_in_class_members() {
 }
 
 #[test]
+fn destructured_class_member_is_recorded_as_used() {
+    let info = parse(
+        r"
+            class Foo {
+                bar = 0;
+                unused = 1;
+            }
+            const foo = new Foo();
+            const { bar } = foo;
+        ",
+    );
+
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "Foo" && access.member == "bar"),
+        "destructured class member should credit the class member"
+    );
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|access| access.object == "Foo" && access.member == "unused"),
+        "unrelated class members must not be credited"
+    );
+}
+
+#[test]
 fn skips_private_and_protected_members() {
     let info = parse(
         r"

@@ -1871,6 +1871,26 @@ impl<'a> ModuleInfoExtractor {
         declarator: &VariableDeclarator<'a>,
         init: &Expression<'a>,
     ) {
+        // `const { member } = instance` reads the class member directly. The
+        // binding itself is a plain identifier, so no later `member` access
+        // can be resolved through `binding_target_names`; record the access at
+        // the destructuring site instead. This is the object-pattern parity
+        // of the existing `instance.member` path (see #2560).
+        if let BindingPattern::ObjectPattern(pattern) = &declarator.id
+            && let Expression::Identifier(source) = unwrap_static_expr(init)
+            && let Some(BindingTarget::Class(class_name)) =
+                self.resolve_bound_object_name(source.name.as_str())
+        {
+            for property in &pattern.properties {
+                if let Some(member) = property.key.static_name() {
+                    self.member_accesses.push(MemberAccess {
+                        object: class_name.clone(),
+                        member: member.to_string(),
+                    });
+                }
+            }
+        }
+
         if let BindingPattern::BindingIdentifier(id) = &declarator.id
             && let Some(source) = static_member_object_name(unwrap_static_expr(init))
         {
