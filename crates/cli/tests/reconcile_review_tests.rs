@@ -455,6 +455,12 @@ fn github_comment_preflight(comment_id: u64) -> MockResponse {
             status: 200,
             body: r#"{"id":1}"#,
         },
+        2 => MockResponse {
+            method: "GET",
+            path_contains: "/repos/owner/repo/pulls/comments/2",
+            status: 200,
+            body: r#"{"id":2}"#,
+        },
         20 => MockResponse {
             method: "GET",
             path_contains: "/repos/owner/repo/pulls/comments/20",
@@ -478,6 +484,12 @@ fn github_resolution_reply(comment_id: u64, body: &'static str) -> MockResponse 
         1 => MockResponse {
             method: "POST",
             path_contains: "/repos/owner/repo/pulls/7/comments/1/replies",
+            status: 201,
+            body,
+        },
+        2 => MockResponse {
+            method: "POST",
+            path_contains: "/repos/owner/repo/pulls/7/comments/2/replies",
             status: 201,
             body,
         },
@@ -589,7 +601,7 @@ fn github_preflight_rejects_mismatched_thread_identity() {
 }
 
 #[test]
-fn github_mutation_failure_is_fail_fast_and_counts_only_completed_writes() {
+fn github_mutation_failure_records_the_failed_fingerprint_and_counts_completed_writes() {
     let envelope = write_envelope(&[]);
     let (api_url, server) = serve(vec![
         github_comments(
@@ -641,6 +653,211 @@ fn github_mutation_failure_is_fail_fast_and_counts_only_completed_writes() {
     );
     let requests = server.join().expect("server thread");
     assert_eq!(requests.len(), 6);
+}
+
+#[test]
+fn github_mutation_failure_does_not_cancel_another_fingerprints_resolution() {
+    let envelope = write_envelope(&[]);
+    let (api_url, server) = serve(vec![
+        github_comments(
+            r#"[{"id":1,"line":null,"body":"<!-- fallow-fingerprint: a -->","user":{"type":"Bot","login":"github-actions[bot]"}},{"id":2,"line":null,"body":"<!-- fallow-fingerprint: b -->","user":{"type":"Bot","login":"github-actions[bot]"}}]"#,
+        ),
+        github_threads_empty(),
+        github_comment_preflight(1),
+        github_comment_preflight(2),
+        MockResponse {
+            method: "POST",
+            path_contains: "/repos/owner/repo/pulls/7/comments/1/replies",
+            status: 403,
+            body: r#"{"message":"Forbidden"}"#,
+        },
+        github_resolution_reply(
+            2,
+            r#"{"id":21,"in_reply_to_id":2,"body":"Resolved in `abcdef1`.\n\n<!-- fallow-resolved-fingerprint: b@abcdef1 -->"}"#,
+        ),
+    ]);
+
+    let output = run_reconcile(
+        &["--provider", "github", "--pr", "7", "--repo", "owner/repo"],
+        &api_url,
+        &envelope,
+    );
+    assert_eq!(output.code, 0, "stderr:\n{}", output.stderr);
+    let json = parse_json(&output);
+    assert_eq!(json["resolution_comments_posted"], 1);
+    assert_eq!(json["failed_fingerprints"], serde_json::json!(["a"]));
+    assert_eq!(json["unapplied_fingerprints"], serde_json::json!(["a"]));
+    let requests = server.join().expect("server thread");
+    assert_eq!(requests.len(), 6);
+    assert!(
+        requests
+            .iter()
+            .any(|request| request.contains("/pulls/7/comments/2/replies"))
+    );
+}
+
+#[test]
+fn github_failed_thread_resolve_skips_only_its_own_reply() {
+    let envelope = write_envelope(&[]);
+    let (api_url, server) = serve(vec![
+        github_comments(
+            r#"[{"id":1,"line":null,"body":"<!-- fallow-fingerprint: a -->","user":{"type":"Bot","login":"github-actions[bot]"}},{"id":2,"line":null,"body":"<!-- fallow-fingerprint: b -->","user":{"type":"Bot","login":"github-actions[bot]"}}]"#,
+        ),
+        github_threads(
+            r#"{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[{"id":"T1","isResolved":false,"comments":{"nodes":[{"databaseId":1}]}},{"id":"T2","isResolved":false,"comments":{"nodes":[{"databaseId":2}]}}],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}}"#,
+        ),
+        github_comment_preflight(1),
+        github_comment_preflight(2),
+        github_thread_preflight("T1", false),
+        github_thread_preflight("T2", false),
+        github_threads(r#"{"errors":[{"message":"cannot resolve thread"}]}"#),
+        github_thread_resolution("T2"),
+        github_resolution_reply(
+            2,
+            r#"{"id":21,"in_reply_to_id":2,"body":"Resolved in `abcdef1`.\n\n<!-- fallow-resolved-fingerprint: b@abcdef1 -->"}"#,
+        ),
+    ]);
+
+    let output = run_reconcile(
+        &["--provider", "github", "--pr", "7", "--repo", "owner/repo"],
+        &api_url,
+        &envelope,
+    );
+    assert_eq!(output.code, 0, "stderr:\n{}", output.stderr);
+    let json = parse_json(&output);
+    assert_eq!(json["threads_resolved"], 1);
+    assert_eq!(json["resolution_comments_posted"], 1);
+    assert_eq!(json["failed_fingerprints"], serde_json::json!(["a"]));
+    assert_eq!(json["unapplied_fingerprints"], serde_json::json!(["a"]));
+    let requests = server.join().expect("server thread");
+    assert_eq!(requests.len(), 9);
+    assert!(
+        !requests
+            .iter()
+            .any(|request| request.contains("/pulls/7/comments/1/replies"))
+    );
+}
+
+#[test]
+fn gitlab_mutation_failure_does_not_cancel_another_fingerprints_resolution() {
+    let envelope = write_envelope(&[]);
+    let (api_url, server) = serve(vec![
+        gitlab_discussions(
+            r#"[{"id":"d1","notes":[{"body":"<!-- fallow-fingerprint: a -->","resolved":false,"author":{"bot":true,"username":"project-bot"}}]},{"id":"d2","notes":[{"body":"<!-- fallow-fingerprint: b -->","resolved":false,"author":{"bot":true,"username":"project-bot"}}]}]"#,
+        ),
+        gitlab_discussion_preflight("d1"),
+        gitlab_discussion_preflight("d2"),
+        MockResponse {
+            method: "PUT",
+            path_contains: "/projects/group%2Frepo/merge_requests/7/discussions/d1",
+            status: 403,
+            body: r#"{"message":"403 Forbidden"}"#,
+        },
+        gitlab_discussion_resolution("d2"),
+        gitlab_resolution_note(
+            "d2",
+            r#"{"id":20,"body":"Resolved in `abcdef1`.\n\n<!-- fallow-resolved-fingerprint: b@abcdef1 -->"}"#,
+        ),
+    ]);
+
+    let output = run_reconcile(
+        &[
+            "--provider",
+            "gitlab",
+            "--mr",
+            "7",
+            "--project-id",
+            "group/repo",
+        ],
+        &api_url,
+        &envelope,
+    );
+    assert_eq!(output.code, 0, "stderr:\n{}", output.stderr);
+    let json = parse_json(&output);
+    assert_eq!(json["threads_resolved"], 1);
+    assert_eq!(json["resolution_comments_posted"], 1);
+    assert_eq!(json["failed_fingerprints"], serde_json::json!(["a"]));
+    assert_eq!(json["unapplied_fingerprints"], serde_json::json!(["a"]));
+    let requests = server.join().expect("server thread");
+    assert_eq!(requests.len(), 6);
+    assert!(
+        !requests
+            .iter()
+            .any(|request| request.contains("/discussions/d1/notes"))
+    );
+}
+
+#[test]
+fn github_resolution_run_posts_replies_without_creating_or_mutating_a_review() {
+    let envelope = write_envelope(&[]);
+    let (api_url, server) = serve(vec![
+        github_comments(
+            r#"[{"id":1,"line":null,"body":"<!-- fallow-fingerprint: a -->","user":{"type":"Bot","login":"github-actions[bot]"}}]"#,
+        ),
+        github_threads_empty(),
+        github_comment_preflight(1),
+        github_resolution_reply(
+            1,
+            r#"{"id":11,"in_reply_to_id":1,"body":"Resolved in `eeeeeee`.\n\n<!-- fallow-resolved-fingerprint: a@eeeeeee -->"}"#,
+        ),
+    ]);
+
+    let output = run_post_review(
+        &["--provider", "github", "--pr", "7", "--repo", "owner/repo"],
+        &api_url,
+        &envelope,
+    );
+    assert_eq!(output.code, 0, "stderr:\n{}", output.stderr);
+    let json = parse_json(&output);
+    assert_eq!(json["action"], "skip");
+    assert_eq!(json["comments_posted"], 0);
+    assert_eq!(json["resolution_comments_posted"], 1);
+    assert!(json.get("failed_fingerprints").is_none());
+    assert!(json.get("unapplied_fingerprints").is_none());
+    assert!(json.get("apply_hint").is_none());
+    let requests = server.join().expect("server thread");
+    assert!(
+        !requests
+            .iter()
+            .any(|request| request.contains("/pulls/7/reviews"))
+    );
+    assert!(!requests.iter().any(|request| request.starts_with("PATCH ")));
+}
+
+#[test]
+fn github_post_review_reports_unapplied_fingerprints_when_a_resolution_fails() {
+    let envelope = write_envelope(&[]);
+    let (api_url, server) = serve(vec![
+        github_comments(
+            r#"[{"id":1,"line":null,"body":"<!-- fallow-fingerprint: a -->","user":{"type":"Bot","login":"github-actions[bot]"}}]"#,
+        ),
+        github_threads_empty(),
+        github_comment_preflight(1),
+        MockResponse {
+            method: "POST",
+            path_contains: "/repos/owner/repo/pulls/7/comments/1/replies",
+            status: 403,
+            body: r#"{"message":"Forbidden"}"#,
+        },
+    ]);
+
+    let output = run_post_review(
+        &["--provider", "github", "--pr", "7", "--repo", "owner/repo"],
+        &api_url,
+        &envelope,
+    );
+    assert_eq!(output.code, 0, "stderr:\n{}", output.stderr);
+    let json = parse_json(&output);
+    assert_eq!(json["resolution_comments_posted"], 0);
+    assert_eq!(json["failed_fingerprints"], serde_json::json!(["a"]));
+    assert_eq!(json["unapplied_fingerprints"], serde_json::json!(["a"]));
+    assert!(
+        json["apply_hint"]
+            .as_str()
+            .expect("apply hint")
+            .contains("rerun")
+    );
+    assert_eq!(server.join().expect("server thread").len(), 4);
 }
 
 #[test]

@@ -2007,7 +2007,14 @@ if [ "${1:-}" = "ci" ]; then
     exit 0
   fi
   if [ "${2:-}" = "post-review" ]; then
-    printf '{"action":"post_review","comments_posted":1,"apply_errors":[],"post_errors":[]}\n'
+    case "${MOCK_POST_REVIEW_ERRORS:-}" in
+      apply)
+        printf '{"action":"post_review","comments_posted":1,"apply_errors":["resolve failed"],"post_errors":[],"apply_hint":"refresh provider state","failed_fingerprints":["a"],"unapplied_fingerprints":["a"]}\n'
+        ;;
+      *)
+        printf '{"action":"post_review","comments_posted":1,"apply_errors":[],"post_errors":[]}\n'
+        ;;
+    esac
     exit 0
   fi
   printf '{"schema":"fallow-review-reconcile/v1","stale":[]}\n'
@@ -2129,6 +2136,16 @@ printf 'FALLOW_ANALYSIS_ARGS=(check --format json --root .)\n' > "$ACTION_TYPED_
     bash "$SCRIPTS_DIR/review.sh" > "$ACTION_TYPED_WORK/review-clean.out"
   PATH="$ACTION_TYPED_BIN:$PATH" \
     MOCK_LOG="$ACTION_TYPED_LOG" \
+    MOCK_POST_REVIEW_ERRORS="apply" \
+    GH_TOKEN="test" \
+    PR_NUMBER="123" \
+    GH_REPO="owner/repo" \
+    FALLOW_COMMAND="check" \
+    FALLOW_ROOT="." \
+    MAX_COMMENTS="5" \
+    bash "$SCRIPTS_DIR/review.sh" > "$ACTION_TYPED_WORK/review-apply-error.out"
+  PATH="$ACTION_TYPED_BIN:$PATH" \
+    MOCK_LOG="$ACTION_TYPED_LOG" \
     MOCK_RENDER_FAILURE="1" \
     GH_TOKEN="test" \
     PR_NUMBER="123" \
@@ -2161,6 +2178,14 @@ assert_contains "$ACTION_TYPED_OUT" "fallow ci post-review --provider github" "r
 assert_contains "$(cat "$ACTION_TYPED_WORK/review-clean.out")" \
   "0 resolution replies posted, 0 threads resolved" \
   "review.sh exposes successful reconciliation counters"
+assert_not_contains "$(cat "$ACTION_TYPED_WORK/review-clean.out")" "fallow post-review incomplete" \
+  "review.sh stays quiet when reconciliation fully succeeds"
+assert_contains "$(cat "$ACTION_TYPED_WORK/review-apply-error.out")" \
+  "::warning::fallow post-review incomplete: refresh provider state" \
+  "review.sh warns when applying reconciliation is incomplete"
+assert_contains "$(cat "$ACTION_TYPED_WORK/review-apply-error.out")" \
+  "(unapplied fingerprints: a)" \
+  "review.sh names the fingerprints reconciliation did not apply"
 assert_contains "$ACTION_TYPED_OUT" "fallow ci post-pr-comment --provider github" "comment.sh invokes GitHub PR comment post command"
 assert_contains "$ACTION_TYPED_OUT" "fallow ci post-check-run --provider github" "comment.sh invokes GitHub Check Run post command"
 assert_contains "$ACTION_TYPED_OUT" "--head-sha head456" "comment.sh posts Check Run against the PR head SHA"
