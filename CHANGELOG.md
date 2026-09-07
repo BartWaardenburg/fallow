@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The rest of the human review brief holds to eighty columns too.** The
+  decision surface printed its question, trade-off and expert list on single
+  unbounded lines, and the focus map put an un-elided path and an unbounded
+  reason on one row. On a real project a decision question naming every widened
+  export ran to 159 columns and a focus entry to 103, so the two sections the
+  brief leads with were the two that wrapped unpredictably in a terminal. Both
+  now wrap under a hanging indent. Prose is re-flowed rather than cut: a
+  decision question ends in the actual ask, so truncating it would drop the
+  question. Only a single word that alone overruns its line is shortened, from
+  whichever end identifies it: a path keeps its file name, an owner identity
+  keeps its head.
+
 - **The human review brief's coordination-gap lines are bounded.** The brief
   printed one line per gap, joining every consumed symbol and both full paths.
   On a change to a barrel-adjacent module that rendered a single line 955

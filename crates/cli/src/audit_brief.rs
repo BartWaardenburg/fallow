@@ -887,56 +887,131 @@ fn print_impact_closure_human(closure: &ImpactClosureFacts) {
     }
 }
 
-/// Print the Stage 4 weighted focus map on the human brief: the ranked
-/// `review-here` units (with reason + any low-confidence flag), then the
-/// de-prioritized count as a collapsed escape hatch. `--show-deprioritized`
-/// re-expands the full de-prioritized list ("show me what you de-prioritized").
-/// Caller has already gated on `!quiet`. Renders nothing when no unit was scored.
-fn print_focus_human(focus: &crate::audit_focus::FocusMap, show_deprioritized: bool) {
-    if focus.total_units() == 0 {
-        return;
+/// Greedily wrap prose to `first` columns on the opening line and `rest`
+/// thereafter, returning the unprefixed chunks so the caller owns the indents.
+///
+/// Elision is wrong for these strings: a decision question is the judgment the
+/// brief exists to pose, and a focus reason is the evidence for a label, so
+/// cutting either destroys the signal rather than shortening it. Only a word
+/// that alone overruns its line is shortened, and `elide` decides from which
+/// end: a path keeps its tail (`elide_path`), while an owner identity keeps its
+/// head (`elide_symbol`), because an email or team name is identified by what it
+/// starts with.
+fn wrap_prose(
+    text: &str,
+    first: usize,
+    rest: usize,
+    elide: fn(&str, usize) -> String,
+) -> Vec<String> {
+    let mut lines: Vec<String> = Vec::new();
+    let mut current = String::new();
+    for word in text.split_whitespace() {
+        let budget = if lines.is_empty() { first } else { rest };
+        if current.is_empty() {
+            current = elide(word, budget);
+            continue;
+        }
+        if current.chars().count() + 1 + word.chars().count() <= budget {
+            current.push(' ');
+            current.push_str(word);
+            continue;
+        }
+        lines.push(std::mem::take(&mut current));
+        current = elide(word, rest);
     }
+    if !current.is_empty() {
+        lines.push(current);
+    }
+    lines
+}
+
+/// Render one focus unit: the label and its file, then the reason wrapped
+/// underneath, then any confidence flags.
+///
+/// The reason used to share the file's line, which put an un-elided path and an
+/// unbounded sentence on one row; on a real project that reached 103 columns.
+fn focus_unit_lines(unit: &crate::audit_focus::FocusUnit) -> Vec<String> {
+    let mut lines = vec![format!(
+        "    [{}] {}",
+        unit.label.token(),
+        elide_path(&unit.file, 56),
+    )];
+    for (n, chunk) in wrap_prose(&unit.reason, 72, 70, elide_path)
+        .into_iter()
+        .enumerate()
+    {
+        // Continuations sit past the key column so `confidence` below stays the
+        // only thing that starts a new fact.
+        lines.push(if n == 0 {
+            format!("      {chunk}")
+        } else {
+            format!("        {chunk}")
+        });
+    }
+    for flag in &unit.confidence {
+        lines.extend(
+            wrap_prose(flag.message(), 60, 60, elide_path)
+                .into_iter()
+                .enumerate()
+                .map(|(i, chunk)| {
+                    if i == 0 {
+                        format!("      confidence {chunk}")
+                    } else {
+                        format!("        {chunk}")
+                    }
+                }),
+        );
+    }
+    lines
+}
+
+/// The Stage 4 weighted focus map lines: the ranked `review-here` units (with
+/// reason and any low-confidence flag), then the de-prioritized count as a
+/// collapsed escape hatch. `--show-deprioritized` re-expands the full
+/// de-prioritized list ("show me what you de-prioritized").
+///
+/// Split out from the printer so the wording and the width are testable, the
+/// way `affected_lines` and `branching_human_lines` are: every line has to hold
+/// under 80 columns. Empty when no unit was scored.
+fn focus_lines(focus: &crate::audit_focus::FocusMap, show_deprioritized: bool) -> Vec<String> {
+    if focus.total_units() == 0 {
+        return Vec::new();
+    }
+    let mut lines = Vec::new();
     if !focus.review_here.is_empty() {
-        eprintln!(
+        lines.push(format!(
             "  focus: {} unit{} to review here (of {} changed)",
             focus.review_here.len(),
             crate::report::plural(focus.review_here.len()),
             focus.total_units(),
-        );
+        ));
         for unit in &focus.review_here {
-            eprintln!(
-                "    [{}] {}: {}",
-                unit.label.token(),
-                unit.file,
-                unit.reason
-            );
-            for flag in &unit.confidence {
-                eprintln!("      confidence {}", flag.message());
-            }
+            lines.extend(focus_unit_lines(unit));
         }
     }
     if focus.deprioritized.is_empty() {
-        return;
+        return lines;
     }
     if show_deprioritized {
-        eprintln!("  de-prioritized ({}):", focus.deprioritized.len());
+        lines.push(format!("  de-prioritized ({}):", focus.deprioritized.len()));
         for unit in &focus.deprioritized {
-            eprintln!(
-                "    [{}] {}: {}",
-                unit.label.token(),
-                unit.file,
-                unit.reason
-            );
-            for flag in &unit.confidence {
-                eprintln!("      confidence {}", flag.message());
-            }
+            lines.extend(focus_unit_lines(unit));
         }
     } else {
-        eprintln!(
+        lines.push(format!(
             "  de-prioritized: {} unit{} (run with --show-deprioritized to list)",
             focus.deprioritized.len(),
             crate::report::plural(focus.deprioritized.len()),
-        );
+        ));
+    }
+    lines
+}
+
+/// Print the Stage 4 weighted focus map on the human brief. Caller has already
+/// gated on `!quiet`. Renders nothing when no unit was scored.
+fn print_focus_human(focus: &crate::audit_focus::FocusMap, show_deprioritized: bool) {
+    for line in focus_lines(focus, show_deprioritized) {
+        eprintln!("{line}");
     }
 }
 
@@ -1043,28 +1118,54 @@ fn print_routing_human(routing: &crate::audit::routing::RoutingFacts) {
     }
 }
 
-/// Print the decision surface (the apex, 6.G): the ranked, capped set of
+/// The decision-surface lines (the apex, 6.G): the ranked, capped set of
 /// consequential structural decisions, each as a framed judgment question with
-/// its routed expert. Caller has already gated on `!quiet`. Leads the brief.
-fn print_decision_surface_human(surface: &crate::audit_decision_surface::DecisionSurface) {
+/// its routed expert. Leads the brief.
+///
+/// Split out from the printer so the wording and the width are testable, the
+/// way `affected_lines` and `branching_human_lines` are: every line has to hold
+/// under 80 columns. A question naming a widened export list runs to several
+/// hundred characters, so it wraps under a hanging indent rather than being
+/// cut: the question IS the judgment the brief exists to pose, and truncating
+/// it would drop the ask at the end of the sentence.
+fn decision_surface_lines(surface: &crate::audit_decision_surface::DecisionSurface) -> Vec<String> {
     if surface.decisions.is_empty() {
-        eprintln!("Decisions: none (no consequential structural decision in this change)");
-        eprintln!();
-        return;
+        return vec![
+            "Decisions: none (no consequential structural decision in this change)".to_string(),
+            String::new(),
+        ];
     }
-    eprintln!("Decisions to make ({}):", surface.decisions.len());
+    let mut lines = vec![format!("Decisions to make ({}):", surface.decisions.len())];
     for (i, decision) in surface.decisions.iter().enumerate() {
         // Taste ownership: the question first (never an answer), then the honest
         // graph fact, then the named trade-off. The human reads reversibility from
         // the count; the tool never labels the door or recommends a choice.
-        eprintln!(
-            "  {}. [{}] {}",
-            i + 1,
-            decision.category.tag(),
-            decision.question
-        );
+        let head = format!("  {}. [{}] ", i + 1, decision.category.tag());
+        let head_width = head.chars().count();
+        // Continuations sit past column 5 so that column stays the key column
+        // `trade-off:` and `ask:` own, giving the block a 2 / 5 / 7 hierarchy.
+        let question = wrap_prose(&decision.question, 80 - head_width, 73, elide_path);
+        if question.is_empty() {
+            lines.push(head.trim_end().to_string());
+        }
+        for (n, chunk) in question.into_iter().enumerate() {
+            if n == 0 {
+                lines.push(format!("{head}{chunk}"));
+            } else {
+                lines.push(format!("       {chunk}"));
+            }
+        }
         if !decision.tradeoff.is_empty() {
-            eprintln!("     trade-off: {}", decision.tradeoff);
+            for (n, chunk) in wrap_prose(&decision.tradeoff, 64, 71, elide_path)
+                .into_iter()
+                .enumerate()
+            {
+                if n == 0 {
+                    lines.push(format!("     trade-off: {chunk}"));
+                } else {
+                    lines.push(format!("       {chunk}"));
+                }
+            }
         }
         if !decision.expert.is_empty() {
             let bus = if decision.bus_factor_one {
@@ -1072,13 +1173,56 @@ fn print_decision_surface_human(surface: &crate::audit_decision_surface::Decisio
             } else {
                 ""
             };
-            eprintln!("     ask: {}{bus}", decision.expert.join(", "));
+            // The suffix lands on the LAST wrapped line, so its width has to come
+            // out of every line's budget, not just the first.
+            let reserved = bus.chars().count();
+            // `     ask: ` is 10 columns and the continuation indent is 7, so the
+            // budgets are 70 and 73 before the suffix, which lands on whichever
+            // line ends up last and therefore comes out of every line.
+            let experts = wrap_prose(
+                &decision.expert.join(", "),
+                70 - reserved,
+                73 - reserved,
+                elide_symbol,
+            );
+            for (n, chunk) in experts.iter().enumerate() {
+                if n == 0 {
+                    lines.push(format!("     ask: {chunk}"));
+                } else {
+                    lines.push(format!("       {chunk}"));
+                }
+            }
+            if !bus.is_empty()
+                && !experts.is_empty()
+                && let Some(last) = lines.last_mut()
+            {
+                last.push_str(bus);
+            }
         }
     }
     if let Some(note) = &surface.truncated {
-        eprintln!("  ... {}", note.reason);
+        for (n, chunk) in wrap_prose(&note.reason, 72, 72, elide_path)
+            .into_iter()
+            .enumerate()
+        {
+            lines.push(if n == 0 {
+                format!("  ... {chunk}")
+            } else {
+                format!("      {chunk}")
+            });
+        }
     }
-    eprintln!();
+    // The apex section closes with a blank line in BOTH states, or it runs
+    // straight into the drill-down header it is supposed to lead.
+    lines.push(String::new());
+    lines
+}
+
+/// Print the decision surface. Caller has already gated on `!quiet`.
+fn print_decision_surface_human(surface: &crate::audit_decision_surface::DecisionSurface) {
+    for line in decision_surface_lines(surface) {
+        eprintln!("{line}");
+    }
 }
 
 fn weakening_label(kind: crate::audit::weakening::WeakeningKind) -> &'static str {
@@ -1850,6 +1994,247 @@ mod tests {
             lines.last().map(String::as_str),
             Some("         (--format json for every consumed symbol)"),
             "a `+N more` with no remainder line still needs somewhere to go: {lines:?}"
+        );
+    }
+
+    fn focus_unit(
+        file: &str,
+        reason: &str,
+        label: crate::audit_focus::FocusLabel,
+    ) -> crate::audit_focus::FocusUnit {
+        use crate::audit_focus::{ConfidenceFlag, FocusScore, FocusUnit};
+        FocusUnit {
+            file: file.to_string(),
+            score: FocusScore {
+                fan_io: 1,
+                security_taint: 0,
+                risk_zone: 0,
+                change_shape: 0,
+                runtime: 0,
+                total: 1,
+            },
+            label,
+            reason: reason.to_string(),
+            confidence: vec![ConfidenceFlag::ReExportIndirection],
+        }
+    }
+
+    /// The widest real inputs: a deep monorepo path and an unbounded reason.
+    fn wide_focus() -> crate::audit_focus::FocusMap {
+        let deep = "packages/platform/features/checkout/pricing/discounts/seasonal/regional/tiers/rules.ts";
+        let reason = "high fan-in (312 importers), fan-out 47, changes a contract consumed \
+             outside the diff, sits in a risk zone, and carries a security-tainted \
+             argument reachable from an untrusted source";
+        use crate::audit_focus::FocusLabel;
+        crate::audit_focus::FocusMap {
+            review_here: vec![focus_unit(deep, reason, FocusLabel::ReviewHere)],
+            // `[not-prioritized]` is the widest label, so it renders the widest
+            // row; labelling this `ReviewHere` would leave that row untested.
+            deprioritized: vec![focus_unit(deep, reason, FocusLabel::NotPrioritized)],
+        }
+    }
+
+    #[test]
+    fn focus_lines_fit_eighty_columns() {
+        for show_deprioritized in [false, true] {
+            let lines = focus_lines(&wide_focus(), show_deprioritized);
+            assert!(
+                lines.iter().any(|line| line.contains(".../")),
+                "the fixture must exercise path elision: {lines:?}"
+            );
+            assert!(
+                lines
+                    .iter()
+                    .filter(|l| l.starts_with("        ") && !l.contains("confidence"))
+                    .count()
+                    >= 1,
+                "the fixture must wrap a reason onto a continuation line, and the \
+                 `confidence` row must not stand in for one: {lines:?}"
+            );
+            if show_deprioritized {
+                // `[not-prioritized]` is four columns wider than `[review-here]`,
+                // so only the expanded branch renders the widest row this section
+                // can produce. Pinning it means raising the path budget fails here.
+                let widest = lines
+                    .iter()
+                    .find(|l| l.starts_with("    [not-prioritized] "))
+                    .expect("the expanded branch renders the de-prioritized unit");
+                assert_eq!(
+                    widest.chars().count(),
+                    78,
+                    "the widest focus row sits at its budget: {widest:?}"
+                );
+            }
+            for line in lines {
+                assert!(
+                    line.chars().count() <= 80,
+                    "brief lines hold under 80 columns: {} chars in {line:?}",
+                    line.chars().count()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_wrapped_focus_reason_keeps_every_word() {
+        let reason =
+            "high fan-in (2 importers), fan-out 4, changes a contract consumed outside the diff";
+        let lines = focus_lines(
+            &crate::audit_focus::FocusMap {
+                review_here: vec![focus_unit(
+                    "src/a.ts",
+                    reason,
+                    crate::audit_focus::FocusLabel::ReviewHere,
+                )],
+                deprioritized: Vec::new(),
+            },
+            false,
+        );
+        let rejoined: String = lines
+            .iter()
+            .filter(|l| l.starts_with("      ") && !l.contains("confidence"))
+            .map(|l| l.trim())
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert_eq!(
+            rejoined, reason,
+            "wrapping re-flows the reason, it never drops a word"
+        );
+    }
+
+    fn decision(
+        question: &str,
+        tradeoff: &str,
+        experts: &[&str],
+    ) -> crate::audit_decision_surface::Decision {
+        use crate::audit_decision_surface::{Decision, DecisionCategory};
+        Decision {
+            signal_id: "sig".to_string(),
+            category: DecisionCategory::PublicApiContract,
+            question: question.to_string(),
+            anchor_file: "src/core.ts".to_string(),
+            anchor_line: 1,
+            signal_key: "key".to_string(),
+            previous_signal_id: None,
+            blast: 1,
+            consequence: 1,
+            expert: experts.iter().map(|e| (*e).to_string()).collect(),
+            bus_factor_one: true,
+            internal_consumer_count: 1,
+            tradeoff: tradeoff.to_string(),
+        }
+    }
+
+    #[test]
+    fn decision_surface_lines_fit_eighty_columns() {
+        // The real shape that overran: a question naming every widened export.
+        let exports = (0..26)
+            .map(|i| format!("safeParseAsyncVariant{i:02}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let question = format!(
+            "`packages/platform/features/checkout/pricing/parse.ts` changes exports \
+             ({exports}) imported by 312 files outside this PR. Does this change break \
+             or alter what those callers expect?"
+        );
+        let surface = crate::audit_decision_surface::DecisionSurface {
+            decisions: vec![decision(
+                &question,
+                "312 modules outside the diff consume this contract; changing its shape \
+                 requires coordinating them.",
+                &[
+                    "a-very-long-github-handle",
+                    "another-long-handle",
+                    "third-handle",
+                ],
+            )],
+            truncated: Some(crate::audit_decision_surface::TruncationNote {
+                collapsed: 9,
+                reason: "9 more structural decisions collapsed below the cap of 4".to_string(),
+            }),
+            emitted_signal_ids: vec!["sig".to_string()],
+        };
+        let lines = decision_surface_lines(&surface);
+        assert!(
+            lines.iter().filter(|l| l.starts_with("     ")).count() > 3,
+            "the fixture must exercise wrapping: {lines:?}"
+        );
+        assert!(
+            lines.iter().any(|l| l.chars().count() == 80),
+            "the fixture must drive a line to the ceiling: {lines:?}"
+        );
+        let ask = lines
+            .iter()
+            .find(|l| l.starts_with("     ask: "))
+            .expect("an ask line");
+        assert!(
+            ask.ends_with("(bus-factor 1)") || lines.iter().any(|l| l.ends_with("(bus-factor 1)")),
+            "the bus-factor suffix still lands: {lines:?}"
+        );
+        assert!(
+            !ask.contains("..."),
+            "an owner identity that fits must not be shortened: {ask:?}"
+        );
+        for line in lines {
+            assert!(
+                line.chars().count() <= 80,
+                "brief lines hold under 80 columns: {} chars in {line:?}",
+                line.chars().count()
+            );
+        }
+    }
+
+    #[test]
+    fn a_decision_with_no_experts_omits_the_ask_line() {
+        let lines = decision_surface_lines(&crate::audit_decision_surface::DecisionSurface {
+            decisions: vec![decision("Widens the public surface. Intended?", "", &[])],
+            truncated: None,
+            emitted_signal_ids: vec!["sig".to_string()],
+        });
+        assert!(!lines.iter().any(|l| l.contains("ask:")), "{lines:?}");
+        assert!(!lines.iter().any(|l| l.contains("trade-off:")), "{lines:?}");
+    }
+
+    #[test]
+    fn an_empty_decision_surface_still_says_so() {
+        let lines =
+            decision_surface_lines(&crate::audit_decision_surface::DecisionSurface::default());
+        assert_eq!(
+            lines.first().map(String::as_str),
+            Some("Decisions: none (no consequential structural decision in this change)")
+        );
+    }
+
+    #[test]
+    fn an_unscored_focus_map_renders_nothing() {
+        assert!(focus_lines(&crate::audit_focus::FocusMap::default(), false).is_empty());
+        assert!(focus_lines(&crate::audit_focus::FocusMap::default(), true).is_empty());
+    }
+
+    #[test]
+    fn a_word_wider_than_its_line_is_shortened_not_overflowed() {
+        let deep =
+            "packages/platform/features/checkout/pricing/discounts/seasonal/regional/rules.ts";
+        let lines = wrap_prose(&format!("touches {deep} directly"), 40, 40, elide_path);
+        for line in &lines {
+            assert!(line.chars().count() <= 40, "{line:?}");
+        }
+        assert!(
+            lines.iter().any(|l| l.contains(".../")),
+            "a path keeps its tail: {lines:?}"
+        );
+    }
+
+    #[test]
+    fn an_owner_identity_is_shortened_from_the_head_not_the_tail() {
+        // The routing line exists to name who to ask, and an email or team name
+        // is identified by what it starts with, not by its domain.
+        let owner = "very.long.firstname.lastname@engineering.example.com";
+        let lines = wrap_prose(owner, 30, 30, elide_symbol);
+        assert_eq!(lines.len(), 1);
+        assert!(
+            lines[0].starts_with("very.long.first") && lines[0].ends_with("..."),
+            "{lines:?}"
         );
     }
 
