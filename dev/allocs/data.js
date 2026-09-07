@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788786909690,
+  "lastUpdate": 1788787607489,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "0bae5b1d371aeadeea21373ced69584dfdcacbcd",
-          "message": "perf(benchmarks): cover recommend workspace JSON",
-          "timestamp": "2026-08-19T15:16:31+02:00",
-          "tree_id": "e8991454566277d66ccf2ef7e58cdab167cb8b81",
-          "url": "https://github.com/fallow-rs/fallow/commit/0bae5b1d371aeadeea21373ced69584dfdcacbcd"
-        },
-        "date": 1787145642493,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9736883,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 49205,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1190541,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8447,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8374,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "4503f09c0f324f4c55e2cff6c581f7fd92c36d6f",
+          "message": "fix(guard): state the coverage requirement for unzoned files\n\nAn unzoned file under boundaries.coverage.requireAllFiles was told it was\nunrestricted while an analysis run would report it as a boundary-coverage\nviolation. guard_notes never read coverage_required, which the JSON already\ncarried, so the human output contradicted the JSON for the same file.\n\nThe unrestricted note now names what it actually covers, import and call\nchecks, and a second note states the coverage requirement when it applies.\nPaths exempted by allowUnmatched keep the old single note.",
+          "timestamp": "2026-09-07T15:19:35+02:00",
+          "tree_id": "10fefeb404697cc57b5fa643833ee776d735b09b",
+          "url": "https://github.com/fallow-rs/fallow/commit/4503f09c0f324f4c55e2cff6c581f7fd92c36d6f"
+        },
+        "date": 1788787603367,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 9798395,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 50576,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1168258,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8352,
             "unit": "allocations"
           }
         ]
