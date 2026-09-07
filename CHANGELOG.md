@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The human review brief's coordination-gap lines are bounded.** The brief
+  printed one line per gap, joining every consumed symbol and both full paths.
+  On a change to a barrel-adjacent module that rendered a single line 955
+  columns wide, and a project with thirty out-of-diff consumers produced sixty
+  lines, directly under a summary that holds to eighty. The section now names
+  how many consumers sit outside the diff, walks the three that take the most
+  symbols (the consumer on its own line, the contract it consumes on the next),
+  and closes with the remainder and where to read it. Paths are shortened from the left and the
+  symbol list is cut with a `+N more` suffix, so every line fits eighty
+  columns. `fallow review --format json` still carries every gap with every
+  symbol; only the terminal rendering is capped.
+
 - **The review brief no longer spends half its bytes on one list, printed
   twice.** `fallow review --format json` and `fallow audit --brief --format
   json` carried the impact closure's affected-but-not-in-diff paths in two
