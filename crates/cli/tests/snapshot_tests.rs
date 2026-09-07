@@ -1963,7 +1963,7 @@ fn pr_comment_github_snapshot() {
     let codeclimate =
         codeclimate_issues_to_value(&build_codeclimate(&results, &root, &RulesConfig::default()));
     let issues = issues_from_codeclimate(&codeclimate);
-    let output = render_pr_comment("check", Provider::Github, &issues);
+    let output = render_pr_comment("check", Provider::Github, &issues, None);
 
     insta::assert_snapshot!("pr_comment_github", output);
 }
@@ -1975,7 +1975,7 @@ fn pr_comment_gitlab_snapshot() {
     let codeclimate =
         codeclimate_issues_to_value(&build_codeclimate(&results, &root, &RulesConfig::default()));
     let issues = issues_from_codeclimate(&codeclimate);
-    let output = render_pr_comment("check", Provider::Gitlab, &issues);
+    let output = render_pr_comment("check", Provider::Gitlab, &issues, None);
 
     insta::assert_snapshot!("pr_comment_gitlab", output);
 }
