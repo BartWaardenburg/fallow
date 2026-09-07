@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788789393922,
+  "lastUpdate": 1788793815766,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "fecc8c221bd0c75346720209d8e6ec18d78f8495",
-          "message": "perf(benchmarks): cover hotspot ownership churn",
-          "timestamp": "2026-08-19T21:24:21+02:00",
-          "tree_id": "949f3bf700e92734ca6877fb6549b0ee69f2adfa",
-          "url": "https://github.com/fallow-rs/fallow/commit/fecc8c221bd0c75346720209d8e6ec18d78f8495"
-        },
-        "date": 1787167793420,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9736555,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 49210,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1187415,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8419,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8406,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "dc8656e74ff5e58df08ccd03bc8aabac4966c594",
+          "message": "test: cover guard multi-file batches and candidate loader errors\n\nTwo gaps salvaged from unlanded optimization branches, without the\noptimizations themselves.\n\nEvery existing guard test passes exactly one file, so nothing caught state\nleaking across files in a batch. The new test asserts a four-file report\nserializes identically to the four single-file reports concatenated, and pins\nthe per-file rule-id ordering, including that an unparsable files glob applies\nto every file.\n\nload_candidate_map had no coverage of its three rejection paths. The verdict\nside was tested, the candidate side was not, so a missing security_findings\narray, a malformed finding, and a duplicate finding_id were all unguarded.",
+          "timestamp": "2026-09-07T17:03:32+02:00",
+          "tree_id": "63b88877e3eddebf22d21f468e060de7c6727e75",
+          "url": "https://github.com/fallow-rs/fallow/commit/dc8656e74ff5e58df08ccd03bc8aabac4966c594"
+        },
+        "date": 1788793811879,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 9864621,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 50675,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1187362,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8419,
             "unit": "allocations"
           }
         ]
