@@ -17747,7 +17747,7 @@
     },
     "ReviewBriefSchemaVersion": {
       "type": "integer",
-      "const": 8,
+      "const": 9,
       "description": "Independently-versioned wire-version newtype for the brief envelope.\nSerializes as the integer `REVIEW_BRIEF_SCHEMA_VERSION`."
     },
     "RiskClass": {
@@ -17838,13 +17838,6 @@
           "type": "integer",
           "description": "Widening-only public API delta, currently equal to `exports_added`.\nRemoved exports are not represented, so zero means no public API exports\nwere added."
         },
-        "reachable_from": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "description": "Root-relative paths of modules the changed code is reachable from / affects\n(the impact closure's affected-but-not-in-diff set), deduped and sorted.\nEmpty when no graph was retained or nothing depends on the changed files."
-        },
         "boundaries_touched": {
           "type": "array",
           "items": {
@@ -17856,31 +17849,48 @@
       "required": [
         "exports_added",
         "api_width_delta",
-        "reachable_from",
         "boundaries_touched"
       ],
-      "description": "Stage 1 of the brief: graph-derived orientation facts.\n\n`boundaries_touched` is derived from the run's boundary-violation zones;\n`reachable_from` is populated by the impact closure (the affected-not-shown\nset: modules the changed code is reachable from / affects, none in the diff).\n`exports_added` and `api_width_delta` both report the exports-aware public API\nwidening count. Removed exports are not represented in this widening-only\nsignal."
+      "description": "Stage 1 of the brief: graph-derived orientation facts.\n\n`boundaries_touched` is derived from the run's boundary-violation zones.\n`exports_added` and `api_width_delta` both report the exports-aware public\nAPI widening count. Removed exports are not represented in this\nwidening-only signal. The set of modules the changed code reaches is Stage\n3's `impact_closure`, which owns both its magnitude and its paths."
     },
     "ImpactClosureFacts": {
       "type": "object",
       "properties": {
+        "affected_count": {
+          "type": "integer",
+          "description": "The FULL number of files transitively affected by the changeset\n(reverse-deps + re-export chains) that are NOT in the diff. Computed\nBEFORE [`affected_not_shown`](Self::affected_not_shown) is capped to a\nsample, so it is always the true magnitude of the blast radius."
+        },
         "affected_not_shown": {
           "type": "array",
           "items": {
             "type": "string"
           },
-          "description": "Root-relative paths transitively affected by the changeset (reverse-deps +\nre-export chains) that are NOT in the diff, deduped and sorted."
+          "description": "A capped, path-sorted sample of the affected root-relative paths (at most\n[`AFFECTED_SAMPLE_CAP`]), deduped. The full count lives in\n[`affected_count`](Self::affected_count) and the distribution in\n[`affected_by_dir`](Self::affected_by_dir); use this list to jump to\nrepresentative files, NEVER to enumerate the blast radius or to infer its\nshape. Because it is a prefix of the sorted set, it clusters in whichever\ndirectory sorts first. To reconstruct the full set, run\n`fallow check --impact-closure <path>` once per changed file and union the\nresults: that flag seeds from a single file, so no single command\nreproduces this changeset-wide union."
+        },
+        "affected_by_dir": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/AffectedDirectory"
+          },
+          "description": "The blast radius rolled up by parent directory: how the affected files\ndistribute, heaviest directory first, ties broken by directory path so the\norder is deterministic. This is the SHAPE signal, and unlike\n[`affected_not_shown`](Self::affected_not_shown) its counts are exact for\nevery directory it lists. At most [`AFFECTED_DIR_CAP`] entries."
+        },
+        "affected_by_dir_omitted": {
+          "type": "integer",
+          "description": "How many directories did not fit within [`AFFECTED_DIR_CAP`] and are\nabsent from [`affected_by_dir`](Self::affected_by_dir). They are the\nlightest ones; their files are still counted in\n[`affected_count`](Self::affected_count). Zero when nothing was omitted.\nAdd this to `affected_by_dir.len()` for the true number of directories\nthe change reaches."
         },
         "coordination_gap": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/CoordinationGapFact"
           },
-          "description": "Coordination gaps: a changed file exports a contract consumed by a module\nabsent from the diff. One entry per (changed file, consumer) pair."
+          "description": "Coordination gaps: a changed file exports a contract consumed by a module\nabsent from the diff. One entry per (changed file, consumer) pair. NOT a\nsubset of [`affected_not_shown`](Self::affected_not_shown): the gap\ndeliberately skips story and test consumers that the affected set counts."
         }
       },
       "required": [
+        "affected_count",
         "affected_not_shown",
+        "affected_by_dir",
+        "affected_by_dir_omitted",
         "coordination_gap"
       ],
       "description": "Stage 3 of the brief: the impact closure. The transitive\naffected-but-not-in-diff set plus the coordination gap. The differentiator a\ndiff tool fundamentally cannot do, because it has no graph.\n\nHonest scope (ADR-001, syntactic): the coordination gap is an attention\npointer at the exact inter-module failure mode, NOT a correctness proof."
@@ -25088,6 +25098,24 @@
       "type": "string",
       "description": "Schema projection for `.` as the privacy-safe diagnosed project root.",
       "const": "."
+    },
+    "AffectedDirectory": {
+      "type": "object",
+      "properties": {
+        "dir": {
+          "type": "string",
+          "description": "Root-relative parent directory, forward-slashed. The empty string is the\nrepository root."
+        },
+        "count": {
+          "type": "integer",
+          "description": "How many affected-but-not-in-diff files live directly in `dir`. Exact,\nnever sampled."
+        }
+      },
+      "required": [
+        "dir",
+        "count"
+      ],
+      "description": "One directory of the blast radius and how many affected files it holds."
     }
   }
 }

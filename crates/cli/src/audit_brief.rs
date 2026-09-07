@@ -112,15 +112,12 @@ pub fn build_triage(
 /// Derive the Stage 1 graph facts from the analysis results plus the impact
 /// closure.
 ///
-/// `boundaries_touched` is the deduped, sorted boundary-violation zone set;
-/// `reachable_from` is the impact closure's affected-not-shown set (modules the
-/// changed code reaches / affects, none in the diff). `exports_added` /
-/// `api_width_delta` stay stubbed until the export-surface delta.
+/// `boundaries_touched` is the deduped, sorted boundary-violation zone set.
+/// `exports_added` / `api_width_delta` stay stubbed until the export-surface
+/// delta. The set of modules the changed code reaches is Stage 3's impact
+/// closure, which owns both its magnitude and its paths.
 #[must_use]
-pub fn derive_graph_facts(
-    results: &AnalysisResults,
-    closure: Option<&fallow_engine::module_graph::ImpactClosurePaths>,
-) -> GraphFacts {
+pub fn derive_graph_facts(results: &AnalysisResults) -> GraphFacts {
     let mut zones: FxHashSet<String> = FxHashSet::default();
     for finding in &results.boundary_violations {
         zones.insert(finding.violation.from_zone.clone());
@@ -129,14 +126,9 @@ pub fn derive_graph_facts(
     let mut boundaries_touched: Vec<String> = zones.into_iter().collect();
     boundaries_touched.sort();
 
-    let reachable_from = closure
-        .map(|c| c.affected_not_shown.clone())
-        .unwrap_or_default();
-
     GraphFacts {
         exports_added: 0,
         api_width_delta: 0,
-        reachable_from,
         boundaries_touched,
     }
 }
@@ -163,10 +155,7 @@ fn build_impact_closure_facts(result: &AuditResult) -> ImpactClosureFacts {
             note: COORDINATION_GAP_NOTE.to_string(),
         })
         .collect();
-    ImpactClosureFacts {
-        affected_not_shown: closure.affected_not_shown.clone(),
-        coordination_gap,
-    }
+    ImpactClosureFacts::new(&closure.affected_not_shown, coordination_gap)
 }
 
 /// Build the Stage 2 partition facts from the audit result's retained
@@ -414,19 +403,14 @@ pub fn build_brief_output_with_diff(
     diff_index: Option<&fallow_output::DiffIndex>,
 ) -> ReviewBriefOutput {
     let triage = build_triage(result, diff_index);
-    let closure = result
-        .check
-        .as_ref()
-        .and_then(|c| c.impact_closure.as_ref());
     let deltas = result.review_deltas.clone().unwrap_or_default();
     let mut graph_facts = result.check.as_ref().map_or_else(
         || GraphFacts {
             exports_added: 0,
             api_width_delta: 0,
-            reachable_from: Vec::new(),
             boundaries_touched: Vec::new(),
         },
-        |check| derive_graph_facts(&check.results, closure),
+        |check| derive_graph_facts(&check.results),
     );
     // The exports-aware delta fills the previously-stubbed export facts:
     // `exports_added` / `api_width_delta` count the public-API surface the change
@@ -715,16 +699,72 @@ fn unit_label(module_dir: &str) -> String {
     }
 }
 
-/// Print the Stage 3 impact-closure summary on the human brief: the count of
-/// affected-but-not-shown files and each coordination gap (the precise
+/// The impact-closure lines: the magnitude, then the single heaviest directory
+/// with its exact share and a pointer at the rest.
+///
+/// Split out from the printer so the wording and the width are testable, the
+/// way `branching_human_lines` is: every line has to hold under 80 columns.
+/// The heaviest directory carries a count because the names alone cannot say
+/// whether the reach is concentrated or diffuse, which is the only question
+/// this section exists to answer. One name plus its share beats two names
+/// without: it costs half the width, and the count is what makes the line
+/// readable at a glance ("88 of 326 in tests" is the answer; two bare names
+/// are not).
+///
+/// The line names the rollup's own top row, so it never disagrees with
+/// `affected_by_dir` in the JSON. That row is often a test directory, because
+/// tests import broadly; the count is what tells a reader that, which is why
+/// it is not omitted.
+fn affected_lines(closure: &ImpactClosureFacts) -> Vec<String> {
+    if closure.affected_count == 0 {
+        return Vec::new();
+    }
+    let dirs = closure.affected_by_dir.len() + closure.affected_by_dir_omitted;
+    let mut lines = vec![format!(
+        "  impact closure: {} file{} affected beyond the diff{}",
+        closure.affected_count,
+        crate::report::plural(closure.affected_count),
+        if dirs < 2 {
+            String::new()
+        } else {
+            format!(" across {dirs} directories")
+        },
+    )];
+    // One directory says nothing the count did not already say.
+    let Some(heaviest) = closure.affected_by_dir.first().filter(|_| dirs > 1) else {
+        return lines;
+    };
+    lines.push(format!(
+        "         heaviest {} ({} file{})",
+        elide_path(&unit_label(&heaviest.dir), 48),
+        heaviest.count,
+        crate::report::plural(heaviest.count),
+    ));
+    let remaining = dirs - 1;
+    // The rollup itself is capped, so the JSON holds the whole breakdown only
+    // when nothing was omitted from it. Promising a full list past that point
+    // would send a reader on a round-trip that cannot answer them.
+    let route = if closure.affected_by_dir_omitted == 0 {
+        "--format json for full list".to_string()
+    } else {
+        format!(
+            "{} of them in --format json",
+            closure.affected_by_dir.len() - 1
+        )
+    };
+    lines.push(format!(
+        "         and {remaining} more director{} ({route})",
+        if remaining == 1 { "y" } else { "ies" },
+    ));
+    lines
+}
+
+/// Print the Stage 3 impact-closure summary on the human brief: the blast
+/// radius and its heaviest directory, then each coordination gap (the precise
 /// inter-module attention pointer). Caller has already gated on `!quiet`.
 fn print_impact_closure_human(closure: &ImpactClosureFacts) {
-    if !closure.affected_not_shown.is_empty() {
-        eprintln!(
-            "  impact closure: {} file{} affected beyond the diff",
-            closure.affected_not_shown.len(),
-            crate::report::plural(closure.affected_not_shown.len()),
-        );
+    for line in affected_lines(closure) {
+        eprintln!("{line}");
     }
     for gap in &closure.coordination_gap {
         eprintln!(
@@ -1456,23 +1496,120 @@ mod tests {
     }
 
     #[test]
-    fn derive_graph_facts_populates_reachable_from_from_closure() {
-        use fallow_engine::module_graph::{CoordinationGapPaths, ImpactClosurePaths};
-        let results = AnalysisResults::default();
-        let closure = ImpactClosurePaths {
-            in_diff: vec!["src/core.ts".to_string()],
-            affected_not_shown: vec!["src/app.ts".to_string(), "src/mid.ts".to_string()],
-            coordination_gap: vec![CoordinationGapPaths {
-                changed_file: "src/core.ts".to_string(),
-                consumer_file: "src/mid.ts".to_string(),
-                consumed_symbols: vec!["compute".to_string()],
-            }],
-        };
-        let facts = derive_graph_facts(&results, Some(&closure));
+    fn graph_facts_carry_no_file_list() {
+        // The blast radius is Stage 3's alone. Stage 1 used to clone it verbatim,
+        // which put the same list on the wire twice and made half the envelope a
+        // duplicate.
+        let facts = derive_graph_facts(&AnalysisResults::default());
+        let value = serde_json::to_value(&facts).expect("graph facts serialize");
+        let keys: Vec<&str> = value
+            .as_object()
+            .expect("graph facts are an object")
+            .keys()
+            .map(String::as_str)
+            .collect();
         assert_eq!(
-            facts.reachable_from,
-            vec!["src/app.ts".to_string(), "src/mid.ts".to_string()]
+            keys,
+            vec!["exports_added", "api_width_delta", "boundaries_touched"]
         );
+    }
+
+    fn spread_closure(affected: &[&str]) -> ImpactClosureFacts {
+        let mut paths: Vec<String> = affected.iter().map(|p| (*p).to_string()).collect();
+        paths.sort();
+        ImpactClosureFacts::new(&paths, Vec::new())
+    }
+
+    #[test]
+    fn human_impact_lines_report_the_full_count_not_the_sample() {
+        // Distinct file and directory totals, so a line that printed one where
+        // the other belongs cannot pass.
+        let mut affected: Vec<String> = (0..40).map(|i| format!("src/zone{i:03}/a.ts")).collect();
+        affected.extend((0..40).map(|i| format!("src/zone{i:03}/b.ts")));
+        affected.sort();
+        let closure = ImpactClosureFacts::new(&affected, Vec::new());
+        assert!(
+            closure.affected_not_shown.len() < closure.affected_count,
+            "the fixture must exercise the sample cap"
+        );
+        assert!(
+            closure.affected_by_dir.len() < 40,
+            "the fixture must exercise the rollup cap too"
+        );
+        let lines = affected_lines(&closure);
+        assert!(
+            lines[0].contains("80 files affected") && lines[0].contains("across 40 directories"),
+            "both totals survive capping, and neither stands in for the other: {lines:?}"
+        );
+        assert!(
+            lines[2].contains("and 39 more directories"),
+            "the remainder counts every directory, not just the kept rollup rows: {lines:?}"
+        );
+    }
+
+    #[test]
+    fn the_json_route_is_only_promised_when_the_json_holds_the_breakdown() {
+        let complete: Vec<String> = (0..3).map(|i| format!("src/z{i}/file.ts")).collect();
+        let lines = affected_lines(&ImpactClosureFacts::new(&complete, Vec::new()));
+        assert!(
+            lines[2].ends_with("(--format json for full list)"),
+            "an uncapped rollup really is the full list: {lines:?}"
+        );
+
+        let mut capped: Vec<String> = (0..40).map(|i| format!("src/z{i:03}/file.ts")).collect();
+        capped.sort();
+        let closure = ImpactClosureFacts::new(&capped, Vec::new());
+        assert!(closure.affected_by_dir_omitted > 0, "fixture must cap");
+        let lines = affected_lines(&closure);
+        assert!(
+            lines[2].ends_with("(24 of them in --format json)"),
+            "past the rollup cap the JSON has no full list either, so do not promise one: {lines:?}"
+        );
+    }
+
+    #[test]
+    fn the_repository_root_is_never_a_blank_token() {
+        let closure = spread_closure(&["setup.ts", "playground.ts", "src/app.ts"]);
+        let lines = affected_lines(&closure);
+        assert!(
+            lines[1].contains("heaviest <root> (2 files)"),
+            "a root-level directory must render as `<root>`, not as nothing: {lines:?}"
+        );
+        assert!(
+            lines[2].contains("and 1 more directory ("),
+            "a single remaining directory is not plural: {lines:?}"
+        );
+    }
+
+    #[test]
+    fn impact_closure_lines_fit_eighty_columns() {
+        let deep = "packages/platform/features/checkout/pricing/discounts/rules/seasonal";
+        let mut affected: Vec<String> = (0..40).map(|i| format!("{deep}/rule{i:03}.ts")).collect();
+        affected.extend((0..999).map(|i| format!("src/z{i:04}/file.ts")));
+        affected.sort();
+        for line in affected_lines(&ImpactClosureFacts::new(&affected, Vec::new())) {
+            assert!(
+                line.chars().count() <= 80,
+                "brief lines hold under 80 columns: {} chars in {line:?}",
+                line.chars().count()
+            );
+        }
+    }
+
+    #[test]
+    fn a_single_directory_reach_says_only_the_count() {
+        let lines = affected_lines(&spread_closure(&["src/a.ts", "src/b.ts"]));
+        assert_eq!(
+            lines,
+            vec!["  impact closure: 2 files affected beyond the diff".to_string()],
+            "naming the one directory would repeat what the count said"
+        );
+    }
+
+    #[test]
+    fn an_empty_closure_prints_nothing() {
+        assert!(affected_lines(&ImpactClosureFacts::new(&[], Vec::new())).is_empty());
+        assert!(affected_lines(&ImpactClosureFacts::default()).is_empty());
     }
 
     #[test]

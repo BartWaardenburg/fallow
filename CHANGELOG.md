@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The review brief no longer spends half its bytes on one list, printed
+  twice.** `fallow review --format json` and `fallow audit --brief --format
+  json` carried the impact closure's affected-but-not-in-diff paths in two
+  places, `graph_facts.reachable_from` and `impact_closure.affected_not_shown`,
+  with identical contents and no cap on either. On a one-file change to a
+  mid-sized project those two lists were more than half the envelope while the
+  focus map and the decision surface, the judgement the brief exists to
+  deliver, were under three percent of it. The brief is read into an agent's
+  context, so those bytes came straight out of the reviewing budget.
+
+  `graph_facts.reachable_from` is gone. `impact_closure` now reports
+  `affected_count`, the exact number of affected files, alongside a capped
+  ten-path sample and `affected_by_dir`, a rollup of the affected files by
+  parent directory with an exact count per directory, heaviest first. The
+  rollup is the part worth reading: it says whether a change stayed inside the
+  module it touched or leaked into somewhere new, which a truncated list of
+  paths cannot, and it does so in a fraction of the bytes the full list took.
+  The human brief reports the same shape: the file and directory totals, then
+  the heaviest directory with its exact share, then a pointer at the rest.
+
+  Decisions, ranks, verdicts, and exit codes are unchanged; the decision
+  surface takes its blast metric from the graph, not from this envelope. The
+  brief `schema_version` moves to 9. See
+  [backwards compatibility](docs/backwards-compatibility.md) for the field-level
+  contract.
+
 ## [3.23.0] - 2026-09-07
 
 ### Added
