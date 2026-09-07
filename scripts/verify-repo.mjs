@@ -52,6 +52,11 @@ const FAST_COMMANDS = [
     command: "npm",
     args: ["run", "check:emitted-versions"],
   },
+  {
+    label: "Conformance fixtures",
+    command: "npm",
+    args: ["run", "check:conformance-fixtures"],
+  },
 ];
 
 const FULL_ONLY_COMMANDS = [
@@ -84,6 +89,11 @@ const FULL_ONLY_COMMANDS = [
     label: "Semantic clone conformance",
     command: "npm",
     args: ["run", "check:semantic-clone-conformance"],
+  },
+  {
+    label: "Duplication accuracy floor",
+    command: "npm",
+    args: ["run", "check:dupes-accuracy"],
   },
   {
     label: "Benchmark compilation",
@@ -162,9 +172,10 @@ export const helpText = () => `Usage: node scripts/verify-repo.mjs [--fast | --f
 
 Canonical local repository verification:
   --fast  Knowledge routing, adapter drift, formatting, linting, generated
-          contracts, and crate boundaries (default)
+          contracts, crate boundaries, and the conformance fixtures (default)
   --full  Fast checks plus repository script tests, npm wrapper tests, workspace
-          tests, benchmark compilation, rustdoc, and the local NAPI build and tests
+          tests, the duplication accuracy floor, benchmark compilation, rustdoc,
+          and the local NAPI build and tests
 
 Prerequisites:
   - Node.js 22 or newer and root dependencies installed with npm install

@@ -174,6 +174,28 @@ test("Action PR comment smoke requires and verifies the branded GitHub App", () 
   assert.match(job, /"\$COMMENT_AUTHOR" != "\$EXPECTED_COMMENT_AUTHOR"/);
 });
 
+test("CI caches are scoped to the analyzed root", () => {
+  const action = readWorkflow("action.yml");
+  const cacheKey = action.match(/^\s+key: fallow-cache-.*$/m)?.[0];
+  const restoreKey = action.match(/^\s+fallow-cache-\$\{\{ runner\.os \}\}[^\n]*$/m)?.[0];
+
+  assert.match(
+    cacheKey ?? "",
+    /\$\{\{ inputs\.root \}\}/,
+    "Action cache key must include the root",
+  );
+  assert.match(
+    restoreKey ?? "",
+    /\$\{\{ inputs\.root \}\}/,
+    "Action restore-keys must include the root so a matrix over roots cannot restore a sibling cache",
+  );
+
+  const gitlabCache = indentedBlock(readWorkflow("ci/gitlab-ci.yml"), "cache", 2);
+
+  assert.match(gitlabCache, /key: "fallow-\$\{CI_COMMIT_REF_SLUG\}-\$\{CI_JOB_NAME_SLUG\}"/);
+  assert.match(gitlabCache, /^\s+- \$\{FALLOW_ROOT\}\/\.fallow\/$/m);
+});
+
 test("binary-size workflow isolates incompatible release builds", () => {
   const workflow = readWorkflow(".github/workflows/bloat.yml");
   const globalEnv = indentedBlock(workflow, "env", 0);

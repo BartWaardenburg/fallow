@@ -875,7 +875,7 @@
           "name": "--top",
           "type": "string",
           "required": false,
-          "description": "Show only the top N items per category"
+          "description": "Show only the top N items per category. Human output only: the JSON, SARIF, and CodeClimate envelopes drive exit codes and CI baselines, so they always carry every finding and a consumer slices the arrays itself"
         },
         {
           "name": "--file",
@@ -981,13 +981,19 @@
     },
     {
       "name": "trace",
-      "description": "Trace a symbol's call chain (best-effort, syntactic; OFF the ranked path)",
+      "description": "Trace a symbol's call chain, or the shortest import path between two modules (best-effort, syntactic; OFF the ranked path)",
       "flags": [
         {
           "name": "symbol",
           "type": "string",
-          "required": true,
-          "description": "Target symbol, formatted as FILE:SYMBOL (e.g. src/utils.ts:formatDate)"
+          "required": false,
+          "description": "Target symbol, formatted as FILE:SYMBOL (e.g. src/utils.ts:formatDate). Omitted when `--path` is used"
+        },
+        {
+          "name": "--path",
+          "type": "string",
+          "required": false,
+          "description": "Shortest import path between two modules, as two file paths (e.g. `--path src/app.ts src/db.ts`). Mutually exclusive with the symbol target and the call-chain flags"
         },
         {
           "name": "--callers",
@@ -1333,7 +1339,17 @@
           "name": "--top",
           "type": "string",
           "required": false,
-          "description": "Show only the N highest-ranked clone groups. Ranking combines clone size, occurrence count, and capped directory or line spread"
+          "description": "Show only the N highest-ranked clone groups. Ranking combines clone size, occurrence count, and capped directory or line spread. `stats` keeps describing the whole corpus; `clone_groups_shown` and `clone_groups_omitted` report the split"
+        },
+        {
+          "name": "--no-fragments",
+          "type": "bool",
+          "required": false,
+          "description": "Omit the verbatim source text from each clone instance in `--format json`. The file and line/column range still address the same code, and this is most of the payload on a duplicated codebase",
+          "possible_values": [
+            "true",
+            "false"
+          ]
         },
         {
           "name": "--trace",
@@ -6995,6 +7011,20 @@
         "code_mode_alias": "traceFile"
       },
       {
+        "name": "trace_import_path",
+        "kind": "trace",
+        "description": "Trace the shortest import path between two modules, hop by hop",
+        "cli_command": "fallow trace --path <from> <to> --format json --quiet",
+        "key_params": [
+          "from",
+          "to"
+        ],
+        "license": "free",
+        "license_note": null,
+        "read_only": true,
+        "code_mode_alias": null
+      },
+      {
         "name": "impact_closure",
         "kind": "trace",
         "description": "Trace the transitive affected-but-not-in-diff set and coordination gaps for one file",
@@ -7098,6 +7128,22 @@
         "description": "JSON Schema of a declarative rule pack (same document as fallow rule-pack-schema)",
         "mime_type": "application/json",
         "template": false
+      },
+      {
+        "uri": "fallow://schema/similar-code-snapshot",
+        "name": "schema-similar-code-snapshot",
+        "title": "Similar-code snapshot JSON Schema",
+        "description": "JSON Schema of the inspect_similar_code `snapshot` object: the bounded candidate handoff find_similar_code returns, passed back unchanged",
+        "mime_type": "application/json",
+        "template": false
+      },
+      {
+        "uri": "fallow://tools/{name}",
+        "name": "tool-guide",
+        "title": "Long-form guide for one tool",
+        "description": "Per-flag detail for one MCP tool (payload shapes, unit vocabularies, suppression placements) kept out of its tools/list description; name is the wire tool name. Not every tool has a guide",
+        "mime_type": "application/json",
+        "template": true
       },
       {
         "uri": "fallow://explain/{issue_type}",
@@ -7252,6 +7298,11 @@
       "note": null
     },
     {
+      "task": "find how one module reaches another",
+      "command": "fallow trace --path <from> <to>",
+      "note": "Reports `reachable: false` instead of failing when no import path exists; type-only hops are reported, not skipped."
+    },
+    {
       "task": "delete an \"unused\" dependency",
       "command": "fallow dead-code --trace-dependency <name>",
       "note": null
@@ -7260,6 +7311,11 @@
       "task": "commit or open a PR",
       "command": "fallow audit --base <ref>",
       "note": null
+    },
+    {
+      "task": "read a diff before approving it",
+      "command": "fallow review --base <ref> --brief",
+      "note": "orientation, never gates: deterministic and always exit 0, unlike the audit row"
     },
     {
       "task": "prioritize refactoring",

@@ -1,5 +1,5 @@
 {
-  "corpus": "/Users/bartwaardenburg/Sites/fallow/tests/benchmark-corpus",
+  "corpus": "tests/benchmark-corpus",
   "ground_truth_pairs": 7,
   "negative_pairs": 5,
   "modes": {

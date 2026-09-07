@@ -363,9 +363,9 @@ runs:
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
       with:
         path: ${{ inputs.root }}/.fallow
-        key: fallow-cache-${{ runner.os }}-${{ hashFiles(format('{0}/**/package.json', inputs.root)) }}
+        key: fallow-cache-${{ runner.os }}-${{ inputs.root }}-${{ hashFiles(format('{0}/**/package.json', inputs.root)) }}
         restore-keys: |
-          fallow-cache-${{ runner.os }}-
+          fallow-cache-${{ runner.os }}-${{ inputs.root }}-
 
     - name: Run analysis
       id: analyze

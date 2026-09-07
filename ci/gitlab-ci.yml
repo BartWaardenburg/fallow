@@ -193,9 +193,12 @@ variables:
   image: node:22-alpine
   stage: test
   cache:
-    key: "fallow-${CI_COMMIT_REF_SLUG}"
+    # Scoped per job so a matrix over FALLOW_ROOT does not overwrite itself.
+    # GitLab rejects "/" inside a cache key, so the root cannot be interpolated
+    # directly; every matrix arm already gets a distinct job name slug.
+    key: "fallow-${CI_COMMIT_REF_SLUG}-${CI_JOB_NAME_SLUG}"
     paths:
-      - .fallow/
+      - ${FALLOW_ROOT}/.fallow/
     policy: pull-push
   before_script:
     # Install dependencies: detect Alpine (apk) vs Debian/Ubuntu (apt-get)
