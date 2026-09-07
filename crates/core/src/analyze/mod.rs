@@ -47,7 +47,7 @@ pub(crate) use unused_deps::matches_virtual_prefix;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use fallow_config::{PackageJson, ResolvedConfig, Severity};
+use fallow_config::{PackageJson, ResolvedConfig, Severity, WorkspaceDiagnosticKind};
 
 use crate::discover::FileId;
 use crate::extract::ModuleInfo;
@@ -627,7 +627,11 @@ fn run_policy_detector(
     suppressions: &crate::suppress::SuppressionContext<'_>,
     line_offsets_by_file: &LineOffsetsMap<'_>,
 ) -> Vec<PolicyViolationFinding> {
-    if config.rules.policy_violation == Severity::Off || config.rule_packs.is_empty() {
+    if config.rules.policy_violation == Severity::Off {
+        return Vec::new();
+    }
+    if config.rule_packs.is_empty() {
+        record_unconfigured_check(config, WorkspaceDiagnosticKind::RulePacksNotConfigured);
         return Vec::new();
     }
     policy::find_policy_violations(
@@ -2149,13 +2153,32 @@ fn run_boundary_violation_detector(
     suppressions: &SuppressionContext<'_>,
     line_offsets_by_file: &LineOffsetsMap<'_>,
 ) -> Vec<BoundaryViolationFinding> {
-    if config.rules.boundary_violation == Severity::Off || config.boundaries.is_empty() {
+    if config.rules.boundary_violation == Severity::Off {
+        return Vec::new();
+    }
+    if config.boundaries.is_empty() {
+        record_unconfigured_check(config, WorkspaceDiagnosticKind::BoundariesNotConfigured);
         return Vec::new();
     }
     boundary::find_boundary_violations(graph, config, suppressions, line_offsets_by_file)
         .into_iter()
         .map(BoundaryViolationFinding::with_actions)
         .collect()
+}
+
+/// Report that a detector produced structurally zero findings because it was
+/// never configured, so a consumer does not read the counter as a measurement.
+///
+/// `rules: off` is deliberately NOT reported here: that zero is the user's own
+/// choice and is already visible in `fallow config`.
+fn record_unconfigured_check(config: &ResolvedConfig, kind: WorkspaceDiagnosticKind) {
+    // Anchored at the project root, stored project-relative: the envelopes'
+    // post-serialisation strip only removes a `root + separator` prefix, so a
+    // root-anchored absolute path would reach JSON output verbatim.
+    let diagnostic =
+        fallow_config::WorkspaceDiagnostic::new(&config.root, config.root.clone(), kind)
+            .into_root_relative(&config.root);
+    fallow_config::record_workspace_diagnostics(&config.root, vec![diagnostic]);
 }
 
 fn filter_public_workspace_results(

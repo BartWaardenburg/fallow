@@ -237,6 +237,21 @@ fn cli_json_documents_conform_to_output_schema() {
         &["trace", "src/lib.ts:used", "--callers"],
         "trace",
     );
+    // The `--path` form is the same published envelope with its own payload
+    // shape; validate the unreachable direction too, because that answer has
+    // the emptiest body and is the one a schema regression would let through.
+    run_and_validate(
+        &schema,
+        root,
+        &["trace", "--path", "src/index.ts", "src/lib.ts"],
+        "trace",
+    );
+    run_and_validate(
+        &schema,
+        root,
+        &["trace", "--path", "src/lib.ts", "src/index.ts"],
+        "trace",
+    );
     run_and_validate_with(
         &schema,
         root,

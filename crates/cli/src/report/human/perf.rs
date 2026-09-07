@@ -1,4 +1,5 @@
 use colored::Colorize;
+use fallow_types::cache_rejection::CacheRejection;
 use fallow_types::trace::PipelineTimings;
 
 /// Stages below this wall-clock time are too cheap to annotate as parallel;
@@ -39,21 +40,18 @@ fn build_performance_human_lines(t: &PipelineTimings) -> Vec<String> {
 
     push_performance_header(&mut lines);
     push_discovery_stage_lines(&mut lines, t);
-    let cache_detail = if t.cache_hits > 0 {
-        format!(", {} cached, {} parsed", t.cache_hits, t.cache_misses)
-    } else {
-        String::new()
-    };
     push_dimmed(
         &mut lines,
         &format!(
-            "│  parse/extract:    {:>8.1}ms  ({} modules{}){}",
+            "│  parse/extract:    {:>8.1}ms  ({} modules, {} cached, {} parsed){}",
             t.parse_extract_ms,
             t.module_count,
-            cache_detail,
+            t.cache_hits,
+            t.cache_misses,
             parallel_annotation(t.parse_extract_ms, t.parse_cpu_ms)
         ),
     );
+    push_cache_rejection_line(&mut lines, "parse cache", t.cache_rejection);
     push_analysis_stage_lines(&mut lines, t);
     if let Some(duplication_ms) = t.duplication_ms {
         push_dimmed(
@@ -68,6 +66,26 @@ fn build_performance_human_lines(t: &PipelineTimings) -> Vec<String> {
 
 fn push_dimmed(lines: &mut Vec<String>, line: &str) {
     lines.push(line.dimmed().to_string());
+}
+
+/// Name a refused cache under the stage that paid for it.
+///
+/// A refusal used to be signalled by the ABSENCE of a cached/parsed
+/// annotation, which reads exactly like a first run on a project. The counts
+/// above this line are always printed now, and this line says why they are
+/// what they are.
+fn push_cache_rejection_line(
+    lines: &mut Vec<String>,
+    label: &str,
+    rejection: Option<CacheRejection>,
+) {
+    let Some(rejection) = rejection else {
+        return;
+    };
+    push_dimmed(
+        lines,
+        &format!("│  {label} not reused: {}", rejection.describe()),
+    );
 }
 
 fn push_performance_header(lines: &mut Vec<String>) {
@@ -123,6 +141,7 @@ fn push_analysis_stage_lines(lines: &mut Vec<String>, t: &PipelineTimings) {
         lines,
         &format!("│  build graph:      {:>8.1}ms", t.build_graph_ms),
     );
+    push_cache_rejection_line(lines, "graph cache", t.graph_cache_rejection);
     push_dimmed(
         lines,
         &format!("│  analyze:          {:>8.1}ms", t.analyze_ms),
@@ -296,6 +315,8 @@ mod tests {
             module_count: 80,
             cache_hits: 0,
             cache_misses: 80,
+            cache_rejection: None,
+            graph_cache_rejection: None,
             cache_update_ms: 5.0,
             entry_points_ms: 0.5,
             entry_point_count: 10,
@@ -344,6 +365,8 @@ mod tests {
             module_count: 40,
             cache_hits: 30,
             cache_misses: 10,
+            cache_rejection: None,
+            graph_cache_rejection: None,
             cache_update_ms: 2.0,
             entry_points_ms: 0.3,
             entry_point_count: 5,
@@ -359,8 +382,11 @@ mod tests {
         assert!(text.contains("10 parsed"));
     }
 
+    /// A cold run states its counts instead of dropping the annotation: the
+    /// absence of text used to be the only signal that a cache was refused,
+    /// which reads exactly like a first run on a project.
     #[test]
-    fn performance_output_omits_cache_detail_when_no_cache_hits() {
+    fn performance_output_states_zero_hits_instead_of_omitting_the_detail() {
         let timings = PipelineTimings {
             discover_files_ms: 10.0,
             file_count: 50,
@@ -373,6 +399,8 @@ mod tests {
             module_count: 40,
             cache_hits: 0,
             cache_misses: 40,
+            cache_rejection: None,
+            graph_cache_rejection: None,
             cache_update_ms: 2.0,
             entry_points_ms: 0.3,
             entry_point_count: 5,
@@ -384,8 +412,31 @@ mod tests {
         };
         let lines = build_performance_human_lines(&timings);
         let text = plain(&lines);
-        assert!(!text.contains("cached"));
-        assert!(!text.contains("parsed"));
+        assert!(text.contains("0 cached"));
+        assert!(text.contains("40 parsed"));
+    }
+
+    /// A refused cache is named under the stage that paid for it, and the
+    /// counts stay on the row above it, so "cold" and "refused" are
+    /// distinguishable in one glance.
+    #[test]
+    fn performance_output_names_a_refused_cache() {
+        let mut timings = pipeline_timings_with_parse(20.0, 20.0);
+        timings.cache_rejection = Some(CacheRejection::ConfigHashMismatch);
+        timings.graph_cache_rejection = Some(CacheRejection::FileSetChanged);
+
+        let text = plain(&build_performance_human_lines(&timings));
+
+        assert!(text.contains("0 cached"), "{text}");
+        assert!(text.contains("40 parsed"), "{text}");
+        assert!(
+            text.contains("parse cache not reused: extraction config changed"),
+            "{text}"
+        );
+        assert!(
+            text.contains("graph cache not reused: the analysed file set changed"),
+            "{text}"
+        );
     }
 
     fn pipeline_timings_with_parse(parse_extract_ms: f64, parse_cpu_ms: f64) -> PipelineTimings {
@@ -401,6 +452,8 @@ mod tests {
             module_count: 40,
             cache_hits: 0,
             cache_misses: 40,
+            cache_rejection: None,
+            graph_cache_rejection: None,
             cache_update_ms: 2.0,
             entry_points_ms: 0.3,
             entry_point_count: 5,

@@ -194,7 +194,7 @@ fn code_mode_limits(timeout_ms: u64, max_output_bytes: usize) -> serde_json::Val
 
 /// Longest prefix of `value` that fits in `max` bytes without splitting a
 /// character.
-fn clamp_utf8(value: &str, max: usize) -> &str {
+pub(super) fn clamp_utf8(value: &str, max: usize) -> &str {
     if value.len() <= max {
         return value;
     }

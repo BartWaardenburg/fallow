@@ -6,7 +6,7 @@ use serde::Serialize;
 use serde_json::Value;
 
 /// Wire version for the `fallow audit --brief --format json` envelope.
-pub const REVIEW_BRIEF_SCHEMA_VERSION: u32 = 8;
+pub const REVIEW_BRIEF_SCHEMA_VERSION: u32 = 9;
 
 /// Independently-versioned wire-version newtype for the brief envelope.
 /// Serializes as the integer `REVIEW_BRIEF_SCHEMA_VERSION`.

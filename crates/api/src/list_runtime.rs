@@ -899,6 +899,7 @@ mod tests {
             .as_array()
             .expect("project info should include workspace_diagnostics")
             .iter()
+            .filter(|diagnostic| diagnostic["kind"] == "glob-matched-no-package-json")
             .map(|diagnostic| {
                 (
                     diagnostic["pattern"].as_str().unwrap_or_default(),

@@ -28,6 +28,7 @@ struct JsxRetryParse {
     complexity: Vec<FunctionComplexity>,
     flag_uses: Vec<FlagUse>,
     parsed_suppressions: crate::suppress::ParsedSuppressions,
+    degradation: ParseDegradation,
 }
 
 fn source_type_for_path(path: &Path) -> SourceType {
@@ -146,6 +147,7 @@ fn parse_source_to_module_inner(
     let source_type = source_type_for_path(path);
     let allocator = Allocator::default();
     let parser_return = Parser::new(&allocator, parser_source, source_type).parse();
+    let mut degradation = ParseDegradation::from_parser(&parser_return);
 
     let mut parsed_suppressions =
         crate::suppress::parse_suppressions(&parser_return.program.comments, source);
@@ -179,6 +181,7 @@ fn parse_source_to_module_inner(
             complexity: &mut complexity,
             flag_uses: &mut flag_uses,
             parsed_suppressions: &mut parsed_suppressions,
+            degradation: &mut degradation,
         },
     );
 
@@ -191,6 +194,7 @@ fn parse_source_to_module_inner(
         line_offsets,
         complexity,
         flag_uses,
+        degradation,
     })
 }
 
@@ -214,6 +218,30 @@ struct ModuleAssemblyInput {
     line_offsets: Vec<u32>,
     complexity: Vec<FunctionComplexity>,
     flag_uses: Vec<FlagUse>,
+    degradation: ParseDegradation,
+}
+
+/// How much of the file the parser actually understood.
+///
+/// oxc reports recoverable errors for valid-but-newer syntax as well as for
+/// genuinely broken sources, so this is reporting data only: extraction keeps
+/// every symbol it found, and no finding is ever withheld because of it. What
+/// it buys is honesty about the case where a file failed to parse and its
+/// imports therefore never credited anything, which otherwise surfaces as a
+/// confident `unused-file` finding on the file that was in fact imported.
+#[derive(Debug, Clone, Copy, Default)]
+struct ParseDegradation {
+    error_count: u32,
+    panicked: bool,
+}
+
+impl ParseDegradation {
+    fn from_parser(parser_return: &oxc_parser::ParserReturn<'_>) -> Self {
+        Self {
+            error_count: u32::try_from(parser_return.errors.len()).unwrap_or(u32::MAX),
+            panicked: parser_return.panicked,
+        }
+    }
 }
 
 /// Build the primary extractor: run the AST walk (JSX-gated), fold in Glimmer
@@ -276,6 +304,7 @@ struct ParseOutputs<'a> {
     complexity: &'a mut Vec<FunctionComplexity>,
     flag_uses: &'a mut Vec<FlagUse>,
     parsed_suppressions: &'a mut crate::suppress::ParsedSuppressions,
+    degradation: &'a mut ParseDegradation,
 }
 
 /// Run the JSX retry parse: when it improves extraction, overwrite every
@@ -302,6 +331,9 @@ fn apply_jsx_retry_or_jsdoc(input: &JsxRetryOrJsdocInput<'_>, outputs: &mut Pars
     *outputs.complexity = retry.complexity;
     *outputs.flag_uses = retry.flag_uses;
     *outputs.parsed_suppressions = retry.parsed_suppressions;
+    // The retry parse replaced every primary output, so the primary parse's
+    // diagnostics describe a tree nothing downstream can see any more.
+    *outputs.degradation = retry.degradation;
 }
 
 /// Apply JSDoc visibility tags and JSDoc `import()` type references to the
@@ -327,8 +359,11 @@ fn assemble_module_info(input: ModuleAssemblyInput) -> ModuleInfo {
         line_offsets,
         complexity,
         flag_uses,
+        degradation,
     } = input;
     let mut info = extractor.into_module_info(file_id, content_hash, parsed_suppressions);
+    info.parse_error_count = degradation.error_count;
+    info.parse_panicked = degradation.panicked;
     info.unused_import_bindings = semantic_usage.import_binding_usage.unused;
     info.type_referenced_import_bindings = semantic_usage.import_binding_usage.type_referenced;
     info.value_referenced_import_bindings = semantic_usage.import_binding_usage.value_referenced;
@@ -391,6 +426,7 @@ fn parse_with_jsx_retry(input: &JsxRetryInput<'_>) -> Option<JsxRetryParse> {
     };
     let allocator = Allocator::default();
     let retry_return = Parser::new(&allocator, input.parser_source, jsx_type).parse();
+    let degradation = ParseDegradation::from_parser(&retry_return);
     let mut extractor = ModuleInfoExtractor::new();
     extractor.set_route_load_harvest_mode(route_load_harvest_mode_for_path(input.path));
     // The retry re-parses a `.js`/`.ts` file that turned out to contain JSX, so
@@ -439,6 +475,7 @@ fn parse_with_jsx_retry(input: &JsxRetryInput<'_>) -> Option<JsxRetryParse> {
         complexity,
         flag_uses,
         parsed_suppressions,
+        degradation,
     })
 }
 

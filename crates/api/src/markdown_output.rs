@@ -994,11 +994,14 @@ pub fn build_duplication_markdown(report: &DuplicationReport, root: &Path) -> St
     }
 
     let stats = &report.stats;
+    // The heading counts the groups this document lists, which `--top` can
+    // narrow; `stats.clone_groups` stays on the whole measured corpus.
+    let shown = report.clone_groups_shown();
     let _ = write!(
         out,
         "## Fallow: {} clone group{} found ({:.1}% duplication)\n\n",
-        stats.clone_groups,
-        plural(stats.clone_groups),
+        shown,
+        plural(shown),
         stats.duplication_percentage,
     );
 

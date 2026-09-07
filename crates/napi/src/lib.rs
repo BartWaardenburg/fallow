@@ -444,6 +444,10 @@ impl TryFrom<DuplicationOptions> for api::DuplicationOptions {
             // forces import blocks to be counted. No `unwrap_or` so the
             // defer-to-config semantics survive (#1224).
             ignore_imports: value.ignore_imports,
+            // The node bindings mirror the CLI, where fragments are on by
+            // default; `None` defers to that default. Only MCP suppresses
+            // fragments, and it does so through its own params struct.
+            include_fragments: None,
             top: value.top.map(|n| n as usize),
         })
     }

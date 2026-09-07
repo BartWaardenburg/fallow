@@ -161,11 +161,21 @@ mod tests {
             .expect("utf-8 filename")
     }
 
+    /// Whether a tool module dispatches to the CLI. Matched on the call name
+    /// alone, not on `(binary` adjacency: rustfmt wraps a long call across
+    /// lines and a formatting change must not read as a routing change.
     fn invokes_cli_dispatch(source: &str) -> bool {
-        source.contains("run_tool(binary")
-            || source.contains("run_tool_with_timeout(binary")
-            || source.contains("run_fallow(binary")
-            || source.contains("run_fallow_sync(")
-            || source.contains("Command::new(binary)")
+        [
+            "run_tool(",
+            "run_tool_with_limit(",
+            "run_tool_with_timeout(",
+            "run_tool_with_stdin_timeout(",
+            "run_tool_with_top_level_warnings(",
+            "run_fallow(",
+            "run_fallow_sync(",
+            "Command::new(binary)",
+        ]
+        .iter()
+        .any(|call| source.contains(call))
     }
 }

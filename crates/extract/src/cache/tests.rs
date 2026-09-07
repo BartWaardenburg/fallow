@@ -5,6 +5,7 @@ use std::path::Path;
 use oxc_span::Span;
 
 use crate::*;
+use fallow_types::cache_rejection::CacheRejection;
 use fallow_types::discover::FileId;
 use fallow_types::extract::{SkippedSecurityCalleeExpressionKind, SkippedSecurityCalleeReason};
 use fallow_types::source_fingerprint::SourceFingerprint;
@@ -13,7 +14,7 @@ use super::*;
 
 #[test]
 fn cache_store_new_is_empty() {
-    let store = CacheStore::new();
+    let store = CacheStore::new(Path::new(""));
     assert!(store.is_empty());
     assert_eq!(store.len(), 0);
 }
@@ -267,10 +268,11 @@ fn cache_omits_empty_type_member_types_but_roundtrips_non_empty() {
 
 #[test]
 fn cache_store_insert_and_get() {
-    let mut store = CacheStore::new();
+    let mut store = CacheStore::new(Path::new(""));
     let module = CachedModule {
         content_hash: 42,
         mtime_ns: 0,
+        ctime_ns: 0,
         file_size: 0,
         last_access_secs: 0,
         exports: vec![],
@@ -283,6 +285,8 @@ fn cache_store_insert_and_get() {
         semantic_facts: None,
         whole_object_uses: Box::default(),
         dynamic_import_patterns: vec![],
+        parse_error_count: 0,
+        parse_panicked: false,
         has_cjs_exports: false,
         has_angular_component_template_url: false,
         unused_import_bindings: vec![],
@@ -292,6 +296,7 @@ fn cache_store_insert_and_get() {
         unknown_suppression_kinds: vec![],
         line_offsets: vec![],
         complexity: vec![],
+        complexity_extracted: false,
         flag_uses: vec![],
         class_heritage: vec![],
         exported_factory_returns: None,
@@ -353,10 +358,11 @@ fn cache_store_insert_and_get() {
 
 #[test]
 fn cache_store_hash_mismatch_returns_none() {
-    let mut store = CacheStore::new();
+    let mut store = CacheStore::new(Path::new(""));
     let module = CachedModule {
         content_hash: 42,
         mtime_ns: 0,
+        ctime_ns: 0,
         file_size: 0,
         last_access_secs: 0,
         exports: vec![],
@@ -369,6 +375,8 @@ fn cache_store_hash_mismatch_returns_none() {
         semantic_facts: None,
         whole_object_uses: Box::default(),
         dynamic_import_patterns: vec![],
+        parse_error_count: 0,
+        parse_panicked: false,
         has_cjs_exports: false,
         has_angular_component_template_url: false,
         unused_import_bindings: vec![],
@@ -378,6 +386,7 @@ fn cache_store_hash_mismatch_returns_none() {
         unknown_suppression_kinds: vec![],
         line_offsets: vec![],
         complexity: vec![],
+        complexity_extracted: false,
         flag_uses: vec![],
         class_heritage: vec![],
         exported_factory_returns: None,
@@ -437,7 +446,7 @@ fn cache_store_hash_mismatch_returns_none() {
 
 #[test]
 fn cache_store_missing_key_returns_none() {
-    let store = CacheStore::new();
+    let store = CacheStore::new(Path::new(""));
     assert!(store.get(Path::new("nonexistent.ts"), 42).is_none());
 }
 
@@ -447,10 +456,11 @@ fn cache_store_missing_key_returns_none() {
     reason = "test fixture; linear setup/assert, length is not a maintainability concern"
 )]
 fn cache_store_overwrite_entry() {
-    let mut store = CacheStore::new();
+    let mut store = CacheStore::new(Path::new(""));
     let m1 = CachedModule {
         content_hash: 1,
         mtime_ns: 0,
+        ctime_ns: 0,
         file_size: 0,
         last_access_secs: 0,
         exports: vec![],
@@ -463,6 +473,8 @@ fn cache_store_overwrite_entry() {
         semantic_facts: None,
         whole_object_uses: Box::default(),
         dynamic_import_patterns: vec![],
+        parse_error_count: 0,
+        parse_panicked: false,
         has_cjs_exports: false,
         has_angular_component_template_url: false,
         unused_import_bindings: vec![],
@@ -472,6 +484,7 @@ fn cache_store_overwrite_entry() {
         unknown_suppression_kinds: vec![],
         line_offsets: vec![],
         complexity: vec![],
+        complexity_extracted: false,
         flag_uses: vec![],
         class_heritage: vec![],
         exported_factory_returns: None,
@@ -528,6 +541,7 @@ fn cache_store_overwrite_entry() {
     let m2 = CachedModule {
         content_hash: 2,
         mtime_ns: 0,
+        ctime_ns: 0,
         file_size: 0,
         last_access_secs: 0,
         exports: vec![],
@@ -540,6 +554,8 @@ fn cache_store_overwrite_entry() {
         semantic_facts: None,
         whole_object_uses: Box::default(),
         dynamic_import_patterns: vec![],
+        parse_error_count: 0,
+        parse_panicked: false,
         has_cjs_exports: false,
         has_angular_component_template_url: false,
         unused_import_bindings: vec![],
@@ -549,6 +565,7 @@ fn cache_store_overwrite_entry() {
         unknown_suppression_kinds: vec![],
         line_offsets: vec![],
         complexity: vec![],
+        complexity_extracted: false,
         flag_uses: vec![],
         class_heritage: vec![],
         exported_factory_returns: None,
@@ -644,6 +661,8 @@ fn module_to_cached_roundtrip_named_export() {
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         content_hash: 123,
+        parse_error_count: 0,
+        parse_panicked: false,
         suppressions: vec![],
         unknown_suppression_kinds: vec![],
         line_offsets: vec![],
@@ -763,6 +782,8 @@ fn module_to_cached_roundtrip_side_effect_used_export() {
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         content_hash: 789,
+        parse_error_count: 0,
+        parse_panicked: false,
         suppressions: vec![],
         unknown_suppression_kinds: vec![],
         line_offsets: vec![],
@@ -867,6 +888,8 @@ fn module_to_cached_roundtrip_default_export() {
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         content_hash: 456,
+        parse_error_count: 0,
+        parse_panicked: false,
         suppressions: vec![],
         unknown_suppression_kinds: vec![],
         line_offsets: vec![],
@@ -1000,6 +1023,8 @@ fn module_to_cached_roundtrip_imports() {
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         content_hash: 789,
+        parse_error_count: 0,
+        parse_panicked: false,
         suppressions: vec![],
         unknown_suppression_kinds: vec![],
         line_offsets: vec![],
@@ -1110,6 +1135,8 @@ fn module_to_cached_roundtrip_re_exports() {
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         content_hash: 0,
+        parse_error_count: 0,
+        parse_panicked: false,
         suppressions: vec![],
         unknown_suppression_kinds: vec![],
         line_offsets: vec![],
@@ -1289,6 +1316,8 @@ fn module_to_cached_roundtrip_dynamic_imports() {
         has_cjs_exports: true,
         has_angular_component_template_url: false,
         content_hash: 0,
+        parse_error_count: 0,
+        parse_panicked: false,
         suppressions: vec![],
         unknown_suppression_kinds: vec![],
         unused_import_bindings: vec![],
@@ -1516,6 +1545,8 @@ fn module_to_cached_roundtrip_members() {
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         content_hash: 0,
+        parse_error_count: 0,
+        parse_panicked: false,
         suppressions: vec![],
         unknown_suppression_kinds: vec![],
         line_offsets: vec![],
@@ -1590,9 +1621,14 @@ fn module_to_cached_roundtrip_members() {
 }
 
 #[test]
-fn cache_load_nonexistent_returns_none() {
-    let result = CacheStore::load(Path::new("/nonexistent/path"), 0, DEFAULT_CACHE_MAX_SIZE);
-    assert!(result.is_none());
+fn cache_load_nonexistent_reports_absent() {
+    let result = CacheStore::load(
+        Path::new("/nonexistent/path"),
+        Path::new(""),
+        0,
+        DEFAULT_CACHE_MAX_SIZE,
+    );
+    assert_eq!(result.err(), Some(CacheRejection::Absent));
 }
 
 /// Create a unique temporary directory for cache tests.
@@ -1609,10 +1645,11 @@ fn test_cache_dir(name: &str) -> std::path::PathBuf {
 #[test]
 fn cache_save_and_load_roundtrip() {
     let dir = test_cache_dir("roundtrip");
-    let mut store = CacheStore::new();
+    let mut store = CacheStore::new(Path::new(""));
     let module = CachedModule {
         content_hash: 42,
         mtime_ns: 0,
+        ctime_ns: 0,
         file_size: 0,
         last_access_secs: 0,
         exports: vec![],
@@ -1625,6 +1662,8 @@ fn cache_save_and_load_roundtrip() {
         semantic_facts: None,
         whole_object_uses: Box::default(),
         dynamic_import_patterns: vec![],
+        parse_error_count: 0,
+        parse_panicked: false,
         has_cjs_exports: false,
         has_angular_component_template_url: false,
         unused_import_bindings: vec![],
@@ -1634,6 +1673,7 @@ fn cache_save_and_load_roundtrip() {
         unknown_suppression_kinds: vec![],
         line_offsets: vec![],
         complexity: vec![],
+        complexity_extracted: false,
         flag_uses: vec![],
         class_heritage: vec![],
         exported_factory_returns: None,
@@ -1690,8 +1730,8 @@ fn cache_save_and_load_roundtrip() {
     store.insert(Path::new("test.ts"), module);
     store.save(&dir, 0, DEFAULT_CACHE_MAX_SIZE).unwrap();
 
-    let loaded = CacheStore::load(&dir, 0, DEFAULT_CACHE_MAX_SIZE);
-    assert!(loaded.is_some());
+    let loaded = CacheStore::load(&dir, Path::new(""), 0, DEFAULT_CACHE_MAX_SIZE);
+    assert!(loaded.is_ok());
     let loaded = loaded.unwrap();
     assert_eq!(loaded.len(), 1);
     assert!(loaded.get(Path::new("test.ts"), 42).is_some());
@@ -1706,10 +1746,11 @@ fn cache_save_and_load_roundtrip() {
 #[test]
 fn cache_version_mismatch_returns_none() {
     let dir = test_cache_dir("version_mismatch");
-    let mut store = CacheStore::new();
+    let mut store = CacheStore::new(Path::new(""));
     let module = CachedModule {
         content_hash: 42,
         mtime_ns: 0,
+        ctime_ns: 0,
         file_size: 0,
         last_access_secs: 0,
         exports: vec![],
@@ -1722,6 +1763,8 @@ fn cache_version_mismatch_returns_none() {
         semantic_facts: None,
         whole_object_uses: Box::default(),
         dynamic_import_patterns: vec![],
+        parse_error_count: 0,
+        parse_panicked: false,
         has_cjs_exports: false,
         has_angular_component_template_url: false,
         unused_import_bindings: vec![],
@@ -1731,6 +1774,7 @@ fn cache_version_mismatch_returns_none() {
         unknown_suppression_kinds: vec![],
         line_offsets: vec![],
         complexity: vec![],
+        complexity_extracted: false,
         flag_uses: vec![],
         class_heritage: vec![],
         exported_factory_returns: None,
@@ -1787,7 +1831,7 @@ fn cache_version_mismatch_returns_none() {
     store.insert(Path::new("test.ts"), module);
     store.save(&dir, 0, DEFAULT_CACHE_MAX_SIZE).unwrap();
 
-    assert!(CacheStore::load(&dir, 0, DEFAULT_CACHE_MAX_SIZE).is_some());
+    assert!(CacheStore::load(&dir, Path::new(""), 0, DEFAULT_CACHE_MAX_SIZE).is_ok());
 
     let cache_file = dir.join("cache.bin");
     let mut data = std::fs::read(&cache_file).unwrap();
@@ -1795,8 +1839,12 @@ fn cache_version_mismatch_returns_none() {
     data[0] = 255; // Corrupt the version byte
     std::fs::write(&cache_file, &data).unwrap();
 
-    let result = CacheStore::load(&dir, 0, DEFAULT_CACHE_MAX_SIZE);
-    assert!(result.is_none());
+    let result = CacheStore::load(&dir, Path::new(""), 0, DEFAULT_CACHE_MAX_SIZE);
+    assert_eq!(
+        result.err(),
+        Some(CacheRejection::Undecodable),
+        "a corrupted blob names its refusal instead of reading as a cold run"
+    );
 
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -1846,6 +1894,8 @@ fn module_to_cached_roundtrip_type_only_import() {
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         content_hash: 0,
+        parse_error_count: 0,
+        parse_panicked: false,
         suppressions: vec![],
         unknown_suppression_kinds: vec![],
         line_offsets: vec![],
@@ -1925,10 +1975,11 @@ fn module_to_cached_roundtrip_type_only_import() {
 
 #[test]
 fn get_by_path_only_returns_entry_regardless_of_hash() {
-    let mut store = CacheStore::new();
+    let mut store = CacheStore::new(Path::new(""));
     let module = CachedModule {
         content_hash: 42,
         mtime_ns: 0,
+        ctime_ns: 0,
         file_size: 0,
         last_access_secs: 0,
         exports: vec![],
@@ -1941,6 +1992,8 @@ fn get_by_path_only_returns_entry_regardless_of_hash() {
         semantic_facts: None,
         whole_object_uses: Box::default(),
         dynamic_import_patterns: vec![],
+        parse_error_count: 0,
+        parse_panicked: false,
         has_cjs_exports: false,
         has_angular_component_template_url: false,
         unused_import_bindings: vec![],
@@ -1950,6 +2003,7 @@ fn get_by_path_only_returns_entry_regardless_of_hash() {
         unknown_suppression_kinds: vec![],
         line_offsets: vec![],
         complexity: vec![],
+        complexity_extracted: false,
         flag_uses: vec![],
         class_heritage: vec![],
         exported_factory_returns: None,
@@ -2012,7 +2066,7 @@ fn get_by_path_only_returns_entry_regardless_of_hash() {
 
 #[test]
 fn get_by_path_only_returns_none_for_missing() {
-    let store = CacheStore::new();
+    let store = CacheStore::new(Path::new(""));
     assert!(
         store
             .get_by_path_only(Path::new("nonexistent.ts"))
@@ -2029,10 +2083,11 @@ fn retain_paths_removes_stale_entries() {
     use fallow_types::discover::DiscoveredFile;
     use std::path::PathBuf;
 
-    let mut store = CacheStore::new();
+    let mut store = CacheStore::new(Path::new(""));
     let m = || CachedModule {
         content_hash: 1,
         mtime_ns: 0,
+        ctime_ns: 0,
         file_size: 0,
         last_access_secs: 0,
         exports: vec![],
@@ -2045,6 +2100,8 @@ fn retain_paths_removes_stale_entries() {
         semantic_facts: None,
         whole_object_uses: Box::default(),
         dynamic_import_patterns: vec![],
+        parse_error_count: 0,
+        parse_panicked: false,
         has_cjs_exports: false,
         has_angular_component_template_url: false,
         unused_import_bindings: vec![],
@@ -2054,6 +2111,7 @@ fn retain_paths_removes_stale_entries() {
         unknown_suppression_kinds: vec![],
         line_offsets: vec![],
         complexity: vec![],
+        complexity_extracted: false,
         flag_uses: vec![],
         class_heritage: vec![],
         exported_factory_returns: None,
@@ -2136,10 +2194,11 @@ fn retain_paths_removes_stale_entries() {
 
 #[test]
 fn retain_paths_with_empty_files_clears_cache() {
-    let mut store = CacheStore::new();
+    let mut store = CacheStore::new(Path::new(""));
     let m = CachedModule {
         content_hash: 1,
         mtime_ns: 0,
+        ctime_ns: 0,
         file_size: 0,
         last_access_secs: 0,
         exports: vec![],
@@ -2152,6 +2211,8 @@ fn retain_paths_with_empty_files_clears_cache() {
         semantic_facts: None,
         whole_object_uses: Box::default(),
         dynamic_import_patterns: vec![],
+        parse_error_count: 0,
+        parse_panicked: false,
         has_cjs_exports: false,
         has_angular_component_template_url: false,
         unused_import_bindings: vec![],
@@ -2161,6 +2222,7 @@ fn retain_paths_with_empty_files_clears_cache() {
         unknown_suppression_kinds: vec![],
         line_offsets: vec![],
         complexity: vec![],
+        complexity_extracted: false,
         flag_uses: vec![],
         class_heritage: vec![],
         exported_factory_returns: None,
@@ -2224,10 +2286,11 @@ fn retain_paths_with_empty_files_clears_cache() {
 
 #[test]
 fn get_by_metadata_returns_entry_on_match() {
-    let mut store = CacheStore::new();
+    let mut store = CacheStore::new(Path::new(""));
     let module = CachedModule {
         content_hash: 42,
         mtime_ns: 1000,
+        ctime_ns: 0,
         file_size: 500,
         last_access_secs: 0,
         exports: vec![],
@@ -2240,6 +2303,8 @@ fn get_by_metadata_returns_entry_on_match() {
         semantic_facts: None,
         whole_object_uses: Box::default(),
         dynamic_import_patterns: vec![],
+        parse_error_count: 0,
+        parse_panicked: false,
         has_cjs_exports: false,
         has_angular_component_template_url: false,
         unused_import_bindings: vec![],
@@ -2249,6 +2314,7 @@ fn get_by_metadata_returns_entry_on_match() {
         unknown_suppression_kinds: vec![],
         line_offsets: vec![],
         complexity: vec![],
+        complexity_extracted: false,
         flag_uses: vec![],
         class_heritage: vec![],
         exported_factory_returns: None,
@@ -2311,10 +2377,11 @@ fn get_by_metadata_returns_entry_on_match() {
 
 #[test]
 fn get_by_metadata_returns_none_on_mtime_mismatch() {
-    let mut store = CacheStore::new();
+    let mut store = CacheStore::new(Path::new(""));
     let module = CachedModule {
         content_hash: 42,
         mtime_ns: 1000,
+        ctime_ns: 0,
         file_size: 500,
         last_access_secs: 0,
         exports: vec![],
@@ -2327,6 +2394,8 @@ fn get_by_metadata_returns_none_on_mtime_mismatch() {
         semantic_facts: None,
         whole_object_uses: Box::default(),
         dynamic_import_patterns: vec![],
+        parse_error_count: 0,
+        parse_panicked: false,
         has_cjs_exports: false,
         has_angular_component_template_url: false,
         unused_import_bindings: vec![],
@@ -2336,6 +2405,7 @@ fn get_by_metadata_returns_none_on_mtime_mismatch() {
         unknown_suppression_kinds: vec![],
         line_offsets: vec![],
         complexity: vec![],
+        complexity_extracted: false,
         flag_uses: vec![],
         class_heritage: vec![],
         exported_factory_returns: None,
@@ -2400,10 +2470,11 @@ fn get_by_metadata_returns_none_on_mtime_mismatch() {
 
 #[test]
 fn get_by_metadata_returns_none_on_size_mismatch() {
-    let mut store = CacheStore::new();
+    let mut store = CacheStore::new(Path::new(""));
     let module = CachedModule {
         content_hash: 42,
         mtime_ns: 1000,
+        ctime_ns: 0,
         file_size: 500,
         last_access_secs: 0,
         exports: vec![],
@@ -2416,6 +2487,8 @@ fn get_by_metadata_returns_none_on_size_mismatch() {
         semantic_facts: None,
         whole_object_uses: Box::default(),
         dynamic_import_patterns: vec![],
+        parse_error_count: 0,
+        parse_panicked: false,
         has_cjs_exports: false,
         has_angular_component_template_url: false,
         unused_import_bindings: vec![],
@@ -2425,6 +2498,7 @@ fn get_by_metadata_returns_none_on_size_mismatch() {
         unknown_suppression_kinds: vec![],
         line_offsets: vec![],
         complexity: vec![],
+        complexity_extracted: false,
         flag_uses: vec![],
         class_heritage: vec![],
         exported_factory_returns: None,
@@ -2489,10 +2563,11 @@ fn get_by_metadata_returns_none_on_size_mismatch() {
 
 #[test]
 fn get_by_metadata_returns_none_for_zero_mtime() {
-    let mut store = CacheStore::new();
+    let mut store = CacheStore::new(Path::new(""));
     let module = CachedModule {
         content_hash: 42,
         mtime_ns: 0,
+        ctime_ns: 0,
         file_size: 500,
         last_access_secs: 0,
         exports: vec![],
@@ -2505,6 +2580,8 @@ fn get_by_metadata_returns_none_for_zero_mtime() {
         semantic_facts: None,
         whole_object_uses: Box::default(),
         dynamic_import_patterns: vec![],
+        parse_error_count: 0,
+        parse_panicked: false,
         has_cjs_exports: false,
         has_angular_component_template_url: false,
         unused_import_bindings: vec![],
@@ -2514,6 +2591,7 @@ fn get_by_metadata_returns_none_for_zero_mtime() {
         unknown_suppression_kinds: vec![],
         line_offsets: vec![],
         complexity: vec![],
+        complexity_extracted: false,
         flag_uses: vec![],
         class_heritage: vec![],
         exported_factory_returns: None,
@@ -2578,7 +2656,7 @@ fn get_by_metadata_returns_none_for_zero_mtime() {
 
 #[test]
 fn get_by_metadata_returns_none_for_missing_file() {
-    let store = CacheStore::new();
+    let store = CacheStore::new(Path::new(""));
     assert!(
         store
             .get_by_metadata(
@@ -2609,6 +2687,8 @@ fn module_to_cached_stores_mtime_and_size() {
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         content_hash: 42,
+        parse_error_count: 0,
+        parse_panicked: false,
         suppressions: vec![],
         unknown_suppression_kinds: vec![],
         line_offsets: vec![],
@@ -2696,6 +2776,8 @@ fn module_to_cached_roundtrip_line_offsets() {
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         content_hash: 0,
+        parse_error_count: 0,
+        parse_panicked: false,
         suppressions: vec![],
         unknown_suppression_kinds: vec![],
         line_offsets: vec![0, 15, 30, 45],
@@ -2787,6 +2869,8 @@ fn module_to_cached_roundtrip_suppressions_with_kinds() {
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         content_hash: 0,
+        parse_error_count: 0,
+        parse_panicked: false,
         suppressions: vec![
             Suppression::all(0, 1),
             Suppression::issue(5, 4, IssueKind::UnusedExport),
@@ -2903,6 +2987,8 @@ fn module_to_cached_roundtrip_unknown_suppression_kinds() {
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         content_hash: 0,
+        parse_error_count: 0,
+        parse_panicked: false,
         suppressions: vec![],
         unknown_suppression_kinds: vec![
             UnknownSuppressionKind {
@@ -3023,6 +3109,8 @@ fn module_to_cached_roundtrip_visibility() {
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         content_hash: 0,
+        parse_error_count: 0,
+        parse_panicked: false,
         suppressions: vec![],
         unknown_suppression_kinds: vec![],
         line_offsets: vec![],
@@ -3121,6 +3209,8 @@ fn module_to_cached_roundtrip_visibility_internal() {
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         content_hash: 0,
+        parse_error_count: 0,
+        parse_panicked: false,
         suppressions: vec![],
         unknown_suppression_kinds: vec![],
         line_offsets: vec![],
@@ -3219,6 +3309,8 @@ fn module_to_cached_roundtrip_visibility_beta() {
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         content_hash: 0,
+        parse_error_count: 0,
+        parse_panicked: false,
         suppressions: vec![],
         unknown_suppression_kinds: vec![],
         line_offsets: vec![],
@@ -3317,6 +3409,8 @@ fn module_to_cached_roundtrip_visibility_alpha() {
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         content_hash: 0,
+        parse_error_count: 0,
+        parse_panicked: false,
         suppressions: vec![],
         unknown_suppression_kinds: vec![],
         line_offsets: vec![],
@@ -3421,6 +3515,8 @@ fn module_to_cached_roundtrip_dynamic_import_patterns() {
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         content_hash: 0,
+        parse_error_count: 0,
+        parse_panicked: false,
         suppressions: vec![],
         unknown_suppression_kinds: vec![],
         line_offsets: vec![],
@@ -3525,6 +3621,8 @@ fn module_to_cached_roundtrip_unused_import_bindings() {
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         content_hash: 0,
+        parse_error_count: 0,
+        parse_panicked: false,
         suppressions: vec![],
         unknown_suppression_kinds: vec![],
         line_offsets: vec![],
@@ -3631,6 +3729,8 @@ fn module_to_cached_roundtrip_complexity() {
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         content_hash: 0,
+        parse_error_count: 0,
+        parse_panicked: false,
         suppressions: vec![],
         unknown_suppression_kinds: vec![],
         line_offsets: vec![],
@@ -3793,6 +3893,8 @@ fn module_to_cached_roundtrip_require_with_destructured() {
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         content_hash: 0,
+        parse_error_count: 0,
+        parse_panicked: false,
         suppressions: vec![],
         unknown_suppression_kinds: vec![],
         line_offsets: vec![],
@@ -3892,6 +3994,8 @@ fn module_to_cached_roundtrip_dynamic_import_with_local() {
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         content_hash: 0,
+        parse_error_count: 0,
+        parse_panicked: false,
         suppressions: vec![],
         unknown_suppression_kinds: vec![],
         line_offsets: vec![],
@@ -3991,6 +4095,8 @@ fn module_to_cached_roundtrip_source_span() {
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         content_hash: 0,
+        parse_error_count: 0,
+        parse_panicked: false,
         suppressions: vec![],
         unknown_suppression_kinds: vec![],
         line_offsets: vec![],
@@ -4102,6 +4208,8 @@ fn module_to_cached_roundtrip_member_decorators() {
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         content_hash: 0,
+        parse_error_count: 0,
+        parse_panicked: false,
         suppressions: vec![],
         unknown_suppression_kinds: vec![],
         line_offsets: vec![],
@@ -4179,6 +4287,7 @@ fn synthetic_module(content_hash: u64, last_access_secs: u64, payload_kb: usize)
     CachedModule {
         content_hash,
         mtime_ns: 0,
+        ctime_ns: 0,
         file_size: 0,
         last_access_secs,
         exports: vec![],
@@ -4191,6 +4300,8 @@ fn synthetic_module(content_hash: u64, last_access_secs: u64, payload_kb: usize)
         semantic_facts: None,
         whole_object_uses: vec![payload].into(),
         dynamic_import_patterns: vec![],
+        parse_error_count: 0,
+        parse_panicked: false,
         has_cjs_exports: false,
         has_angular_component_template_url: false,
         unused_import_bindings: vec![],
@@ -4200,6 +4311,7 @@ fn synthetic_module(content_hash: u64, last_access_secs: u64, payload_kb: usize)
         unknown_suppression_kinds: vec![],
         line_offsets: vec![],
         complexity: vec![],
+        complexity_extracted: false,
         flag_uses: vec![],
         class_heritage: vec![],
         exported_factory_returns: None,
@@ -4258,7 +4370,7 @@ fn synthetic_module(content_hash: u64, last_access_secs: u64, payload_kb: usize)
 #[test]
 fn cache_save_no_eviction_when_under_threshold() {
     let dir = test_cache_dir("no_evict");
-    let mut store = CacheStore::new();
+    let mut store = CacheStore::new(Path::new(""));
     for i in 0..10u64 {
         store.insert(Path::new(&format!("file{i}.ts")), synthetic_module(i, i, 1));
     }
@@ -4266,7 +4378,8 @@ fn cache_save_no_eviction_when_under_threshold() {
         .save(&dir, 42, DEFAULT_CACHE_MAX_SIZE)
         .expect("save under threshold");
 
-    let loaded = CacheStore::load(&dir, 42, DEFAULT_CACHE_MAX_SIZE).expect("load round-trip");
+    let loaded =
+        CacheStore::load(&dir, Path::new(""), 42, DEFAULT_CACHE_MAX_SIZE).expect("load round-trip");
     assert_eq!(loaded.len(), 10, "all 10 entries survive");
 
     let _ = std::fs::remove_dir_all(&dir);
@@ -4275,14 +4388,15 @@ fn cache_save_no_eviction_when_under_threshold() {
 #[test]
 fn cache_save_evicts_when_over_threshold() {
     let dir = test_cache_dir("evict_over_threshold");
-    let mut store = CacheStore::new();
+    let mut store = CacheStore::new(Path::new(""));
     for i in 0..50u64 {
         store.insert(Path::new(&format!("file{i}.ts")), synthetic_module(i, i, 1));
     }
     let cap = 40 * 1024;
     store.save(&dir, 99, cap).expect("save with eviction");
 
-    let loaded = CacheStore::load(&dir, 99, DEFAULT_CACHE_MAX_SIZE).expect("load after eviction");
+    let loaded = CacheStore::load(&dir, Path::new(""), 99, DEFAULT_CACHE_MAX_SIZE)
+        .expect("load after eviction");
     assert!(loaded.len() < 50, "eviction removed entries");
     let kept_max = (0..50u64)
         .filter(|i| {
@@ -4320,7 +4434,7 @@ fn cache_save_evicts_when_over_threshold() {
 #[test]
 fn cache_eviction_bounds_full_store_encoding_work() {
     let dir = test_cache_dir("bounded_eviction_encoding");
-    let mut store = CacheStore::new();
+    let mut store = CacheStore::new(Path::new(""));
     for i in 0..2_000u64 {
         store.insert(Path::new(&format!("file{i}.ts")), synthetic_module(i, i, 1));
     }
@@ -4359,7 +4473,7 @@ fn cache_eviction_budget_avoids_intermediate_overflow() {
 #[test]
 fn cache_eviction_preserves_recent_entries_with_skewed_sizes() {
     let dir = test_cache_dir("skewed_eviction_sizes");
-    let mut store = CacheStore::new();
+    let mut store = CacheStore::new(Path::new(""));
     for i in 0..1_000u64 {
         store.insert(
             Path::new(&format!("small{i}.ts")),
@@ -4378,7 +4492,8 @@ fn cache_eviction_preserves_recent_entries_with_skewed_sizes() {
     CacheStore::reset_full_store_encode_count();
     store.save(&dir, 99, cap).expect("save skewed cache");
     let encode_count = CacheStore::full_store_encode_count();
-    let loaded = CacheStore::load(&dir, 99, DEFAULT_CACHE_MAX_SIZE).expect("load skewed cache");
+    let loaded = CacheStore::load(&dir, Path::new(""), 99, DEFAULT_CACHE_MAX_SIZE)
+        .expect("load skewed cache");
 
     assert!(
         loaded.len() > 200,
@@ -4408,14 +4523,14 @@ fn cache_eviction_preserves_recent_entries_with_skewed_sizes() {
 #[test]
 fn cache_save_always_honors_cap_with_huge_entries() {
     let dir = test_cache_dir("huge_entry_overshoot");
-    let mut store = CacheStore::new();
+    let mut store = CacheStore::new(Path::new(""));
     store.insert(Path::new("huge.ts"), synthetic_module(7, 0, 10));
     store
         .save(&dir, 5, 1024)
         .expect("save honors cap with overshoot");
 
-    let loaded =
-        CacheStore::load(&dir, 5, DEFAULT_CACHE_MAX_SIZE).expect("load after overshoot save");
+    let loaded = CacheStore::load(&dir, Path::new(""), 5, DEFAULT_CACHE_MAX_SIZE)
+        .expect("load after overshoot save");
     assert_eq!(loaded.len(), 1, "single entry preserved under overshoot");
 
     let _ = std::fs::remove_dir_all(&dir);
@@ -4424,18 +4539,19 @@ fn cache_save_always_honors_cap_with_huge_entries() {
 #[test]
 fn cache_load_returns_none_on_config_hash_mismatch() {
     let dir = test_cache_dir("config_hash_mismatch");
-    let mut store = CacheStore::new();
+    let mut store = CacheStore::new(Path::new(""));
     store.insert(Path::new("test.ts"), synthetic_module(1, 0, 1));
     store
         .save(&dir, 0xDEAD_BEEF, DEFAULT_CACHE_MAX_SIZE)
         .expect("save with config_hash A");
 
     assert!(
-        CacheStore::load(&dir, 0xCAFE_BABE, DEFAULT_CACHE_MAX_SIZE).is_none(),
-        "mismatched config_hash invalidates cache"
+        CacheStore::load(&dir, Path::new(""), 0xCAFE_BABE, DEFAULT_CACHE_MAX_SIZE).err()
+            == Some(CacheRejection::ConfigHashMismatch),
+        "mismatched config_hash invalidates cache and names the reason"
     );
     assert!(
-        CacheStore::load(&dir, 0xDEAD_BEEF, DEFAULT_CACHE_MAX_SIZE).is_some(),
+        CacheStore::load(&dir, Path::new(""), 0xDEAD_BEEF, DEFAULT_CACHE_MAX_SIZE).is_ok(),
         "matching config_hash round-trips"
     );
 
@@ -4445,7 +4561,7 @@ fn cache_load_returns_none_on_config_hash_mismatch() {
 #[test]
 fn cache_load_round_trip_with_matching_config_hash() {
     let dir = test_cache_dir("config_hash_roundtrip");
-    let mut store = CacheStore::new();
+    let mut store = CacheStore::new(Path::new(""));
     store.insert(Path::new("a.ts"), synthetic_module(1, 0, 1));
     store.insert(Path::new("b.ts"), synthetic_module(2, 1, 1));
     let hash = 0xABCD_1234_5678_9ABC_u64;
@@ -4453,8 +4569,8 @@ fn cache_load_round_trip_with_matching_config_hash() {
         .save(&dir, hash, DEFAULT_CACHE_MAX_SIZE)
         .expect("save with hash");
 
-    let loaded =
-        CacheStore::load(&dir, hash, DEFAULT_CACHE_MAX_SIZE).expect("load with matching hash");
+    let loaded = CacheStore::load(&dir, Path::new(""), hash, DEFAULT_CACHE_MAX_SIZE)
+        .expect("load with matching hash");
     assert_eq!(loaded.len(), 2);
     assert!(loaded.get(Path::new("a.ts"), 1).is_some());
     assert!(loaded.get(Path::new("b.ts"), 2).is_some());
@@ -4465,19 +4581,19 @@ fn cache_load_round_trip_with_matching_config_hash() {
 #[test]
 fn cache_load_honors_user_max_size_above_default() {
     let dir = test_cache_dir("load_honors_user_max");
-    let mut store = CacheStore::new();
+    let mut store = CacheStore::new(Path::new(""));
     store.insert(Path::new("a.ts"), synthetic_module(1, 0, 1));
     store
         .save(&dir, 0, DEFAULT_CACHE_MAX_SIZE)
         .expect("save under default");
 
     assert!(
-        CacheStore::load(&dir, 0, 1).is_some(),
+        CacheStore::load(&dir, Path::new(""), 0, 1).is_ok(),
         "tiny user cap does not discard valid existing cache"
     );
 
     assert!(
-        CacheStore::load(&dir, 0, DEFAULT_CACHE_MAX_SIZE * 2).is_some(),
+        CacheStore::load(&dir, Path::new(""), 0, DEFAULT_CACHE_MAX_SIZE * 2).is_ok(),
         "user cap above default round-trips"
     );
 
@@ -4485,11 +4601,14 @@ fn cache_load_honors_user_max_size_above_default() {
 }
 
 #[test]
-fn cache_load_returns_none_on_bitcode_decode_failure() {
+fn cache_load_reports_undecodable_on_bitcode_decode_failure() {
     let dir = test_cache_dir("decode_fail_info");
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("cache.bin"), b"not-a-valid-bitcode-payload").unwrap();
-    assert!(CacheStore::load(&dir, 0, DEFAULT_CACHE_MAX_SIZE).is_none());
+    assert_eq!(
+        CacheStore::load(&dir, Path::new(""), 0, DEFAULT_CACHE_MAX_SIZE).err(),
+        Some(CacheRejection::Undecodable)
+    );
 
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -4497,7 +4616,7 @@ fn cache_load_returns_none_on_bitcode_decode_failure() {
 #[test]
 fn cache_save_atomic_write_leaves_no_tmp_on_success() {
     let dir = test_cache_dir("atomic_no_tmp");
-    let mut store = CacheStore::new();
+    let mut store = CacheStore::new(Path::new(""));
     store.insert(Path::new("test.ts"), synthetic_module(1, 0, 1));
     store
         .save(&dir, 0, DEFAULT_CACHE_MAX_SIZE)
@@ -4555,11 +4674,12 @@ fn warm_cache_load_matches_cold_parse() {
     let cold_bytes = bitcode::encode(&cold_cached);
 
     // Warm path: store, persist, and reload through the on-disk cache.
-    let mut store = CacheStore::new();
+    let mut store = CacheStore::new(Path::new(""));
     store.insert(path, cold_cached);
     store.save(&dir, 0, DEFAULT_CACHE_MAX_SIZE).unwrap();
 
-    let loaded = CacheStore::load(&dir, 0, DEFAULT_CACHE_MAX_SIZE).expect("warm cache loads");
+    let loaded =
+        CacheStore::load(&dir, Path::new(""), 0, DEFAULT_CACHE_MAX_SIZE).expect("warm cache loads");
     let warm_cached = loaded
         .get(path, cold_module.content_hash)
         .expect("entry present in warm cache");
@@ -4635,4 +4755,47 @@ fn warm_cache_load_matches_cold_parse() {
     );
 
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Issue: a fully warm tree copied to a sibling path reused nothing. The blob
+/// loaded, so the run paid the full decode, and then every lookup missed
+/// because the entries were keyed on the absolute path of the directory that
+/// wrote them.
+#[test]
+fn warm_cache_written_under_one_root_is_reused_under_another() {
+    let dir = test_cache_dir("root_relative_reuse");
+    let original_root = Path::new("/build/checkout-a");
+    let moved_root = Path::new("/build/checkout-b");
+
+    let mut store = CacheStore::new(original_root);
+    store.insert(&original_root.join("src/app.ts"), synthetic_module(7, 0, 1));
+    store
+        .save(&dir, 0, DEFAULT_CACHE_MAX_SIZE)
+        .expect("save under the original root");
+
+    let loaded = CacheStore::load(&dir, moved_root, 0, DEFAULT_CACHE_MAX_SIZE)
+        .expect("a relocated cache still loads");
+    assert!(
+        loaded.get(&moved_root.join("src/app.ts"), 7).is_some(),
+        "an entry written under one root must be found under another"
+    );
+}
+
+/// A path outside the project root keeps its own spelling, so a lookup for it
+/// still resolves and never collides with a root-relative entry.
+#[test]
+fn entries_outside_the_root_keep_their_own_key() {
+    let root = Path::new("/build/checkout-a");
+    let outside = Path::new("/elsewhere/vendor/lib.ts");
+
+    let mut store = CacheStore::new(root);
+    store.insert(outside, synthetic_module(11, 0, 1));
+
+    assert!(store.get(outside, 11).is_some());
+    assert!(
+        store
+            .get(&root.join("elsewhere/vendor/lib.ts"), 11)
+            .is_none(),
+        "an outside path must not alias a root-relative one"
+    );
 }

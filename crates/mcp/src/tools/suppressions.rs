@@ -4,7 +4,8 @@ use rmcp::ErrorData as McpError;
 use rmcp::model::{CallToolResult, ContentBlock};
 
 use super::{
-    push_global, push_remote_extends, push_scope, push_str_flag, run_tool, validation_error_body,
+    push_global, push_remote_extends, push_scope, push_str_flag, run_tool_with_limit,
+    validation_error_body,
 };
 
 /// Run `list_suppressions`. Subprocess-backed: the suppression inventory has
@@ -15,7 +16,9 @@ pub async fn run_list_suppressions(
     params: ListSuppressionsParams,
 ) -> Result<CallToolResult, McpError> {
     match build_list_suppressions_args(&params) {
-        Ok(args) => run_tool(binary, "list_suppressions", &args).await,
+        Ok(args) => {
+            run_tool_with_limit(binary, "list_suppressions", &args, params.max_output_bytes).await
+        }
         Err(msg) => Ok(CallToolResult::error(vec![ContentBlock::text(msg)])),
     }
 }

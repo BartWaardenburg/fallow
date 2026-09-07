@@ -93,6 +93,23 @@ invariants in this file.
 
    Version-string assertions do not catch the second case. Verify a touched
    lockfile with `cd crates/napi && rm -rf node_modules && npm ci`.
+
+   The comparative performance numbers are the one artifact a version bump
+   cannot regenerate: `benchmarks/bench-ci.sh` runs only fallow, and
+   `benchmarks/compare.mjs` is the only script that also runs knip. Refresh
+   them deliberately, not every release:
+
+   - Re-run `node benchmarks/compare.mjs` on the same class of hardware named
+     in the `BENCHMARKS.md` environment line, so the numbers stay comparable
+     with the ones they replace.
+   - Update the Reference Results tables, the environment line, and the README
+     Performance paragraph in the same commit. `scripts/repository-policy.test.mjs`
+     fails when the README quotes a number or a measurement vintage that the
+     environment line no longer carries.
+
+   A release is never blocked on a re-measurement. A stale but internally
+   consistent capture is correct; a README that quotes numbers no benchmark
+   run produced is not.
 9. Run package dry-runs, generated-contract checks, companion-repository
    checks, and the repository's full release gates. Review the exact staged
    paths before creating a signed release commit. Do not create the version tag

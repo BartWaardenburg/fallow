@@ -12,9 +12,10 @@ use crate::report::{HumanStatus, human_status_line, sink::outln};
 pub const HELP: &str = "\
 Diagnose project readiness without analysis or mutation.
 
-Checks the root, config resolution, workspace discovery, external plugins, and
-the optional type-aware companion. Uses only local reads and supports human and
-JSON output.
+Checks the root, config resolution, workspace discovery, external plugins, the
+optional type-aware companion, installed dependencies, and whether the
+persisted extraction cache would be reused. Uses only local reads and supports
+human and JSON output.
 
 Usage: fallow doctor [OPTIONS]
 
@@ -125,6 +126,8 @@ const fn check_id(id: fallow_output::DoctorCheckId) -> &'static str {
         fallow_output::DoctorCheckId::Workspaces => "workspaces",
         fallow_output::DoctorCheckId::Plugins => "plugins",
         fallow_output::DoctorCheckId::TypeAware => "type-aware",
+        fallow_output::DoctorCheckId::Dependencies => "dependencies",
+        fallow_output::DoctorCheckId::Cache => "cache",
     }
 }
 
@@ -147,6 +150,6 @@ mod tests {
             config_path: None,
         });
         assert_eq!(report_exit(&report), ExitCode::from(2));
-        assert_eq!(report.checks.len(), 5);
+        assert_eq!(report.checks.len(), 7);
     }
 }

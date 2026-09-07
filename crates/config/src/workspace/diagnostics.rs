@@ -483,6 +483,78 @@ pub fn record_source_read_failures(
     diagnostics
 }
 
+/// Whether `root` should have a `node_modules` directory and does not.
+///
+/// The single predicate behind [`WorkspaceDiagnosticKind::NodeModulesMissing`].
+/// A Deno project with no `package.json` legitimately runs without one, so it
+/// is not reported.
+#[must_use]
+pub fn node_modules_missing(root: &Path) -> bool {
+    !root.join("node_modules").is_dir() && !super::is_deno_without_node_modules(root)
+}
+
+/// Build the missing-`node_modules` diagnostic for `root`, or `None` once the
+/// project has been installed.
+///
+/// Replaces the previous per-pipeline `tracing::warn!`, which existed twice
+/// byte-identically and reached neither JSON output nor `fallow doctor`. The
+/// source walk folds this into its own diagnostic set, so it reaches an
+/// analysis by value like every other walk-recorded kind instead of through a
+/// second registry writer.
+#[must_use]
+pub fn missing_node_modules_diagnostic(root: &Path) -> Option<WorkspaceDiagnostic> {
+    node_modules_missing(root).then(|| {
+        WorkspaceDiagnostic::new(
+            root,
+            root.join("node_modules"),
+            WorkspaceDiagnosticKind::NodeModulesMissing,
+        )
+    })
+}
+
+/// Replace source-parse-degraded diagnostics for `root` with the degradations
+/// from the current parse while preserving every workspace and discovery
+/// diagnostic produced by other stages.
+///
+/// Mirrors [`record_source_read_failures`]: the parse stage owns this kind, so
+/// a fixed file drops out of the set on the next run instead of persisting.
+///
+/// Returns the structured diagnostics so session-owned outputs can carry the
+/// exact same values as the process registry used by direct core and CLI paths.
+#[must_use]
+pub fn record_source_parse_degradations(
+    root: &Path,
+    degradations: &[fallow_types::extract::SourceParseDegradation],
+) -> Vec<WorkspaceDiagnostic> {
+    let diagnostics: Vec<WorkspaceDiagnostic> = degradations
+        .iter()
+        .map(|degradation| {
+            WorkspaceDiagnostic::new(
+                root,
+                degradation.path.clone(),
+                WorkspaceDiagnosticKind::SourceParseDegraded {
+                    error_count: degradation.error_count,
+                    panicked: degradation.panicked,
+                },
+            )
+        })
+        .collect();
+    let canonical = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    let registry = WORKSPACE_DIAGNOSTICS.get_or_init(|| Mutex::new(FxHashMap::default()));
+    if let Ok(mut map) = registry.lock() {
+        let existing = map.entry(canonical).or_default();
+        existing.retain(|diagnostic| {
+            !matches!(
+                diagnostic.kind,
+                WorkspaceDiagnosticKind::SourceParseDegraded { .. }
+            )
+        });
+        existing.extend(diagnostics.iter().cloned());
+    }
+    emit_diagnostics(root, &diagnostics);
+    diagnostics
+}
+
 /// Replace every source-discovery diagnostic for `root` with `diagnostics` in
 /// ONE registry operation, and hand the same list back to the caller.
 ///
@@ -589,12 +661,28 @@ pub fn workspace_diagnostics_for(root: &Path) -> Vec<WorkspaceDiagnostic> {
 /// non-walk kind (workspace discovery, analysis stage) is likewise still read,
 /// which is what lets `--skip check` and `--only health` report what their
 /// analyses recorded after the section captured its list.
+///
+/// The result is ordered by `(path, kind id, message)` rather than by arrival.
+/// Analysis-stage detectors record into the registry from a rayon pool, so
+/// arrival order is a scheduling artefact: `boundaries-not-configured` and
+/// `rule-packs-not-configured` swapped places between a one-worker and an
+/// eight-worker run of the same command, on a `required` wire array. Ordering
+/// the registry leg fixes that at the single point every consumer reads it.
+/// The caller's own list keeps its meaningful discovery order; only this leg
+/// is sorted, and `merge_workspace_diagnostics` puts it after that list.
 #[must_use]
 pub fn registry_diagnostics_to_fold(root: &Path) -> Vec<WorkspaceDiagnostic> {
-    workspace_diagnostics_for(root)
+    let mut diagnostics: Vec<WorkspaceDiagnostic> = workspace_diagnostics_for(root)
         .into_iter()
         .filter(|diagnostic| !diagnostic.kind.is_source_walk_recorded())
-        .collect()
+        .collect();
+    diagnostics.sort_by(|left, right| {
+        left.path
+            .cmp(&right.path)
+            .then_with(|| left.kind.id().cmp(right.kind.id()))
+            .then_with(|| left.message.cmp(&right.message))
+    });
+    diagnostics
 }
 
 /// Directories that are conventionally NOT workspace packages even when a

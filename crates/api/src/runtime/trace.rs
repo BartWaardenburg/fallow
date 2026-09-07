@@ -6,7 +6,8 @@ use crate::{
     ProgrammaticAnalysisContext, ProgrammaticError, TraceCloneOptions,
     TraceCloneProgrammaticOutput, TraceCloneTarget, TraceDependencyOptions,
     TraceDependencyProgrammaticOutput, TraceExportOptions, TraceExportProgrammaticOutput,
-    TraceExportTargetOutput, TraceFileOptions, TraceFileProgrammaticOutput,
+    TraceExportTargetOutput, TraceFileOptions, TraceFileProgrammaticOutput, TraceImportPathOptions,
+    TraceImportPathProgrammaticOutput,
 };
 
 use super::{ProgrammaticResult, duplication, resolve_programmatic_analysis_context};
@@ -99,6 +100,51 @@ pub fn run_trace_file(
                     .with_context("trace_file")
                 })?;
         Ok(TraceFileProgrammaticOutput { output })
+    })
+}
+
+/// Trace the shortest import path between two modules.
+///
+/// An unreachable pair is a RESULT, not an error: the output reports
+/// `reachable: false` with zero hops. Only an endpoint that is not a module in
+/// the graph is an error.
+///
+/// # Errors
+///
+/// Returns a structured programmatic error for invalid options, config load
+/// failures, graph construction failures, or an endpoint that is not in the
+/// module graph.
+pub fn run_trace_import_path(
+    options: &TraceImportPathOptions,
+) -> ProgrammaticResult<TraceImportPathProgrammaticOutput> {
+    validate_non_empty("from", &options.from)?;
+    validate_non_empty("to", &options.to)?;
+    let resolved = resolve_programmatic_analysis_context(&options.analysis)?;
+    resolved.install(|| {
+        let session = load_trace_session(&resolved)?;
+        let artifacts = trace_artifacts(&session)?;
+        let output = fallow_engine::trace::trace_import_path(
+            &artifacts.graph,
+            session.root(),
+            &options.from,
+            &options.to,
+        )
+        .map_err(|endpoint| {
+            let label = endpoint.label();
+            let value = match endpoint {
+                fallow_engine::trace::ImportPathEndpoint::From => &options.from,
+                fallow_engine::trace::ImportPathEndpoint::To => &options.to,
+            };
+            ProgrammaticError::new(format!("'{value}' ({label}) not found in module graph"), 2)
+                .with_code("FALLOW_TRACE_TARGET_NOT_FOUND")
+                .with_help(
+                    "The module is not in the analyzed module graph. Run project_info to list \
+                 discovered files; both paths must be project-relative and not excluded by \
+                 ignore patterns or outside the analyzed roots.",
+                )
+                .with_context("trace_import_path")
+        })?;
+        Ok(TraceImportPathProgrammaticOutput { output })
     })
 }
 

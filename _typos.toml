@@ -39,6 +39,9 @@ dependnecy = "dependnecy"
 # Intentional misspelling in #449 unknown-suppression-kind tests.
 # `unsed-export` is the close-typo Levenshtein-suggestion fixture.
 unsed = "unsed"
+# Intentional misspelling in the MCP unknown-tool did-you-mean tests.
+# `check_helth` is the close-typo fixture the suggestion path must resolve.
+helth = "helth"
 # `unparseable` is a valid variant spelling used in VS Code license parsing.
 unparseable = "unparseable"
 # `vulnerabilit` is a deliberate truncated substring matched via `.includes()`

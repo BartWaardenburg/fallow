@@ -9,9 +9,9 @@ use std::sync::Arc;
 
 use std::path::{Path, PathBuf};
 
+use fallow_types::cache_rejection::CacheRejection;
 use fallow_types::discover::{DiscoveredFile, FileId, StableFileKey};
 use fallow_types::extract::{ImportInfo, ReExportInfo};
-use fallow_types::source_fingerprint::SourceFingerprint;
 use oxc_span::Span;
 
 use crate::resolve::{
@@ -221,7 +221,15 @@ pub use store::GraphCacheStore;
 /// preview fragments, and SvelteKit declares its `static/` directory as such a
 /// mount. A warm 47 cache holds the resolver's earlier miss and would replay it
 /// as an unresolved import plus an unused asset file.
-pub const GRAPH_CACHE_VERSION: u32 = 48;
+///
+/// Bumped to 49: manifest rows carry the parsed content hash instead of the
+/// `(mtime, size)` metadata fingerprint. Metadata alone cannot see a same-size
+/// rewrite whose mtime was restored, so a warm 48 manifest could match a tree
+/// whose contents had changed and replay the previous run's graph. Content
+/// hashing is also portable in a way ctime is not: `cp -Rp` and every CI cache
+/// restore preserve mtime but reset ctime, so keying on ctime here would break
+/// cross-checkout reuse instead of protecting it.
+pub const GRAPH_CACHE_VERSION: u32 = 49;
 
 /// Cached form of a resolved target.
 ///
@@ -914,22 +922,28 @@ pub struct GraphCacheFile {
     /// edges through stable keys, a changed assignment must miss rather than
     /// trust a graph whose `modules[file_id]` indexes point at different files.
     pub file_id: FileId,
-    /// Metadata fingerprint for cache invalidation.
-    pub fingerprint: SourceFingerprint,
+    /// xxh3 hash of the parsed source content.
+    ///
+    /// Content, not `(mtime, size)`: the metadata pair is writer-controlled and
+    /// a same-length rewrite with a restored mtime leaves it unchanged, so a
+    /// metadata-keyed manifest can hand back the previous run's graph for a
+    /// tree that no longer matches it. The hash is free here because the parse
+    /// stage already computed it, and unlike a ctime it survives `cp -Rp` and
+    /// CI cache restores, which is what makes a warm graph reusable across
+    /// checkouts at all.
+    ///
+    /// `0` when the run produced no module for the file (an unreadable source).
+    pub content_hash: u64,
 }
 
 impl GraphCacheFile {
-    /// Build a graph-cache file row from a discovered file and fingerprint.
+    /// Build a graph-cache file row from a discovered file and content hash.
     #[must_use]
-    fn from_discovered_file(
-        root: &Path,
-        file: &DiscoveredFile,
-        fingerprint: SourceFingerprint,
-    ) -> Self {
+    fn from_discovered_file(root: &Path, file: &DiscoveredFile, content_hash: u64) -> Self {
         Self {
             key: StableFileKey::from_root_relative(root, &file.path),
             file_id: file.id,
-            fingerprint,
+            content_hash,
         }
     }
 }
@@ -957,17 +971,17 @@ impl GraphCacheManifest {
         }
     }
 
-    /// Build a manifest from discovered files plus a fingerprint provider.
+    /// Build a manifest from discovered files plus a content-hash provider.
     pub fn from_discovered_files(
         root: &Path,
         files: &[DiscoveredFile],
         mode: GraphCacheMode,
-        mut fingerprint_for_path: impl FnMut(&Path) -> SourceFingerprint,
+        mut content_hash_for_file: impl FnMut(&DiscoveredFile) -> u64,
     ) -> Self {
         let rows = files
             .iter()
             .map(|file| {
-                GraphCacheFile::from_discovered_file(root, file, fingerprint_for_path(&file.path))
+                GraphCacheFile::from_discovered_file(root, file, content_hash_for_file(file))
             })
             .collect();
         Self::new(mode, rows)
@@ -980,6 +994,37 @@ impl GraphCacheManifest {
             && current.version == GRAPH_CACHE_VERSION
             && self.mode == current.mode
             && self.files == current.files
+    }
+
+    /// Name the first input dimension that differs from the current run, for
+    /// a manifest that failed [`Self::matches_resolution_inputs`].
+    ///
+    /// The caller decides graph reuse after a successful, fully paid load, so
+    /// this is the most expensive refusal in the pipeline and used to be the
+    /// only silent one. `None` means the resolution inputs actually match and
+    /// the caller should not be asking.
+    #[must_use]
+    pub fn classify_resolution_mismatch(&self, current: &Self) -> Option<CacheRejection> {
+        if self.version != GRAPH_CACHE_VERSION || current.version != GRAPH_CACHE_VERSION {
+            return Some(CacheRejection::VersionMismatch);
+        }
+        if self.mode != current.mode {
+            return Some(CacheRejection::ModeMismatch);
+        }
+        if self.files.len() != current.files.len()
+            || self
+                .files
+                .iter()
+                .zip(current.files.iter())
+                .any(|(cached, current)| cached.key != current.key)
+        {
+            return Some(CacheRejection::FileSetChanged);
+        }
+        self.files
+            .iter()
+            .zip(current.files.iter())
+            .any(|(cached, current)| cached.content_hash != current.content_hash)
+            .then_some(CacheRejection::FingerprintChanged)
     }
 
     /// True when a persisted resolver payload can be remapped to current FileIds.
@@ -999,7 +1044,7 @@ impl GraphCacheManifest {
                 .iter()
                 .zip(current.files.iter())
                 .all(|(cached, current)| {
-                    cached.key == current.key && cached.fingerprint == current.fingerprint
+                    cached.key == current.key && cached.content_hash == current.content_hash
                 })
     }
 }
@@ -1029,20 +1074,20 @@ mod tests {
         GraphCacheMode::new(1, 2, 3)
     }
 
-    fn fingerprints(pairs: &[(&str, SourceFingerprint)]) -> FxHashMap<PathBuf, SourceFingerprint> {
+    fn content_hashes(pairs: &[(&str, u64)]) -> FxHashMap<PathBuf, u64> {
         pairs
             .iter()
-            .map(|(path, fingerprint)| (PathBuf::from(path), *fingerprint))
+            .map(|(path, hash)| (PathBuf::from(path), *hash))
             .collect()
     }
 
     fn manifest(
         files: &[DiscoveredFile],
         mode: GraphCacheMode,
-        map: &FxHashMap<PathBuf, SourceFingerprint>,
+        map: &FxHashMap<PathBuf, u64>,
     ) -> GraphCacheManifest {
-        GraphCacheManifest::from_discovered_files(Path::new("/project"), files, mode, |path| {
-            *map.get(path).unwrap()
+        GraphCacheManifest::from_discovered_files(Path::new("/project"), files, mode, |file| {
+            *map.get(&file.path).unwrap()
         })
     }
 
@@ -1084,10 +1129,7 @@ mod tests {
     #[test]
     fn manifest_sorts_by_stable_file_key() {
         let files = vec![file(0, "/project/src/z.ts"), file(1, "/project/src/a.ts")];
-        let map = fingerprints(&[
-            ("/project/src/z.ts", SourceFingerprint::new(10, 1)),
-            ("/project/src/a.ts", SourceFingerprint::new(20, 1)),
-        ]);
+        let map = content_hashes(&[("/project/src/z.ts", 10), ("/project/src/a.ts", 20)]);
 
         let manifest = manifest(&files, mode(), &map);
 
@@ -1103,10 +1145,7 @@ mod tests {
     fn manifest_misses_on_file_id_shift_until_graph_remap_exists() {
         let before = vec![file(0, "/project/src/a.ts"), file(1, "/project/src/c.ts")];
         let after = vec![file(9, "/project/src/c.ts"), file(2, "/project/src/a.ts")];
-        let map = fingerprints(&[
-            ("/project/src/a.ts", SourceFingerprint::new(10, 1)),
-            ("/project/src/c.ts", SourceFingerprint::new(20, 1)),
-        ]);
+        let map = content_hashes(&[("/project/src/a.ts", 10), ("/project/src/c.ts", 20)]);
 
         let cached = manifest(&before, mode(), &map);
         let current = manifest(&after, mode(), &map);
@@ -1277,10 +1316,10 @@ mod tests {
     }
 
     #[test]
-    fn manifest_misses_on_fingerprint_change() {
+    fn manifest_misses_on_content_change() {
         let files = vec![file(0, "/project/src/a.ts")];
-        let cached_map = fingerprints(&[("/project/src/a.ts", SourceFingerprint::new(10, 1))]);
-        let current_map = fingerprints(&[("/project/src/a.ts", SourceFingerprint::new(11, 1))]);
+        let cached_map = content_hashes(&[("/project/src/a.ts", 10)]);
+        let current_map = content_hashes(&[("/project/src/a.ts", 11)]);
 
         let cached = manifest(&files, mode(), &cached_map);
         let current = manifest(&files, mode(), &current_map);
@@ -1295,10 +1334,7 @@ mod tests {
             file(1, "/project/src/deleted.ts"),
         ];
         let after = vec![file(0, "/project/src/a.ts")];
-        let map = fingerprints(&[
-            ("/project/src/a.ts", SourceFingerprint::new(10, 1)),
-            ("/project/src/deleted.ts", SourceFingerprint::new(20, 1)),
-        ]);
+        let map = content_hashes(&[("/project/src/a.ts", 10), ("/project/src/deleted.ts", 20)]);
 
         let cached = manifest(&before, mode(), &map);
         let current = manifest(&after, mode(), &map);
@@ -1307,13 +1343,10 @@ mod tests {
     }
 
     #[test]
-    fn manifest_misses_on_file_rename_with_same_fingerprint() {
+    fn manifest_misses_on_file_rename_with_same_content() {
         let before = vec![file(0, "/project/src/old.ts")];
         let after = vec![file(0, "/project/src/new.ts")];
-        let map = fingerprints(&[
-            ("/project/src/old.ts", SourceFingerprint::new(10, 1)),
-            ("/project/src/new.ts", SourceFingerprint::new(10, 1)),
-        ]);
+        let map = content_hashes(&[("/project/src/old.ts", 10), ("/project/src/new.ts", 10)]);
 
         let cached = manifest(&before, mode(), &map);
         let current = manifest(&after, mode(), &map);
@@ -1328,15 +1361,9 @@ mod tests {
             file(1, "/project/packages/shared/src/index.ts"),
         ];
         let workspace_scoped = vec![file(0, "/project/packages/app/src/index.ts")];
-        let map = fingerprints(&[
-            (
-                "/project/packages/app/src/index.ts",
-                SourceFingerprint::new(10, 1),
-            ),
-            (
-                "/project/packages/shared/src/index.ts",
-                SourceFingerprint::new(20, 1),
-            ),
+        let map = content_hashes(&[
+            ("/project/packages/app/src/index.ts", 10),
+            ("/project/packages/shared/src/index.ts", 20),
         ]);
 
         let cached = manifest(&full_project, mode(), &map);
@@ -1349,7 +1376,7 @@ mod tests {
     #[test]
     fn manifest_misses_on_mode_change() {
         let files = vec![file(0, "/project/src/a.ts")];
-        let map = fingerprints(&[("/project/src/a.ts", SourceFingerprint::new(10, 1))]);
+        let map = content_hashes(&[("/project/src/a.ts", 10)]);
 
         let cached = manifest(&files, mode(), &map);
         let current = manifest(&files, GraphCacheMode::new(1, 99, 3), &map);
@@ -1360,7 +1387,7 @@ mod tests {
     #[test]
     fn manifest_misses_on_version_change() {
         let files = vec![file(0, "/project/src/a.ts")];
-        let map = fingerprints(&[("/project/src/a.ts", SourceFingerprint::new(10, 1))]);
+        let map = content_hashes(&[("/project/src/a.ts", 10)]);
         let mut cached = manifest(&files, mode(), &map);
         let current = manifest(&files, mode(), &map);
 

@@ -121,6 +121,8 @@ pub struct DuplicationJsonOutputInput<'a> {
     pub root: &'a Path,
     /// Analysis wall time, emitted as `elapsed_ms`.
     pub elapsed: Duration,
+    /// Whether each clone instance carries its verbatim source text.
+    pub include_fragments: bool,
     /// Optional explain metadata block for the envelope.
     pub meta: Option<Meta>,
     /// Non-fatal per-file diagnostics collected during the workspace walk.
@@ -143,6 +145,8 @@ pub struct GroupedDuplicationJsonOutputInput<'a> {
     pub root: &'a Path,
     /// Analysis wall time, emitted as `elapsed_ms`.
     pub elapsed: Duration,
+    /// Whether each clone instance carries its verbatim source text.
+    pub include_fragments: bool,
     /// Optional explain metadata block for the envelope.
     pub meta: Option<Meta>,
     /// Non-fatal per-file diagnostics collected during the workspace walk.
@@ -256,13 +260,16 @@ pub fn serialize_grouped_check_json(
 pub fn serialize_duplication_json(
     input: DuplicationJsonOutputInput<'_>,
 ) -> Result<serde_json::Value, serde_json::Error> {
-    let payload = DupesReportPayload::from_report(input.report);
+    let payload =
+        DupesReportPayload::from_report_with_fragments(input.report, input.include_fragments);
     let envelope: DupesOutput<DupesReportPayload, DuplicationGroup> =
         build_dupes_output(DupesOutputInput {
             schema_version: DUPES_SCHEMA_VERSION,
             version: env!("CARGO_PKG_VERSION").to_string(),
             elapsed: input.elapsed,
             report: payload,
+            clone_groups_shown: input.report.clone_groups_shown(),
+            clone_groups_omitted: input.report.clone_groups_omitted(),
             grouped_by: None,
             total_issues: None,
             groups: None,
@@ -289,13 +296,16 @@ pub fn serialize_grouped_duplication_json(
     input: GroupedDuplicationJsonOutputInput<'_>,
 ) -> Result<serde_json::Value, serde_json::Error> {
     let root_prefix = format!("{}/", input.root.display());
-    let payload = DupesReportPayload::from_report(input.report);
+    let payload =
+        DupesReportPayload::from_report_with_fragments(input.report, input.include_fragments);
     let envelope: DupesOutput<DupesReportPayload, DuplicationGroup> =
         build_dupes_output(DupesOutputInput {
             schema_version: DUPES_SCHEMA_VERSION,
             version: env!("CARGO_PKG_VERSION").to_string(),
             elapsed: input.elapsed,
             report: payload,
+            clone_groups_shown: input.report.clone_groups_shown(),
+            clone_groups_omitted: input.report.clone_groups_omitted(),
             grouped_by: Some(group_by_mode_from_label(input.grouping.mode)),
             total_issues: Some(input.report.clone_groups.len()),
             groups: None,
@@ -315,7 +325,13 @@ pub fn serialize_grouped_duplication_json(
         .groups
         .iter()
         .map(|group| {
-            let mut value = serde_json::to_value(group)?;
+            let mut value = if input.include_fragments {
+                serde_json::to_value(group)?
+            } else {
+                let mut stripped = group.clone();
+                stripped.strip_fragments();
+                serde_json::to_value(&stripped)?
+            };
             strip_root_prefix(&mut value, &root_prefix);
             Ok(value)
         })

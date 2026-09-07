@@ -31,6 +31,32 @@ impl ImpactCounts {
     }
 }
 
+/// Recorded gate runs grouped by the gate that produced them. Local
+/// provenance only: the store never leaves the machine, so this answers "where
+/// do my gate runs come from", never "how widely is fallow adopted". Absent
+/// when the store holds no gate run at all.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct GateRunCounts {
+    /// Runs recorded by the agent gate (`--gate-marker agent`).
+    pub agent: usize,
+    /// Runs recorded by the git pre-commit hook (`--gate-marker pre-commit`).
+    pub pre_commit: usize,
+    /// Runs recorded by a CI gate (`--gate-marker ci`).
+    pub ci: usize,
+    /// Gate runs whose marker this build does not recognise, plus every gate
+    /// run recorded before the store kept its source (store schema 6 and older).
+    pub unknown: usize,
+}
+
+impl GateRunCounts {
+    /// Whether any gate run was recorded at all.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.agent == 0 && self.pre_commit == 0 && self.ci == 0 && self.unknown == 0
+    }
+}
+
 /// A commit-gate containment event recorded by `fallow impact`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -180,6 +206,10 @@ pub struct ImpactReport {
     /// `trend`. None until two full `fallow` runs exist. v1.6.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project_trend: Option<TrendSummary>,
+    /// Recorded gate runs grouped by source. Absent when no gate run was ever
+    /// recorded. Local provenance, never an adoption metric.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gate_runs: Option<GateRunCounts>,
     /// Lifetime count of commit-gate containment events.
     pub containment_count: usize,
     /// Most recent containment events (newest last), capped for display.
@@ -331,6 +361,7 @@ mod tests {
             trend: None,
             project_surfacing: None,
             project_trend: None,
+            gate_runs: None,
             containment_count: 0,
             recent_containment: Vec::new(),
             resolved_total: 0,

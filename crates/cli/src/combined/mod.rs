@@ -514,6 +514,7 @@ fn build_combined_dupes_options<'a>(
         summary: opts.summary,
         group_by: opts.group_by,
         performance: false,
+        include_fragments: true,
     }
 }
 

@@ -5,12 +5,20 @@ use rmcp::model::{CallToolResult, ContentBlock};
 use std::time::Duration;
 
 use super::{
-    push_global, push_remote_extends, push_str_flag, run_tool_with_stdin_timeout,
-    run_tool_with_timeout, timeout_duration_with_default, validation_error_body,
+    api_runtime::programmatic_error_body, push_global, push_remote_extends, push_str_flag,
+    run_tool_with_stdin_timeout, run_tool_with_timeout, timeout_duration_with_default,
+    validation_error_body,
 };
 
 const SIMILAR_CODE_TIMEOUT_SECS: u64 = 15 * 60;
 const MAX_CANDIDATE_SNAPSHOT_BYTES: usize = 16 * 1024 * 1024;
+
+/// Stable code for a `snapshot` object that is not a candidate snapshot.
+/// The wire parameter is an open JSON object so the inspect input schema does
+/// not inline the whole snapshot shape, so the shape check happens here and
+/// must name itself rather than leaking a serde parser message.
+const INVALID_SNAPSHOT_CODE: &str = "FALLOW_MCP_INVALID_CANDIDATE_SNAPSHOT";
+const INVALID_SNAPSHOT_HELP: &str = "pass the candidate snapshot from find_similar_code unchanged; read fallow://schema/similar-code-snapshot for the object shape";
 
 fn similar_code_timeout() -> Duration {
     timeout_duration_with_default(SIMILAR_CODE_TIMEOUT_SECS)
@@ -23,7 +31,14 @@ pub async fn run_find_similar_code(
 ) -> Result<CallToolResult, McpError> {
     match build_find_similar_code_args(&params) {
         Ok(args) => {
-            run_tool_with_timeout(binary, "find_similar_code", &args, similar_code_timeout()).await
+            run_tool_with_timeout(
+                binary,
+                "find_similar_code",
+                &args,
+                similar_code_timeout(),
+                params.max_output_bytes,
+            )
+            .await
         }
         Err(message) => Ok(CallToolResult::error(vec![ContentBlock::text(message)])),
     }
@@ -34,9 +49,13 @@ pub async fn run_inspect_similar_code(
     binary: &str,
     params: InspectSimilarCodeParams,
 ) -> Result<CallToolResult, McpError> {
-    match build_inspect_similar_code_args(&params) {
+    let candidate = match parse_candidate_snapshot(&params.snapshot) {
+        Ok(candidate) => candidate,
+        Err(message) => return Ok(CallToolResult::error(vec![ContentBlock::text(message)])),
+    };
+    match build_inspect_similar_code_args(&params, &candidate) {
         Ok(args) => {
-            let snapshot = match serde_json::to_vec(&params.snapshot) {
+            let snapshot = match serde_json::to_vec(&candidate) {
                 Ok(snapshot) => snapshot,
                 Err(error) => {
                     return Ok(CallToolResult::error(vec![ContentBlock::text(
@@ -59,6 +78,7 @@ pub async fn run_inspect_similar_code(
                 &args,
                 snapshot,
                 similar_code_timeout(),
+                params.max_output_bytes,
             )
             .await
         }
@@ -71,14 +91,38 @@ pub fn build_find_similar_code_args(params: &FindSimilarCodeParams) -> Result<Ve
     build_args(params)
 }
 
+/// Deserialize the open `snapshot` object into the typed candidate handoff.
+///
+/// # Errors
+///
+/// Returns a `FALLOW_MCP_INVALID_CANDIDATE_SNAPSHOT` error body when the
+/// object is not a candidate snapshot, so the caller sees a named refusal
+/// pointing at the published schema rather than a raw serde parser message.
+pub fn parse_candidate_snapshot(
+    snapshot: &serde_json::Value,
+) -> Result<fallow_api::SimilarCodeCandidateSnapshot, String> {
+    serde_json::from_value(snapshot.clone()).map_err(|error| {
+        programmatic_error_body(
+            &fallow_api::ProgrammaticError::new(
+                format!("snapshot is not a similar-code candidate snapshot: {error}"),
+                2,
+            )
+            .with_code(INVALID_SNAPSHOT_CODE)
+            .with_help(INVALID_SNAPSHOT_HELP)
+            .with_context("inspect_similar_code.snapshot"),
+        )
+    })
+}
+
 /// Build CLI arguments for `inspect_similar_code`.
 pub fn build_inspect_similar_code_args(
     params: &InspectSimilarCodeParams,
+    snapshot: &fallow_api::SimilarCodeCandidateSnapshot,
 ) -> Result<Vec<String>, String> {
     if params.candidate_id.trim().is_empty() {
         return Err(validation_error_body("candidate_id must not be empty"));
     }
-    if params.snapshot.candidate.candidate_id != params.candidate_id.trim() {
+    if snapshot.candidate.candidate_id != params.candidate_id.trim() {
         return Err(validation_error_body(
             "snapshot candidate identity must match candidate_id",
         ));

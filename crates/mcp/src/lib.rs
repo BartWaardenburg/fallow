@@ -16,6 +16,7 @@ use tracing_subscriber::EnvFilter;
 mod params;
 mod resources;
 mod server;
+mod tool_guides;
 mod tools;
 
 #[cfg(all(test, windows))]

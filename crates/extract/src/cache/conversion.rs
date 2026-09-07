@@ -491,6 +491,8 @@ pub fn cached_to_module_opts(
         has_cjs_exports: cached.has_cjs_exports,
         has_angular_component_template_url: cached.has_angular_component_template_url,
         content_hash: cached.content_hash,
+        parse_error_count: cached.parse_error_count,
+        parse_panicked: cached.parse_panicked,
         suppressions: cached_suppressions_to_module(&cached.suppressions),
         unknown_suppression_kinds: cached_unknown_suppressions_to_module(
             &cached.unknown_suppression_kinds,
@@ -581,10 +583,12 @@ pub fn cached_to_module_opts(
 pub fn module_to_cached(
     module: &crate::ModuleInfo,
     fingerprint: fallow_types::source_fingerprint::SourceFingerprint,
+    complexity_extracted: bool,
 ) -> CachedModule {
     CachedModule {
         content_hash: module.content_hash,
         mtime_ns: fingerprint.mtime_ns,
+        ctime_ns: fingerprint.ctime_ns,
         file_size: fingerprint.file_size,
         last_access_secs: current_unix_seconds(),
         exports: module_exports_to_cached(&module.exports),
@@ -598,6 +602,8 @@ pub fn module_to_cached(
             .then(|| Box::from(&*module.semantic_facts)),
         whole_object_uses: Box::from(&*module.whole_object_uses),
         dynamic_import_patterns: module_dynamic_patterns_to_cached(&module.dynamic_import_patterns),
+        parse_error_count: module.parse_error_count,
+        parse_panicked: module.parse_panicked,
         has_cjs_exports: module.has_cjs_exports,
         has_angular_component_template_url: module.has_angular_component_template_url,
         unused_import_bindings: module.unused_import_bindings.clone(),
@@ -609,6 +615,7 @@ pub fn module_to_cached(
         ),
         line_offsets: module.line_offsets.clone(),
         complexity: module.complexity.clone(),
+        complexity_extracted,
         flag_uses: module.flag_uses.clone(),
         class_heritage: module.class_heritage.clone(),
         exported_factory_returns: (!module.exported_factory_returns.is_empty())
@@ -687,5 +694,6 @@ pub fn module_to_cached_from_parts(
     module_to_cached(
         module,
         fallow_types::source_fingerprint::SourceFingerprint::new(mtime_ns, file_size),
+        !module.complexity.is_empty(),
     )
 }

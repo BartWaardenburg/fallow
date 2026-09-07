@@ -30,6 +30,11 @@ pub type FileTrace = fallow_types::trace::FileTrace;
 pub type ImpactClosureGap = fallow_types::trace::ImpactClosureGap;
 /// Engine alias for [`fallow_types::trace::ImpactClosureTrace`].
 pub type ImpactClosureTrace = fallow_types::trace::ImpactClosureTrace;
+/// Engine alias for [`fallow_types::trace::ImportPathHop`].
+pub type ImportPathHop = fallow_types::trace::ImportPathHop;
+/// Engine alias for [`fallow_types::trace::ImportPathTrace`].
+pub type ImportPathTrace = fallow_types::trace::ImportPathTrace;
+pub use trace_impl::ImportPathEndpoint;
 /// Engine alias for [`fallow_types::trace::PipelineTimings`].
 pub type PipelineTimings = fallow_types::trace::PipelineTimings;
 /// Engine alias for [`fallow_types::trace::ReExportChain`].
@@ -170,4 +175,38 @@ pub fn trace_impact_closure(
     file_path: &str,
 ) -> Option<ImpactClosureTrace> {
     trace_impl::trace_impact_closure(graph.as_graph(), root, file_path)
+}
+
+/// Trace the shortest import path between two modules.
+///
+/// # Errors
+///
+/// Returns the endpoint that did not resolve to a module in the graph.
+pub fn trace_import_path(
+    graph: &RetainedModuleGraph,
+    root: &Path,
+    from_path: &str,
+    to_path: &str,
+) -> Result<ImportPathTrace, ImportPathEndpoint> {
+    trace_impl::trace_import_path(graph.as_graph(), root, from_path, to_path)
+}
+
+/// Trace the shortest import path through an existing analysis session.
+///
+/// The inner `Result` carries the endpoint that did not resolve to a module.
+///
+/// # Errors
+///
+/// Returns an error if parsing or graph construction fails.
+pub fn trace_import_path_with_session(
+    session: &crate::session::AnalysisSession,
+    from_path: &str,
+    to_path: &str,
+) -> crate::EngineResult<Result<ImportPathTrace, ImportPathEndpoint>> {
+    let output = session.analyze_dead_code_with_shared_artifacts(false, true)?;
+    let graph = output
+        .graph
+        .as_ref()
+        .ok_or_else(|| crate::EngineError::new("trace --path requires a retained module graph"))?;
+    Ok(trace_import_path(graph, session.root(), from_path, to_path))
 }

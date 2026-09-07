@@ -48,6 +48,7 @@ fn resources_are_listed_and_read_over_stdio() {
             "fallow://schema/config",
             "fallow://schema/plugin",
             "fallow://schema/rule-pack",
+            "fallow://schema/similar-code-snapshot",
         ]
     );
     for resource in resources {
@@ -69,7 +70,10 @@ fn resources_are_listed_and_read_over_stdio() {
         .iter()
         .filter_map(|t| t["uriTemplate"].as_str())
         .collect();
-    assert_eq!(template_uris, ["fallow://explain/{issue_type}"]);
+    assert_eq!(
+        template_uris,
+        ["fallow://tools/{name}", "fallow://explain/{issue_type}"]
+    );
 
     let task_matrix = server.read(4, "fallow://task-matrix");
     let rows = task_matrix["rows"].as_array().expect("rows");

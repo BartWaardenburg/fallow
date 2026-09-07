@@ -885,7 +885,7 @@
           "items": {
             "$ref": "#/definitions/WorkspaceDiagnostic"
           },
-          "description": "Non-fatal diagnostics about the project itself, from all three stages\nthat record them (issue #473):\n\n- workspace discovery, at config load: `undeclared-workspace`,\n  `malformed-package-json`, `glob-matched-no-package-json`,\n  `malformed-tsconfig`, `tsconfig-reference-dir-missing`;\n- source discovery, during the file walk: `skipped-large-file`,\n  `skipped-minified-file`, `skipped-source-dotdir`,\n  `source-read-failure`;\n- dead-code analysis, from the dependency-catalog and override\n  detectors: `malformed-pnpm-workspace-yaml`,\n  `bun-lockb-override-resolution-skipped`.\n\nAnalysis-stage kinds therefore reach only the envelopes whose run\nincludes a dead-code analyze pass, never a standalone\n`fallow dupes --format json`. `path` is project-root-relative with\nforward slashes; the array is omitted when empty. The same list is\nrepeated on each top-level command's envelope so single-command\nconsumers see it without having to look at a separate top-level field."
+          "description": "Non-fatal diagnostics about the project itself, from all three stages\nthat record them (issue #473):\n\n- workspace discovery, at config load: `undeclared-workspace`,\n  `malformed-package-json`, `glob-matched-no-package-json`,\n  `malformed-tsconfig`, `tsconfig-reference-dir-missing`;\n- source discovery, during the file walk: `skipped-large-file`,\n  `skipped-minified-file`, `skipped-source-dotdir`,\n  `source-read-failure`, `source-parse-degraded`;\n- dead-code analysis, from the dependency-catalog and override\n  detectors: `malformed-pnpm-workspace-yaml`,\n  `bun-lockb-override-resolution-skipped`.\n\nAnalysis-stage kinds therefore reach only the envelopes whose run\nincludes a dead-code analyze pass, never a standalone\n`fallow dupes --format json`. `path` is project-root-relative with\nforward slashes; the array is omitted when empty. The same list is\nrepeated on each top-level command's envelope so single-command\nconsumers see it without having to look at a separate top-level field."
         },
         "next_steps": {
           "type": "array",
@@ -2739,6 +2739,14 @@
           "description": "Aggregate duplication statistics.",
           "$ref": "#/definitions/DuplicationStats"
         },
+        "clone_groups_shown": {
+          "type": "integer",
+          "description": "Number of clone groups carried in `clone_groups[]`."
+        },
+        "clone_groups_omitted": {
+          "type": "integer",
+          "description": "Number of scoped-corpus clone groups withheld from `clone_groups[]` by\na presentation cap such as `--top`. `0` on an untruncated run, so\n`clone_groups_shown + clone_groups_omitted == stats.clone_groups`\nalways holds and `stats` keeps describing the whole measured corpus."
+        },
         "grouped_by": {
           "anyOf": [
             {
@@ -2799,7 +2807,9 @@
         "elapsed_ms",
         "clone_groups",
         "clone_families",
-        "stats"
+        "stats",
+        "clone_groups_shown",
+        "clone_groups_omitted"
       ],
       "description": "Envelope emitted by `fallow dupes --format json`.\n\n`Report` and `Group` are generic so the envelope can live in\n`fallow-output` while duplication report wrappers and grouped output\ninternals continue to migrate out of CLI/API-specific crates.",
       "title": "fallow dupes --format json"
@@ -5270,7 +5280,7 @@
         },
         "fragment": {
           "type": "string",
-          "description": "The actual source code fragment."
+          "description": "The actual source code fragment.\n\nOmitted from JSON when the caller asked for a location-only payload\n(`fallow dupes --no-fragments`, and the MCP `find_dupes` default). The\nfive location fields above address the same text, so a consumer that\nwants the source reads it from the file."
         }
       },
       "required": [
@@ -5278,8 +5288,7 @@
         "start_line",
         "end_line",
         "start_col",
-        "end_col",
-        "fragment"
+        "end_col"
       ],
       "description": "A single instance of duplicated code at a specific location."
     },
@@ -5377,11 +5386,11 @@
         },
         "clone_groups": {
           "type": "integer",
-          "description": "Number of clone groups in the reported `clone_groups[]` array after\nfiltering and optional `--top` truncation."
+          "description": "Number of clone groups the scoped corpus contains after filtering.\n`--top` does not change it; compare it with `clone_groups_shown` on the\nenvelope to see how much of the corpus the array carries."
         },
         "clone_instances": {
           "type": "integer",
-          "description": "Total clone instances across all reported groups after filtering and\noptional `--top` truncation."
+          "description": "Total clone instances across the scoped corpus after filtering.\n`--top` does not change it."
         },
         "duplication_percentage": {
           "type": "number",
@@ -8776,7 +8785,7 @@
           ]
         },
         {
-          "description": "Export, member, file, dependency, clone, impact-closure, or symbol-level\ntrace, including exact TypeScript checker evidence when requested.",
+          "description": "Export, member, file, dependency, clone, impact-closure, import-path, or\nsymbol-level trace, including exact TypeScript checker evidence when\nrequested.",
           "allOf": [
             {
               "oneOf": [
@@ -8797,6 +8806,9 @@
                 },
                 {
                   "$ref": "#/definitions/ImpactClosureTrace"
+                },
+                {
+                  "$ref": "#/definitions/ImportPathTrace"
                 },
                 {
                   "$ref": "#/definitions/SymbolChainTrace"
@@ -9465,7 +9477,7 @@
         },
         "fragment": {
           "type": "string",
-          "description": "The actual source code fragment."
+          "description": "The actual source code fragment.\n\nOmitted from JSON when the caller asked for a location-only payload\n(`fallow dupes --no-fragments`, and the MCP `find_dupes` default). The\nfive location fields above address the same text, so a consumer that\nwants the source reads it from the file."
         },
         "owner": {
           "type": "string",
@@ -9478,7 +9490,6 @@
         "end_line",
         "start_col",
         "end_col",
-        "fragment",
         "owner"
       ],
       "description": "A clone instance plus its per-instance owner key (for inline JSON / SARIF\nrendering).\n\nEach instance carries its own `owner` field alongside the standard\n`CloneInstance` shape (file / start_line / end_line / start_col / end_col /\nfragment), so consumers can attribute instances to resolver keys without\nre-resolving paths."
@@ -11480,6 +11491,29 @@
         {
           "type": "object",
           "properties": {
+            "error_count": {
+              "type": "integer",
+              "description": "Number of parser diagnostics reported for the file."
+            },
+            "panicked": {
+              "type": "boolean",
+              "description": "`true` when the parser abandoned the file instead of recovering, so\nthe extracted module is a fragment at best."
+            },
+            "kind": {
+              "type": "string",
+              "const": "source-parse-degraded"
+            }
+          },
+          "required": [
+            "kind",
+            "error_count",
+            "panicked"
+          ],
+          "description": "A source file was read but parsed with diagnostics, so the module\nextracted from it may be missing imports, exports, or references after\nthe first error. Analysis proceeds with the partial module, which is why\nthis is reported: an import the parser never saw credits nothing, and its\ntarget can surface as a confident `unused-file` or `unused-export`\nfinding with a `delete-file` or `remove-export` action on it.\n\nRecorded by the parse stage, alongside `source-read-failure`, and never\nused to withhold a finding. oxc reports recoverable errors for valid\nsyntax newer than the parser as well as for genuinely broken files, so\ngating findings on this would mute real results project-wide instead of\njust the affected file."
+        },
+        {
+          "type": "object",
+          "properties": {
             "kind": {
               "type": "string",
               "const": "bun-lockb-override-resolution-skipped"
@@ -11515,6 +11549,45 @@
             "kind"
           ],
           "description": "A bun manifest declares both `overrides` and a non-empty `resolutions`\nobject. Bun applies `overrides` and ignores `resolutions`, so fallow\nreports the shadowed configuration without offering removal advice."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "node-modules-missing"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "description": "The project has no `node_modules` directory and is not a Deno project\nthat legitimately runs without one. Analysis proceeds, but three things\ndegrade silently: package `exports` and conditional exports cannot be\nread, so imports into a dependency's subpaths resolve less precisely;\nframework plugins that activate on an installed package stay inactive,\nso their entry points and path aliases are missing; and a dependency's\ninstalled shape cannot be inspected, so type-only dependency\nclassification falls back to declaration-based heuristics.\n\nRecorded once per run by the source walk, anchored at the missing\n`node_modules` directory so the reported path is a real location rather\nthan the empty string a root-anchored diagnostic would render. This used\nto be a bare `tracing::warn!` duplicated in two pipelines, so it never\nreached JSON output and never reached `fallow doctor`, which reported\n`pass` on a tree that had never been installed."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "boundaries-not-configured"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "description": "`boundaries` is empty while `boundary-violation` is not `off`, so the\nboundary detector never ran. Its summary counters are therefore\nstructurally zero and say nothing about the project.\n\nThis is the UNCONFIGURED zero, not the user-chosen one: a project that\nsets `boundary-violation: off` asked for silence and can see that\nchoice in `fallow config`. A project that left `boundaries` empty\ncannot distinguish \"no violations\" from \"nothing was measured\"."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "rule-packs-not-configured"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "description": "`rulePacks` is empty while `policy-violation` is not `off`, so the\npolicy detector never ran and its summary counters are structurally\nzero. The unconfigured counterpart of\n[`Self::BoundariesNotConfigured`]."
         }
       ],
       "description": "A diagnostic about a workspace-discovery candidate.\n\nThe `message` field is a human-readable rendering derived from `kind`. It\nalways ends with a concrete next step (\"fix the JSON syntax\", \"remove from\n`workspaces`\", \"add to `ignorePatterns`\") so first-time users have a path\nforward."
@@ -12208,6 +12281,17 @@
             }
           ],
           "description": "Trend between the two most recent whole-project records. Comparable over\ntime (same whole-project denominator every run), unlike the changed-file\n`trend`. None until two full `fallow` runs exist. v1.6."
+        },
+        "gate_runs": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GateRunCounts"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Recorded gate runs grouped by source. Absent when no gate run was ever\nrecorded. Local provenance, never an adoption metric."
         },
         "containment_count": {
           "type": "integer",
@@ -17747,7 +17831,7 @@
     },
     "ReviewBriefSchemaVersion": {
       "type": "integer",
-      "const": 8,
+      "const": 9,
       "description": "Independently-versioned wire-version newtype for the brief envelope.\nSerializes as the integer `REVIEW_BRIEF_SCHEMA_VERSION`."
     },
     "RiskClass": {
@@ -18796,7 +18880,7 @@
         },
         "security_taint": {
           "type": "integer",
-          "description": "Security source -> sink taint-touch component (0 until a security pass is\nthreaded onto the brief path; the seam is built and tested)."
+          "description": "Security source -> sink taint-touch component (0 until a security pass is\nthreaded onto the brief path; the seam is built and tested).\n\nOmitted from the wire while it is zero, the same treatment `runtime`\ngets. Publishing a permanently-zero component as a required field made\nit read as a measurement that found nothing, when nothing measured it.\nA consumer that sums components must read an absent component as zero."
         },
         "risk_zone": {
           "type": "integer",
@@ -18817,7 +18901,6 @@
       },
       "required": [
         "fan_io",
-        "security_taint",
         "risk_zone",
         "change_shape",
         "total"
@@ -20426,6 +20509,20 @@
         "exit_code": {
           "type": "integer",
           "description": "The process exit code the CLI returns alongside this document."
+        },
+        "code": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Stable machine-readable code such as `FALLOW_INVALID_COVERAGE_PATH`,\nwhen the failure has one. Present so an agent can branch on the reason\nwithout pattern-matching the human message."
+        },
+        "help": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Remediation hint for the caller, when the failure has one."
         }
       },
       "required": [
@@ -21911,6 +22008,10 @@
           "$ref": "#/definitions/ImpactClosureTrace"
         },
         {
+          "description": "Shortest import path between two modules.",
+          "$ref": "#/definitions/ImportPathTrace"
+        },
+        {
           "description": "Symbol-level call chain trace.",
           "$ref": "#/definitions/SymbolChainTrace"
         },
@@ -22881,7 +22982,7 @@
     },
     "AuditSchemaVersion": {
       "type": "integer",
-      "const": 10,
+      "const": 11,
       "description": "Schema projection for the audit envelope's exact version."
     },
     "CheckSchemaVersion": {
@@ -22891,14 +22992,14 @@
     },
     "CombinedSchemaVersion": {
       "type": "integer",
-      "const": 11,
+      "const": 12,
       "description": "Schema projection for the combined envelope's exact version."
     },
     "DupesSchemaVersion": {
       "type": "integer",
       "enum": [
-        3,
-        9
+        4,
+        10
       ],
       "description": "Schema projection for the duplication envelope's CLI and programmatic\nversion lineages."
     },
@@ -24839,7 +24940,7 @@
     },
     "DoctorSchemaVersion": {
       "type": "integer",
-      "const": 1,
+      "const": 2,
       "description": "Schema projection for the exact doctor envelope version."
     },
     "DoctorOutput": {
@@ -24954,6 +25055,11 @@
           "type": "string",
           "const": "companion",
           "description": "Optional companion readiness."
+        },
+        {
+          "type": "string",
+          "const": "cache",
+          "description": "Warm-run readiness of persisted analysis state."
         }
       ],
       "description": "Stable category for a doctor check."
@@ -24984,6 +25090,16 @@
           "type": "string",
           "const": "type-aware",
           "description": "Optional type-aware companion discovery."
+        },
+        {
+          "type": "string",
+          "const": "dependencies",
+          "description": "Installed dependency tree availability."
+        },
+        {
+          "type": "string",
+          "const": "cache",
+          "description": "Persisted extraction-cache reuse."
         }
       ],
       "description": "Stable identifier for a doctor check. Declaration order is output order."
@@ -25088,6 +25204,121 @@
       "type": "string",
       "description": "Schema projection for `.` as the privacy-safe diagnosed project root.",
       "const": "."
+    },
+    "GateRunCounts": {
+      "type": "object",
+      "properties": {
+        "agent": {
+          "type": "integer",
+          "description": "Runs recorded by the agent gate (`--gate-marker agent`)."
+        },
+        "pre_commit": {
+          "type": "integer",
+          "description": "Runs recorded by the git pre-commit hook (`--gate-marker pre-commit`)."
+        },
+        "ci": {
+          "type": "integer",
+          "description": "Runs recorded by a CI gate (`--gate-marker ci`)."
+        },
+        "unknown": {
+          "type": "integer",
+          "description": "Gate runs whose marker this build does not recognise, plus every gate\nrun recorded before the store kept its source (store schema 6 and older)."
+        }
+      },
+      "required": [
+        "agent",
+        "pre_commit",
+        "ci",
+        "unknown"
+      ],
+      "description": "Recorded gate runs grouped by the gate that produced them. Local\nprovenance only: the store never leaves the machine, so this answers \"where\ndo my gate runs come from\", never \"how widely is fallow adopted\". Absent\nwhen the store holds no gate run at all."
+    },
+    "ImportPathTrace": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "description": "Wire-shape version of this payload.",
+          "$ref": "#/definitions/ImportPathTraceSchemaVersion"
+        },
+        "from": {
+          "type": "string",
+          "description": "The module the walk started from, root-relative."
+        },
+        "to": {
+          "type": "string",
+          "description": "The module the walk was looking for, root-relative."
+        },
+        "reachable": {
+          "type": "boolean",
+          "description": "Whether `to` is reachable from `from` by following import edges."
+        },
+        "hops": {
+          "type": "integer",
+          "description": "Number of import edges on the reported route. `0` both when the two ends\nare the same module and when there is no route at all."
+        },
+        "path": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ImportPathHop"
+          },
+          "description": "The route, in import order. Empty whenever `hops` is `0`."
+        },
+        "reason": {
+          "type": "string",
+          "description": "Human-readable summary of the outcome."
+        }
+      },
+      "required": [
+        "schema_version",
+        "from",
+        "to",
+        "reachable",
+        "hops",
+        "path",
+        "reason"
+      ],
+      "title": "fallow trace --path",
+      "description": "Result of asking how one module reaches another: the shortest import path.\n\n`reachable` is the only field that separates \"no route exists\" from \"the\nroute is empty because both ends are the same module\". Both report\n`hops: 0`, so a consumer must read `reachable`, never the hop count."
+    },
+    "ImportPathTraceSchemaVersion": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "1",
+          "description": "First release of the `fallow trace --path` shape."
+        }
+      ],
+      "description": "Wire-version discriminator for [`ImportPathTrace`]. Independent from the\nglobal `SchemaVersion`: the import-path payload versions on its own cadence,\nlike the other independently-versioned envelopes. Serializes as a string\n`const` so JSON consumers can switch on it."
+    },
+    "ImportPathHop": {
+      "type": "object",
+      "properties": {
+        "from": {
+          "type": "string",
+          "description": "The importing module, root-relative."
+        },
+        "to": {
+          "type": "string",
+          "description": "The imported module, root-relative."
+        },
+        "type_only": {
+          "type": "boolean",
+          "description": "Whether every symbol on this edge is type-only, so the hop is erased at\nbuild time. Type-only hops are reported, never skipped: an `import type`\nchain is a real compile-time coupling."
+        },
+        "import_line": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "1-based line in `from` of the imported binding that creates this edge:\nthe first value-carrying symbol on the import, or the first symbol when\nevery symbol is type-only. On a multi-line import that is the binding's\nown line, not the `import` keyword's. Absent when the edge carries no\nspan or the source could not be read."
+        }
+      },
+      "required": [
+        "from",
+        "to",
+        "type_only"
+      ],
+      "description": "One import edge on an [`ImportPathTrace`]."
     }
   }
 }

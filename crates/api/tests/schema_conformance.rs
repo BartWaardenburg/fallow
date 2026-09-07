@@ -321,8 +321,12 @@ fn combined_document_with_workspace_diagnostics_conforms() {
     })
     .expect("combined runs");
     let json = serialize_combined_programmatic_json(run).expect("serialize combined");
-    assert_eq!(
-        json["workspace_diagnostics"][0]["kind"], "bun-lockb-override-resolution-skipped",
+    assert!(
+        json["workspace_diagnostics"]
+            .as_array()
+            .is_some_and(|diagnostics| diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic["kind"] == "bun-lockb-override-resolution-skipped")),
         "the validated document must carry the optional root array: {json}"
     );
     EnvelopeSchema::load().assert_conforms("combined", &json);

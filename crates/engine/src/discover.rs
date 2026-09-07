@@ -231,8 +231,6 @@ impl AnalysisDiscovery {
 /// Run engine-owned workspace and source discovery for a resolved project.
 #[must_use]
 pub(crate) fn prepare_analysis_discovery(config: &ResolvedConfig) -> AnalysisDiscovery {
-    warn_missing_node_modules(config);
-
     let workspaces_start = Instant::now();
     let workspaces = discover_workspaces(&config.root);
     let workspaces_ms = workspaces_start.elapsed().as_secs_f64() * 1000.0;
@@ -268,8 +266,6 @@ pub(crate) fn prepare_analysis_discovery_with_workspaces(
     workspaces: &[WorkspaceInfo],
     workspaces_ms: f64,
 ) -> AnalysisDiscovery {
-    warn_missing_node_modules(config);
-
     if !workspaces.is_empty() {
         tracing::info!(count = workspaces.len(), "workspaces discovered");
     }
@@ -288,19 +284,6 @@ pub(crate) fn prepare_analysis_discovery_with_workspaces(
         discover_ms,
         workspaces_ms,
     )
-}
-
-fn warn_missing_node_modules(config: &ResolvedConfig) {
-    if config.root.join("node_modules").is_dir() {
-        return;
-    }
-    if fallow_config::is_deno_without_node_modules(&config.root) {
-        return;
-    }
-
-    tracing::warn!(
-        "node_modules directory not found. Run `npm install` / `pnpm install` first for accurate results."
-    );
 }
 
 fn format_undeclared_workspace_warning(

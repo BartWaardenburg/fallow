@@ -50,7 +50,7 @@ kind: "audit"
 kind: "explain"
 }) | (InspectOutput & {
 kind: "inspect_target"
-}) | ((ExportTrace | ClassMemberTrace | FileTrace | DependencyTrace | CloneTrace | ImpactClosureTrace | SymbolChainTrace | SemanticSymbolTrace) & {
+}) | ((ExportTrace | ClassMemberTrace | FileTrace | DependencyTrace | CloneTrace | ImpactClosureTrace | ImportPathTrace | SymbolChainTrace | SemanticSymbolTrace) & {
 kind: "trace"
 }) | (ReviewEnvelopeOutput & {
 kind: "review-envelope"
@@ -110,7 +110,7 @@ kind: "similar-code-review"
 /**
  * Schema projection for the audit envelope's exact version.
  */
-export type AuditSchemaVersion = 10
+export type AuditSchemaVersion = 11
 /**
  * Fallow CLI version that produced this envelope. Renders to the JSON wire as
  * a bare string (e.g. `"2.74.0"`).
@@ -452,11 +452,28 @@ kind: "skipped-source-dotdir"
 error: string
 kind: "source-read-failure"
 } | {
+/**
+ * Number of parser diagnostics reported for the file.
+ */
+error_count: number
+/**
+ * `true` when the parser abandoned the file instead of recovering, so
+ * the extracted module is a fragment at best.
+ */
+panicked: boolean
+kind: "source-parse-degraded"
+} | {
 kind: "bun-lockb-override-resolution-skipped"
 } | {
 kind: "bun-lock-override-resolution-skipped"
 } | {
 kind: "bun-resolutions-shadowed-by-overrides"
+} | {
+kind: "node-modules-missing"
+} | {
+kind: "boundaries-not-configured"
+} | {
+kind: "rule-packs-not-configured"
 })
 /**
  * Discriminant for [`CloneGroupAction::kind`]. Mirrors the action types
@@ -774,6 +791,13 @@ export type InspectSectionStatus = ("ok" | "partial" | "unavailable" | "error")
  */
 export type InspectEvidenceScope = ("symbol" | "file" | "project_filtered_to_file")
 /**
+ * Wire-version discriminator for [`ImportPathTrace`]. Independent from the
+ * global `SchemaVersion`: the import-path payload versions on its own cadence,
+ * like the other independently-versioned envelopes. Serializes as a string
+ * `const` so JSON consumers can switch on it.
+ */
+export type ImportPathTraceSchemaVersion = "1"
+/**
  * Best-effort classification of why a callee did not resolve to an edge.
  */
 export type UnresolvedReason = ("local-or-global" | "member-or-dynamic")
@@ -859,7 +883,7 @@ export type GroupByMode = ("owner" | "directory" | "package" | "section")
  * Schema projection for the duplication envelope's CLI and programmatic
  * version lineages.
  */
-export type DupesSchemaVersion = (3 | 9)
+export type DupesSchemaVersion = (4 | 10)
 /**
  * Wire-version discriminator for [`ImpactReport`]. Independent from the global
  * `SchemaVersion` (the impact report versions on its own cadence) and from the
@@ -971,7 +995,7 @@ export type SecurityBlindSpotsSchemaVersion = "1"
 /**
  * Schema projection for the combined envelope's exact version.
  */
-export type CombinedSchemaVersion = 11
+export type CombinedSchemaVersion = 12
 /**
  * Schema projection for the feature-flags envelope's exact version.
  */
@@ -992,7 +1016,7 @@ export type FeatureFlagActionType = ("investigate-flag" | "suppress-line")
  * Independently-versioned wire-version newtype for the brief envelope.
  * Serializes as the integer `REVIEW_BRIEF_SCHEMA_VERSION`.
  */
-export type ReviewBriefSchemaVersion = 8
+export type ReviewBriefSchemaVersion = 9
 /**
  * The exactly-three shippable decision categories (the SOLID-3). No cut category
  * (abstraction / deletion / convention / irreversibility) is representable: this
@@ -1064,7 +1088,7 @@ export type SuppressionInventoryOrigin = "comment"
 /**
  * Schema projection for the exact doctor envelope version.
  */
-export type DoctorSchemaVersion = 1
+export type DoctorSchemaVersion = 2
 /**
  * Schema projection for `.` as the privacy-safe diagnosed project root.
  */
@@ -1076,11 +1100,11 @@ export type DoctorStatus = ("pass" | "warn" | "fail")
 /**
  * Stable identifier for a doctor check. Declaration order is output order.
  */
-export type DoctorCheckId = ("root" | "config" | "workspaces" | "plugins" | "type-aware")
+export type DoctorCheckId = ("root" | "config" | "workspaces" | "plugins" | "type-aware" | "dependencies" | "cache")
 /**
  * Stable category for a doctor check.
  */
-export type DoctorCheckCategory = ("project" | "configuration" | "workspace" | "plugin" | "companion")
+export type DoctorCheckCategory = ("project" | "configuration" | "workspace" | "plugin" | "companion" | "cache")
 /**
  * Per-check readiness outcome.
  */
@@ -2585,7 +2609,7 @@ _meta?: (Meta | null)
  *   `malformed-tsconfig`, `tsconfig-reference-dir-missing`;
  * - source discovery, during the file walk: `skipped-large-file`,
  *   `skipped-minified-file`, `skipped-source-dotdir`,
- *   `source-read-failure`;
+ *   `source-read-failure`, `source-parse-degraded`;
  * - dead-code analysis, from the dependency-catalog and override
  *   detectors: `malformed-pnpm-workspace-yaml`,
  *   `bun-lockb-override-resolution-skipped`.
@@ -5083,8 +5107,13 @@ start_col: number
 end_col: number
 /**
  * The actual source code fragment.
+ *
+ * Omitted from JSON when the caller asked for a location-only payload
+ * (`fallow dupes --no-fragments`, and the MCP `find_dupes` default). The
+ * five location fields above address the same text, so a consumer that
+ * wants the source reads it from the file.
  */
-fragment: string
+fragment?: string
 }
 /**
  * Per-action wire shape attached to each `CloneGroupFinding` and
@@ -5249,13 +5278,14 @@ total_tokens: number
  */
 duplicated_tokens: number
 /**
- * Number of clone groups in the reported `clone_groups[]` array after
- * filtering and optional `--top` truncation.
+ * Number of clone groups the scoped corpus contains after filtering.
+ * `--top` does not change it; compare it with `clone_groups_shown` on the
+ * envelope to see how much of the corpus the array carries.
  */
 clone_groups: number
 /**
- * Total clone instances across all reported groups after filtering and
- * optional `--top` truncation.
+ * Total clone instances across the scoped corpus after filtering.
+ * `--top` does not change it.
  */
 clone_instances: number
 /**
@@ -9538,6 +9568,68 @@ consumed_symbols: string[]
 note: string
 }
 /**
+ * Result of asking how one module reaches another: the shortest import path.
+ *
+ * `reachable` is the only field that separates "no route exists" from "the
+ * route is empty because both ends are the same module". Both report
+ * `hops: 0`, so a consumer must read `reachable`, never the hop count.
+ */
+export interface ImportPathTrace {
+schema_version: ImportPathTraceSchemaVersion
+/**
+ * The module the walk started from, root-relative.
+ */
+from: string
+/**
+ * The module the walk was looking for, root-relative.
+ */
+to: string
+/**
+ * Whether `to` is reachable from `from` by following import edges.
+ */
+reachable: boolean
+/**
+ * Number of import edges on the reported route. `0` both when the two ends
+ * are the same module and when there is no route at all.
+ */
+hops: number
+/**
+ * The route, in import order. Empty whenever `hops` is `0`.
+ */
+path: ImportPathHop[]
+/**
+ * Human-readable summary of the outcome.
+ */
+reason: string
+}
+/**
+ * One import edge on an [`ImportPathTrace`].
+ */
+export interface ImportPathHop {
+/**
+ * The importing module, root-relative.
+ */
+from: string
+/**
+ * The imported module, root-relative.
+ */
+to: string
+/**
+ * Whether every symbol on this edge is type-only, so the hop is erased at
+ * build time. Type-only hops are reported, never skipped: an `import type`
+ * chain is a real compile-time coupling.
+ */
+type_only: boolean
+/**
+ * 1-based line in `from` of the imported binding that creates this edge:
+ * the first value-carrying symbol on the import, or the first symbol when
+ * every symbol is type-only. On a multi-line import that is the binding's
+ * own line, not the `import` keyword's. Absent when the edge carries no
+ * span or the source could not be read.
+ */
+import_line?: (number | null)
+}
+/**
  * The result of a symbol-level call-chain trace. Its own surface (`kind:
  * "trace"`), NOT folded into the ranked brief.
  */
@@ -10421,6 +10513,17 @@ clone_families: CloneFamilyFinding[]
 mirrored_directories?: MirroredDirectory[]
 stats: DuplicationStats
 /**
+ * Number of clone groups carried in `clone_groups[]`.
+ */
+clone_groups_shown: number
+/**
+ * Number of scoped-corpus clone groups withheld from `clone_groups[]` by
+ * a presentation cap such as `--top`. `0` on an untruncated run, so
+ * `clone_groups_shown + clone_groups_omitted == stats.clone_groups`
+ * always holds and `stats` keeps describing the whole measured corpus.
+ */
+clone_groups_omitted: number
+/**
  * Grouping mode when `--group-by` was passed.
  */
 grouped_by?: (GroupByMode | null)
@@ -10556,8 +10659,13 @@ start_col: number
 end_col: number
 /**
  * The actual source code fragment.
+ *
+ * Omitted from JSON when the caller asked for a location-only payload
+ * (`fallow dupes --no-fragments`, and the MCP `find_dupes` default). The
+ * five location fields above address the same text, so a consumer that
+ * wants the source reads it from the file.
  */
-fragment: string
+fragment?: string
 /**
  * Resolver key for this specific instance (per-instance, not the
  * group-level largest-owner).
@@ -11009,6 +11117,11 @@ project_surfacing?: (ImpactCounts | null)
  */
 project_trend?: (TrendSummary | null)
 /**
+ * Recorded gate runs grouped by source. Absent when no gate run was ever
+ * recorded. Local provenance, never an adoption metric.
+ */
+gate_runs?: (GateRunCounts | null)
+/**
  * Lifetime count of commit-gate containment events.
  */
 containment_count: number
@@ -11088,6 +11201,31 @@ previous_total: number
  * Total issues in the later run.
  */
 current_total: number
+}
+/**
+ * Recorded gate runs grouped by the gate that produced them. Local
+ * provenance only: the store never leaves the machine, so this answers "where
+ * do my gate runs come from", never "how widely is fallow adopted". Absent
+ * when the store holds no gate run at all.
+ */
+export interface GateRunCounts {
+/**
+ * Runs recorded by the agent gate (`--gate-marker agent`).
+ */
+agent: number
+/**
+ * Runs recorded by the git pre-commit hook (`--gate-marker pre-commit`).
+ */
+pre_commit: number
+/**
+ * Runs recorded by a CI gate (`--gate-marker ci`).
+ */
+ci: number
+/**
+ * Gate runs whose marker this build does not recognise, plus every gate
+ * run recorded before the store kept its source (store schema 6 and older).
+ */
+unknown: number
 }
 /**
  * A commit-gate containment event recorded by `fallow impact`.
@@ -12708,8 +12846,13 @@ fan_io: number
 /**
  * Security source -> sink taint-touch component (0 until a security pass is
  * threaded onto the brief path; the seam is built and tested).
+ *
+ * Omitted from the wire while it is zero, the same treatment `runtime`
+ * gets. Publishing a permanently-zero component as a required field made
+ * it read as a measurement that found nothing, when nothing measured it.
+ * A consumer that sums components must read an absent component as zero.
  */
-security_taint: number
+security_taint?: number
 /**
  * Risk-zone component (boundary / public-API / security-sensitive).
  */
@@ -14277,6 +14420,16 @@ message: string
  * The process exit code the CLI returns alongside this document.
  */
 exit_code: number
+/**
+ * Stable machine-readable code such as `FALLOW_INVALID_COVERAGE_PATH`,
+ * when the failure has one. Present so an agent can branch on the reason
+ * without pattern-matching the human message.
+ */
+code?: (string | null)
+/**
+ * Remediation hint for the caller, when the failure has one.
+ */
+help?: (string | null)
 }
 
 

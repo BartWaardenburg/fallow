@@ -101,9 +101,11 @@ fn zero_config_json_is_stable_and_path_free() {
     assert!(!output.stdout.contains(root_text.as_ref()));
     let json = parse_json(&output);
     assert_eq!(json["kind"], "doctor");
-    assert_eq!(json["schema_version"], 1);
+    assert_eq!(json["schema_version"], 2);
     assert_eq!(json["root"], ".");
-    assert_eq!(json["status"], "pass");
+    // A bare temp root has no node_modules, which is exactly the state the
+    // dependencies check exists to report, so the aggregate is advisory.
+    assert_eq!(json["status"], "warn");
     assert_eq!(
         json["checks"]
             .as_array()
@@ -111,7 +113,15 @@ fn zero_config_json_is_stable_and_path_free() {
             .iter()
             .map(|check| check["id"].as_str().expect("check id"))
             .collect::<Vec<_>>(),
-        ["root", "config", "workspaces", "plugins", "type-aware"]
+        [
+            "root",
+            "config",
+            "workspaces",
+            "plugins",
+            "type-aware",
+            "dependencies",
+            "cache"
+        ]
     );
 }
 
@@ -135,7 +145,7 @@ fn invalid_config_returns_complete_failed_json_report() {
     let json = parse_json(&output);
     assert_eq!(json["kind"], "doctor");
     assert_eq!(json["status"], "fail");
-    assert_eq!(json["checks"].as_array().map(Vec::len), Some(5));
+    assert_eq!(json["checks"].as_array().map(Vec::len), Some(7));
     assert_eq!(json["checks"][1]["id"], "config");
     assert_eq!(json["checks"][1]["status"], "fail");
 }

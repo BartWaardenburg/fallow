@@ -4,7 +4,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
 ---
 {
   "kind": "dupes",
-  "schema_version": 9,
+  "schema_version": 10,
   "version": "[VERSION]",
   "elapsed_ms": 0,
   "clone_groups": [
@@ -103,6 +103,8 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
     "clone_instances": 5,
     "duplication_percentage": 0.7
   },
+  "clone_groups_shown": 2,
+  "clone_groups_omitted": 0,
   "grouped_by": "directory",
   "total_issues": 2,
   "next_steps": [

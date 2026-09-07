@@ -29,7 +29,8 @@ pub use crate::runtime_output::{
     HealthJsonReportInput, HealthProgrammaticOutput, TraceClassMemberOutput, TraceCloneOutput,
     TraceCloneProgrammaticOutput, TraceDependencyOutput, TraceDependencyProgrammaticOutput,
     TraceExportOutput, TraceExportProgrammaticOutput, TraceExportTargetOutput, TraceFileOutput,
-    TraceFileProgrammaticOutput, serialize_health_report_json,
+    TraceFileProgrammaticOutput, TraceImportPathOutput, TraceImportPathProgrammaticOutput,
+    serialize_health_report_json,
 };
 pub use audit::run_audit;
 pub use combined::run_combined;
@@ -44,7 +45,7 @@ pub use similar_code::{
 pub use trace::{
     TraceCloneBenchmarkResult, benchmark_trace_clone_compact_json,
     benchmark_trace_graph_family_compact_json, run_trace_clone, run_trace_dependency,
-    run_trace_export, run_trace_file,
+    run_trace_export, run_trace_file, run_trace_import_path,
 };
 
 use crate::{

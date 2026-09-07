@@ -34,6 +34,10 @@ struct CacheStore {
 #[derive(Debug, Clone, Encode, Decode)]
 struct CachedTokenFile {
     mtime_ns: u64,
+    /// Inode change time, or `0` where the platform reports none. Paired with
+    /// `mtime_ns` so a same-length rewrite with a restored mtime cannot serve
+    /// the previous file's token stream.
+    ctime_ns: u64,
     file_size: u64,
     normalization_hash: u64,
     hashed_tokens: Vec<CachedHashedToken>,
@@ -48,7 +52,7 @@ struct CachedTokenFile {
 
 impl CachedTokenFile {
     fn source_fingerprint(&self) -> SourceFingerprint {
-        SourceFingerprint::new(self.mtime_ns, self.file_size)
+        SourceFingerprint::with_ctime(self.mtime_ns, self.ctime_ns, self.file_size)
     }
 }
 
@@ -149,7 +153,7 @@ impl TokenCache {
         fingerprint: SourceFingerprint,
         mode: TokenCacheMode,
     ) -> Option<TokenCacheEntry> {
-        if !fingerprint.has_known_mtime() {
+        if !fingerprint.is_trustworthy_without_content() {
             return None;
         }
         let entry = self.store.entries.get(&cache_key(path))?;
@@ -242,6 +246,7 @@ impl CachedTokenFile {
     ) -> Self {
         Self {
             mtime_ns: fingerprint.mtime_ns,
+            ctime_ns: fingerprint.ctime_ns,
             file_size: fingerprint.file_size,
             normalization_hash,
             hashed_tokens: hashed_tokens
@@ -573,6 +578,41 @@ mod tests {
         cached.mtime_ns = cached.mtime_ns.saturating_add(1);
 
         assert!(cache.get(&file, &metadata, mode()).is_none());
+    }
+
+    /// A rewrite that keeps the byte length and restores the mtime is invisible
+    /// to `(mtime, size)`, so the ctime half of the fingerprint is what stops
+    /// the cache from replaying the previous file's token stream.
+    #[test]
+    fn token_cache_misses_when_only_the_ctime_moved() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let file = dir.path().join("src.ts");
+        std::fs::write(&file, "const value = 1;\n").expect("write source");
+        let metadata = std::fs::metadata(&file).expect("metadata");
+        let modified = metadata.modified().expect("mtime");
+        let accessed = metadata.accessed().unwrap_or(modified);
+
+        let mut cache = TokenCache::load(dir.path());
+        let entry = entry("const value = 1;\n");
+        insert_entry(&mut cache, &file, &metadata, mode(), &entry);
+
+        std::fs::write(&file, "const other = 1;\n").expect("rewrite source");
+        let handle = std::fs::OpenOptions::new()
+            .write(true)
+            .open(&file)
+            .expect("open source for timestamp restore");
+        handle
+            .set_times(
+                std::fs::FileTimes::new()
+                    .set_accessed(accessed)
+                    .set_modified(modified),
+            )
+            .expect("restore source timestamps");
+        let rewritten = std::fs::metadata(&file).expect("metadata after rewrite");
+        assert_eq!(rewritten.len(), metadata.len());
+        assert_eq!(rewritten.modified().expect("mtime after rewrite"), modified);
+
+        assert!(cache.get(&file, &rewritten, mode()).is_none());
     }
 
     #[test]

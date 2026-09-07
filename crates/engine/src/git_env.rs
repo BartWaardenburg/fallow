@@ -1,6 +1,6 @@
 //! Git process environment helpers owned by the engine boundary.
 
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 /// Environment variables that describe an enclosing git operation's repository
 /// state and should not leak into fallow-owned git subprocesses.
@@ -22,4 +22,18 @@ pub fn clear_ambient_git_env(cmd: &mut Command) -> &mut Command {
         cmd.env_remove(var);
     }
     cmd
+}
+
+/// Build a `git` command with the ambient repository-state environment cleared
+/// and stdin closed. Long-lived embedders keep protocol stdin open, which Git
+/// for Windows can inherit and hold.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "engine-owned git spawn wrapper clears ambient git env before every git subprocess"
+)]
+pub fn git_command() -> Command {
+    let mut command = Command::new("git");
+    clear_ambient_git_env(&mut command);
+    command.stdin(Stdio::null());
+    command
 }

@@ -292,6 +292,66 @@ fn dupes_top_flag() {
     );
 }
 
+/// `--top` narrows the rendered vector, never the measurement.
+///
+/// The envelope used to mix two scopes in one object: `clone_groups` and
+/// `clone_instances` were recomputed from the truncated vector while
+/// `files_with_clones` and `duplication_percentage` still described the whole
+/// corpus, so a consumer reading all four got numbers that cannot come from the
+/// same run. All four now describe the corpus, and the truncation is disclosed
+/// through `clone_groups_shown` / `clone_groups_omitted` instead.
+#[test]
+fn dupes_top_keeps_corpus_stats_and_discloses_the_split() {
+    let full = parse_json(&run_fallow(
+        "dupes",
+        "duplicate-code",
+        &["--format", "json", "--quiet"],
+    ));
+    let limited = parse_json(&run_fallow(
+        "dupes",
+        "duplicate-code",
+        &["--top", "1", "--format", "json", "--quiet"],
+    ));
+
+    let corpus_groups = full["stats"]["clone_groups"].as_u64().unwrap();
+    assert!(
+        corpus_groups > 1,
+        "fixture must produce more than one clone group for --top to omit any"
+    );
+
+    for field in [
+        "clone_groups",
+        "clone_instances",
+        "files_with_clones",
+        "duplication_percentage",
+    ] {
+        assert_eq!(
+            limited["stats"][field], full["stats"][field],
+            "stats.{field} must describe the measured corpus, not the truncated vector"
+        );
+    }
+
+    let shown = limited["clone_groups_shown"].as_u64().unwrap();
+    let omitted = limited["clone_groups_omitted"].as_u64().unwrap();
+    assert_eq!(
+        shown,
+        limited["clone_groups"].as_array().unwrap().len() as u64,
+        "clone_groups_shown must count the groups actually rendered"
+    );
+    assert!(omitted > 0, "--top 1 must omit the remaining groups");
+    assert_eq!(
+        shown + omitted,
+        corpus_groups,
+        "clone_groups_shown + clone_groups_omitted must equal stats.clone_groups"
+    );
+
+    assert_eq!(
+        full["clone_groups_omitted"].as_u64().unwrap(),
+        0,
+        "a run without --top omits nothing"
+    );
+}
+
 #[test]
 fn dupes_filters_atomic_function_call_clones() {
     let dir = tempdir().unwrap();

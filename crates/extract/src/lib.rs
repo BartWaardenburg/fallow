@@ -67,8 +67,8 @@ pub use fallow_types::extract::{
     MemberInfo, MemberKind, ModuleInfo, ModuleLoadMechanism, ParseResult,
     PlaywrightFixtureAliasFact, PlaywrightFixtureDefinitionFact, PlaywrightFixtureTypeFact,
     PlaywrightFixtureUseFact, PublicSignatureTypeReference, QualifiedClassMemberAccessFact,
-    ReExportInfo, RequireCallInfo, RequiredTypeMemberFact, SemanticFact, SourceReadFailure,
-    StringEnumMemberValueFact, TypeAliasSurfaceTargetFact, TypeMemberTypeEntry,
+    ReExportInfo, RequireCallInfo, RequiredTypeMemberFact, SemanticFact, SourceParseDegradation,
+    SourceReadFailure, StringEnumMemberValueFact, TypeAliasSurfaceTargetFact, TypeMemberTypeEntry,
     TypedPropertyMemberAccessFact, VisibilityTag, VitestModuleMockAction,
     VitestModuleMockOperationFact, compute_line_offsets,
 };
@@ -181,15 +181,26 @@ pub fn parse_all_files_cancellable(
 
     let mut modules = Vec::with_capacity(results.len());
     let mut read_failures = Vec::new();
+    let mut parse_degradations = Vec::new();
     let mut hits = 0usize;
     let mut misses = 0usize;
     let mut parse_cpu_nanos = 0u64;
 
-    for result in results {
+    // `results` is a positional map over `files`, so zipping recovers the path
+    // for a module without carrying one on `ModuleInfo`.
+    for (file, result) in files.iter().zip(results) {
         hits += result.cache_hits;
         misses += result.cache_misses;
         parse_cpu_nanos = parse_cpu_nanos.saturating_add(result.parse_cpu_nanos);
         if let Some(module) = result.module {
+            if module.parse_error_count > 0 {
+                parse_degradations.push(SourceParseDegradation {
+                    file_id: module.file_id,
+                    path: file.path.clone(),
+                    error_count: module.parse_error_count,
+                    panicked: module.parse_panicked,
+                });
+            }
             modules.push(module);
         }
         if let Some(failure) = result.read_failure {
@@ -208,6 +219,7 @@ pub fn parse_all_files_cancellable(
     ParseResult {
         modules,
         read_failures,
+        parse_degradations,
         cache_hits: hits,
         cache_misses: misses,
         parse_cpu_ms: parse_cpu_nanos as f64 / 1_000_000.0,
@@ -263,11 +275,20 @@ impl ParseFileResult {
 ///
 /// Cache validation strategy (fast path -> slow path):
 /// 1. Open the file so unreadable sources cannot use stale cached analysis
-/// 2. Read mtime + size from the open handle
-/// 3. If mtime+size match the cached entry -> cache hit, return immediately
-/// 4. If mtime+size differ -> read file, compute content hash
-/// 5. If content hash matches cached entry -> cache hit (file was `touch`ed but unchanged)
+/// 2. Read mtime + ctime + size from the open handle
+/// 3. If all three match the cached entry -> cache hit, return immediately
+/// 4. Otherwise -> read file, compute content hash
+/// 5. If content hash matches cached entry -> cache hit (file was rewritten or
+///    `touch`ed but its content is unchanged)
 /// 6. Otherwise -> cache miss, full parse
+///
+/// Step 3 requires ctime as well as mtime because mtime is writer-controlled:
+/// a same-length rewrite whose mtime is restored (`touch -r`, a codemod, a
+/// `git checkout` of an equal-length revision) leaves `(mtime, size)`
+/// unchanged, and serving the cached module for it means reporting the OLD
+/// file's unused exports with an auto-fixable `remove-export` action. A file
+/// whose ctime moved falls through to step 4 and still hits on the content
+/// hash, so the cost of the stricter gate is one read, not a reparse.
 fn parse_single_file_cached(
     file: &DiscoveredFile,
     cache: Option<&CacheStore>,
@@ -288,8 +309,8 @@ fn parse_single_file_cached(
             let fingerprint =
                 fallow_types::source_fingerprint::SourceFingerprint::from_metadata(&metadata);
             if cached.source_fingerprint() == fingerprint
-                && fingerprint.has_known_mtime()
-                && (!need_complexity || !cached.complexity.is_empty())
+                && fingerprint.is_trustworthy_without_content()
+                && (!need_complexity || cached.complexity_extracted)
             {
                 return ParseFileResult::cache_hit(cache::cached_to_module_opts(
                     cached,
@@ -309,7 +330,7 @@ fn parse_single_file_cached(
 
     if let Some(cached) = cached_by_path
         && cached.content_hash == content_hash
-        && (!need_complexity || !cached.complexity.is_empty())
+        && (!need_complexity || cached.complexity_extracted)
     {
         return ParseFileResult::cache_hit(cache::cached_to_module_opts(
             cached,

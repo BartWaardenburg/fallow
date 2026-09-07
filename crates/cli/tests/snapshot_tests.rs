@@ -117,6 +117,7 @@ fn api_grouped_duplication_json_document(
         grouping,
         root,
         elapsed,
+        include_fragments: true,
         meta: explain.then(dupes_meta),
         workspace_diagnostics: Vec::new(),
         next_steps: build_dupes_next_steps(DupesNextStepsInput {

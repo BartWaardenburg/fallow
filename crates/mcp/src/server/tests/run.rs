@@ -951,22 +951,28 @@ Start-Sleep -Seconds 600
     );
 }
 
+/// An over-limit response is a measurement, not a failure: the analysis ran
+/// and the caller needs to know how much came back and what it looked like.
+/// A contentless error made the caller guess whether to retry or narrow.
 #[cfg(unix)]
 #[tokio::test]
-async fn run_fallow_output_limit_returns_structured_error() {
+async fn run_fallow_output_limit_reports_truncation_with_a_preview() {
     let script = r#"i=0; while [ "$i" -lt 2048 ]; do printf x; i=$((i + 1)); done"#;
     let result =
         run_fallow_with_output_limit("/bin/sh", &["-c".to_string(), script.to_string()], 1024)
             .await
             .expect("output limit should stay a tool result");
 
-    assert_eq!(result.is_error, Some(true));
+    assert_eq!(result.is_error, Some(false));
     let body: serde_json::Value =
         serde_json::from_str(extract_text(&result)).expect("output-limit body is JSON");
-    assert_eq!(body["error"], true);
-    assert_eq!(body["exit_code"], 2);
-    assert_eq!(body["code"], "FALLOW_MCP_SUBPROCESS_OUTPUT_LIMIT");
+    assert_eq!(body["ok"], false);
+    assert_eq!(body["truncated"], true);
+    assert_eq!(body["result_bytes"], 2048);
     assert_eq!(body["limit_bytes"], 1024);
+    assert_eq!(body["stream"], "stdout");
+    assert_eq!(body["code"], "FALLOW_MCP_SUBPROCESS_OUTPUT_LIMIT");
+    assert_eq!(body["result_preview"], "x".repeat(256));
 }
 
 #[cfg(unix)]

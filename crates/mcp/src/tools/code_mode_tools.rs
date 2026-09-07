@@ -125,6 +125,23 @@ impl CodeModeTool {
         }
     }
 
+    /// Refusal for a tool name the sandbox does not expose. The allowlist is
+    /// in hand at the refusal, so a near miss names the tool the caller meant
+    /// instead of making it re-read the manifest.
+    fn unknown_code_mode_tool_message(name: &str) -> String {
+        let allowlist = fallow_types::mcp_manifest::code_mode_allowlist();
+        let names: Vec<&str> = allowlist
+            .iter()
+            .flat_map(|(alias, wire)| [*alias, *wire])
+            .collect();
+        fallow_api::closest_match(name, names).map_or_else(
+            || format!("unsupported code mode fallow tool '{name}'"),
+            |nearest| {
+                format!("unsupported code mode fallow tool '{name}'; did you mean '{nearest}'?")
+            },
+        )
+    }
+
     pub(super) fn from_name(name: &str) -> Result<Self, String> {
         match name {
             "analyze" => Ok(Self::Analyze),
@@ -157,7 +174,7 @@ impl CodeModeTool {
                 "code mode does not expose fix tools; use standalone MCP tools for previews"
                     .to_string(),
             ),
-            _ => Err(format!("unsupported code mode fallow tool '{name}'")),
+            _ => Err(Self::unknown_code_mode_tool_message(name)),
         }
     }
 
@@ -711,6 +728,21 @@ mod tests {
     use fallow_types::mcp_manifest::{MCP_TOOLS, code_mode_allowlist};
 
     use super::*;
+
+    /// The allowlist is in hand at the refusal, so a one-edit typo must name
+    /// the tool the snippet meant instead of sending the agent back to the
+    /// manifest.
+    #[test]
+    fn unknown_tool_name_suggests_the_nearest_allowlisted_tool() {
+        let error = CodeModeTool::from_name("check_helth").expect_err("unknown tool");
+        assert!(error.contains("did you mean 'check_health'?"), "{error}");
+    }
+
+    #[test]
+    fn unrelated_tool_name_gets_no_suggestion() {
+        let error = CodeModeTool::from_name("teleport").expect_err("unknown tool");
+        assert!(!error.contains("did you mean"), "{error}");
+    }
 
     #[test]
     fn all_lists_every_variant_in_order() {

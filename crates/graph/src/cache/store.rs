@@ -6,10 +6,13 @@
 //! plus best-effort fsync and rename, and a `.gitignore` is written alongside
 //! so `.fallow/` is never committed. Every IO error is swallowed (the graph
 //! cache is best-effort and must never fail analysis); a corrupt or
-//! version-mismatched file simply misses and the graph is rebuilt fresh.
+//! version-mismatched file misses and the graph is rebuilt fresh, but the
+//! loader names WHY it missed through [`CacheRejection`] so the run can report
+//! a refusal instead of leaving it indistinguishable from a first run.
 
 use std::path::Path;
 
+use fallow_types::cache_rejection::CacheRejection;
 use serde::{Deserialize, Serialize};
 
 use super::{CachedResolvedProject, GRAPH_CACHE_VERSION, GraphCacheManifest};
@@ -38,33 +41,40 @@ pub struct GraphCacheStore {
 impl GraphCacheStore {
     /// Load the persisted graph cache from `cache_dir`.
     ///
-    /// Returns `None` when the file is missing, undecodable, or written for a
-    /// different `GRAPH_CACHE_VERSION`. The caller compares the loaded
-    /// manifest against the current inputs before trusting the graph or
-    /// resolver payload.
-    #[must_use]
-    pub fn load(cache_dir: &Path) -> Option<Self> {
+    /// # Errors
+    ///
+    /// Returns the [`CacheRejection`] that decided against reuse: the file is
+    /// missing, undecodable, or written for a different
+    /// `GRAPH_CACHE_VERSION`. The caller compares the loaded manifest against
+    /// the current inputs before trusting the graph or resolver payload, and
+    /// reports its own rejection reason for that comparison.
+    ///
+    /// A file that existed and was then refused logs at warn: the run paid the
+    /// read and the decode and reused nothing. A missing file stays quiet.
+    pub fn load(cache_dir: &Path) -> Result<Self, CacheRejection> {
         let cache_file = cache_dir.join(GRAPH_CACHE_FILE);
-        let data = std::fs::read(&cache_file).ok()?;
+        let data = std::fs::read(&cache_file).map_err(|_| CacheRejection::Absent)?;
         let mut store: Self = match postcard::from_bytes(&data) {
             Ok(store) => store,
             Err(_) => {
-                tracing::info!(
-                    "Graph cache format upgraded, rebuilding (one-time cost after version bump)"
+                tracing::warn!(
+                    "Graph cache could not be decoded, rebuilding (one-time cost after version bump)"
                 );
-                return None;
+                return Err(CacheRejection::Undecodable);
             }
         };
         if store.version != GRAPH_CACHE_VERSION {
-            tracing::info!(
+            tracing::warn!(
+                cached_version = store.version,
+                expected_version = GRAPH_CACHE_VERSION,
                 "Graph cache format upgraded, rebuilding (one-time cost after version bump)"
             );
-            return None;
+            return Err(CacheRejection::VersionMismatch);
         }
         // `namespace_imported` is `#[serde(skip)]`; rebuild it from the persisted
         // edges so the loaded graph is byte-identical to a fresh build.
         store.graph.reconstruct_namespace_imported();
-        Some(store)
+        Ok(store)
     }
 
     /// Persist this graph cache to `cache_dir`, best-effort.

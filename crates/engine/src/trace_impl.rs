@@ -1,18 +1,23 @@
 use std::path::{Path, PathBuf};
 
+use fallow_types::discover::FileId;
 pub use fallow_types::trace::{
     ClassMemberTrace, CloneTrace, DependencyTrace, ExportReference, ExportTrace, FileTrace,
-    ImpactClosureGap, ImpactClosureTrace, NamespacedExportReferences, PipelineTimings,
-    ReExportChain, TracedCloneGroup, TracedExport, TracedReExport,
+    ImpactClosureGap, ImpactClosureTrace, ImportPathHop, ImportPathTrace,
+    ImportPathTraceSchemaVersion, NamespacedExportReferences, PipelineTimings, ReExportChain,
+    TracedCloneGroup, TracedExport, TracedReExport,
 };
 use fallow_types::trace_chain::StarExportAmbiguity;
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::duplicates::{
     CloneFingerprintSet, CloneGroup, CloneInstance, DuplicationReport, dominant_identifier,
     group_refactoring_suggestion,
 };
-use crate::graph::{EffectiveExportResolution, ExportNamespace, ModuleGraph, ReferenceKind};
+use crate::graph::{
+    EffectiveExportResolution, ExportNamespace, ImportPathHop as GraphImportPathHop, ModuleGraph,
+    ReferenceKind,
+};
 
 /// Match a user-provided file path against a module's actual path.
 ///
@@ -906,6 +911,148 @@ pub fn trace_impact_closure(
         affected_not_shown: paths.affected_not_shown,
         coordination_gap,
     })
+}
+
+/// Which endpoint of a `--path` request could not be resolved to a module.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImportPathEndpoint {
+    /// The module the walk would start from.
+    From,
+    /// The module the walk is looking for.
+    To,
+}
+
+impl ImportPathEndpoint {
+    /// The flag position this endpoint occupies, for diagnostics.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::From => "from",
+            Self::To => "to",
+        }
+    }
+}
+
+/// Trace the shortest import path from one module to another.
+///
+/// Both endpoints are resolved through the same path matching the other traces
+/// use. Returns the unresolved endpoint when either side is not a module in the
+/// graph, so the caller can name which half of the request was wrong.
+///
+/// # Errors
+///
+/// Returns the endpoint that did not resolve to a module in the graph.
+pub fn trace_import_path(
+    graph: &ModuleGraph,
+    root: &Path,
+    from_path: &str,
+    to_path: &str,
+) -> Result<ImportPathTrace, ImportPathEndpoint> {
+    let from = graph
+        .modules
+        .iter()
+        .find(|m| path_matches(&m.path, root, from_path))
+        .ok_or(ImportPathEndpoint::From)?;
+    let to = graph
+        .modules
+        .iter()
+        .find(|m| path_matches(&m.path, root, to_path))
+        .ok_or(ImportPathEndpoint::To)?;
+
+    let from_rel = relativize(&from.path, root);
+    let to_rel = relativize(&to.path, root);
+
+    let Some(hops) = graph.shortest_import_path(from.file_id, to.file_id) else {
+        return Ok(ImportPathTrace {
+            schema_version: ImportPathTraceSchemaVersion::V1,
+            reason: format!("no import path from {from_rel} to {to_rel}"),
+            from: from_rel,
+            to: to_rel,
+            reachable: false,
+            hops: 0,
+            path: Vec::new(),
+        });
+    };
+
+    if hops.is_empty() {
+        return Ok(ImportPathTrace {
+            schema_version: ImportPathTraceSchemaVersion::V1,
+            reason: format!("{from_rel} is the same module as {to_rel}"),
+            from: from_rel,
+            to: to_rel,
+            reachable: true,
+            hops: 0,
+            path: Vec::new(),
+        });
+    }
+
+    let path = resolve_import_path_hops(graph, root, &hops);
+    let hop_count = path.len();
+    let plural = if hop_count == 1 { "hop" } else { "hops" };
+    // A route whose every hop is type-only is erased at build time. Saying so is
+    // the difference between "these modules ship coupled" and "the coupling only
+    // exists for the type checker".
+    let reason = if path.iter().all(|hop| hop.type_only) {
+        format!(
+            "{from_rel} reaches {to_rel} in {hop_count} type-only {plural}, erased at build time"
+        )
+    } else {
+        format!("{from_rel} reaches {to_rel} in {hop_count} {plural}")
+    };
+
+    Ok(ImportPathTrace {
+        schema_version: ImportPathTraceSchemaVersion::V1,
+        from: from_rel,
+        to: to_rel,
+        reachable: true,
+        hops: hop_count,
+        path,
+        reason,
+    })
+}
+
+/// Resolve graph-level hops to the wire shape, turning each import span into a
+/// 1-based line. Each source file is read at most once per trace; a file that
+/// cannot be read yields `import_line: None` rather than a guessed line.
+fn resolve_import_path_hops(
+    graph: &ModuleGraph,
+    root: &Path,
+    hops: &[GraphImportPathHop],
+) -> Vec<ImportPathHop> {
+    let mut line_offsets: FxHashMap<FileId, Option<Vec<u32>>> = FxHashMap::default();
+    hops.iter()
+        .filter_map(|hop| {
+            let from = graph.modules.get(hop.from.0 as usize)?;
+            let to = graph.modules.get(hop.to.0 as usize)?;
+            let import_line = hop.import_span_start.and_then(|span_start| {
+                line_offsets
+                    .entry(hop.from)
+                    .or_insert_with(|| {
+                        std::fs::read_to_string(&from.path)
+                            .ok()
+                            .map(|source| fallow_types::extract::compute_line_offsets(&source))
+                    })
+                    .as_ref()
+                    .map(|offsets| {
+                        fallow_types::extract::byte_offset_to_line_col(offsets, span_start).0
+                    })
+            });
+            Some(ImportPathHop {
+                from: relativize(&from.path, root),
+                to: relativize(&to.path, root),
+                type_only: hop.all_type_only,
+                import_line,
+            })
+        })
+        .collect()
+}
+
+/// Relativize a module path against the project root, forward-slashed.
+fn relativize(path: &Path, root: &Path) -> String {
+    path.strip_prefix(root)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .replace('\\', "/")
 }
 
 /// Build a [`TracedCloneGroup`] from a raw clone group, computing the

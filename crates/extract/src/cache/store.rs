@@ -5,6 +5,7 @@ use std::path::Path;
 #[cfg(test)]
 use std::cell::Cell;
 
+use fallow_types::cache_rejection::CacheRejection;
 use fallow_types::source_fingerprint::SourceFingerprint;
 use rustc_hash::FxHashMap;
 
@@ -21,38 +22,61 @@ thread_local! {
 }
 
 /// Cached module information stored on disk.
+///
+/// Entries are keyed on the ROOT-RELATIVE, forward-slash-normalised path, and
+/// the root is recorded once in the header. Absolute keys made the blob
+/// unusable anywhere but the directory that wrote it: a container job, a
+/// matrix over roots, a GitLab shell executor, or a plain `cp -Rp` to a
+/// sibling path paid the full decode of a multi-megabyte file and then missed
+/// every single lookup, with nothing on stderr to say so.
 #[derive(Debug, Encode, Decode)]
 pub struct CacheStore {
     version: u32,
     /// Stable hash of extraction-affecting config fields.
     config_hash: u64,
-    /// Map from file path to cached module data.
+    /// Project root the entries are relative to, forward-slash normalised and
+    /// without a trailing separator. Informational after load: the loader
+    /// re-anchors to the CURRENT root, because a blob restored under another
+    /// path is exactly the case root-relative keys exist to serve.
+    root: String,
+    /// Map from root-relative file path to cached module data.
     entries: FxHashMap<String, CachedModule>,
 }
 
 impl CacheStore {
-    /// Create a new empty cache.
+    /// Create a new empty cache anchored at `root`.
     #[must_use]
-    pub fn new() -> Self {
+    pub fn new(root: &Path) -> Self {
         Self {
             version: CACHE_VERSION,
             config_hash: 0,
+            root: normalise_root(root),
             entries: FxHashMap::default(),
         }
     }
 
     /// Load cache from disk.
     ///
-    /// Returns `None` when the file is missing, too large, undecodable, or
-    /// built for a different `config_hash`.
-    #[must_use]
+    /// # Errors
+    ///
+    /// Returns the [`CacheRejection`] that decided against reuse. Every branch
+    /// names itself instead of collapsing into a bare miss: a run that read a
+    /// multi-megabyte blob and then refused it costs the same as a cold run
+    /// but used to be indistinguishable from having no cache at all, and the
+    /// config-hash branch in particular said nothing whatsoever. Callers carry
+    /// the reason into the perf table and `fallow doctor`.
+    ///
+    /// Every branch that refuses a file that DID exist logs at warn, because
+    /// the user paid the read and got nothing back. Only the missing-file case
+    /// stays quiet.
     pub fn load(
         cache_dir: &Path,
+        root: &Path,
         expected_config_hash: u64,
         max_size_bytes: usize,
-    ) -> Option<Self> {
+    ) -> Result<Self, CacheRejection> {
         let cache_file = cache_dir.join("cache.bin");
-        let data = std::fs::read(&cache_file).ok()?;
+        let data = std::fs::read(&cache_file).map_err(|_| CacheRejection::Absent)?;
         let safety_ceiling = max_size_bytes.max(DEFAULT_CACHE_MAX_SIZE);
         if data.len() > safety_ceiling {
             tracing::warn!(
@@ -60,25 +84,43 @@ impl CacheStore {
                 ceiling_mb = safety_ceiling / (1024 * 1024),
                 "Cache file exceeds safety ceiling, ignoring"
             );
-            return None;
+            return Err(CacheRejection::Oversize {
+                size_bytes: data.len() as u64,
+                ceiling_bytes: safety_ceiling as u64,
+            });
         }
-        let store: Self = match bitcode::decode(&data) {
+        let mut store: Self = match bitcode::decode(&data) {
             Ok(s) => s,
             Err(_) => {
-                tracing::info!(
-                    "Cache format upgraded, rebuilding (one-time cost after version bump)"
+                tracing::warn!(
+                    "Cache file could not be decoded, rebuilding (one-time cost after version bump)"
                 );
-                return None;
+                return Err(CacheRejection::Undecodable);
             }
         };
         if store.version != CACHE_VERSION {
-            tracing::info!("Cache format upgraded, rebuilding (one-time cost after version bump)");
-            return None;
+            tracing::warn!(
+                cached_version = store.version,
+                expected_version = CACHE_VERSION,
+                "Cache format upgraded, rebuilding (one-time cost after version bump)"
+            );
+            return Err(CacheRejection::VersionMismatch);
         }
         if store.config_hash != expected_config_hash {
-            return None;
+            tracing::warn!(
+                "Cache was built under different extraction config, rebuilding from cold"
+            );
+            return Err(CacheRejection::ConfigHashMismatch);
         }
-        Some(store)
+        let current_root = normalise_root(root);
+        if store.root != current_root {
+            tracing::debug!(
+                cached_root = %store.root,
+                "Reusing a cache written under a different project root"
+            );
+            store.root = current_root;
+        }
+        Ok(store)
     }
 
     /// Save cache to disk with write-time size enforcement and atomic rename.
@@ -230,12 +272,43 @@ impl CacheStore {
         FULL_STORE_ENCODE_COUNT.with(Cell::get)
     }
 
+    /// Key `path` the way entries are stored: root-relative where possible,
+    /// forward-slash normalised.
+    ///
+    /// A path outside the root keeps its own normalised spelling. It is still
+    /// stable within one root, which is all a lookup needs, and no root-
+    /// relative spelling of it exists to prefer.
+    fn key_for(&self, path: &Path) -> String {
+        let text = path.to_string_lossy().replace('\\', "/");
+        if self.root.is_empty() {
+            return text;
+        }
+        match text
+            .strip_prefix(&self.root)
+            .and_then(|rest| rest.strip_prefix('/'))
+        {
+            Some(relative) => relative.to_owned(),
+            None => text,
+        }
+    }
+
+    /// Rebuild the absolute path an entry key refers to under the current root.
+    fn path_for_key(&self, key: &str) -> std::path::PathBuf {
+        if self.root.is_empty() {
+            return std::path::PathBuf::from(key);
+        }
+        let candidate = Path::new(key);
+        if candidate.is_absolute() {
+            return candidate.to_path_buf();
+        }
+        Path::new(&self.root).join(key)
+    }
+
     /// Look up a cached module by path and content hash.
     /// Returns None if not cached or hash mismatch.
     #[must_use]
     pub fn get(&self, path: &Path, content_hash: u64) -> Option<&CachedModule> {
-        let key = path.to_string_lossy();
-        let entry = self.entries.get(key.as_ref())?;
+        let entry = self.entries.get(&self.key_for(path))?;
         if entry.content_hash == content_hash {
             Some(entry)
         } else {
@@ -245,7 +318,7 @@ impl CacheStore {
 
     /// Insert or update a cached module.
     pub fn insert(&mut self, path: &Path, module: CachedModule) {
-        let key = path.to_string_lossy().into_owned();
+        let key = self.key_for(path);
         self.entries.insert(key, module);
     }
 
@@ -256,8 +329,7 @@ impl CacheStore {
         path: &Path,
         fingerprint: SourceFingerprint,
     ) -> Option<&CachedModule> {
-        let key = path.to_string_lossy();
-        let entry = self.entries.get(key.as_ref())?;
+        let entry = self.entries.get(&self.key_for(path))?;
         if entry.source_fingerprint() == fingerprint && fingerprint.has_known_mtime() {
             Some(entry)
         } else {
@@ -268,21 +340,38 @@ impl CacheStore {
     /// Look up a cached module by path only (ignoring hash).
     #[must_use]
     pub fn get_by_path_only(&self, path: &Path) -> Option<&CachedModule> {
-        let key = path.to_string_lossy();
-        self.entries.get(key.as_ref())
+        self.entries.get(&self.key_for(path))
     }
 
-    /// Remove cache entries for files that are no longer in the project.
+    /// Remove cache entries for files that no longer exist on disk.
     ///
     /// Returns `true` when any entry was removed.
+    ///
+    /// The predicate is deliberately "still exists", not "was discovered by
+    /// this run". Discovery is scoped: `--production` drops test and story
+    /// files, `--root` narrows to a subtree, and `ignorePatterns` differs per
+    /// command. Evicting whatever the current scope did not walk meant one
+    /// `--production` run threw away the entries for every test file, and the
+    /// next full run reparsed them from cold. Entries are keyed by absolute
+    /// path, so the check is one `symlink_metadata` per undiscovered entry
+    /// (`symlink_metadata`, not `metadata`, so a broken symlink still counts as
+    /// present rather than being evicted as missing). Size is not this
+    /// method's concern: `evict_lru_to_target` remains the only guard on how
+    /// large the blob may grow.
     pub fn retain_paths(&mut self, files: &[fallow_types::discover::DiscoveredFile]) -> bool {
         use rustc_hash::FxHashSet;
-        let current_paths: FxHashSet<String> = files
-            .iter()
-            .map(|f| f.path.to_string_lossy().to_string())
-            .collect();
+        let current_keys: FxHashSet<String> = files.iter().map(|f| self.key_for(&f.path)).collect();
         let before = self.entries.len();
-        self.entries.retain(|key, _| current_paths.contains(key));
+        let retained: FxHashSet<String> = self
+            .entries
+            .keys()
+            .filter(|key| {
+                current_keys.contains(*key)
+                    || std::fs::symlink_metadata(self.path_for_key(key)).is_ok()
+            })
+            .cloned()
+            .collect();
+        self.entries.retain(|key, _| retained.contains(key));
         self.entries.len() != before
     }
 
@@ -314,6 +403,17 @@ pub(super) fn estimated_eviction_budget(
     let safety = (safety_bps as u128).min(BASIS_POINTS);
     let budget = scaled / BASIS_POINTS * safety + scaled % BASIS_POINTS * safety / BASIS_POINTS;
     budget.min(usize::MAX as u128) as usize
+}
+
+/// Normalise a project root for storage and prefix stripping: forward slashes,
+/// no trailing separator. An empty root disables stripping, which is what a
+/// default-constructed store gets.
+fn normalise_root(root: &Path) -> String {
+    let text = root.to_string_lossy().replace('\\', "/");
+    match text.strip_suffix('/') {
+        Some(trimmed) => trimmed.to_owned(),
+        None => text,
+    }
 }
 
 fn write_cache_gitignore(cache_dir: &Path) -> Result<(), String> {
@@ -348,6 +448,6 @@ fn atomic_write(cache_file: &Path, data: &[u8]) -> Result<(), String> {
 
 impl Default for CacheStore {
     fn default() -> Self {
-        Self::new()
+        Self::new(Path::new(""))
     }
 }

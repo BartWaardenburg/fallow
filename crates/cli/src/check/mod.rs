@@ -1296,6 +1296,7 @@ fn prepare_print_check(result: &CheckResult, opts: PrintCheckOptions) -> Prepare
             skip_score_and_trend: false,
             css_requested: false,
             json_style: opts.json_style,
+            include_fragments: true,
         },
         regression_json: opts.regression_json,
         quiet: opts.quiet,

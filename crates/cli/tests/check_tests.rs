@@ -8,8 +8,8 @@
 mod common;
 
 use common::{
-    fixture_path, parse_json, redact_all, redact_paths, run_fallow, run_fallow_combined,
-    run_fallow_in_root, run_fallow_raw, run_fallow_raw_with_env,
+    canonical_report, fixture_path, parse_json, redact_all, redact_paths, run_fallow,
+    run_fallow_combined, run_fallow_in_root, run_fallow_raw, run_fallow_raw_with_env,
     run_fallow_raw_with_type_aware_sidecar,
 };
 
@@ -710,30 +710,6 @@ fn combined_performance_includes_duplication_stage() {
 /// inherently nondeterministic wall-clock fields are stripped.
 #[test]
 fn combined_parallel_output_is_deterministic() {
-    fn normalize(value: &mut serde_json::Value) {
-        match value {
-            serde_json::Value::Object(map) => {
-                map.remove("elapsed_ms");
-                if let Some(telemetry) = map
-                    .get_mut("_meta")
-                    .and_then(|meta| meta.get_mut("telemetry"))
-                    .and_then(|telemetry| telemetry.as_object_mut())
-                {
-                    telemetry.remove("analysis_run_id");
-                }
-                for v in map.values_mut() {
-                    normalize(v);
-                }
-            }
-            serde_json::Value::Array(items) => {
-                for v in items {
-                    normalize(v);
-                }
-            }
-            _ => {}
-        }
-    }
-
     let mut canonicalized: Vec<String> = std::iter::repeat_with(|| {
         let output = run_fallow_combined(
             "duplicate-code",
@@ -745,9 +721,7 @@ fn combined_parallel_output_is_deterministic() {
             output.stdout,
             output.stderr
         );
-        let mut value = parse_json(&output);
-        normalize(&mut value);
-        serde_json::to_string(&value).expect("re-serialize canonical json")
+        canonical_report(&output)
     })
     .take(3)
     .collect();
@@ -1203,10 +1177,19 @@ fn bun_resolutions_surface_as_unused_overrides_in_json_output() {
             "the bun hint names the resolutions origin: {hint}"
         );
     }
+    // A parseable bun.lock resolves normally, so no lockfile diagnostic is
+    // recorded. Environment and unconfigured-detector diagnostics are a
+    // different channel and a bare fixture always carries some, so this asserts
+    // the absence of the bun kinds rather than an empty array.
+    let bun_kind = json["workspace_diagnostics"]
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|entry| entry["kind"].as_str())
+        .find(|kind| kind.starts_with("bun-"));
     assert!(
-        json["workspace_diagnostics"]
-            .as_array()
-            .is_none_or(Vec::is_empty),
+        bun_kind.is_none(),
         "a parseable bun.lock resolves normally: {}",
         json["workspace_diagnostics"]
     );
@@ -1834,22 +1817,26 @@ fn combined_json_root_workspace_diagnostics_are_byte_identical_across_repeat_run
                 "skipped-large-file".to_owned(),
                 "src/huge.prod.ts".to_owned()
             ),
-            (
-                "malformed-pnpm-workspace-yaml".to_owned(),
-                "pnpm-workspace.yaml".to_owned()
-            ),
+            ("node-modules-missing".to_owned(), "node_modules".to_owned()),
             (
                 "bun-lockb-override-resolution-skipped".to_owned(),
                 "package.json".to_owned()
             ),
             (
+                "malformed-pnpm-workspace-yaml".to_owned(),
+                "pnpm-workspace.yaml".to_owned()
+            ),
+            ("boundaries-not-configured".to_owned(), ".".to_owned()),
+            ("rule-packs-not-configured".to_owned(), ".".to_owned()),
+            (
                 "skipped-large-file".to_owned(),
                 "src/huge.test.ts".to_owned()
             ),
         ],
-        "the union runs in section order: the dead-code analysis's own list \
-         (its production walk's skip plus the analysis-stage entries it recorded), \
-         then the skip only the full-file-set walks saw"
+        "the union runs in section order: the dead-code analysis's own snapshot \
+         (its production walk's skips and the config-load stash), then the \
+         registry entries recorded after the session was built, sorted by path \
+         and kind, then the skip only the full-file-set walks saw"
     );
     for (index, run) in observed.iter().enumerate() {
         assert_eq!(

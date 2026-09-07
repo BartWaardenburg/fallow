@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 
 pub use fallow_output::{
     ContainmentEvent, CrossRepoImpactReport, CrossRepoImpactSchemaVersion, CrossRepoProjectEntry,
-    CrossRepoTotals, EnabledSource, ImpactCounts, ImpactReport, ImpactReportSchemaVersion,
-    ImpactTrendDirection, ResolutionEvent, TrendSummary,
+    CrossRepoTotals, EnabledSource, GateRunCounts, ImpactCounts, ImpactReport,
+    ImpactReportSchemaVersion, ImpactTrendDirection, ResolutionEvent, TrendSummary,
 };
 use fallow_types::results::{ActiveSuppression, AnalysisResults};
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -15,7 +15,9 @@ use crate::audit::{AuditSummary, AuditVerdict};
 use crate::report::ci::fingerprint::fingerprint_hash;
 use crate::report::format_display_path;
 
-const STORE_SCHEMA_VERSION: u32 = 6;
+/// Version 7 replaced the per-record `gate: bool` with `gate_source`; older
+/// stores migrate on read (see [`StoredImpactRecord`]).
+const STORE_SCHEMA_VERSION: u32 = 7;
 
 const MAX_RECORDS: usize = 200;
 
@@ -50,16 +52,85 @@ fn impact_counts_from_summary(summary: &AuditSummary) -> ImpactCounts {
     }
 }
 
+/// Which gate produced a recorded run. The store is local and never leaves the
+/// machine, so this is run provenance ("where do my gate runs come from"), not
+/// an adoption signal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum GateSource {
+    /// The agent gate hook (`--gate-marker agent`).
+    Agent,
+    /// The generated git pre-commit hook (`--gate-marker pre-commit`).
+    PreCommit,
+    /// A CI gate (`--gate-marker ci`).
+    Ci,
+    /// A gate run whose marker this build does not recognise, plus every gate
+    /// run recorded before the store kept its source.
+    Unknown,
+}
+
+impl GateSource {
+    /// Classify the `--gate-marker` string the installers pass. An unrecognised
+    /// marker is still a gate run, recorded as [`GateSource::Unknown`].
+    #[must_use]
+    pub fn from_marker(marker: &str) -> Self {
+        match marker {
+            "agent" => Self::Agent,
+            "pre-commit" => Self::PreCommit,
+            "ci" => Self::Ci,
+            _ => Self::Unknown,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(from = "StoredImpactRecord")]
 pub struct ImpactRecord {
     pub timestamp: String,
     pub version: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub git_sha: Option<String>,
     pub verdict: String,
-    #[serde(default)]
-    pub gate: bool,
+    /// The gate this run came from, `None` for a run no gate produced.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gate_source: Option<GateSource>,
     pub counts: ImpactCounts,
+}
+
+/// On-disk shape of [`ImpactRecord`], carrying both the schema 6 `gate: bool`
+/// and the schema 7 `gate_source`. Every read goes through it, so a store an
+/// older fallow wrote keeps its gate runs instead of silently losing them.
+#[derive(Deserialize)]
+struct StoredImpactRecord {
+    timestamp: String,
+    version: String,
+    #[serde(default)]
+    git_sha: Option<String>,
+    verdict: String,
+    #[serde(default)]
+    gate: bool,
+    #[serde(default)]
+    gate_source: Option<GateSource>,
+    counts: ImpactCounts,
+}
+
+impl From<StoredImpactRecord> for ImpactRecord {
+    fn from(stored: StoredImpactRecord) -> Self {
+        // Migration arm, store schema 6 -> 7: a legacy `gate: true` was a gate
+        // run whose source was never stored, so it becomes `Unknown`; `false`
+        // was not a gate run at all, so it becomes `None`.
+        let gate_source = stored
+            .gate_source
+            .or_else(|| stored.gate.then_some(GateSource::Unknown));
+        Self {
+            timestamp: stored.timestamp,
+            version: stored.version,
+            git_sha: stored.git_sha,
+            verdict: stored.verdict,
+            gate_source,
+            counts: stored.counts,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -805,7 +876,7 @@ pub fn reset_all() -> bool {
 /// Record an audit run into the rolling store.
 pub struct AuditRunRecord<'a> {
     pub verdict: AuditVerdict,
-    pub gate: bool,
+    pub gate_source: Option<GateSource>,
     pub git_sha: Option<&'a str>,
     pub version: &'a str,
     pub timestamp: &'a str,
@@ -820,7 +891,7 @@ pub fn record_audit_run(
 ) -> Result<(), String> {
     let AuditRunRecord {
         verdict,
-        gate,
+        gate_source,
         git_sha,
         version,
         timestamp,
@@ -855,14 +926,21 @@ pub fn record_audit_run(
         store.first_recorded = Some((*timestamp).to_owned());
     }
 
-    apply_containment(&mut store, *verdict, *gate, *git_sha, timestamp, &counts);
+    apply_containment(
+        &mut store,
+        *verdict,
+        gate_source.is_some(),
+        *git_sha,
+        timestamp,
+        &counts,
+    );
 
     store.records.push(ImpactRecord {
         timestamp: (*timestamp).to_owned(),
         version: (*version).to_owned(),
         git_sha: git_sha.map(ToOwned::to_owned),
         verdict: verdict_str.to_owned(),
-        gate: *gate,
+        gate_source: *gate_source,
         counts,
     });
     compact(&mut store);
@@ -920,7 +998,7 @@ pub fn record_combined_run(
         version: version.to_owned(),
         git_sha: git_sha.map(ToOwned::to_owned),
         verdict: verdict_str.to_owned(),
-        gate: false,
+        gate_source: None,
         counts,
     });
     if store.project_records.len() > MAX_RECORDS {
@@ -1784,6 +1862,21 @@ fn trend_for(records: &[ImpactRecord]) -> Option<TrendSummary> {
     })
 }
 
+/// Tally recorded gate runs by source. `None` when the store holds no gate run
+/// at all, so the report field stays absent on the unchanged path.
+fn gate_run_counts(records: &[ImpactRecord]) -> Option<GateRunCounts> {
+    let mut counts = GateRunCounts::default();
+    for source in records.iter().filter_map(|record| record.gate_source) {
+        match source {
+            GateSource::Agent => counts.agent += 1,
+            GateSource::PreCommit => counts.pre_commit += 1,
+            GateSource::Ci => counts.ci += 1,
+            GateSource::Unknown => counts.unknown += 1,
+        }
+    }
+    (!counts.is_empty()).then_some(counts)
+}
+
 pub fn build_report(store: &ImpactStore) -> ImpactReport {
     let surfacing = store.records.last().map(|r| r.counts.clone());
     let trend = trend_for(&store.records);
@@ -1827,6 +1920,7 @@ pub fn build_report(store: &ImpactStore) -> ImpactReport {
         trend,
         project_surfacing,
         project_trend,
+        gate_runs: gate_run_counts(&store.records),
         containment_count: store.containment.len(),
         recent_containment,
         resolved_total: store.resolved_total,
@@ -2230,6 +2324,21 @@ fn render_human_resolved_section(out: &mut String, report: &ImpactReport) {
     }
 }
 
+/// Join the non-zero gate sources into one `agent 12, pre-commit 3` phrase.
+fn gate_run_summary(counts: &GateRunCounts) -> String {
+    [
+        ("agent", counts.agent),
+        ("pre-commit", counts.pre_commit),
+        ("ci", counts.ci),
+        ("unknown", counts.unknown),
+    ]
+    .into_iter()
+    .filter(|(_, runs)| *runs > 0)
+    .map(|(label, runs)| format!("{label} {runs}"))
+    .collect::<Vec<_>>()
+    .join(", ")
+}
+
 /// Render the trailing provenance/footer lines of the human report.
 #[expect(
     clippy::format_push_string,
@@ -2252,6 +2361,12 @@ fn render_human_footer(out: &mut String, report: &ImpactReport) {
     } else {
         out.push_str(&format!(
             "Tracking since {since}. Local-only; never uploaded.\n",
+        ));
+    }
+    if let Some(gate_runs) = &report.gate_runs {
+        out.push_str(&format!(
+            "Where your gate runs come from: {}. Local provenance, not adoption.\n",
+            gate_run_summary(gate_runs),
         ));
     }
     out.push_str(
@@ -2747,7 +2862,7 @@ mod tests {
             summary,
             &AuditRunRecord {
                 verdict,
-                gate,
+                gate_source: gate.then_some(GateSource::Unknown),
                 git_sha,
                 version,
                 timestamp,
@@ -2809,7 +2924,7 @@ mod tests {
             &summary(0, 0, 0),
             &AuditRunRecord {
                 verdict: AuditVerdict::Pass,
-                gate: true,
+                gate_source: Some(GateSource::Unknown),
                 git_sha: Some("sha"),
                 version: "2.0.0",
                 timestamp: ts,
@@ -2986,7 +3101,7 @@ mod tests {
             version: "2.0.0".into(),
             git_sha: None,
             verdict: "warn".into(),
-            gate: false,
+            gate_source: None,
             counts: ImpactCounts {
                 total_issues: 5,
                 dead_code: 5,
@@ -3146,7 +3261,7 @@ mod tests {
                 version: "2.0.0".into(),
                 git_sha: None,
                 verdict: "warn".into(),
-                gate: false,
+                gate_source: None,
                 counts: ImpactCounts {
                     total_issues: total,
                     dead_code: total,
@@ -3245,7 +3360,7 @@ mod tests {
                 version: "2.0.0".into(),
                 git_sha: None,
                 verdict: "pass".into(),
-                gate: false,
+                gate_source: None,
                 counts: ImpactCounts::default(),
             });
         }
@@ -3274,7 +3389,7 @@ mod tests {
             version: "2.0.0".into(),
             git_sha: None,
             verdict: "pass".into(),
-            gate: false,
+            gate_source: None,
             counts: ImpactCounts::default(),
         });
         assert_eq!(
@@ -3302,7 +3417,7 @@ mod tests {
             version: "2.0.0".into(),
             git_sha: None,
             verdict: "pass".into(),
-            gate: false,
+            gate_source: None,
             counts: ImpactCounts::default(),
         });
         let report = build_report(&store);
@@ -3598,6 +3713,112 @@ mod tests {
         assert_eq!(store.suppressed_total, 1);
     }
 
+    // ----- gate source: recorded provenance and the schema 6 migration -----
+
+    /// Record one gate run with an explicit marker, no attribution.
+    fn record_gate(root: &Path, marker: Option<&str>, timestamp: &str) {
+        record_audit_run(
+            root,
+            &summary(0, 0, 0),
+            &AuditRunRecord {
+                verdict: AuditVerdict::Pass,
+                gate_source: marker.map(GateSource::from_marker),
+                git_sha: None,
+                version: "3.0.0",
+                timestamp,
+                attribution: None,
+                analysis_identity: &fallow_types::semantic::SemanticAnalysisIdentity::default(),
+            },
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn gate_marker_is_recorded_and_counted_per_source() {
+        let (_config, dir) = test_env();
+        let root = dir.path();
+        enable(root);
+
+        record_gate(root, Some("agent"), "t0");
+        record_gate(root, Some("agent"), "t1");
+        record_gate(root, Some("pre-commit"), "t2");
+        record_gate(root, Some("ci"), "t3");
+        record_gate(root, Some("nightly-robot"), "t4");
+        record_gate(root, None, "t5");
+
+        let counts = build_report(&load(root))
+            .gate_runs
+            .expect("gate runs must be reported once a gate recorded a run");
+        assert_eq!(counts.agent, 2);
+        assert_eq!(counts.pre_commit, 1);
+        assert_eq!(counts.ci, 1);
+        assert_eq!(
+            counts.unknown, 1,
+            "an unrecognised marker is still a gate run"
+        );
+    }
+
+    #[test]
+    fn report_omits_gate_runs_when_no_gate_recorded() {
+        let (_config, dir) = test_env();
+        let root = dir.path();
+        enable(root);
+        record_gate(root, None, "t0");
+
+        let report = build_report(&load(root));
+        assert!(
+            report.gate_runs.is_none(),
+            "a store without gate runs must keep the field off the wire"
+        );
+        let json = render_json(&report);
+        assert!(
+            !json.contains("gate_runs"),
+            "gate_runs must be absent on the unchanged path: {json}"
+        );
+    }
+
+    #[test]
+    fn legacy_gate_bool_migrates_to_unknown_source() {
+        let (_config, dir) = test_env();
+        let root = dir.path();
+        let counts = r#"{"total_issues":0,"dead_code":0,"complexity":0,"duplication":0}"#;
+        let v6 = format!(
+            r#"{{"schema_version":6,"enabled":true,"first_recorded":"t0","records":[
+                {{"timestamp":"t0","version":"3.0.0","verdict":"pass","gate":true,"counts":{counts}}},
+                {{"timestamp":"t1","version":"3.0.0","verdict":"pass","gate":false,"counts":{counts}}}
+            ],"containment":[]}}"#
+        );
+        seed_store_raw(root, v6.as_bytes());
+
+        let store = load(root);
+        assert_eq!(store.records[0].gate_source, Some(GateSource::Unknown));
+        assert_eq!(
+            store.records[1].gate_source, None,
+            "a legacy non-gate run must not become a gate run"
+        );
+
+        let counts = build_report(&store)
+            .gate_runs
+            .expect("a legacy gate run must survive the migration");
+        assert_eq!(counts.unknown, 1);
+        assert_eq!(counts.agent + counts.pre_commit + counts.ci, 0);
+    }
+
+    #[test]
+    fn human_report_names_where_gate_runs_come_from() {
+        let (_config, dir) = test_env();
+        let root = dir.path();
+        enable(root);
+        record_gate(root, Some("agent"), "t0");
+        record_gate(root, Some("pre-commit"), "t1");
+
+        let human = render_human(&build_report(&load(root)));
+        assert!(
+            human.contains("Where your gate runs come from: agent 1, pre-commit 1."),
+            "human report must name the gate sources: {human}"
+        );
+    }
+
     #[test]
     fn v1_store_loads_and_upgrades_to_v2() {
         let (_config, dir) = test_env();
@@ -3672,7 +3893,7 @@ mod tests {
                 version: "2.0.0".into(),
                 git_sha: None,
                 verdict: "warn".into(),
-                gate: false,
+                gate_source: None,
                 counts: ImpactCounts::default(),
             }],
             ..Default::default()
@@ -3698,6 +3919,7 @@ mod tests {
             trend: None,
             project_surfacing: None,
             project_trend: None,
+            gate_runs: None,
             containment_count: 0,
             recent_containment: vec![],
             resolved_total: 0,
@@ -3898,6 +4120,7 @@ mod tests {
             trend,
             project_surfacing,
             project_trend,
+            gate_runs: None,
             containment_count: 0,
             recent_containment: vec![],
             resolved_total: 0,
@@ -4184,7 +4407,7 @@ mod tests {
             version: "2.0.0".to_owned(),
             git_sha: None,
             verdict: "warn".to_owned(),
-            gate: false,
+            gate_source: None,
             counts: ImpactCounts::from_combined(latest_issues, 0, 0),
         });
         for _ in 0..contained {
@@ -4524,7 +4747,7 @@ mod tests {
                 version: "2.0.0".into(),
                 git_sha: None,
                 verdict: "warn".into(),
-                gate: false,
+                gate_source: None,
                 counts: ImpactCounts {
                     total_issues: total,
                     dead_code: total,
@@ -4553,7 +4776,7 @@ mod tests {
             version: "2.0.0".to_owned(),
             git_sha: None,
             verdict: "warn".to_owned(),
-            gate: false,
+            gate_source: None,
             counts: ImpactCounts::default(),
         });
         store.project_records.push(ImpactRecord {
@@ -4561,7 +4784,7 @@ mod tests {
             version: "2.0.0".to_owned(),
             git_sha: None,
             verdict: "warn".to_owned(),
-            gate: false,
+            gate_source: None,
             counts: ImpactCounts::default(),
         });
         assert_eq!(
@@ -4578,7 +4801,7 @@ mod tests {
             version: "2.0.0".to_owned(),
             git_sha: None,
             verdict: "pass".to_owned(),
-            gate: false,
+            gate_source: None,
             counts: ImpactCounts::default(),
         });
         assert_eq!(
@@ -4769,7 +4992,7 @@ mod tests {
                 version: "2.0.0".to_owned(),
                 git_sha: None,
                 verdict: "warn".to_owned(),
-                gate: false,
+                gate_source: None,
                 counts: ImpactCounts::default(),
             });
         }
@@ -4868,7 +5091,7 @@ mod tests {
             version: "2.0.0".to_owned(),
             git_sha: None,
             verdict: "warn".to_owned(),
-            gate: false,
+            gate_source: None,
             counts: ImpactCounts::from_combined(5, 0, 0),
         });
         // Add a project_records entry so project_surfacing is non-None.
@@ -4877,7 +5100,7 @@ mod tests {
             version: "2.0.0".to_owned(),
             git_sha: None,
             verdict: "warn".to_owned(),
-            gate: false,
+            gate_source: None,
             counts: ImpactCounts::from_combined(20, 0, 0),
         });
 
@@ -4892,7 +5115,7 @@ mod tests {
             version: "2.0.0".to_owned(),
             git_sha: None,
             verdict: "warn".to_owned(),
-            gate: false,
+            gate_source: None,
             counts: ImpactCounts::from_combined(2, 0, 0),
         });
         s2.project_records.push(ImpactRecord {
@@ -4900,7 +5123,7 @@ mod tests {
             version: "2.0.0".to_owned(),
             git_sha: None,
             verdict: "warn".to_owned(),
-            gate: false,
+            gate_source: None,
             counts: ImpactCounts::from_combined(30, 0, 0),
         });
 
@@ -5025,7 +5248,7 @@ mod tests {
             version: "2.0.0".to_owned(),
             git_sha: None,
             verdict: "warn".to_owned(),
-            gate: false,
+            gate_source: None,
             counts: ImpactCounts::from_combined(42, 0, 0),
         });
         seed_store("proj", &s);
@@ -5053,6 +5276,7 @@ mod tests {
             trend: None,
             project_surfacing: None,
             project_trend: None,
+            gate_runs: None,
             containment_count: 0,
             recent_containment: vec![],
             resolved_total: 1,
@@ -5093,6 +5317,7 @@ mod tests {
             trend: None,
             project_surfacing: None,
             project_trend: None,
+            gate_runs: None,
             containment_count: 0,
             recent_containment: vec![],
             resolved_total: 0,
@@ -5129,6 +5354,7 @@ mod tests {
             }),
             project_surfacing: None,
             project_trend: None,
+            gate_runs: None,
             containment_count: 0,
             recent_containment: vec![],
             resolved_total: 0,
@@ -5165,6 +5391,7 @@ mod tests {
                 previous_total: 10,
                 current_total: 10,
             }),
+            gate_runs: None,
             containment_count: 0,
             recent_containment: vec![],
             resolved_total: 0,
@@ -5199,6 +5426,7 @@ mod tests {
             trend: None,
             project_surfacing: None,
             project_trend: None,
+            gate_runs: None,
             containment_count: 0,
             recent_containment: vec![],
             resolved_total: 0,
@@ -5229,6 +5457,7 @@ mod tests {
             trend: None,
             project_surfacing: None,
             project_trend: None,
+            gate_runs: None,
             containment_count: 0,
             recent_containment: vec![],
             resolved_total: 4,
@@ -5267,6 +5496,7 @@ mod tests {
             trend: None,
             project_surfacing: Some(ImpactCounts::from_combined(3, 2, 1)),
             project_trend: None,
+            gate_runs: None,
             containment_count: 0,
             recent_containment: vec![],
             resolved_total: 0,
@@ -5298,7 +5528,7 @@ mod tests {
             version: "2.0.0".to_owned(),
             git_sha: None,
             verdict: "warn".to_owned(),
-            gate: false,
+            gate_source: None,
             counts: ImpactCounts::from_combined(99, 0, 0),
         });
         seed_store("proj", &s);
@@ -5453,7 +5683,7 @@ mod tests {
             version: "2.0.0".to_owned(),
             git_sha: None,
             verdict: "warn".to_owned(),
-            gate: false,
+            gate_source: None,
             counts: ImpactCounts::from_combined(1, 0, 0),
         });
         seed_store("abcdefghijklmnop", &s);
@@ -5485,6 +5715,7 @@ mod tests {
             }),
             project_surfacing: None,
             project_trend: None,
+            gate_runs: None,
             containment_count: 0,
             recent_containment: vec![],
             resolved_total: 0,
@@ -5511,6 +5742,7 @@ mod tests {
             trend: None,
             project_surfacing: None,
             project_trend: None,
+            gate_runs: None,
             containment_count: 0,
             recent_containment: vec![],
             resolved_total: 0,

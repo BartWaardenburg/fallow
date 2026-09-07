@@ -111,6 +111,8 @@ mod lit_unused_state;
 mod member_detection;
 #[path = "integration_test/nx_project_json.rs"]
 mod nx_project_json;
+#[path = "integration_test/parse_degraded_diagnostic.rs"]
+mod parse_degraded_diagnostic;
 #[path = "integration_test/redwoodsdk.rs"]
 mod redwoodsdk;
 #[path = "integration_test/rspress_theme.rs"]
@@ -129,6 +131,8 @@ mod svelte_dead_event;
 mod symlink_root_containment;
 #[path = "integration_test/typed_receiver_scoping.rs"]
 mod typed_receiver_scoping;
+#[path = "integration_test/unmeasured_zero_diagnostics.rs"]
+mod unmeasured_zero_diagnostics;
 #[path = "integration_test/unreachable_exports.rs"]
 mod unreachable_exports;
 #[path = "integration_test/workspaces.rs"]

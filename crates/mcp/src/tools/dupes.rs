@@ -117,6 +117,7 @@ fn duplication_options_from_params(params: &FindDupesParams) -> Result<Duplicati
         cross_language: params.cross_language,
         ignore_imports: params.ignore_imports,
         top: params.top,
+        include_fragments: Some(params.include_fragments.unwrap_or(false)),
     })
 }
 
@@ -180,7 +181,11 @@ fn push_dupes_detection_flags(
 }
 
 /// Push the boolean toggle flags (`--skip-local`, `--cross-language`,
-/// ignore-imports, `--explain-skipped`, `--top`) for `find_dupes`.
+/// ignore-imports, `--explain-skipped`, `--top`, `--no-fragments`) for
+/// `find_dupes`.
+///
+/// Fragments are opt-in over MCP: the CLI emits them by default, so the
+/// fallback has to pass `--no-fragments` unless the caller asked for them.
 fn push_dupes_toggle_flags(args: &mut Vec<String>, params: &FindDupesParams) {
     if params.near == Some(true) {
         args.push("--near".to_string());
@@ -201,6 +206,9 @@ fn push_dupes_toggle_flags(args: &mut Vec<String>, params: &FindDupesParams) {
     }
     if let Some(top) = params.top {
         args.extend(["--top".to_string(), top.to_string()]);
+    }
+    if params.include_fragments != Some(true) {
+        args.push("--no-fragments".to_string());
     }
 }
 
@@ -297,6 +305,33 @@ mod tests {
         ] {
             assert!(requires_cli_fallback(&params));
         }
+    }
+
+    #[test]
+    fn fragments_are_opt_in_over_mcp() {
+        let default_options =
+            duplication_options_from_params(&FindDupesParams::default()).expect("options");
+        assert_eq!(default_options.include_fragments, Some(false));
+
+        let requested = duplication_options_from_params(&FindDupesParams {
+            include_fragments: Some(true),
+            ..FindDupesParams::default()
+        })
+        .expect("options");
+        assert_eq!(requested.include_fragments, Some(true));
+    }
+
+    #[test]
+    fn cli_fallback_suppresses_fragments_unless_requested() {
+        let default_args = build_find_dupes_args(&FindDupesParams::default()).expect("dupes args");
+        assert!(default_args.contains(&"--no-fragments".to_string()));
+
+        let requested_args = build_find_dupes_args(&FindDupesParams {
+            include_fragments: Some(true),
+            ..FindDupesParams::default()
+        })
+        .expect("dupes args");
+        assert!(!requested_args.contains(&"--no-fragments".to_string()));
     }
 
     #[test]

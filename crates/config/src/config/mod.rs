@@ -36,7 +36,8 @@ pub use resolution::{
     AnalysisSnapshot, CompiledIgnoreCatalogReferenceRule, CompiledIgnoreDependencyOverrideRule,
     CompiledIgnoreExportRule, ConfigOverride, DEFAULT_MAX_FILE_SIZE_BYTES,
     DEFAULT_MAX_FILE_SIZE_MB, IgnoreCatalogReferenceRule, IgnoreDependencyOverrideRule,
-    IgnoreExportRule, ResolvedConfig, ResolvedOverride, resolve_max_file_size_bytes,
+    IgnoreExportRule, ResolvedConfig, ResolvedOverride, cache_config_hash,
+    resolve_max_file_size_bytes,
 };
 pub use resolve::ResolveConfig;
 pub use rules::{

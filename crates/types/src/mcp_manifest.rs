@@ -528,6 +528,17 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         code_mode_alias: Some("traceFile"),
     },
     McpToolInfo {
+        name: "trace_import_path",
+        kind: "trace",
+        description: "Trace the shortest import path between two modules, hop by hop",
+        cli_command: Some("fallow trace --path <from> <to> --format json --quiet"),
+        key_params: &["from", "to"],
+        license: McpToolLicense::Free,
+        license_note: None,
+        read_only: true,
+        code_mode_alias: None,
+    },
+    McpToolInfo {
         name: "impact_closure",
         kind: "trace",
         description: "Trace the transitive affected-but-not-in-diff set and coordination gaps for one file",
@@ -616,6 +627,11 @@ pub const MCP_RESOURCE_SCHEME: &str = "fallow://";
 /// RFC 6570 template of the per-issue-type explain resource.
 pub const MCP_EXPLAIN_RESOURCE_TEMPLATE: &str = "fallow://explain/{issue_type}";
 
+/// RFC 6570 template of the per-tool long-form guide. Distinct from the
+/// `fallow://tools` catalogue: that resource stays one terse line per tool,
+/// this template carries the per-flag detail kept out of `tools/list`.
+pub const MCP_TOOL_GUIDE_RESOURCE_TEMPLATE: &str = "fallow://tools/{name}";
+
 /// All resources exposed by the fallow MCP server, in catalogue order.
 /// Concrete resources first, templates last; `resources/list` and
 /// `resources/templates/list` preserve this order.
@@ -675,6 +691,22 @@ pub const MCP_RESOURCES: &[McpResourceInfo] = &[
         description: "JSON Schema of a declarative rule pack (same document as fallow rule-pack-schema)",
         mime_type: "application/json",
         template: false,
+    },
+    McpResourceInfo {
+        uri: "fallow://schema/similar-code-snapshot",
+        name: "schema-similar-code-snapshot",
+        title: "Similar-code snapshot JSON Schema",
+        description: "JSON Schema of the inspect_similar_code `snapshot` object: the bounded candidate handoff find_similar_code returns, passed back unchanged",
+        mime_type: "application/json",
+        template: false,
+    },
+    McpResourceInfo {
+        uri: MCP_TOOL_GUIDE_RESOURCE_TEMPLATE,
+        name: "tool-guide",
+        title: "Long-form guide for one tool",
+        description: "Per-flag detail for one MCP tool (payload shapes, unit vocabularies, suppression placements) kept out of its tools/list description; name is the wire tool name. Not every tool has a guide",
+        mime_type: "application/json",
+        template: true,
     },
     McpResourceInfo {
         uri: MCP_EXPLAIN_RESOURCE_TEMPLATE,
@@ -891,6 +923,15 @@ pub const CAPABILITY_PARITY: &[CapabilityParityRow] = &[
         mcp_tool: Some("trace_file"),
         omission_note: Some(
             "File edge trace (imports, exports, importers). No napi export; the trace family is CLI, MCP, and api only.",
+        ),
+    },
+    CapabilityParityRow {
+        capability: "shortest import path",
+        api_runner: Some("run_trace_import_path"),
+        napi_export: None,
+        mcp_tool: Some("trace_import_path"),
+        omission_note: Some(
+            "Shortest import path between two modules. No napi export; the trace family is CLI, MCP, and api only.",
         ),
     },
     CapabilityParityRow {
@@ -1169,9 +1210,16 @@ mod tests {
             MCP_RESOURCES[first_template..].iter().all(|r| r.template),
             "templates must trail the concrete resources so list order stays deterministic"
         );
+        let templates: Vec<&str> = MCP_RESOURCES[first_template..]
+            .iter()
+            .map(|r| r.uri)
+            .collect();
         assert_eq!(
-            MCP_RESOURCES[first_template].uri,
-            MCP_EXPLAIN_RESOURCE_TEMPLATE
+            templates,
+            [
+                MCP_TOOL_GUIDE_RESOURCE_TEMPLATE,
+                MCP_EXPLAIN_RESOURCE_TEMPLATE
+            ]
         );
     }
 

@@ -64,25 +64,20 @@ impl TypeAwareRequireParam {
 
 #[derive(Default, Deserialize, JsonSchema)]
 pub struct AnalyzeParams {
-    /// Project root directory to analyze. Defaults to the current working directory.
+    /// Project root to analyze. Defaults to the working directory.
     pub root: Option<String>,
 
-    /// Path to a fallow config file (.fallowrc.json, .fallowrc.jsonc, fallow.toml, or .fallow.toml).
+    /// Path to a fallow config file.
     pub config: Option<String>,
 
-    /// Allow trusted HTTPS config inheritance for this request.
-    /// Defaults to false and never grants process-global trust.
+    /// Allow trusted HTTPS config inheritance for this request; never process-global.
     pub allow_remote_extends: Option<bool>,
 
     /// Production mode: exclude test, story, and dev files, only start/build
     /// scripts, and report type-only dependencies.
     pub production: Option<bool>,
 
-    /// Scope analysis to one or more workspaces. Accepts a single package name
-    /// for the common case, or a comma-separated list with globs and `!` negation
-    /// (e.g. `"web,admin"`, `"apps/*"`, `"apps/*,!apps/legacy"`). Patterns match
-    /// against both the package name and the workspace path relative to the repo
-    /// root.
+    /// Scope analysis to one or more workspaces: a package name, or a comma-separated list with globs and `!` negation.
     pub workspace: Option<String>,
 
     /// Issue types to include, for example `["unused-exports", "unused-files"]`;
@@ -124,10 +119,10 @@ pub struct AnalyzeParams {
     /// Report unused exports in entry files instead of auto-marking them as used.
     pub include_entry_exports: Option<bool>,
 
-    /// Disable the incremental parse cache. Forces a full re-parse of all files.
+    /// Disable the incremental parse cache.
     pub no_cache: Option<bool>,
 
-    /// Number of parser threads. Defaults to available CPU cores.
+    /// Number of parser threads. Defaults to CPU cores.
     pub threads: Option<usize>,
 
     /// Refine project-wide public API findings with TypeScript symbol identity.
@@ -142,22 +137,20 @@ pub struct AnalyzeParams {
 
 #[derive(Default, Deserialize, JsonSchema)]
 pub struct CombinedParams {
-    /// Project root directory to analyze. Defaults to the current working directory.
+    /// Project root to analyze. Defaults to the working directory.
     pub root: Option<String>,
 
-    /// Path to a fallow config file (.fallowrc.json, .fallowrc.jsonc, fallow.toml, or .fallow.toml).
+    /// Path to a fallow config file.
     pub config: Option<String>,
 
-    /// Allow trusted HTTPS config inheritance for this request.
-    /// Defaults to false and never grants process-global trust.
+    /// Allow trusted HTTPS config inheritance for this request; never process-global.
     pub allow_remote_extends: Option<bool>,
 
     /// Production mode: exclude test, story, and dev files, only start/build
     /// scripts, and report type-only dependencies.
     pub production: Option<bool>,
 
-    /// Scope analysis to one or more workspaces. Accepts a single package name
-    /// for the common case, or a comma-separated list with globs and `!` negation.
+    /// Scope analysis to one or more workspaces: a package name, or a comma-separated list with globs and `!` negation.
     pub workspace: Option<String>,
 
     /// Git ref to compare against when limiting all combined sections to
@@ -167,10 +160,10 @@ pub struct CombinedParams {
     /// Report unused exports in entry files instead of auto-marking them as used.
     pub include_entry_exports: Option<bool>,
 
-    /// Disable the incremental parse cache. Forces a full re-parse of all files.
+    /// Disable the incremental parse cache.
     pub no_cache: Option<bool>,
 
-    /// Number of parser threads. Defaults to available CPU cores.
+    /// Number of parser threads. Defaults to CPU cores.
     pub threads: Option<usize>,
 
     /// Duplicate-detection mode for the dupes section: "strict", "mild",
@@ -239,26 +232,24 @@ pub struct CombinedParams {
 
 #[derive(Deserialize, JsonSchema)]
 pub struct CheckChangedParams {
-    /// Project root directory to analyze. Defaults to the current working directory.
+    /// Project root to analyze. Defaults to the working directory.
     pub root: Option<String>,
 
     /// Git ref to compare against (e.g. "main", "HEAD~5"). Only files changed
     /// since this ref are analyzed. Required.
     pub since: String,
 
-    /// Path to a fallow config file (.fallowrc.json, .fallowrc.jsonc, fallow.toml, or .fallow.toml).
+    /// Path to a fallow config file.
     pub config: Option<String>,
 
-    /// Allow trusted HTTPS config inheritance for this request.
-    /// Defaults to false and never grants process-global trust.
+    /// Allow trusted HTTPS config inheritance for this request; never process-global.
     pub allow_remote_extends: Option<bool>,
 
     /// Production mode: exclude test, story, and dev files, only start/build
     /// scripts, and report type-only dependencies.
     pub production: Option<bool>,
 
-    /// Scope analysis to one or more workspaces. Accepts a single package name
-    /// for the common case, or a comma-separated list with globs and `!` negation.
+    /// Scope analysis to one or more workspaces: a package name, or a comma-separated list with globs and `!` negation.
     pub workspace: Option<String>,
 
     /// Compare results against a saved baseline file. Only new issues (not in
@@ -286,10 +277,10 @@ pub struct CheckChangedParams {
     /// Report unused exports in entry files instead of auto-marking them as used.
     pub include_entry_exports: Option<bool>,
 
-    /// Disable the incremental parse cache. Forces a full re-parse of all files.
+    /// Disable the incremental parse cache.
     pub no_cache: Option<bool>,
 
-    /// Number of parser threads. Defaults to available CPU cores.
+    /// Number of parser threads. Defaults to CPU cores.
     pub threads: Option<usize>,
 }
 
@@ -299,14 +290,13 @@ pub struct CheckChangedParams {
 /// repos. Raise `FALLOW_TIMEOUT_SECS` in the server environment when needed.
 #[derive(Default, Deserialize, JsonSchema)]
 pub struct SecurityCandidatesParams {
-    /// Project root directory to analyze. Defaults to the current working directory.
+    /// Project root to analyze. Defaults to the working directory.
     pub root: Option<String>,
 
-    /// Path to a fallow config file (.fallowrc.json, .fallowrc.jsonc, fallow.toml, or .fallow.toml).
+    /// Path to a fallow config file.
     pub config: Option<String>,
 
-    /// Allow trusted HTTPS config inheritance for this request.
-    /// Defaults to false and never grants process-global trust.
+    /// Allow trusted HTTPS config inheritance for this request; never process-global.
     pub allow_remote_extends: Option<bool>,
 
     /// Scope candidates to selected workspace roots. Mutually exclusive with
@@ -333,11 +323,15 @@ pub struct SecurityCandidatesParams {
     /// "newly-reachable". The "newly-reachable" gate requires `changed_since`.
     pub gate: Option<String>,
 
-    /// Disable the incremental parse cache. Forces a full re-parse of all files.
+    /// Disable the incremental parse cache.
     pub no_cache: Option<bool>,
 
-    /// Number of parser threads. Defaults to available CPU cores.
+    /// Number of parser threads. Defaults to CPU cores.
     pub threads: Option<usize>,
+
+    /// Byte cap for this call's response. Lowers the 16 MiB default; over it,
+    /// `truncated` plus a preview come back instead.
+    pub max_output_bytes: Option<usize>,
 }
 
 /// Parameters for advisory semantic similar-code discovery.
@@ -347,13 +341,13 @@ pub struct SecurityCandidatesParams {
 /// still required.
 #[derive(Default, Deserialize, JsonSchema)]
 pub struct FindSimilarCodeParams {
-    /// Project root directory to analyze. Defaults to the current working directory.
+    /// Project root to analyze. Defaults to the working directory.
     pub root: Option<String>,
 
-    /// Path to a fallow config file (.fallowrc.json, .fallowrc.jsonc, fallow.toml, or .fallow.toml).
+    /// Path to a fallow config file.
     pub config: Option<String>,
 
-    /// Allow trusted HTTPS config inheritance for this request.
+    /// Allow trusted HTTPS config inheritance for this request; never process-global.
     pub allow_remote_extends: Option<bool>,
 
     /// Scope candidate reporting to selected workspace roots. Mutually
@@ -379,11 +373,15 @@ pub struct FindSimilarCodeParams {
     /// Cap returned candidates after bounded full-corpus comparison.
     pub top: Option<usize>,
 
-    /// Disable the incremental parse cache. Forces a full re-parse of all files.
+    /// Disable the incremental parse cache.
     pub no_cache: Option<bool>,
 
-    /// Number of parser threads. Defaults to available CPU cores.
+    /// Number of parser threads. Defaults to CPU cores.
     pub threads: Option<usize>,
+
+    /// Byte cap for this call's response. Lowers the 16 MiB default; over it,
+    /// `truncated` plus a preview come back instead.
+    pub max_output_bytes: Option<usize>,
 }
 
 /// Parameters for reproducing one similar-code candidate and collecting its
@@ -393,10 +391,13 @@ pub struct InspectSimilarCodeParams {
     /// Snapshot-stable candidate identity returned by `find_similar_code`.
     pub candidate_id: String,
 
-    /// Bounded exact-candidate snapshot selected from the original discovery
-    /// response. Pass generation, candidate, completion, and diagnostics
-    /// unchanged; inspect validates current source hashes before enrichment.
-    pub snapshot: fallow_api::SimilarCodeCandidateSnapshot,
+    /// Bounded exact-candidate snapshot object selected from the original
+    /// discovery response. Pass generation, candidate, completion, and
+    /// diagnostics unchanged; inspect validates current source hashes before
+    /// enrichment. Read `fallow://schema/similar-code-snapshot` for the full
+    /// object shape; a snapshot that does not match it is refused with
+    /// `FALLOW_MCP_INVALID_CANDIDATE_SNAPSHOT`.
+    pub snapshot: serde_json::Value,
 
     /// Project root directory to analyze. Defaults to the current working directory.
     pub root: Option<String>,
@@ -406,6 +407,10 @@ pub struct InspectSimilarCodeParams {
 
     /// Allow trusted HTTPS config inheritance for this request.
     pub allow_remote_extends: Option<bool>,
+
+    /// Byte cap for this call's response. Lowers the 16 MiB default; over it,
+    /// `truncated` plus a preview come back instead.
+    pub max_output_bytes: Option<usize>,
 }
 
 #[derive(Default, Deserialize, JsonSchema)]
@@ -462,8 +467,16 @@ pub struct FindDupesParams {
     /// Human-format only (human/markdown CLI output); MCP JSON responses suppress the note.
     pub explain_skipped: Option<bool>,
 
-    /// Show only the N highest-ranked clone groups.
+    /// Show only the N highest-ranked clone groups. `stats` keeps describing
+    /// the whole corpus; read `clone_groups_shown` and `clone_groups_omitted`
+    /// for the split.
     pub top: Option<usize>,
+
+    /// Include the verbatim source text on each clone instance. Defaults to
+    /// false: `file` plus the line and column range address the same code, and
+    /// the text is most of the response. Set true only when you need the
+    /// source without reading the files.
+    pub include_fragments: Option<bool>,
 
     /// Compare results against a saved baseline file. Only new clone groups
     /// (not in the baseline) are reported.
@@ -488,22 +501,20 @@ pub struct FindDupesParams {
 
 #[derive(Default, Deserialize, JsonSchema)]
 pub struct FixParams {
-    /// Project root directory to analyze. Defaults to the current working directory.
+    /// Project root to analyze. Defaults to the working directory.
     pub root: Option<String>,
 
-    /// Path to a fallow config file (.fallowrc.json, .fallowrc.jsonc, fallow.toml, or .fallow.toml).
+    /// Path to a fallow config file.
     pub config: Option<String>,
 
-    /// Allow trusted HTTPS config inheritance for this request.
-    /// Defaults to false and never grants process-global trust.
+    /// Allow trusted HTTPS config inheritance for this request; never process-global.
     pub allow_remote_extends: Option<bool>,
 
     /// Production mode: exclude test, story, and dev files, only start/build
     /// scripts, and report type-only dependencies.
     pub production: Option<bool>,
 
-    /// Scope analysis to one or more workspaces. Accepts a single package name
-    /// for the common case, or a comma-separated list with globs and `!` negation.
+    /// Scope analysis to one or more workspaces: a package name, or a comma-separated list with globs and `!` negation.
     pub workspace: Option<String>,
 
     /// Refuse to create a new fallow config file when none exists. Use this
@@ -511,23 +522,26 @@ pub struct FixParams {
     /// top-level config file would surprise the user.
     pub no_create_config: Option<bool>,
 
-    /// Disable the incremental parse cache. Forces a full re-parse of all files.
+    /// Disable the incremental parse cache.
     pub no_cache: Option<bool>,
 
-    /// Number of parser threads. Defaults to available CPU cores.
+    /// Number of parser threads. Defaults to CPU cores.
     pub threads: Option<usize>,
+
+    /// Byte cap for this call's response. Lowers the 16 MiB default; over it,
+    /// `truncated` plus a preview come back instead.
+    pub max_output_bytes: Option<usize>,
 }
 
 #[derive(Default, Deserialize, JsonSchema)]
 pub struct ProjectInfoParams {
-    /// Project root directory to analyze. Defaults to the current working directory.
+    /// Project root to analyze. Defaults to the working directory.
     pub root: Option<String>,
 
-    /// Path to a fallow config file (.fallowrc.json, .fallowrc.jsonc, fallow.toml, or .fallow.toml).
+    /// Path to a fallow config file.
     pub config: Option<String>,
 
-    /// Allow trusted HTTPS config inheritance for this request.
-    /// Defaults to false and never grants process-global trust.
+    /// Allow trusted HTTPS config inheritance for this request; never process-global.
     pub allow_remote_extends: Option<bool>,
 
     /// Include entry-point patterns in the response.
@@ -542,10 +556,10 @@ pub struct ProjectInfoParams {
     /// Include discovered architecture boundary zones in the response.
     pub boundaries: Option<bool>,
 
-    /// Disable the incremental parse cache. Forces a full re-parse of all files.
+    /// Disable the incremental parse cache.
     pub no_cache: Option<bool>,
 
-    /// Number of parser threads. Defaults to available CPU cores.
+    /// Number of parser threads. Defaults to CPU cores.
     pub threads: Option<usize>,
 }
 
@@ -560,14 +574,13 @@ pub struct InspectTargetParams {
     /// the two addressing shapes.
     pub target: InspectTarget,
 
-    /// Project root directory to analyze. Defaults to the current working directory.
+    /// Project root to analyze. Defaults to the working directory.
     pub root: Option<String>,
 
-    /// Path to a fallow config file (.fallowrc.json, .fallowrc.jsonc, fallow.toml, or .fallow.toml).
+    /// Path to a fallow config file.
     pub config: Option<String>,
 
-    /// Allow trusted HTTPS config inheritance for this request.
-    /// Defaults to false and never grants process-global trust.
+    /// Allow trusted HTTPS config inheritance for this request; never process-global.
     pub allow_remote_extends: Option<bool>,
 
     /// Production mode: exclude test, story, and dev files, only start/build
@@ -575,14 +588,13 @@ pub struct InspectTargetParams {
     /// analyses that support it: trace, dead-code, and health.
     pub production: Option<bool>,
 
-    /// Scope analysis to one or more workspaces. Accepts a single package name
-    /// for the common case, or a comma-separated list with globs and `!` negation.
+    /// Scope analysis to one or more workspaces: a package name, or a comma-separated list with globs and `!` negation.
     pub workspace: Option<String>,
 
-    /// Disable the incremental parse cache. Forces a full re-parse of all files.
+    /// Disable the incremental parse cache.
     pub no_cache: Option<bool>,
 
-    /// Number of parser threads. Defaults to available CPU cores.
+    /// Number of parser threads. Defaults to CPU cores.
     pub threads: Option<usize>,
 
     /// Include project-wide TypeScript semantic evidence for symbol targets.
@@ -605,6 +617,10 @@ pub struct InspectTargetParams {
     /// reported honestly, the chain is never folded into the ranked brief and is
     /// never a focus-map / ranking input.
     pub symbol_chain: Option<bool>,
+
+    /// Byte cap for this call's response. Lowers the 16 MiB default; over it,
+    /// `truncated` plus a preview come back instead.
+    pub max_output_bytes: Option<usize>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -616,9 +632,12 @@ pub struct GuardParams {
     /// Project root. Defaults to the MCP server's working directory.
     pub root: Option<String>,
 
-    /// Allow trusted HTTPS config inheritance for this request.
-    /// Defaults to false and never grants process-global trust.
+    /// Allow trusted HTTPS config inheritance for this request; never process-global.
     pub allow_remote_extends: Option<bool>,
+
+    /// Byte cap for this call's response. Lowers the 16 MiB default; over it,
+    /// `truncated` plus a preview come back instead.
+    pub max_output_bytes: Option<usize>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -646,28 +665,26 @@ pub struct TraceExportParams {
     #[schemars(length(min = 1))]
     pub export_name: String,
 
-    /// Project root directory to analyze. Defaults to the current working directory.
+    /// Project root to analyze. Defaults to the working directory.
     pub root: Option<String>,
 
-    /// Path to a fallow config file (.fallowrc.json, .fallowrc.jsonc, fallow.toml, or .fallow.toml).
+    /// Path to a fallow config file.
     pub config: Option<String>,
 
-    /// Allow trusted HTTPS config inheritance for this request.
-    /// Defaults to false and never grants process-global trust.
+    /// Allow trusted HTTPS config inheritance for this request; never process-global.
     pub allow_remote_extends: Option<bool>,
 
     /// Production mode: exclude test, story, and dev files, only start/build
     /// scripts, and report type-only dependencies.
     pub production: Option<bool>,
 
-    /// Scope analysis to one or more workspaces. Accepts a single package name
-    /// for the common case, or a comma-separated list with globs and `!` negation.
+    /// Scope analysis to one or more workspaces: a package name, or a comma-separated list with globs and `!` negation.
     pub workspace: Option<String>,
 
-    /// Disable the incremental parse cache. Forces a full re-parse of all files.
+    /// Disable the incremental parse cache.
     pub no_cache: Option<bool>,
 
-    /// Number of parser threads. Defaults to available CPU cores.
+    /// Number of parser threads. Defaults to CPU cores.
     pub threads: Option<usize>,
 }
 
@@ -681,13 +698,13 @@ pub struct SemanticSymbolParams {
     #[schemars(length(min = 1))]
     pub export_name: String,
 
-    /// Project root directory to analyze. Defaults to the current working directory.
+    /// Project root to analyze. Defaults to the working directory.
     pub root: Option<String>,
 
-    /// Path to a fallow config file (.fallowrc.json, .fallowrc.jsonc, fallow.toml, or .fallow.toml).
+    /// Path to a fallow config file.
     pub config: Option<String>,
 
-    /// Allow trusted HTTPS config inheritance for this request.
+    /// Allow trusted HTTPS config inheritance for this request; never process-global.
     pub allow_remote_extends: Option<bool>,
 
     /// Explicit tsconfig paths. Project auto-discovery is used when omitted.
@@ -696,11 +713,15 @@ pub struct SemanticSymbolParams {
     /// Whether incomplete semantic evidence is advisory or gating.
     pub type_aware_require: Option<TypeAwareRequireParam>,
 
-    /// Disable the incremental parse cache. Forces a full re-parse of all files.
+    /// Disable the incremental parse cache.
     pub no_cache: Option<bool>,
 
-    /// Number of parser threads. Defaults to available CPU cores.
+    /// Number of parser threads. Defaults to CPU cores.
     pub threads: Option<usize>,
+
+    /// Byte cap for this call's response. Lowers the 16 MiB default; over it,
+    /// `truncated` plus a preview come back instead.
+    pub max_output_bytes: Option<usize>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -746,8 +767,7 @@ pub struct SemanticImpactParams {
     /// Optional Fallow config path.
     pub config: Option<String>,
 
-    /// Allow trusted HTTPS config inheritance for this request.
-    /// Defaults to false and never grants process-global trust.
+    /// Allow trusted HTTPS config inheritance for this request; never process-global.
     pub allow_remote_extends: Option<bool>,
 
     /// Explicit tsconfig paths. Project auto-discovery is used when omitted.
@@ -761,6 +781,10 @@ pub struct SemanticImpactParams {
 
     /// Worker thread limit for Fallow's syntactic analysis.
     pub threads: Option<usize>,
+
+    /// Byte cap for this call's response. Lowers the 16 MiB default; over it,
+    /// `truncated` plus a preview come back instead.
+    pub max_output_bytes: Option<usize>,
 }
 
 #[expect(
@@ -834,28 +858,59 @@ pub struct TraceFileParams {
     #[schemars(length(min = 1))]
     pub file: String,
 
-    /// Project root directory to analyze. Defaults to the current working directory.
+    /// Project root to analyze. Defaults to the working directory.
     pub root: Option<String>,
 
-    /// Path to a fallow config file (.fallowrc.json, .fallowrc.jsonc, fallow.toml, or .fallow.toml).
+    /// Path to a fallow config file.
     pub config: Option<String>,
 
-    /// Allow trusted HTTPS config inheritance for this request.
-    /// Defaults to false and never grants process-global trust.
+    /// Allow trusted HTTPS config inheritance for this request; never process-global.
     pub allow_remote_extends: Option<bool>,
 
     /// Production mode: exclude test, story, and dev files, only start/build
     /// scripts, and report type-only dependencies.
     pub production: Option<bool>,
 
-    /// Scope analysis to one or more workspaces. Accepts a single package name
-    /// for the common case, or a comma-separated list with globs and `!` negation.
+    /// Scope analysis to one or more workspaces: a package name, or a comma-separated list with globs and `!` negation.
     pub workspace: Option<String>,
 
-    /// Disable the incremental parse cache. Forces a full re-parse of all files.
+    /// Disable the incremental parse cache.
     pub no_cache: Option<bool>,
 
-    /// Number of parser threads. Defaults to available CPU cores.
+    /// Number of parser threads. Defaults to CPU cores.
+    pub threads: Option<usize>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct TraceImportPathParams {
+    /// Project-relative path of the module the walk starts from.
+    #[schemars(length(min = 1))]
+    pub from: String,
+
+    /// Project-relative path of the module the walk is looking for.
+    #[schemars(length(min = 1))]
+    pub to: String,
+
+    /// Project root to analyze. Defaults to the working directory.
+    pub root: Option<String>,
+
+    /// Path to a fallow config file.
+    pub config: Option<String>,
+
+    /// Allow trusted HTTPS config inheritance for this request; never process-global.
+    pub allow_remote_extends: Option<bool>,
+
+    /// Production mode: exclude test, story, and dev files, only start/build
+    /// scripts, and report type-only dependencies.
+    pub production: Option<bool>,
+
+    /// Scope analysis to one or more workspaces: a package name, or a comma-separated list with globs and `!` negation.
+    pub workspace: Option<String>,
+
+    /// Disable the incremental parse cache.
+    pub no_cache: Option<bool>,
+
+    /// Number of parser threads. Defaults to CPU cores.
     pub threads: Option<usize>,
 }
 
@@ -865,29 +920,31 @@ pub struct ImpactClosureParams {
     #[schemars(length(min = 1))]
     pub path: String,
 
-    /// Project root directory to analyze. Defaults to the current working directory.
+    /// Project root to analyze. Defaults to the working directory.
     pub root: Option<String>,
 
-    /// Path to a fallow config file (.fallowrc.json, .fallowrc.jsonc, fallow.toml, or .fallow.toml).
+    /// Path to a fallow config file.
     pub config: Option<String>,
 
-    /// Allow trusted HTTPS config inheritance for this request.
-    /// Defaults to false and never grants process-global trust.
+    /// Allow trusted HTTPS config inheritance for this request; never process-global.
     pub allow_remote_extends: Option<bool>,
 
     /// Production mode: exclude test, story, and dev files, only start/build
     /// scripts, and report type-only dependencies.
     pub production: Option<bool>,
 
-    /// Scope analysis to one or more workspaces. Accepts a single package name
-    /// for the common case, or a comma-separated list with globs and `!` negation.
+    /// Scope analysis to one or more workspaces: a package name, or a comma-separated list with globs and `!` negation.
     pub workspace: Option<String>,
 
-    /// Disable the incremental parse cache. Forces a full re-parse of all files.
+    /// Disable the incremental parse cache.
     pub no_cache: Option<bool>,
 
-    /// Number of parser threads. Defaults to available CPU cores.
+    /// Number of parser threads. Defaults to CPU cores.
     pub threads: Option<usize>,
+
+    /// Byte cap for this call's response. Lowers the 16 MiB default; over it,
+    /// `truncated` plus a preview come back instead.
+    pub max_output_bytes: Option<usize>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -896,28 +953,26 @@ pub struct TraceDependencyParams {
     #[schemars(length(min = 1))]
     pub package_name: String,
 
-    /// Project root directory to analyze. Defaults to the current working directory.
+    /// Project root to analyze. Defaults to the working directory.
     pub root: Option<String>,
 
-    /// Path to a fallow config file (.fallowrc.json, .fallowrc.jsonc, fallow.toml, or .fallow.toml).
+    /// Path to a fallow config file.
     pub config: Option<String>,
 
-    /// Allow trusted HTTPS config inheritance for this request.
-    /// Defaults to false and never grants process-global trust.
+    /// Allow trusted HTTPS config inheritance for this request; never process-global.
     pub allow_remote_extends: Option<bool>,
 
     /// Production mode: exclude test, story, and dev files, only start/build
     /// scripts, and report type-only dependencies.
     pub production: Option<bool>,
 
-    /// Scope analysis to one or more workspaces. Accepts a single package name
-    /// for the common case, or a comma-separated list with globs and `!` negation.
+    /// Scope analysis to one or more workspaces: a package name, or a comma-separated list with globs and `!` negation.
     pub workspace: Option<String>,
 
-    /// Disable the incremental parse cache. Forces a full re-parse of all files.
+    /// Disable the incremental parse cache.
     pub no_cache: Option<bool>,
 
-    /// Number of parser threads. Defaults to available CPU cores.
+    /// Number of parser threads. Defaults to CPU cores.
     pub threads: Option<usize>,
 }
 
@@ -938,18 +993,16 @@ pub struct TraceCloneParams {
     #[serde(default)]
     pub fingerprint: Option<String>,
 
-    /// Project root directory to analyze. Defaults to the current working directory.
+    /// Project root to analyze. Defaults to the working directory.
     pub root: Option<String>,
 
-    /// Path to a fallow config file (.fallowrc.json, .fallowrc.jsonc, fallow.toml, or .fallow.toml).
+    /// Path to a fallow config file.
     pub config: Option<String>,
 
-    /// Allow trusted HTTPS config inheritance for this request.
-    /// Defaults to false and never grants process-global trust.
+    /// Allow trusted HTTPS config inheritance for this request; never process-global.
     pub allow_remote_extends: Option<bool>,
 
-    /// Scope analysis to one or more workspaces. Accepts a single package name
-    /// for the common case, or a comma-separated list with globs and `!` negation.
+    /// Scope analysis to one or more workspaces: a package name, or a comma-separated list with globs and `!` negation.
     pub workspace: Option<String>,
 
     /// Detection mode: "strict", "mild", "weak", or "semantic". Defaults to
@@ -985,23 +1038,22 @@ pub struct TraceCloneParams {
     /// `false` to count them again.
     pub ignore_imports: Option<bool>,
 
-    /// Disable the incremental parse cache. Forces a full re-parse of all files.
+    /// Disable the incremental parse cache.
     pub no_cache: Option<bool>,
 
-    /// Number of parser threads. Defaults to available CPU cores.
+    /// Number of parser threads. Defaults to CPU cores.
     pub threads: Option<usize>,
 }
 
 #[derive(Default, Deserialize, JsonSchema)]
 pub struct HealthParams {
-    /// Root directory of the project to analyze. Defaults to current working directory.
+    /// Project root to analyze. Defaults to the working directory.
     pub root: Option<String>,
 
-    /// Path to fallow config file (.fallowrc.json, .fallowrc.jsonc, fallow.toml, or .fallow.toml).
+    /// Path to a fallow config file.
     pub config: Option<String>,
 
-    /// Allow trusted HTTPS config inheritance for this request.
-    /// Defaults to false and never grants process-global trust.
+    /// Allow trusted HTTPS config inheritance for this request; never process-global.
     pub allow_remote_extends: Option<bool>,
 
     /// Maximum cyclomatic complexity threshold. Functions exceeding this are reported.
@@ -1096,11 +1148,7 @@ pub struct HealthParams {
     /// file is authoritative).
     pub churn_file: Option<String>,
 
-    /// Scope output to one or more workspaces. Accepts a single package name
-    /// for the common case, or a comma-separated list with globs and `!` negation
-    /// (e.g. `"web,admin"`, `"apps/*"`, `"apps/*,!apps/legacy"`). Patterns match
-    /// against both the package name and the workspace path relative to the repo
-    /// root. Passed through to the CLI's `--workspace` flag.
+    /// Scope output to one or more workspaces: a package name, or a comma-separated list with globs and `!` negation.
     pub workspace: Option<String>,
 
     /// Only analyze production code (excludes tests, stories, dev files).
@@ -1124,10 +1172,10 @@ pub struct HealthParams {
     /// to the CLI's `--baseline-mode` flag.
     pub baseline_mode: Option<BaselineModeParam>,
 
-    /// Disable the incremental parse cache. Forces a full re-parse of all files.
+    /// Disable the incremental parse cache.
     pub no_cache: Option<bool>,
 
-    /// Number of parser threads. Defaults to available CPU cores.
+    /// Number of parser threads. Defaults to CPU cores.
     pub threads: Option<usize>,
 
     /// Enable the TypeScript semantic backend.
@@ -1223,24 +1271,19 @@ pub struct CheckRuntimeCoverageParams {
     /// Istanbul `coverage-final.json`. Required.
     pub coverage: String,
 
-    /// Root directory of the project to analyze. Defaults to current working directory.
+    /// Project root to analyze. Defaults to the working directory.
     pub root: Option<String>,
 
-    /// Path to fallow config file (.fallowrc.json, .fallowrc.jsonc, fallow.toml, or .fallow.toml).
+    /// Path to a fallow config file.
     pub config: Option<String>,
 
-    /// Allow trusted HTTPS config inheritance for this request.
-    /// Defaults to false and never grants process-global trust.
+    /// Allow trusted HTTPS config inheritance for this request; never process-global.
     pub allow_remote_extends: Option<bool>,
 
     /// Only analyze production code (excludes tests, stories, dev files).
     pub production: Option<bool>,
 
-    /// Scope analysis to one or more workspaces. Accepts a single package name
-    /// for the common case, or a comma-separated list with globs and `!` negation
-    /// (e.g. `"web,admin"`, `"apps/*"`, `"apps/*,!apps/legacy"`). Patterns match
-    /// against both the package name and the workspace path relative to the repo
-    /// root. Passed through to the CLI's `--workspace` flag.
+    /// Scope analysis to one or more workspaces: a package name, or a comma-separated list with globs and `!` negation.
     pub workspace: Option<String>,
 
     /// Minimum invocation count for a function to be classified as a hot
@@ -1260,10 +1303,10 @@ pub struct CheckRuntimeCoverageParams {
     /// omitted.
     pub low_traffic_threshold: Option<f64>,
 
-    /// Disable the incremental parse cache. Forces a full re-parse of all files.
+    /// Disable the incremental parse cache.
     pub no_cache: Option<bool>,
 
-    /// Number of parser threads. Defaults to available CPU cores.
+    /// Number of parser threads. Defaults to CPU cores.
     pub threads: Option<usize>,
 
     /// Maximum CRAP score threshold (default 30.0). Functions meeting or
@@ -1281,18 +1324,21 @@ pub struct CheckRuntimeCoverageParams {
     /// "package", "section". `section` attaches an `owners: string[]` array
     /// to each group. Passed through to the CLI's `--group-by` flag.
     pub group_by: Option<String>,
+
+    /// Byte cap for this call's response. Lowers the 16 MiB default; over it,
+    /// `truncated` plus a preview come back instead.
+    pub max_output_bytes: Option<usize>,
 }
 
 #[derive(Default, Deserialize, JsonSchema)]
 pub struct AuditParams {
-    /// Root directory of the project to analyze. Defaults to current working directory.
+    /// Project root to analyze. Defaults to the working directory.
     pub root: Option<String>,
 
-    /// Path to fallow config file (.fallowrc.json, .fallowrc.jsonc, fallow.toml, or .fallow.toml).
+    /// Path to a fallow config file.
     pub config: Option<String>,
 
-    /// Allow trusted HTTPS config inheritance for this request.
-    /// Defaults to false and never grants process-global trust.
+    /// Allow trusted HTTPS config inheritance for this request; never process-global.
     pub allow_remote_extends: Option<bool>,
 
     /// Git ref to compare against (e.g., "main", "HEAD~5"). When unset, the
@@ -1322,17 +1368,13 @@ pub struct AuditParams {
     /// `--no-css-deep` on the CLI fallback path.
     pub css_deep: Option<bool>,
 
-    /// Scope analysis to one or more workspaces. Accepts a single package name
-    /// for the common case, or a comma-separated list with globs and `!` negation
-    /// (e.g. `"web,admin"`, `"apps/*"`, `"apps/*,!apps/legacy"`). Patterns match
-    /// against both the package name and the workspace path relative to the repo
-    /// root. Passed through to the CLI's `--workspace` flag.
+    /// Scope analysis to one or more workspaces: a package name, or a comma-separated list with globs and `!` negation.
     pub workspace: Option<String>,
 
-    /// Disable the incremental parse cache. Forces a full re-parse of all files.
+    /// Disable the incremental parse cache.
     pub no_cache: Option<bool>,
 
-    /// Number of parser threads. Defaults to available CPU cores.
+    /// Number of parser threads. Defaults to CPU cores.
     pub threads: Option<usize>,
 
     /// Refine both audit sides with TypeScript symbol identity before attribution.
@@ -1441,20 +1483,19 @@ pub struct ExplainParams {
 /// Parameters for `list_boundaries`.
 #[derive(Debug, Default, serde::Deserialize, schemars::JsonSchema)]
 pub struct ListBoundariesParams {
-    /// Project root directory (defaults to current working directory).
+    /// Project root to analyze. Defaults to the working directory.
     pub root: Option<String>,
 
     /// Path to a fallow config file.
     pub config: Option<String>,
 
-    /// Allow trusted HTTPS config inheritance for this request.
-    /// Defaults to false and never grants process-global trust.
+    /// Allow trusted HTTPS config inheritance for this request; never process-global.
     pub allow_remote_extends: Option<bool>,
 
     /// Disable the incremental parse cache.
     pub no_cache: Option<bool>,
 
-    /// Number of threads for file parsing (defaults to CPU core count).
+    /// Number of parser threads. Defaults to CPU cores.
     pub threads: Option<usize>,
 }
 
@@ -1466,6 +1507,10 @@ pub struct RecommendParams {
     /// pipeline), so this is the sole parameter. Defaults to the current
     /// working directory.
     pub root: Option<String>,
+
+    /// Byte cap for this call's response. Lowers the 16 MiB default; over it,
+    /// `truncated` plus a preview come back instead.
+    pub max_output_bytes: Option<usize>,
 }
 
 /// Parameters for the `impact` value-report tool.
@@ -1475,6 +1520,10 @@ pub struct ImpactParams {
     /// stored per-project in the user's private config dir (never inside the
     /// repo). Defaults to the current working directory.
     pub root: Option<String>,
+
+    /// Byte cap for this call's response. Lowers the 16 MiB default; over it,
+    /// `truncated` plus a preview come back instead.
+    pub max_output_bytes: Option<usize>,
 }
 
 /// Parameters for the `impact_all` cross-repo value-report tool.
@@ -1488,6 +1537,10 @@ pub struct ImpactAllParams {
     /// Cap the number of project rows returned. Grand totals still reflect
     /// every tracked project, including any beyond the cap. Omit for all rows.
     pub limit: Option<usize>,
+
+    /// Byte cap for this call's response. Lowers the 16 MiB default; over it,
+    /// `truncated` plus a preview come back instead.
+    pub max_output_bytes: Option<usize>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -1514,33 +1567,28 @@ pub struct CodeExecuteParams {
 
 #[derive(Default, Deserialize, JsonSchema)]
 pub struct FeatureFlagsParams {
-    /// Root directory of the project to analyze. Defaults to current working directory.
+    /// Project root to analyze. Defaults to the working directory.
     pub root: Option<String>,
 
-    /// Path to fallow config file (.fallowrc.json, .fallowrc.jsonc, fallow.toml, or .fallow.toml).
+    /// Path to a fallow config file.
     pub config: Option<String>,
 
-    /// Allow trusted HTTPS config inheritance for this request.
-    /// Defaults to false and never grants process-global trust.
+    /// Allow trusted HTTPS config inheritance for this request; never process-global.
     pub allow_remote_extends: Option<bool>,
 
     /// Only analyze production code (excludes tests, stories, dev files).
     pub production: Option<bool>,
 
-    /// Scope analysis to one or more workspaces. Accepts a single package name
-    /// for the common case, or a comma-separated list with globs and `!` negation
-    /// (e.g. `"web,admin"`, `"apps/*"`, `"apps/*,!apps/legacy"`). Patterns match
-    /// against both the package name and the workspace path relative to the repo
-    /// root. Passed through to the CLI's `--workspace` flag.
+    /// Scope analysis to one or more workspaces: a package name, or a comma-separated list with globs and `!` negation.
     pub workspace: Option<String>,
 
     /// Show only the top N flags.
     pub top: Option<usize>,
 
-    /// Disable the incremental parse cache. Forces a full re-parse of all files.
+    /// Disable the incremental parse cache.
     pub no_cache: Option<bool>,
 
-    /// Number of parser threads. Defaults to available CPU cores.
+    /// Number of parser threads. Defaults to CPU cores.
     pub threads: Option<usize>,
 }
 
@@ -1550,24 +1598,19 @@ pub struct FeatureFlagsParams {
 /// v1 (niche; `workspace` plus `changed_since` cover the agent use cases).
 #[derive(Default, Deserialize, JsonSchema)]
 pub struct ListSuppressionsParams {
-    /// Root directory of the project to analyze. Defaults to current working directory.
+    /// Project root to analyze. Defaults to the working directory.
     pub root: Option<String>,
 
-    /// Path to fallow config file (.fallowrc.json, .fallowrc.jsonc, fallow.toml, or .fallow.toml).
+    /// Path to a fallow config file.
     pub config: Option<String>,
 
-    /// Allow trusted HTTPS config inheritance for this request.
-    /// Defaults to false and never grants process-global trust.
+    /// Allow trusted HTTPS config inheritance for this request; never process-global.
     pub allow_remote_extends: Option<bool>,
 
     /// Only analyze production code (excludes tests, stories, dev files).
     pub production: Option<bool>,
 
-    /// Scope analysis to one or more workspaces. Accepts a single package name
-    /// for the common case, or a comma-separated list with globs and `!` negation
-    /// (e.g. `"web,admin"`, `"apps/*"`, `"apps/*,!apps/legacy"`). Patterns match
-    /// against both the package name and the workspace path relative to the repo
-    /// root. Passed through to the CLI's `--workspace` flag.
+    /// Scope analysis to one or more workspaces: a package name, or a comma-separated list with globs and `!` negation.
     pub workspace: Option<String>,
 
     /// Git ref (e.g. "main", "HEAD~5"). Scopes the inventory to files changed
@@ -1578,23 +1621,26 @@ pub struct ListSuppressionsParams {
     /// project root; forwarded as a repeated `--file` flag.
     pub file: Option<Vec<String>>,
 
-    /// Disable the incremental parse cache. Forces a full re-parse of all files.
+    /// Disable the incremental parse cache.
     pub no_cache: Option<bool>,
 
-    /// Number of parser threads. Defaults to available CPU cores.
+    /// Number of parser threads. Defaults to CPU cores.
     pub threads: Option<usize>,
+
+    /// Byte cap for this call's response. Lowers the 16 MiB default; over it,
+    /// `truncated` plus a preview come back instead.
+    pub max_output_bytes: Option<usize>,
 }
 
 #[derive(Default, Deserialize, JsonSchema)]
 pub struct DecisionSurfaceParams {
-    /// Root directory of the project to analyze. Defaults to current working directory.
+    /// Project root to analyze. Defaults to the working directory.
     pub root: Option<String>,
 
-    /// Path to fallow config file (.fallowrc.json, .fallowrc.jsonc, fallow.toml, or .fallow.toml).
+    /// Path to a fallow config file.
     pub config: Option<String>,
 
-    /// Allow trusted HTTPS config inheritance for this request.
-    /// Defaults to false and never grants process-global trust.
+    /// Allow trusted HTTPS config inheritance for this request; never process-global.
     pub allow_remote_extends: Option<bool>,
 
     /// Git ref to compare against (e.g., "main", "HEAD~5"). When unset, the
@@ -1608,15 +1654,13 @@ pub struct DecisionSurfaceParams {
     /// 1).
     pub max_decisions: Option<usize>,
 
-    /// Scope analysis to one or more workspaces. Accepts a single package name
-    /// for the common case, or a comma-separated list with globs and `!` negation
-    /// (e.g. `"web,admin"`, `"apps/*"`).
+    /// Scope analysis to one or more workspaces: a package name, or a comma-separated list with globs and `!` negation.
     pub workspace: Option<String>,
 
-    /// Disable the incremental parse cache. Forces a full re-parse of all files.
+    /// Disable the incremental parse cache.
     pub no_cache: Option<bool>,
 
-    /// Number of parser threads. Defaults to available CPU cores.
+    /// Number of parser threads. Defaults to CPU cores.
     pub threads: Option<usize>,
 }
 
@@ -1629,19 +1673,22 @@ pub struct DecisionSurfaceParams {
 /// omitted (they would only ever return empty).
 #[derive(Default, Deserialize, JsonSchema)]
 pub struct GetTokenBlastRadiusParams {
-    /// Root directory of the project to analyze. Defaults to current working directory.
+    /// Project root to analyze. Defaults to the working directory.
     pub root: Option<String>,
 
-    /// Path to fallow config file (.fallowrc.json, .fallowrc.jsonc, fallow.toml, or .fallow.toml).
+    /// Path to a fallow config file.
     pub config: Option<String>,
 
-    /// Allow trusted HTTPS config inheritance for this request.
-    /// Defaults to false and never grants process-global trust.
+    /// Allow trusted HTTPS config inheritance for this request; never process-global.
     pub allow_remote_extends: Option<bool>,
 
-    /// Disable the incremental parse cache. Forces a full re-parse of all files.
+    /// Disable the incremental parse cache.
     pub no_cache: Option<bool>,
 
-    /// Number of parser threads. Defaults to available CPU cores.
+    /// Number of parser threads. Defaults to CPU cores.
     pub threads: Option<usize>,
+
+    /// Byte cap for this call's response. Lowers the 16 MiB default; over it,
+    /// `truncated` plus a preview come back instead.
+    pub max_output_bytes: Option<usize>,
 }

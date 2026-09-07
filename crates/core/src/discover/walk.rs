@@ -223,6 +223,24 @@ fn partition_minified_generated_js(
 /// emit one aggregated `tracing::warn!` so a human running `fallow` sees what
 /// was dropped. Mirrors the JSON-plus-gated-warn pattern used for undeclared
 /// workspaces. The caller writes the returned list to the registry.
+/// Report an uninstalled dependency tree as part of the walk's own
+/// source-discovery set.
+///
+/// It belongs here rather than beside the two pipelines that used to warn
+/// about it: the walk owns this root's source-discovery diagnostics, and any
+/// second writer would be replaced by whichever walk finished last.
+fn report_missing_node_modules(config: &ResolvedConfig) -> Vec<WorkspaceDiagnostic> {
+    let Some(diagnostic) = fallow_config::missing_node_modules_diagnostic(&config.root) else {
+        return Vec::new();
+    };
+    if !config.quiet
+        && should_emit_note_once(format!("node-modules-missing::{}", config.root.display()))
+    {
+        tracing::warn!("fallow: {}", diagnostic.message);
+    }
+    vec![diagnostic]
+}
+
 fn report_skipped_large_files(
     config: &ResolvedConfig,
     skipped: &[SizedFile],
@@ -1239,6 +1257,7 @@ pub fn discover_files_config_candidates_and_diagnostics(
                 production_excludes.as_ref(),
                 &dotdir_candidates,
             ))
+            .chain(report_missing_node_modules(config))
             .collect(),
     );
 

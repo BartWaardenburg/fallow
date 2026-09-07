@@ -84,6 +84,10 @@ pub struct DupesOptions<'a> {
     /// Standalone `fallow dupes` reads this; combined-mode invocations rely
     /// on the bare `fallow` pipeline panel and ignore this field.
     pub performance: bool,
+    /// Emit the verbatim source text on each clone instance in `--format json`
+    /// output. `false` is `--no-fragments`: the five location fields still
+    /// address the same code. Human and CI renderers ignore this.
+    pub include_fragments: bool,
 }
 
 /// Parse a `--trace` spec string into (file_path, line_number).
@@ -265,6 +269,9 @@ pub struct DupesResult {
     /// the same way on every run (issue #2366). Empty when the run reused
     /// another analysis's discovery: that analysis carries the same list.
     pub workspace_diagnostics: Vec<fallow_config::WorkspaceDiagnostic>,
+    /// Whether `--format json` carries the verbatim source text per clone
+    /// instance. Mirrors `DupesOptions::include_fragments`.
+    pub include_fragments: bool,
 }
 
 /// Run duplication analysis, filtering, and baseline handling. Returns results without printing.
@@ -426,6 +433,7 @@ fn execute_dupes_inner(
         ignore_imports: dupes_config.ignore_imports,
         explain_skipped: opts.explain_skipped,
         workspace_diagnostics,
+        include_fragments: opts.include_fragments,
     })
 }
 
@@ -565,12 +573,17 @@ fn resolve_changed_since(
 }
 
 /// Keep only the `n` highest-ranked clone groups.
+///
+/// `stats` keeps describing the corpus the run measured. Truncation is a
+/// presentation choice, so rewriting `clone_groups` / `clone_instances` from
+/// the truncated vector would put two mutually contradictory scopes in one
+/// object next to the untouched `files_with_clones` and
+/// `duplication_percentage`. Consumers read the shown/omitted split from
+/// `DuplicationReport::clone_groups_shown` / `clone_groups_omitted` instead.
 fn apply_top(report: &mut DuplicationReport, n: usize, root: &std::path::Path) {
     report.sort();
     report.clone_groups.truncate(n);
     fallow_engine::duplicates::refresh_clone_families(report, root);
-    report.stats.clone_groups = report.clone_groups.len();
-    report.stats.clone_instances = report.clone_groups.iter().map(|g| g.instances.len()).sum();
     report.sort();
 }
 
@@ -765,6 +778,7 @@ fn print_dupes_result_with_grouping(input: DupesResultGroupingInput<'_>) -> Exit
         skip_score_and_trend: false,
         css_requested: false,
         json_style: input.json_style,
+        include_fragments: result.include_fragments,
     };
     print_default_ignore_note(result, input.quiet);
     print_min_occurrences_note(result, input.quiet);
@@ -963,6 +977,7 @@ mod tests {
         total_lines: usize,
     ) -> DuplicationReport {
         let clone_instances: usize = groups.iter().map(|g| g.instances.len()).sum();
+        let group_count = groups.len();
         DuplicationReport {
             clone_groups: groups,
             clone_families: vec![],
@@ -974,7 +989,7 @@ mod tests {
                 duplicated_lines: 0,
                 total_tokens: 0,
                 duplicated_tokens: 0,
-                clone_groups: 0,
+                clone_groups: group_count,
                 clone_instances,
                 duplication_percentage: 0.0,
                 clone_groups_below_min_occurrences: 0,
@@ -1026,6 +1041,7 @@ mod tests {
             summary: false,
             group_by: None,
             performance: false,
+            include_fragments: true,
         }
     }
 
@@ -1237,7 +1253,7 @@ mod tests {
     }
 
     #[test]
-    fn apply_top_recomputes_clone_groups_and_clone_instances_stats() {
+    fn apply_top_keeps_all_four_stats_on_the_measured_corpus() {
         let groups = vec![
             make_group(vec![instance("a.ts", 1, 10); 5], 50, 10),
             make_group(vec![instance("b.ts", 1, 10); 3], 50, 10),
@@ -1245,6 +1261,8 @@ mod tests {
             make_group(vec![instance("d.ts", 1, 10); 2], 50, 10),
         ];
         let mut report = make_report(groups, 4, 100);
+        report.stats.files_with_clones = 4;
+        report.stats.duplication_percentage = 4.7268;
         report.sort();
 
         apply_top(&mut report, 1, Path::new("/project"));
@@ -1256,14 +1274,35 @@ mod tests {
             "kept group is the 5-instance group"
         );
         assert_eq!(
-            report.stats.clone_groups,
-            report.clone_groups.len(),
-            "stats.clone_groups must match the truncated array length"
+            report.stats.clone_groups, 4,
+            "stats.clone_groups stays on the corpus the run measured"
         );
         assert_eq!(
-            report.stats.clone_instances, 5,
-            "stats.clone_instances must reflect the surviving instances"
+            report.stats.clone_instances, 12,
+            "stats.clone_instances stays on the corpus the run measured"
         );
+        assert_eq!(
+            report.stats.files_with_clones, 4,
+            "files_with_clones was never truncated and must stay corpus-wide"
+        );
+        assert!(
+            (report.stats.duplication_percentage - 4.7268).abs() < f64::EPSILON,
+            "duplication_percentage was never truncated and must stay corpus-wide"
+        );
+        assert_eq!(report.clone_groups_shown(), 1);
+        assert_eq!(report.clone_groups_omitted(), 3);
+    }
+
+    #[test]
+    fn untruncated_report_omits_nothing() {
+        let groups = vec![
+            make_group(vec![instance("a.ts", 1, 10); 5], 50, 10),
+            make_group(vec![instance("b.ts", 1, 10); 3], 50, 10),
+        ];
+        let report = make_report(groups, 2, 100);
+
+        assert_eq!(report.clone_groups_shown(), 2);
+        assert_eq!(report.clone_groups_omitted(), 0);
     }
 
     #[test]

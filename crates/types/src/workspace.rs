@@ -128,6 +128,25 @@ pub enum WorkspaceDiagnosticKind {
         /// Filesystem or UTF-8 decoding error from `read_to_string`.
         error: String,
     },
+    /// A source file was read but parsed with diagnostics, so the module
+    /// extracted from it may be missing imports, exports, or references after
+    /// the first error. Analysis proceeds with the partial module, which is why
+    /// this is reported: an import the parser never saw credits nothing, and its
+    /// target can surface as a confident `unused-file` or `unused-export`
+    /// finding with a `delete-file` or `remove-export` action on it.
+    ///
+    /// Recorded by the parse stage, alongside `source-read-failure`, and never
+    /// used to withhold a finding. oxc reports recoverable errors for valid
+    /// syntax newer than the parser as well as for genuinely broken files, so
+    /// gating findings on this would mute real results project-wide instead of
+    /// just the affected file.
+    SourceParseDegraded {
+        /// Number of parser diagnostics reported for the file.
+        error_count: u32,
+        /// `true` when the parser abandoned the file instead of recovering, so
+        /// the extracted module is a fragment at best.
+        panicked: bool,
+    },
     /// Dependency-override resolution was skipped because bun's legacy binary
     /// `bun.lockb` sits next to this `package.json`, fallow cannot read the
     /// binary format, and no parseable text lockfile was found to use
@@ -150,6 +169,36 @@ pub enum WorkspaceDiagnosticKind {
     /// object. Bun applies `overrides` and ignores `resolutions`, so fallow
     /// reports the shadowed configuration without offering removal advice.
     BunResolutionsShadowedByOverrides,
+    /// The project has no `node_modules` directory and is not a Deno project
+    /// that legitimately runs without one. Analysis proceeds, but three things
+    /// degrade silently: package `exports` and conditional exports cannot be
+    /// read, so imports into a dependency's subpaths resolve less precisely;
+    /// framework plugins that activate on an installed package stay inactive,
+    /// so their entry points and path aliases are missing; and a dependency's
+    /// installed shape cannot be inspected, so type-only dependency
+    /// classification falls back to declaration-based heuristics.
+    ///
+    /// Recorded once per run by the source walk, anchored at the missing
+    /// `node_modules` directory so the reported path is a real location rather
+    /// than the empty string a root-anchored diagnostic would render. This used
+    /// to be a bare `tracing::warn!` duplicated in two pipelines, so it never
+    /// reached JSON output and never reached `fallow doctor`, which reported
+    /// `pass` on a tree that had never been installed.
+    NodeModulesMissing,
+    /// `boundaries` is empty while `boundary-violation` is not `off`, so the
+    /// boundary detector never ran. Its summary counters are therefore
+    /// structurally zero and say nothing about the project.
+    ///
+    /// This is the UNCONFIGURED zero, not the user-chosen one: a project that
+    /// sets `boundary-violation: off` asked for silence and can see that
+    /// choice in `fallow config`. A project that left `boundaries` empty
+    /// cannot distinguish "no violations" from "nothing was measured".
+    BoundariesNotConfigured,
+    /// `rulePacks` is empty while `policy-violation` is not `off`, so the
+    /// policy detector never ran and its summary counters are structurally
+    /// zero. The unconfigured counterpart of
+    /// [`Self::BoundariesNotConfigured`].
+    RulePacksNotConfigured,
 }
 
 impl WorkspaceDiagnosticKind {
@@ -167,9 +216,13 @@ impl WorkspaceDiagnosticKind {
             Self::SkippedMinifiedFile { .. } => "skipped-minified-file",
             Self::SkippedSourceDotdir => "skipped-source-dotdir",
             Self::SourceReadFailure { .. } => "source-read-failure",
+            Self::SourceParseDegraded { .. } => "source-parse-degraded",
             Self::BunLockbOverrideResolutionSkipped => "bun-lockb-override-resolution-skipped",
             Self::BunLockOverrideResolutionSkipped => "bun-lock-override-resolution-skipped",
             Self::BunResolutionsShadowedByOverrides => "bun-resolutions-shadowed-by-overrides",
+            Self::NodeModulesMissing => "node-modules-missing",
+            Self::BoundariesNotConfigured => "boundaries-not-configured",
+            Self::RulePacksNotConfigured => "rule-packs-not-configured",
         }
     }
 
@@ -189,6 +242,8 @@ impl WorkspaceDiagnosticKind {
                 | Self::SkippedMinifiedFile { .. }
                 | Self::SkippedSourceDotdir
                 | Self::SourceReadFailure { .. }
+                | Self::SourceParseDegraded { .. }
+                | Self::NodeModulesMissing
         )
     }
 
@@ -211,6 +266,7 @@ impl WorkspaceDiagnosticKind {
             Self::SkippedLargeFile { .. }
                 | Self::SkippedMinifiedFile { .. }
                 | Self::SkippedSourceDotdir
+                | Self::NodeModulesMissing
         )
     }
 
@@ -234,7 +290,9 @@ impl WorkspaceDiagnosticKind {
             Self::MalformedPnpmWorkspaceYaml { .. }
             | Self::BunLockbOverrideResolutionSkipped
             | Self::BunLockOverrideResolutionSkipped
-            | Self::BunResolutionsShadowedByOverrides => true,
+            | Self::BunResolutionsShadowedByOverrides
+            | Self::BoundariesNotConfigured
+            | Self::RulePacksNotConfigured => true,
             Self::UndeclaredWorkspace
             | Self::MalformedPackageJson { .. }
             | Self::GlobMatchedNoPackageJson { .. }
@@ -243,7 +301,9 @@ impl WorkspaceDiagnosticKind {
             | Self::SkippedLargeFile { .. }
             | Self::SkippedMinifiedFile { .. }
             | Self::SkippedSourceDotdir
-            | Self::SourceReadFailure { .. } => false,
+            | Self::SourceReadFailure { .. }
+            | Self::SourceParseDegraded { .. }
+            | Self::NodeModulesMissing => false,
         }
     }
 }
@@ -322,10 +382,19 @@ impl WorkspaceDiagnostic {
     ///
     /// Paths outside `root` (canonicalisation crossed a symlink) are left
     /// absolute, matching how [`Self::new`] renders the message.
+    ///
+    /// A diagnostic anchored at the root itself becomes `.`, not the empty
+    /// path: an empty string is not a location, and the analysis envelopes'
+    /// post-serialisation strip only removes a `root + separator` prefix, so a
+    /// root-anchored path that stays absolute here leaks a host path.
     #[must_use]
     pub fn into_root_relative(mut self, root: &Path) -> Self {
         if let Ok(relative) = self.path.strip_prefix(root) {
-            self.path = relative.to_path_buf();
+            self.path = if relative.as_os_str().is_empty() {
+                PathBuf::from(".")
+            } else {
+                relative.to_path_buf()
+            };
         }
         self
     }
@@ -537,6 +606,22 @@ fn render_message(root: &Path, path: &Path, kind: &WorkspaceDiagnosticKind) -> S
             "Could not read source '{display}' ({error}). Restore the file or its read permissions, \
              ensure it contains valid UTF-8 text, or add '{display}' to ignorePatterns."
         ),
+        WorkspaceDiagnosticKind::SourceParseDegraded {
+            error_count,
+            panicked,
+        } => {
+            let outcome = if *panicked {
+                "the parser stopped there"
+            } else {
+                "the parser recovered and continued"
+            };
+            format!(
+                "Parsed '{display}' with {error_count} error(s); {outcome}. Imports, exports, and \
+                 references it did not reach are missing from this run, so files and symbols it \
+                 uses can be reported as unused. Fix the syntax, or ignore this if the file uses \
+                 syntax newer than fallow's parser."
+            )
+        }
         WorkspaceDiagnosticKind::BunLockbOverrideResolutionSkipped => format!(
             "Skipped dependency-override resolution for '{display}': bun's legacy binary bun.lockb \
              sits next to it, fallow cannot read the binary format, and no parseable text lockfile \
@@ -556,6 +641,24 @@ fn render_message(root: &Path, path: &Path, kind: &WorkspaceDiagnosticKind) -> S
              `overrides` and ignores `resolutions`. Move the intended pins into `overrides` or \
              remove the shadowed `resolutions` entries."
         ),
+        WorkspaceDiagnosticKind::NodeModulesMissing => format!(
+            "'{display}' does not exist. Package exports and conditional exports cannot be read, \
+             framework plugins that activate on an installed package stay inactive, and \
+             dependency classification degrades, so imports and dependencies can be \
+             misreported. Run npm install / pnpm install / yarn / bun install first."
+        ),
+        WorkspaceDiagnosticKind::BoundariesNotConfigured => {
+            "No architecture boundaries are configured, so the boundary detector did not run and \
+             its violation counts are zero because nothing was measured. Add `boundaries` to the \
+             config, or set `boundary-violation` to off to state that the check is not wanted."
+                .to_string()
+        }
+        WorkspaceDiagnosticKind::RulePacksNotConfigured => {
+            "No rule packs are configured, so the policy detector did not run and its violation \
+             counts are zero because nothing was measured. Add `rulePacks` to the config, or set \
+             `policy-violation` to off to state that the check is not wanted."
+                .to_string()
+        }
     }
 }
 

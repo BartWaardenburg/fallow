@@ -9,7 +9,7 @@ mod common;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-use common::fallow_bin;
+use common::{fallow_bin, strip_volatile_fields};
 
 fn workspace_fixture(path: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -594,4 +594,183 @@ fn malformed_current_security_report_fails_closed_for_saved_renderers() {
         );
         assert!(stderr.contains("invalid type"), "{format}: {stderr}");
     }
+}
+
+/// Build a one-commit-old git project so a `--base HEAD~1` command has a real
+/// comparison point.
+fn changed_project(label: &str) -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("rerun fixture tempdir");
+    let root = dir.path();
+    let git = |args: &[&str]| {
+        let status = std::process::Command::new("git")
+            .args(args)
+            .current_dir(root)
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .env("GIT_AUTHOR_NAME", "test")
+            .env("GIT_AUTHOR_EMAIL", "test@test.com")
+            .env("GIT_COMMITTER_NAME", "test")
+            .env("GIT_COMMITTER_EMAIL", "test@test.com")
+            .status()
+            .expect("run git");
+        assert!(status.success(), "git {args:?}");
+    };
+
+    std::fs::create_dir(root.join("src")).expect("create source directory");
+    std::fs::write(
+        root.join("package.json"),
+        format!(r#"{{"name":"rerun-{label}","private":true,"main":"src/index.ts"}}"#),
+    )
+    .expect("write manifest");
+    std::fs::write(
+        root.join("src/index.ts"),
+        "import { helper } from './helper';\nexport const entry = helper();\n",
+    )
+    .expect("write entrypoint");
+    std::fs::write(
+        root.join("src/helper.ts"),
+        "export const helper = (): number => 1;\n",
+    )
+    .expect("write helper");
+    git(&["init", "--quiet", "--initial-branch=main"]);
+    git(&["add", "."]);
+    git(&[
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "--quiet",
+        "-m",
+        "base",
+    ]);
+
+    std::fs::write(
+        root.join("src/changed.ts"),
+        "export const changed = (value: number): number => value + 1;\nexport const alsoDead = 2;\n",
+    )
+    .expect("write changed file");
+    git(&["add", "."]);
+    git(&[
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "--quiet",
+        "-m",
+        "change",
+    ]);
+
+    dir
+}
+
+/// Reduce a JSON report to the form two runs over the same commit must agree
+/// on exactly. Uses the shared volatile-field definition so this gate and the
+/// determinism gates in `check_tests` / `audit_tests` cannot drift apart.
+fn canonical_stdout(output: &Output, label: &str) -> String {
+    let mut value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap_or_else(|e| {
+        panic!(
+            "{label} JSON: {e}\n{}",
+            String::from_utf8_lossy(&output.stdout)
+        )
+    });
+    strip_volatile_fields(&mut value);
+    serde_json::to_string(&value).expect("re-serialize canonical report")
+}
+
+/// Assert that a second, independent run of the same command over the same
+/// commit produces the same report.
+///
+/// `assert_saved_report_parity` gives the analysis commands this guarantee as
+/// a side effect: it renders each format from a fresh pipeline and compares it
+/// to the saved render. The commands here cannot be replayed through
+/// `fallow report --from`, which reads only the dead-code, dupes, health,
+/// audit, security and combined envelopes, so they get the rerun comparison
+/// directly.
+fn assert_rerun_is_byte_identical(root: &Path, args: &[String], env: &[(&str, &str)], label: &str) {
+    let first = run_with_env(root, args, env);
+    assert!(
+        matches!(first.status.code(), Some(0 | 1)),
+        "{label} failed: {}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    let second = run_with_env(root, args, env);
+    assert!(
+        matches!(second.status.code(), Some(0 | 1)),
+        "{label} rerun failed: {}",
+        String::from_utf8_lossy(&second.stderr)
+    );
+    assert_eq!(
+        canonical_stdout(&first, label),
+        canonical_stdout(&second, label),
+        "{label} must produce the same report on a rerun over the same commit"
+    );
+}
+
+#[test]
+fn decision_surface_rerun_is_byte_identical() {
+    let project = changed_project("decision-surface");
+    let root = project.path();
+    let args = analysis_args(
+        Some("decision-surface"),
+        root,
+        "json",
+        &["--base", "HEAD~1"],
+    );
+
+    assert_rerun_is_byte_identical(root, &args, &[], "decision-surface");
+
+    // The thread pool is the one input a plain rerun holds fixed, and the
+    // decision ranking walks graph-derived collections, so vary it explicitly.
+    for threads in ["1", "8"] {
+        let mut varied = args.clone();
+        varied.extend(["--threads".to_string(), threads.to_string()]);
+        assert_eq!(
+            canonical_stdout(&run(root, &args), "decision-surface"),
+            canonical_stdout(&run(root, &varied), "decision-surface"),
+            "decision-surface at --threads {threads} differed from the default thread pool"
+        );
+    }
+}
+
+#[test]
+fn impact_rerun_is_byte_identical() {
+    let project = changed_project("impact");
+    let root = project.path();
+
+    // Impact history lives in the user config dir, never in the repo, so the
+    // test needs its own. Recording is refused in CI, which leaves the store
+    // empty there; the rerun comparison is the assertion either way, and
+    // locally it runs against a populated store.
+    let home = tempfile::tempdir().expect("impact home tempdir");
+    let config = home.path().join(".config");
+    let env: &[(&str, &str)] = &[
+        ("HOME", home.path().to_str().expect("utf8 home")),
+        ("USERPROFILE", home.path().to_str().expect("utf8 home")),
+        ("XDG_CONFIG_HOME", config.to_str().expect("utf8 config")),
+    ];
+
+    let enable = run_with_env(
+        root,
+        &[
+            "impact".to_string(),
+            "enable".to_string(),
+            "--root".to_string(),
+            root.display().to_string(),
+        ],
+        env,
+    );
+    assert!(
+        enable.status.success(),
+        "impact enable failed: {}",
+        String::from_utf8_lossy(&enable.stderr)
+    );
+    let recorded = run_with_env(
+        root,
+        &analysis_args(Some("audit"), root, "json", &["--base", "HEAD~1"]),
+        env,
+    );
+    assert!(matches!(recorded.status.code(), Some(0 | 1)));
+
+    let args = analysis_args(Some("impact"), root, "json", &[]);
+    assert_rerun_is_byte_identical(root, &args, env, "impact");
 }

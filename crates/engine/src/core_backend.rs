@@ -39,6 +39,8 @@ pub struct ParseMetrics {
     pub cache_hits: usize,
     pub cache_misses: usize,
     pub parse_cpu_ms: f64,
+    /// Why the persisted parse cache was not reused, when it was not.
+    pub cache_rejection: Option<fallow_types::cache_rejection::CacheRejection>,
 }
 
 pub struct DeadCodeBackendPrelude<'a> {
@@ -322,6 +324,8 @@ pub fn dead_code_pipeline_profile(
             module_count,
             cache_hits: parse_metrics.cache_hits,
             cache_misses: parse_metrics.cache_misses,
+            cache_rejection: parse_metrics.cache_rejection,
+            graph_cache_rejection: None,
             cache_update_ms: parse_metrics.cache_ms,
             entry_points_ms: entry_points.elapsed_ms(),
             entry_point_count: entry_points.count(),

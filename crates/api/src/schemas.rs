@@ -34,6 +34,14 @@ pub fn rule_pack_schema() -> serde_json::Value {
     RulePackDef::json_schema()
 }
 
+/// JSON Schema of the `inspect_similar_code` candidate snapshot handoff, the
+/// object `find_similar_code` hands back and `inspect` reads from stdin.
+#[cfg(feature = "schema")]
+#[must_use]
+pub fn similar_code_snapshot_schema() -> serde_json::Value {
+    fallow_output::SimilarCodeCandidateSnapshot::json_schema()
+}
+
 /// The zero-config `rules.*` severities as a flat JSON object keyed by config
 /// key (`unused-exports`, `security-sink`, ...), serialized once from
 /// `RulesConfig::default()`. This is the single source of default severities

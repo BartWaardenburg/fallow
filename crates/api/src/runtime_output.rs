@@ -63,6 +63,9 @@ pub type TraceFileOutput = fallow_types::trace::FileTrace;
 /// Concrete dependency trace output returned by typed programmatic runs.
 pub type TraceDependencyOutput = fallow_types::trace::DependencyTrace;
 
+/// Concrete import-path trace output returned by typed programmatic runs.
+pub type TraceImportPathOutput = fallow_types::trace::ImportPathTrace;
+
 /// Concrete duplicate-code trace output returned by typed programmatic runs.
 pub type TraceCloneOutput = fallow_types::trace::CloneTrace;
 
@@ -358,6 +361,21 @@ impl TraceFileProgrammaticOutput {
     /// Typed file trace retained by this run.
     #[must_use]
     pub const fn trace(&self) -> &TraceFileOutput {
+        &self.output
+    }
+}
+
+/// Typed programmatic import-path-trace output before JSON serialization.
+#[derive(Debug)]
+pub struct TraceImportPathProgrammaticOutput {
+    /// Typed import-path trace produced by the run.
+    pub output: TraceImportPathOutput,
+}
+
+impl TraceImportPathProgrammaticOutput {
+    /// Typed import-path trace retained by this run.
+    #[must_use]
+    pub const fn trace(&self) -> &TraceImportPathOutput {
         &self.output
     }
 }

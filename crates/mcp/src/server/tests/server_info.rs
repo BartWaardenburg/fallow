@@ -72,7 +72,8 @@ fn all_tools_registered() {
     assert!(names.contains(&"impact_all".to_string()));
     assert!(names.contains(&"decision_surface".to_string()));
     assert!(names.contains(&"recommend".to_string()));
-    assert_eq!(tools.len(), 35);
+    assert!(names.contains(&"trace_import_path".to_string()));
+    assert_eq!(tools.len(), 36);
 }
 
 #[test]
@@ -342,8 +343,12 @@ fn code_execute_schema_contains_expected_properties() {
     assert_required_fields(&schema, &["code"]);
 }
 
+/// The snapshot shape is published once as a resource instead of inlined into
+/// every `tools/list`: it was the single largest input schema on the wire and
+/// an agent only needs it when it actually inspects a candidate. The typed
+/// shape still gates the call, in the handler, with a named refusal.
 #[test]
-fn inspect_similar_code_schema_requires_the_exact_candidate_snapshot() {
+fn inspect_similar_code_schema_points_at_the_published_snapshot_schema() {
     let server = FallowMcp::new();
     let tools = server.tool_router.list_all();
     let tool = tools
@@ -354,6 +359,42 @@ fn inspect_similar_code_schema_requires_the_exact_candidate_snapshot() {
 
     assert_required_fields(&schema, &["candidate_id", "snapshot"]);
     let serialized = serde_json::to_string(&schema).unwrap();
+    for inlined in [
+        "source_sha256",
+        "embedding_semantics_version",
+        "similarity_band",
+    ] {
+        assert!(
+            !serialized.contains(inlined),
+            "inspect schema must not inline the snapshot shape ({inlined})"
+        );
+    }
+    let properties = schema["properties"].as_object().unwrap();
+    let snapshot_description = properties["snapshot"]["description"]
+        .as_str()
+        .expect("snapshot description");
+    assert!(
+        snapshot_description.contains("fallow://schema/similar-code-snapshot"),
+        "{snapshot_description}"
+    );
+    assert!(
+        snapshot_description.contains("FALLOW_MCP_INVALID_CANDIDATE_SNAPSHOT"),
+        "{snapshot_description}"
+    );
+    for removed in ["changed_since", "paths", "threshold", "min_lines", "top"] {
+        assert!(
+            !properties.contains_key(removed),
+            "inspect schema still exposes reranking field {removed}"
+        );
+    }
+}
+
+/// The published resource must carry the shape the schema no longer inlines,
+/// so an agent that follows the pointer gets the whole snapshot contract.
+#[test]
+fn published_snapshot_schema_carries_the_shape_the_wire_no_longer_inlines() {
+    let schema = serde_json::to_string(&fallow_api::schemas::similar_code_snapshot_schema())
+        .expect("snapshot schema serializes");
     for field in [
         "generation",
         "candidate",
@@ -361,17 +402,7 @@ fn inspect_similar_code_schema_requires_the_exact_candidate_snapshot() {
         "diagnostics",
         "source_sha256",
     ] {
-        assert!(
-            serialized.contains(field),
-            "snapshot schema is missing {field}"
-        );
-    }
-    let properties = schema["properties"].as_object().unwrap();
-    for removed in ["changed_since", "paths", "threshold", "min_lines", "top"] {
-        assert!(
-            !properties.contains_key(removed),
-            "inspect schema still exposes reranking field {removed}"
-        );
+        assert!(schema.contains(field), "snapshot schema is missing {field}");
     }
 }
 

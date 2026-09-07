@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 use serde::Serialize;
 
+use crate::cache_rejection::CacheRejection;
 use crate::duplicates::{CloneInstance, RefactoringSuggestion};
 use crate::semantic::SemanticNamespace;
 use crate::serde_path;
@@ -244,6 +245,14 @@ pub struct PipelineTimings {
     pub cache_hits: usize,
     /// Number of files parsed without a cache hit.
     pub cache_misses: usize,
+    /// Why the persisted parse cache was not reused, when it was not. `None`
+    /// means the cache was loaded; the hit and miss counts then describe how
+    /// much of it applied.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_rejection: Option<CacheRejection>,
+    /// Why the persisted module-graph cache was not reused, when it was not.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub graph_cache_rejection: Option<CacheRejection>,
     /// Time spent updating the parse cache.
     pub cache_update_ms: f64,
     /// Time spent categorizing entry points.
@@ -273,6 +282,65 @@ pub struct ImpactClosureTrace {
     pub affected_not_shown: Vec<String>,
     /// Coordination gaps between the seed and consumers.
     pub coordination_gap: Vec<ImpactClosureGap>,
+}
+
+/// Wire-version discriminator for [`ImportPathTrace`]. Independent from the
+/// global `SchemaVersion`: the import-path payload versions on its own cadence,
+/// like the other independently-versioned envelopes. Serializes as a string
+/// `const` so JSON consumers can switch on it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub enum ImportPathTraceSchemaVersion {
+    /// First release of the `fallow trace --path` shape.
+    #[serde(rename = "1")]
+    V1,
+}
+
+/// Result of asking how one module reaches another: the shortest import path.
+///
+/// `reachable` is the only field that separates "no route exists" from "the
+/// route is empty because both ends are the same module". Both report
+/// `hops: 0`, so a consumer must read `reachable`, never the hop count.
+#[derive(Debug, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", schemars(title = "fallow trace --path"))]
+pub struct ImportPathTrace {
+    /// Wire-shape version of this payload.
+    pub schema_version: ImportPathTraceSchemaVersion,
+    /// The module the walk started from, root-relative.
+    pub from: String,
+    /// The module the walk was looking for, root-relative.
+    pub to: String,
+    /// Whether `to` is reachable from `from` by following import edges.
+    pub reachable: bool,
+    /// Number of import edges on the reported route. `0` both when the two ends
+    /// are the same module and when there is no route at all.
+    pub hops: usize,
+    /// The route, in import order. Empty whenever `hops` is `0`.
+    pub path: Vec<ImportPathHop>,
+    /// Human-readable summary of the outcome.
+    pub reason: String,
+}
+
+/// One import edge on an [`ImportPathTrace`].
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct ImportPathHop {
+    /// The importing module, root-relative.
+    pub from: String,
+    /// The imported module, root-relative.
+    pub to: String,
+    /// Whether every symbol on this edge is type-only, so the hop is erased at
+    /// build time. Type-only hops are reported, never skipped: an `import type`
+    /// chain is a real compile-time coupling.
+    pub type_only: bool,
+    /// 1-based line in `from` of the imported binding that creates this edge:
+    /// the first value-carrying symbol on the import, or the first symbol when
+    /// every symbol is type-only. On a multi-line import that is the binding's
+    /// own line, not the `import` keyword's. Absent when the edge carries no
+    /// span or the source could not be read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub import_line: Option<u32>,
 }
 
 /// One coordination-gap entry in an [`ImpactClosureTrace`].

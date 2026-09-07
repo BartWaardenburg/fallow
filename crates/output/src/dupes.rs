@@ -15,10 +15,10 @@ use crate::GroupByMode;
 use crate::root_envelopes::{RootEnvelopeMode, attach_telemetry_meta, serialize_named_json_output};
 
 /// Current schema version for `fallow dupes --format json`.
-pub const DUPES_SCHEMA_VERSION: u32 = 9;
+pub const DUPES_SCHEMA_VERSION: u32 = 10;
 
 /// Current schema version for programmatic duplication JSON.
-pub const DUPES_PROGRAMMATIC_SCHEMA_VERSION: u32 = 3;
+pub const DUPES_PROGRAMMATIC_SCHEMA_VERSION: u32 = 4;
 
 /// Schema projection for the duplication envelope's CLI and programmatic
 /// version lineages.
@@ -49,6 +49,13 @@ pub struct DupesOutput<Report, Group> {
     /// Duplication report body, flattened into the envelope root.
     #[serde(flatten)]
     pub report: Report,
+    /// Number of clone groups carried in `clone_groups[]`.
+    pub clone_groups_shown: usize,
+    /// Number of scoped-corpus clone groups withheld from `clone_groups[]` by
+    /// a presentation cap such as `--top`. `0` on an untruncated run, so
+    /// `clone_groups_shown + clone_groups_omitted == stats.clone_groups`
+    /// always holds and `stats` keeps describing the whole measured corpus.
+    pub clone_groups_omitted: usize,
     /// Grouping mode when `--group-by` was passed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub grouped_by: Option<GroupByMode>,
@@ -89,6 +96,10 @@ pub struct DupesOutputInput<Report, Group> {
     pub elapsed: Duration,
     /// Duplication report body to flatten into the envelope root.
     pub report: Report,
+    /// Number of clone groups carried in `clone_groups[]`.
+    pub clone_groups_shown: usize,
+    /// Number of scoped-corpus clone groups withheld by a presentation cap.
+    pub clone_groups_omitted: usize,
     /// Grouping mode when `--group-by` was passed.
     pub grouped_by: Option<GroupByMode>,
     /// Total finding count across all groups, for grouped output.
@@ -114,6 +125,8 @@ pub fn build_dupes_output<Report, Group>(
         version: ToolVersion(input.version),
         elapsed_ms: ElapsedMs(input.elapsed.as_millis() as u64),
         report: input.report,
+        clone_groups_shown: input.clone_groups_shown,
+        clone_groups_omitted: input.clone_groups_omitted,
         grouped_by: input.grouped_by,
         total_issues: input.total_issues,
         groups: input.groups,
@@ -301,6 +314,8 @@ mod tests {
             version: "0.0.0".to_string(),
             elapsed: Duration::from_millis(5),
             report: json!({"stats": {"clone_groups": 0}}),
+            clone_groups_shown: 0,
+            clone_groups_omitted: 0,
             grouped_by: None,
             total_issues: None,
             groups: None,

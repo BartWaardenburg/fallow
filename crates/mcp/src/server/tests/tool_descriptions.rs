@@ -60,3 +60,104 @@ fn tool_attributes_take_descriptions_from_method_docs() {
         "tool descriptions must live in method docs, not #[tool] arguments"
     );
 }
+
+/// Per-tool wire-description ceiling. Every `tools/list` byte is resident in
+/// every agent session that connects, whether or not the tool is ever called,
+/// so a description that grows without a budget is a permanent tax. Per-flag
+/// payload shapes, unit vocabularies, and suppression placements belong in the
+/// `fallow://tools/{name}` guide resource, which an agent reads once and only
+/// for the tool it is about to call.
+const MAX_TOOL_DESCRIPTION_BYTES: usize = 2_000;
+
+/// Total wire-description budget across every registered tool. This is the
+/// binding constraint; the target is 35_000, reached by moving one tool's
+/// per-flag prose into its `fallow://tools/{name}` guide at a time. Rewriting
+/// prose only ever lowers the number. A NEW capability is the one thing that
+/// may raise it, and only by its own routing summary: the new tool's
+/// description carries no per-flag detail (that goes straight into its guide),
+/// and the ceiling moves to exactly the resulting total, never a round number
+/// with headroom to spend later.
+const MAX_TOTAL_DESCRIPTION_BYTES: usize = 52_276;
+
+/// How much unused headroom an exception may carry before the test asks for
+/// the allowance to be lowered. Without this the list would keep stale numbers
+/// and stop being a ratchet.
+const MAX_EXCEPTION_SLACK_BYTES: usize = 128;
+
+/// Tools allowed past [`MAX_TOOL_DESCRIPTION_BYTES`], each with the allowance
+/// it may spend and the reason it earns one. Two kinds of entry live here.
+///
+/// Permanent: `code_execute` and `fix_apply`. For those two the prose IS the
+/// safety boundary an agent reads before it acts, so a uniform 600- or
+/// 800-byte ceiling is not defensible. `code_execute` states the sandbox
+/// contract, the host-call allowlist, and the output and timeout bounds
+/// before an agent runs JavaScript in this process; `fix_apply` states the
+/// dry-run-first mutation contract, and it is the only tool that writes to
+/// the project.
+///
+/// Temporary: every other row. Those descriptions still carry per-flag detail
+/// that belongs in a `fallow://tools/{name}` guide; each is scheduled for the
+/// same split `check_health` already had, and its allowance disappears with
+/// that split.
+const DESCRIPTION_BUDGET_EXCEPTIONS: &[(&str, usize)] = &[
+    ("code_execute", 4_600),
+    ("fix_apply", 3_800),
+    ("check_health", 5_500),
+    ("audit", 5_150),
+    ("fix_preview", 2_750),
+    ("analyze", 2_550),
+    ("check_runtime_coverage", 2_350),
+    ("impact", 2_250),
+    ("security_candidates", 2_250),
+    ("impact_all", 2_100),
+];
+
+fn description_allowance(tool: &str) -> usize {
+    DESCRIPTION_BUDGET_EXCEPTIONS
+        .iter()
+        .find(|(name, _)| *name == tool)
+        .map_or(MAX_TOOL_DESCRIPTION_BYTES, |(_, allowance)| *allowance)
+}
+
+#[test]
+fn tool_descriptions_stay_within_their_byte_budget() {
+    for (tool, description) in live_tool_descriptions() {
+        let allowance = description_allowance(&tool);
+        assert!(
+            description.len() <= allowance,
+            "{tool} wire description is {} bytes, over its {allowance}-byte budget; \
+             move the per-flag detail into its fallow://tools/{tool} guide rather than \
+             raising the number",
+            description.len()
+        );
+    }
+}
+
+#[test]
+fn total_tool_description_bytes_stay_within_budget() {
+    let total: usize = live_tool_descriptions()
+        .values()
+        .map(std::string::String::len)
+        .sum();
+    assert!(
+        total <= MAX_TOTAL_DESCRIPTION_BYTES,
+        "tools/list carries {total} description bytes, over the \
+         {MAX_TOTAL_DESCRIPTION_BYTES}-byte budget every agent session pays on connect"
+    );
+}
+
+#[test]
+fn budget_exceptions_keep_no_stale_headroom() {
+    let live = live_tool_descriptions();
+    for (tool, allowance) in DESCRIPTION_BUDGET_EXCEPTIONS {
+        let description = live
+            .get(*tool)
+            .unwrap_or_else(|| panic!("budget exception {tool} is not a registered tool"));
+        assert!(
+            allowance.saturating_sub(description.len()) <= MAX_EXCEPTION_SLACK_BYTES,
+            "{tool} is {} bytes but its exception allows {allowance}; lower the allowance, \
+             or drop the row when the description fits the {MAX_TOOL_DESCRIPTION_BYTES}-byte ceiling",
+            description.len()
+        );
+    }
+}

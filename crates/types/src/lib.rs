@@ -15,6 +15,9 @@
 
 /// Typed audit cache-key inputs.
 pub mod audit_cache;
+/// Why a persisted cache was refused, shared by the extraction cache, the
+/// graph cache, the perf table, and `fallow doctor`.
+pub mod cache_rejection;
 /// Shared churn output contracts.
 pub mod churn;
 /// File discovery types: discovered files, file IDs, and entry points.

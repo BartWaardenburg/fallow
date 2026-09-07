@@ -24,8 +24,11 @@ use std::path::Path;
 /// Finding-count and finding-identity baselines for suppressing known issues
 /// across runs.
 pub mod baseline;
+/// Read-only inspection of the persisted extraction cache, for `fallow doctor`.
+pub mod cache_status;
 pub mod changed_files;
 pub mod churn;
+pub mod clock;
 pub mod codeowners;
 mod core_backend;
 pub mod cross_reference;

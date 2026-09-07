@@ -25,6 +25,12 @@ pub struct CloneInstance {
     /// 0-based end column.
     pub end_col: usize,
     /// The actual source code fragment.
+    ///
+    /// Omitted from JSON when the caller asked for a location-only payload
+    /// (`fallow dupes --no-fragments`, and the MCP `find_dupes` default). The
+    /// five location fields above address the same text, so a consumer that
+    /// wants the source reads it from the file.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub fragment: String,
 }
 
@@ -76,6 +82,13 @@ impl CloneGroup {
     #[must_use]
     pub fn spread(&self) -> usize {
         clone_group_spread(&self.instances)
+    }
+
+    /// Drop the verbatim source text from every instance in this group.
+    pub fn strip_fragments(&mut self) {
+        for instance in &mut self.instances {
+            instance.fragment.clear();
+        }
     }
 }
 
@@ -414,6 +427,41 @@ impl DuplicationReport {
         }
         self.clone_families.sort_by(|a, b| a.files.cmp(&b.files));
     }
+
+    /// Number of clone groups actually carried in `clone_groups[]`.
+    #[must_use]
+    pub fn clone_groups_shown(&self) -> usize {
+        self.clone_groups.len()
+    }
+
+    /// Number of scoped-corpus clone groups withheld from `clone_groups[]`.
+    ///
+    /// Non-zero only when a presentation cap such as `--top` truncated the
+    /// array; scope filters (diff, workspace, baseline) recompute `stats`, so
+    /// they leave nothing omitted.
+    #[must_use]
+    pub fn clone_groups_omitted(&self) -> usize {
+        self.stats
+            .clone_groups
+            .saturating_sub(self.clone_groups.len())
+    }
+
+    /// Drop the verbatim source text from every clone instance, including the
+    /// copies nested in `clone_families[].groups[]`.
+    ///
+    /// Fingerprints, suggested names, refactoring suggestions and actions are
+    /// all derived before serialization, so removing the text only shrinks the
+    /// payload.
+    pub fn strip_fragments(&mut self) {
+        for group in &mut self.clone_groups {
+            group.strip_fragments();
+        }
+        for family in &mut self.clone_families {
+            for group in &mut family.groups {
+                group.strip_fragments();
+            }
+        }
+    }
 }
 
 /// Aggregate duplication statistics.
@@ -432,11 +480,12 @@ pub struct DuplicationStats {
     pub total_tokens: usize,
     /// Tokens in redundant clone copies, excluding one retained copy per group.
     pub duplicated_tokens: usize,
-    /// Number of clone groups in the reported `clone_groups[]` array after
-    /// filtering and optional `--top` truncation.
+    /// Number of clone groups the scoped corpus contains after filtering.
+    /// `--top` does not change it; compare it with `clone_groups_shown` on the
+    /// envelope to see how much of the corpus the array carries.
     pub clone_groups: usize,
-    /// Total clone instances across all reported groups after filtering and
-    /// optional `--top` truncation.
+    /// Total clone instances across the scoped corpus after filtering.
+    /// `--top` does not change it.
     pub clone_instances: usize,
     /// Percentage of duplicated lines (0.0 to 100.0). `--top` does not change
     /// this scoped corpus metric.

@@ -79,6 +79,7 @@ mod runtime_support;
 mod schema;
 mod security;
 mod security_help;
+mod selector;
 mod setup_hooks;
 mod signal;
 mod similar_code_cli;
@@ -87,6 +88,7 @@ mod suppressions;
 mod task_matrix;
 mod telemetry;
 mod trace_chain;
+mod trace_path;
 mod type_aware_degrade;
 mod update_check;
 use fallow_engine::validate;
@@ -143,8 +145,10 @@ macro_rules! top_level_task_cheat_sheet {
 When the agent is about to...
   delete an \"unused\" export or file        fallow dead-code --trace <file>:<export>
   prove exact TypeScript symbol consumers  fallow dead-code --type-aware --symbol-impact <file>:<export-or-class.method>
+  find how one module reaches another      fallow trace --path <from> <to>
   delete an \"unused\" dependency            fallow dead-code --trace-dependency <name>
   commit or open a PR                      fallow audit --base <ref>
+  read a diff before approving it          fallow review --base <ref> --brief
   prioritize refactoring                   fallow health --hotspots --targets
   ask who owns code                        fallow health --ownership
   check untested-but-reachable code        fallow health --coverage-gaps
@@ -797,7 +801,10 @@ enum Command {
         #[arg(long, value_name = "FILE:EXPORT")]
         symbol_impact: Option<String>,
 
-        /// Show only the top N items per category
+        /// Show only the top N items per category. Human output only: the JSON,
+        /// SARIF, and CodeClimate envelopes drive exit codes and CI baselines,
+        /// so they always carry every finding and a consumer slices the arrays
+        /// itself.
         #[arg(long)]
         top: Option<usize>,
 
@@ -880,7 +887,8 @@ enum Command {
         churn: bool,
     },
 
-    /// Trace a symbol's call chain (best-effort, syntactic; OFF the ranked path)
+    /// Trace a symbol's call chain, or the shortest import path between two
+    /// modules (best-effort, syntactic; OFF the ranked path)
     ///
     /// Walks callers UP (modules that import the symbol) and callees DOWN
     /// (import-symbol edges + intra-module call sites) via the module graph,
@@ -888,10 +896,27 @@ enum Command {
     /// ADR-001: resolved-vs-unresolved callees are reported honestly, never
     /// silently dropped. The result is its OWN surface, NOT folded into the
     /// ranked brief and NEVER an input to the focus map / ranking.
+    ///
+    /// `--path <FROM> <TO>` answers a different question: the shortest chain of
+    /// imports by which one module reaches another. Type-only hops are reported
+    /// rather than skipped, and an unreachable pair reports `reachable: false`
+    /// instead of an error.
     Trace {
         /// Target symbol, formatted as FILE:SYMBOL (e.g. src/utils.ts:formatDate).
-        #[arg(value_name = "FILE:SYMBOL")]
-        symbol: String,
+        /// Omitted when `--path` is used.
+        #[arg(value_name = "FILE:SYMBOL", required_unless_present = "path")]
+        symbol: Option<String>,
+
+        /// Shortest import path between two modules, as two file paths
+        /// (e.g. `--path src/app.ts src/db.ts`). Mutually exclusive with the
+        /// symbol target and the call-chain flags.
+        #[arg(
+            long,
+            num_args = 2,
+            value_names = ["FROM", "TO"],
+            conflicts_with_all = ["symbol", "callers", "callees", "depth"]
+        )]
+        path: Vec<String>,
 
         /// Walk UP to callers (modules that import the symbol). When neither
         /// `--callers` nor `--callees` is set, both directions are walked.
@@ -1146,8 +1171,16 @@ enum Command {
 
         /// Show only the N highest-ranked clone groups. Ranking combines clone
         /// size, occurrence count, and capped directory or line spread.
+        /// `stats` keeps describing the whole corpus; `clone_groups_shown` and
+        /// `clone_groups_omitted` report the split.
         #[arg(long)]
         top: Option<usize>,
+
+        /// Omit the verbatim source text from each clone instance in
+        /// `--format json`. The file and line/column range still address the
+        /// same code, and this is most of the payload on a duplicated codebase.
+        #[arg(long)]
+        no_fragments: bool,
 
         /// Trace all clones at a specific location (format: `FILE:LINE`)
         #[arg(long, value_name = "FILE:LINE")]
@@ -3606,10 +3639,11 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
         } => dispatch_inspect_command(dispatch, file, symbol, symbol_chain, churn),
         Command::Trace {
             symbol,
+            path,
             callers,
             callees,
             depth,
-        } => dispatch_trace_command(dispatch, symbol, callers, callees, depth),
+        } => dispatch_trace_command(dispatch, symbol, &path, callers, callees, depth),
         fix @ Command::Fix { .. } => dispatch_fix_command(&fix, dispatch),
         init @ Command::Init { .. } => dispatch_init_command(init, root, quiet),
         Command::Hooks { subcommand } => {
@@ -3979,16 +4013,12 @@ fn dispatch_inspect_command(
 ) -> ExitCode {
     let target = match (file, symbol) {
         (Some(file), None) => inspect::InspectTarget::File { file },
-        (None, Some(symbol)) => match symbol.rsplit_once(':') {
-            Some((file, export_name))
-                if !file.trim().is_empty() && !export_name.trim().is_empty() =>
-            {
-                inspect::InspectTarget::Symbol {
-                    file: file.to_string(),
-                    export_name: export_name.to_string(),
-                }
-            }
-            _ => {
+        (None, Some(symbol)) => match selector::parse_file_symbol_selector(&symbol) {
+            Some((file, export_name)) => inspect::InspectTarget::Symbol {
+                file: file.to_string(),
+                export_name: export_name.to_string(),
+            },
+            None => {
                 return emit_error(
                     "--symbol must be formatted as FILE:EXPORT",
                     2,
@@ -4051,11 +4081,33 @@ fn dispatch_inspect_command(
 
 fn dispatch_trace_command(
     dispatch: &DispatchContext<'_>,
-    symbol: String,
+    symbol: Option<String>,
+    path: &[String],
     callers: bool,
     callees: bool,
     depth: Option<u32>,
 ) -> ExitCode {
+    if let [from, to] = path {
+        return trace_path::run_trace_path(&trace_path::TracePathOptions {
+            root: dispatch.root,
+            config_path: &dispatch.cli.config,
+            output: dispatch.output,
+            json_style: dispatch.json_style,
+            no_cache: dispatch.cli.no_cache,
+            threads: dispatch.threads,
+            quiet: dispatch.quiet,
+            allow_remote_extends: dispatch.cli.allow_remote_extends,
+            from,
+            to,
+        });
+    }
+    let Some(symbol) = symbol else {
+        return emit_error(
+            "trace requires a FILE:SYMBOL target or --path <FROM> <TO>",
+            2,
+            dispatch.output,
+        );
+    };
     trace_chain::run_trace(&trace_chain::TraceChainOptions {
         root: dispatch.root,
         config_path: &dispatch.cli.config,
@@ -4309,6 +4361,7 @@ fn dispatch_dupes_command(command: Command, dispatch: &DispatchContext<'_>) -> E
         ignore_imports,
         no_ignore_imports,
         top,
+        no_fragments,
         trace,
     } = command
     else {
@@ -4329,6 +4382,7 @@ fn dispatch_dupes_command(command: Command, dispatch: &DispatchContext<'_>) -> E
             ignore_imports,
             no_ignore_imports,
             top,
+            no_fragments,
             trace,
         },
     )
@@ -5431,6 +5485,7 @@ struct DupesDispatchArgs {
     ignore_imports: bool,
     no_ignore_imports: bool,
     top: Option<usize>,
+    no_fragments: bool,
     trace: Option<String>,
 }
 
@@ -5477,6 +5532,7 @@ fn dispatch_dupes(dispatch: &DispatchContext<'_>, args: &DupesDispatchArgs) -> E
         summary: cli.summary,
         group_by: cli.group_by,
         performance: cli.performance,
+        include_fragments: !args.no_fragments,
     })
 }
 

@@ -50,6 +50,7 @@ use fallow_config::{
     EntryPointRole, PackageJson, ResolvedConfig, discover_workspaces_with_diagnostics,
     find_undeclared_workspaces_with_ignores,
 };
+use fallow_types::cache_rejection::CacheRejection;
 use fallow_types::trace::PipelineTimings;
 use rayon::prelude::*;
 use results::AnalysisResults;
@@ -179,13 +180,23 @@ pub struct AnalysisParseMetrics {
     cache_hits: usize,
     cache_misses: usize,
     parse_cpu_ms: f64,
+    cache_rejection: Option<CacheRejection>,
 }
 
-/// Update cache: write freshly parsed modules and refresh stale mtime/size entries.
+/// Update cache: write freshly parsed modules, refresh stale metadata entries,
+/// and upgrade entries a complexity-blind run wrote earlier.
+///
+/// An entry whose content hash still matches is rewritten only when its
+/// metadata fingerprint moved or when this run can add complexity the entry
+/// lacks. A run with `need_complexity == false` never rewrites the complexity
+/// an earlier `health` run stored: `module.complexity` is empty on such a run
+/// by design, so copying it over would silently strip the entry and make every
+/// later `health` run reparse the file.
 fn update_cache(
     store: &mut cache::CacheStore,
     modules: &[extract::ModuleInfo],
     files: &[discover::DiscoveredFile],
+    need_complexity: bool,
 ) -> bool {
     let mut dirty = false;
     for module in modules {
@@ -194,16 +205,28 @@ fn update_cache(
             if let Some(cached) = store.get_by_path_only(&file.path)
                 && cached.content_hash == module.content_hash
             {
-                if cached.source_fingerprint() != fingerprint {
+                let stale_metadata = cached.source_fingerprint() != fingerprint;
+                let adds_complexity = need_complexity && !cached.complexity_extracted;
+                if stale_metadata || adds_complexity {
                     let preserved_last_access = cached.last_access_secs;
-                    let mut refreshed = cache::module_to_cached(module, fingerprint);
+                    let preserved_complexity = (!need_complexity && cached.complexity_extracted)
+                        .then(|| cached.complexity.clone());
+                    let mut refreshed =
+                        cache::module_to_cached(module, fingerprint, need_complexity);
                     refreshed.last_access_secs = preserved_last_access;
+                    if let Some(complexity) = preserved_complexity {
+                        refreshed.complexity = complexity;
+                        refreshed.complexity_extracted = true;
+                    }
                     store.insert(&file.path, refreshed);
                     dirty = true;
                 }
                 continue;
             }
-            store.insert(&file.path, cache::module_to_cached(module, fingerprint));
+            store.insert(
+                &file.path,
+                cache::module_to_cached(module, fingerprint, need_complexity),
+            );
             dirty = true;
         }
     }
@@ -401,19 +424,6 @@ fn new_analysis_progress(config: &ResolvedConfig) -> progress::AnalysisProgress 
     progress::AnalysisProgress::new(show_progress)
 }
 
-fn warn_missing_node_modules(config: &ResolvedConfig) {
-    if config.root.join("node_modules").is_dir() {
-        return;
-    }
-    if fallow_config::is_deno_without_node_modules(&config.root) {
-        return;
-    }
-
-    tracing::warn!(
-        "node_modules directory not found. Run `npm install` / `pnpm install` first for accurate results."
-    );
-}
-
 fn discover_analysis_workspaces(
     config: &ResolvedConfig,
 ) -> Result<(Vec<fallow_config::WorkspaceInfo>, f64), FallowError> {
@@ -609,9 +619,10 @@ impl<'a> AnalysisSession<'a> {
         };
 
         let entry_points = discover_analysis_entry_points(&shared);
+        let mut graph_cache_rejection = None;
         let (resolved, graph) =
-            if let Some(hit) = try_load_analysis_graph_cache(&shared, &entry_points, &modules) {
-                (
+            match try_load_analysis_graph_cache(&shared, &entry_points, &modules) {
+                Ok(hit) => (
                     TimedResolvedModules {
                         project: hit.project,
                         elapsed_ms: 0.0,
@@ -620,12 +631,18 @@ impl<'a> AnalysisSession<'a> {
                         graph: hit.graph,
                         elapsed_ms: hit.elapsed_ms,
                     },
-                )
-            } else {
-                let resolved = resolve_analysis_imports_timed(&shared, &modules);
-                let graph =
-                    build_analysis_graph_timed(&shared, &resolved.project, &entry_points, &modules);
-                (resolved, graph)
+                ),
+                Err(rejection) => {
+                    graph_cache_rejection = rejection;
+                    let resolved = resolve_analysis_imports_timed(&shared, &modules);
+                    let graph = build_analysis_graph_timed(
+                        &shared,
+                        &resolved.project,
+                        &entry_points,
+                        &modules,
+                    );
+                    (resolved, graph)
+                }
             };
         release_resolution_payloads(&mut modules);
         let analysis = analyze_dead_code_timed(
@@ -646,6 +663,7 @@ impl<'a> AnalysisSession<'a> {
             resolve_ms: resolved.elapsed_ms,
             graph_ms: graph.elapsed_ms,
             analyze_ms: analysis.elapsed_ms,
+            graph_cache_rejection,
         }
     }
 
@@ -689,7 +707,6 @@ impl<'a> AnalysisSession<'a> {
 /// root-package discovery, hidden-dir scoping, and file discovery.
 fn run_analysis_setup(config: &ResolvedConfig) -> Result<AnalysisSetup, FallowError> {
     let progress = new_analysis_progress(config);
-    warn_missing_node_modules(config);
 
     let (workspaces_vec, workspaces_ms) = discover_analysis_workspaces(config)?;
     let root_pkg = load_root_package_json(config);
@@ -899,18 +916,20 @@ pub fn try_load_dead_code_graph_cache(
     modules: &[extract::ModuleInfo],
 ) -> Option<(DeadCodeResolvedModules, DeadCodeGraphRun)> {
     let shared = prelude.shared_input();
-    try_load_analysis_graph_cache(&shared, &entry_points.inner, modules).map(|hit| {
-        (
-            DeadCodeResolvedModules {
-                project: hit.project,
-                elapsed_ms: 0.0,
-            },
-            DeadCodeGraphRun {
-                graph: hit.graph,
-                elapsed_ms: hit.elapsed_ms,
-            },
-        )
-    })
+    try_load_analysis_graph_cache(&shared, &entry_points.inner, modules)
+        .ok()
+        .map(|hit| {
+            (
+                DeadCodeResolvedModules {
+                    project: hit.project,
+                    elapsed_ms: 0.0,
+                },
+                DeadCodeGraphRun {
+                    graph: hit.graph,
+                    elapsed_ms: hit.elapsed_ms,
+                },
+            )
+        })
 }
 
 /// Resolve imports for an engine-owned dead-code pipeline.
@@ -1098,13 +1117,22 @@ fn discover_analysis_entry_points(input: &AnalysisCoreSharedInput<'_>) -> TimedE
     }
 }
 
+/// Try to reuse the persisted module graph.
+///
+/// # Errors
+///
+/// `Err(Some(reason))` names why persisted work was refused. Two of these
+/// branches are decided AFTER a full decode of a multi-megabyte blob, so they
+/// are the most expensive refusals in the pipeline; leaving them silent made a
+/// fully paid, fully wasted load indistinguishable from a first run.
+/// `Err(None)` means there was nothing to refuse: the run disabled caching.
 fn try_load_analysis_graph_cache(
     input: &AnalysisCoreSharedInput<'_>,
     entry_points: &TimedEntryPoints,
     modules: &[extract::ModuleInfo],
-) -> Option<GraphCacheHit> {
+) -> Result<GraphCacheHit, Option<CacheRejection>> {
     if input.config.no_cache {
-        return None;
+        return Err(None);
     }
 
     let t = Instant::now();
@@ -1114,41 +1142,62 @@ fn try_load_analysis_graph_cache(
         input.plugin_result,
         &entry_points.entry_points,
         input.files,
+        modules,
     );
-    let store = graph_cache::GraphCacheStore::load(&input.config.cache_dir)?;
+    let store = graph_cache::GraphCacheStore::load(&input.config.cache_dir).map_err(Some)?;
     if store.manifest.matches_inputs(&current) {
-        let project = graph_cache::restore_resolved_project(
-            &input.config.root,
-            modules,
-            input.files,
-            &store.resolved_project,
-        )?;
+        let project = restore_cached_resolved_project(input, modules, &store.resolved_project)?;
         tracing::debug!("Graph cache hit: skipping import resolution and graph build");
 
-        return Some(GraphCacheHit {
+        return Ok(GraphCacheHit {
             graph: store.graph,
             project,
             elapsed_ms: t.elapsed().as_secs_f64() * 1000.0,
         });
     }
 
-    if !store.manifest.matches_resolution_inputs(&current) {
-        return None;
+    if let Some(rejection) = store.manifest.classify_resolution_mismatch(&current) {
+        tracing::warn!(
+            reason = rejection.id(),
+            "Graph cache decoded but not reused: {}",
+            rejection.describe()
+        );
+        return Err(Some(rejection));
     }
 
-    let project = graph_cache::restore_resolved_project(
-        &input.config.root,
-        modules,
-        input.files,
-        &store.resolved_project,
-    )?;
+    let project = restore_cached_resolved_project(input, modules, &store.resolved_project)?;
     tracing::debug!("Graph resolver cache hit: skipping import resolution and rebuilding graph");
     let graph = build_analysis_graph_timed(input, &project, entry_points, modules);
 
-    Some(GraphCacheHit {
+    Ok(GraphCacheHit {
         graph: graph.graph,
         project,
         elapsed_ms: t.elapsed().as_secs_f64() * 1000.0,
+    })
+}
+
+/// Remap a decoded resolver payload onto the current `FileId`s.
+///
+/// A failure here means the persisted stable keys no longer describe the
+/// discovered files, which is a file-set change reported the same way as a
+/// manifest-level one rather than a silent miss.
+fn restore_cached_resolved_project(
+    input: &AnalysisCoreSharedInput<'_>,
+    modules: &[extract::ModuleInfo],
+    resolved_project: &graph_cache::CachedResolvedProject,
+) -> Result<resolve::ResolvedProject, Option<CacheRejection>> {
+    graph_cache::restore_resolved_project(
+        &input.config.root,
+        modules,
+        input.files,
+        resolved_project,
+    )
+    .ok_or_else(|| {
+        tracing::warn!(
+            reason = CacheRejection::FileSetChanged.id(),
+            "Graph cache decoded but its resolver payload no longer maps to the discovered files"
+        );
+        Some(CacheRejection::FileSetChanged)
     })
 }
 
@@ -1300,6 +1349,7 @@ struct OwnedAnalysisCore {
     resolve_ms: f64,
     graph_ms: f64,
     analyze_ms: f64,
+    graph_cache_rejection: Option<CacheRejection>,
 }
 
 /// Assemble the `PipelineProfile` for the full (freshly parsed) pipeline path.
@@ -1327,6 +1377,8 @@ fn full_pipeline_profile(
         cache_hits: parse.cache_hits,
         cache_misses: parse.cache_misses,
         parse_cpu_ms: parse.parse_cpu_ms,
+        cache_rejection: parse.cache_rejection,
+        graph_cache_rejection: core.graph_cache_rejection,
     }
 }
 
@@ -1350,6 +1402,8 @@ struct PipelineProfile {
     cache_hits: usize,
     cache_misses: usize,
     parse_cpu_ms: f64,
+    cache_rejection: Option<CacheRejection>,
+    graph_cache_rejection: Option<CacheRejection>,
 }
 
 struct AnalysisParseOutput {
@@ -1364,6 +1418,8 @@ struct ParseMetrics {
     cache_hits: usize,
     cache_misses: usize,
     parse_cpu_ms: f64,
+    /// Why the persisted parse cache was not reused, when it was not.
+    cache_rejection: Option<CacheRejection>,
 }
 
 impl From<AnalysisParseMetrics> for ParseMetrics {
@@ -1374,6 +1430,7 @@ impl From<AnalysisParseMetrics> for ParseMetrics {
             cache_hits: metrics.cache_hits,
             cache_misses: metrics.cache_misses,
             parse_cpu_ms: metrics.parse_cpu_ms,
+            cache_rejection: metrics.cache_rejection,
         }
     }
 }
@@ -1385,18 +1442,30 @@ fn parse_analysis_modules(
     start: Instant,
 ) -> AnalysisParseOutput {
     let cache_max_size_bytes = resolve_cache_max_size_bytes(config);
+    let mut cache_rejection = None;
     let mut cache_store = if config.no_cache {
         None
     } else {
-        cache::CacheStore::load(
+        match cache::CacheStore::load(
             &config.cache_dir,
+            &config.root,
             config.cache_config_hash,
             cache_max_size_bytes,
-        )
+        ) {
+            Ok(store) => Some(store),
+            Err(rejection) => {
+                cache_rejection = Some(rejection);
+                None
+            }
+        }
     };
 
     let parse_result = extract::parse_all_files(files, cache_store.as_ref(), need_complexity);
     let _ = fallow_config::record_source_read_failures(&config.root, &parse_result.read_failures);
+    let _ = fallow_config::record_source_parse_degradations(
+        &config.root,
+        &parse_result.parse_degradations,
+    );
     let modules = parse_result.modules;
     let parse_ms = start.elapsed().as_secs_f64() * 1000.0;
     let cache_ms = update_parse_cache_if_enabled(
@@ -1405,6 +1474,7 @@ fn parse_analysis_modules(
         &modules,
         files,
         cache_max_size_bytes,
+        need_complexity,
     );
 
     AnalysisParseOutput {
@@ -1415,6 +1485,7 @@ fn parse_analysis_modules(
             cache_hits: parse_result.cache_hits,
             cache_misses: parse_result.cache_misses,
             parse_cpu_ms: parse_result.parse_cpu_ms,
+            cache_rejection,
         },
     }
 }
@@ -1432,6 +1503,8 @@ fn retained_pipeline_timings(retain: bool, profile: &PipelineProfile) -> Option<
         module_count: profile.module_count,
         cache_hits: profile.cache_hits,
         cache_misses: profile.cache_misses,
+        cache_rejection: profile.cache_rejection,
+        graph_cache_rejection: profile.graph_cache_rejection,
         cache_update_ms: profile.cache_ms,
         entry_points_ms: profile.entry_points_ms,
         entry_point_count: profile.entry_point_count,
@@ -1449,11 +1522,12 @@ fn update_parse_cache_if_enabled(
     modules: &[extract::ModuleInfo],
     files: &[discover::DiscoveredFile],
     cache_max_size_bytes: usize,
+    need_complexity: bool,
 ) -> f64 {
     let t = Instant::now();
     if !config.no_cache {
-        let store = cache_store.get_or_insert_with(cache::CacheStore::new);
-        if update_cache(store, modules, files)
+        let store = cache_store.get_or_insert_with(|| cache::CacheStore::new(&config.root));
+        if update_cache(store, modules, files, need_complexity)
             && let Err(error) = store.save(
                 &config.cache_dir,
                 config.cache_config_hash,
@@ -1520,6 +1594,7 @@ fn build_analysis_graph(input: &BuildAnalysisGraphInput<'_>) -> graph::ModuleGra
             input.plugin_result,
             input.entry_points,
             input.files,
+            input.modules,
         )
     });
 
@@ -1564,25 +1639,44 @@ fn build_graph_cache_manifest(
     plugin_result: &plugins::AggregatedPluginResult,
     entry_points: &discover::CategorizedEntryPoints,
     files: &[discover::DiscoveredFile],
+    modules: &[extract::ModuleInfo],
 ) -> graph_cache::GraphCacheManifest {
     let mode = graph_cache::GraphCacheMode::new(
         resolver_options_hash(config),
-        entry_points_hash(entry_points),
-        plugin_config_hash(plugin_result),
+        entry_points_hash(entry_points, &config.root),
+        plugin_config_hash(plugin_result, &config.root),
     );
-    graph_cache::GraphCacheManifest::from_discovered_files(&config.root, files, mode, |path| {
-        std::fs::metadata(path).map_or(
-            fallow_types::source_fingerprint::SourceFingerprint::new(0, 0),
-            |metadata| {
-                fallow_types::source_fingerprint::SourceFingerprint::from_metadata(&metadata)
-            },
-        )
+    // The parse stage already hashed every file it read, so keying the manifest
+    // on content costs nothing and does not inherit mtime's blind spot for a
+    // same-size rewrite. A file with no module (unreadable) hashes to 0, which
+    // compares equal only against another run that also failed to read it.
+    let mut content_hashes = vec![0u64; files.len()];
+    for module in modules {
+        if let Some(slot) = content_hashes.get_mut(module.file_id.0 as usize) {
+            *slot = module.content_hash;
+        }
+    }
+    graph_cache::GraphCacheManifest::from_discovered_files(&config.root, files, mode, |file| {
+        content_hashes
+            .get(file.id.0 as usize)
+            .copied()
+            .unwrap_or_default()
     })
 }
 
-/// Hash the resolver-affecting options: the project root, extraction config
-/// hash (which already folds tsconfig / resolver-relevant config), and the
+/// Hash the resolver-affecting options: the extraction config hash and the
 /// user-supplied resolve `conditions`.
+///
+/// The project root is deliberately NOT hashed. It is not a resolver option:
+/// it is where the project happens to sit, and hashing it meant a container
+/// job, a matrix over roots, or a copied worktree could never reuse a cache it
+/// had fully decoded. Every path this mode covers is hashed root-relative
+/// instead.
+///
+/// `cache_config_hash` does NOT fold tsconfig `paths`, despite what this
+/// comment used to claim: it hashes extraction-affecting config plus external
+/// plugin names. tsconfig-derived aliases reach the mode through
+/// [`hash_path_aliases`].
 ///
 /// `production` and `ignore_patterns` intentionally stay out of this hash:
 /// they shape discovery, so changed file sets already miss through stable file
@@ -1590,45 +1684,69 @@ fn build_graph_cache_manifest(
 fn resolver_options_hash(config: &ResolvedConfig) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut hasher = rustc_hash::FxHasher::default();
-    config.root.hash(&mut hasher);
     config.cache_config_hash.hash(&mut hasher);
     config.resolve.conditions.hash(&mut hasher);
     hasher.finish()
 }
 
-/// Hash the entry-point set (sorted paths per role) so any change in reachability
-/// roots misses the cache.
-fn entry_points_hash(entry_points: &discover::CategorizedEntryPoints) -> u64 {
+/// Render `path` the way every graph-cache mode hash spells a path: relative to
+/// the project root where possible, with forward slashes, so an identical
+/// project under a different absolute path hashes identically.
+fn root_relative_key(root: &std::path::Path, path: &std::path::Path) -> String {
+    path.strip_prefix(root)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .replace('\\', "/")
+}
+
+/// Hash the entry-point set (sorted root-relative paths per role) so any change
+/// in reachability roots misses the cache.
+fn entry_points_hash(
+    entry_points: &discover::CategorizedEntryPoints,
+    root: &std::path::Path,
+) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut hasher = rustc_hash::FxHasher::default();
     for role in [&entry_points.all, &entry_points.runtime, &entry_points.test] {
-        let mut paths: Vec<&std::path::Path> = role.iter().map(|ep| ep.path.as_path()).collect();
-        paths.sort_unstable();
-        paths.len().hash(&mut hasher);
-        for path in paths {
-            path.hash(&mut hasher);
+        let mut keys: Vec<String> = role
+            .iter()
+            .map(|ep| root_relative_key(root, &ep.path))
+            .collect();
+        keys.sort_unstable();
+        keys.len().hash(&mut hasher);
+        for key in keys {
+            key.hash(&mut hasher);
         }
     }
     hasher.finish()
 }
 
-/// Hash the plugin-derived graph-affecting configuration.
-fn plugin_config_hash(plugin_result: &plugins::AggregatedPluginResult) -> u64 {
+/// Hash the plugin-derived graph-affecting configuration, with every path
+/// spelled root-relative.
+fn plugin_config_hash(
+    plugin_result: &plugins::AggregatedPluginResult,
+    root: &std::path::Path,
+) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut hasher = rustc_hash::FxHasher::default();
 
     hash_active_plugins(plugin_result, &mut hasher);
-    hash_path_aliases(plugin_result, &mut hasher);
+    hash_path_aliases(plugin_result, root, &mut hasher);
 
-    let mut auto_imports: Vec<(&str, &std::path::Path, fallow_config::AutoImportKind)> =
-        plugin_result
-            .auto_imports
-            .iter()
-            .map(|rule| (rule.name.as_str(), rule.source.as_path(), rule.kind))
-            .collect();
+    let mut auto_imports: Vec<(&str, String, fallow_config::AutoImportKind)> = plugin_result
+        .auto_imports
+        .iter()
+        .map(|rule| {
+            (
+                rule.name.as_str(),
+                root_relative_key(root, &rule.source),
+                rule.kind,
+            )
+        })
+        .collect();
     auto_imports.sort_unstable_by(|a, b| {
         a.0.cmp(b.0)
-            .then_with(|| a.1.cmp(b.1))
+            .then_with(|| a.1.cmp(&b.1))
             .then_with(|| auto_import_kind_rank(a.2).cmp(&auto_import_kind_rank(b.2)))
     });
     auto_imports.len().hash(&mut hasher);
@@ -1638,10 +1756,10 @@ fn plugin_config_hash(plugin_result: &plugins::AggregatedPluginResult) -> u64 {
         auto_import_kind_rank(kind).hash(&mut hasher);
     }
 
-    let mut scss_include_paths: Vec<&std::path::Path> = plugin_result
+    let mut scss_include_paths: Vec<String> = plugin_result
         .scss_include_paths
         .iter()
-        .map(std::path::PathBuf::as_path)
+        .map(|path| root_relative_key(root, path))
         .collect();
     scss_include_paths.sort_unstable();
     scss_include_paths.len().hash(&mut hasher);
@@ -1649,10 +1767,10 @@ fn plugin_config_hash(plugin_result: &plugins::AggregatedPluginResult) -> u64 {
         path.hash(&mut hasher);
     }
 
-    let mut static_dir_mappings: Vec<(&std::path::Path, &str)> = plugin_result
+    let mut static_dir_mappings: Vec<(String, &str)> = plugin_result
         .static_dir_mappings
         .iter()
-        .map(|(from_dir, mount)| (from_dir.as_path(), mount.as_str()))
+        .map(|(from_dir, mount)| (root_relative_key(root, from_dir), mount.as_str()))
         .collect();
     static_dir_mappings.sort_unstable();
     static_dir_mappings.len().hash(&mut hasher);
@@ -1681,15 +1799,24 @@ fn hash_active_plugins(
     }
 }
 
+/// Hash tsconfig- and plugin-derived path aliases. Replacements are absolute
+/// filesystem paths, so they are spelled root-relative like every other path in
+/// the mode hash.
 fn hash_path_aliases(
     plugin_result: &plugins::AggregatedPluginResult,
+    root: &std::path::Path,
     hasher: &mut rustc_hash::FxHasher,
 ) {
     use std::hash::Hash;
-    let mut aliases: Vec<(&str, &str)> = plugin_result
+    let mut aliases: Vec<(&str, String)> = plugin_result
         .path_aliases
         .iter()
-        .map(|(prefix, replacement)| (prefix.as_str(), replacement.as_str()))
+        .map(|(prefix, replacement)| {
+            (
+                prefix.as_str(),
+                root_relative_key(root, std::path::Path::new(replacement)),
+            )
+        })
         .collect();
     aliases.sort_unstable();
     aliases.len().hash(hasher);
@@ -1739,13 +1866,18 @@ fn trace_pipeline_profile(profile: &PipelineProfile) {
         entry_point_count,
         cache_hits,
         cache_misses,
+        cache_rejection,
         ..
     } = *profile;
-    let cache_summary = if cache_hits > 0 {
-        format!(" ({cache_hits} cached, {cache_misses} parsed)")
-    } else {
-        String::new()
-    };
+    let cache_summary = cache_rejection.map_or_else(
+        || format!(" ({cache_hits} cached, {cache_misses} parsed)"),
+        |rejection| {
+            format!(
+                " ({cache_hits} cached, {cache_misses} parsed, cache refused: {})",
+                rejection.describe()
+            )
+        },
+    );
 
     tracing::debug!(
         "\n┌─ Pipeline Profile ─────────────────────────────\n\
@@ -2650,17 +2782,61 @@ mod tests {
         );
     }
 
+    /// The resolver hash used to include the project root, which made a cache
+    /// unusable anywhere but the directory that wrote it: a container job, a
+    /// matrix over roots, or a copied worktree decoded the whole blob and then
+    /// reused none of it. What discriminates two projects is their content, and
+    /// the manifest already compares every file's stable key and content hash,
+    /// so the root added nothing but a location lock.
     #[test]
-    fn graph_cache_resolver_hash_includes_project_root() {
+    fn graph_cache_resolver_hash_is_independent_of_the_project_root() {
         let dir_a = tempfile::tempdir().expect("create temp dir a");
         let dir_b = tempfile::tempdir().expect("create temp dir b");
         let config_a = session_config(dir_a.path());
         let config_b = session_config(dir_b.path());
 
-        assert_ne!(
+        assert_eq!(
             resolver_options_hash(&config_a),
             resolver_options_hash(&config_b),
-            "shared cache dirs must not reuse graphs across project roots"
+            "an identical project relocated to another path must still match"
+        );
+    }
+
+    /// The relocation above is safe only because the manifest itself still
+    /// discriminates on content: two different projects sharing one cache
+    /// directory must not reuse each other's graph.
+    #[test]
+    fn graph_cache_manifest_still_rejects_a_different_file_set() {
+        let dir_a = tempfile::tempdir().expect("create temp dir a");
+        let dir_b = tempfile::tempdir().expect("create temp dir b");
+        let mode = crate::graph_cache::GraphCacheMode::new(1, 2, 3);
+        let files_a = [crate::discover::DiscoveredFile {
+            id: crate::discover::FileId(0),
+            path: dir_a.path().join("src/a.ts"),
+            size_bytes: 1,
+        }];
+        let files_b = [crate::discover::DiscoveredFile {
+            id: crate::discover::FileId(0),
+            path: dir_b.path().join("src/b.ts"),
+            size_bytes: 1,
+        }];
+
+        let manifest_a = crate::graph_cache::GraphCacheManifest::from_discovered_files(
+            dir_a.path(),
+            &files_a,
+            mode,
+            |_| 7,
+        );
+        let manifest_b = crate::graph_cache::GraphCacheManifest::from_discovered_files(
+            dir_b.path(),
+            &files_b,
+            mode,
+            |_| 7,
+        );
+
+        assert_eq!(
+            manifest_a.classify_resolution_mismatch(&manifest_b),
+            Some(fallow_types::cache_rejection::CacheRejection::FileSetChanged)
         );
     }
 
@@ -2689,8 +2865,8 @@ mod tests {
         });
 
         assert_ne!(
-            plugin_config_hash(&without_auto_import),
-            plugin_config_hash(&with_auto_import),
+            plugin_config_hash(&without_auto_import, std::path::Path::new("")),
+            plugin_config_hash(&with_auto_import, std::path::Path::new("")),
             "auto-import edge changes must invalidate the graph cache"
         );
 
@@ -2700,8 +2876,8 @@ mod tests {
             kind: AutoImportKind::Default,
         });
         assert_ne!(
-            plugin_config_hash(&without_auto_import),
-            plugin_config_hash(&with_auto_import),
+            plugin_config_hash(&without_auto_import, std::path::Path::new("")),
+            plugin_config_hash(&with_auto_import, std::path::Path::new("")),
             "auto-import kind changes must invalidate the graph cache"
         );
     }
@@ -2714,8 +2890,8 @@ mod tests {
             .scss_include_paths
             .push(PathBuf::from("/project/styles"));
         assert_ne!(
-            plugin_config_hash(&base),
-            plugin_config_hash(&with_scss),
+            plugin_config_hash(&base, std::path::Path::new("")),
+            plugin_config_hash(&with_scss, std::path::Path::new("")),
             "SCSS include path changes must invalidate the graph cache"
         );
 
@@ -2724,8 +2900,8 @@ mod tests {
             .static_dir_mappings
             .push((PathBuf::from("/project/public"), "/".to_string()));
         assert_ne!(
-            plugin_config_hash(&base),
-            plugin_config_hash(&with_static_dir),
+            plugin_config_hash(&base, std::path::Path::new("")),
+            plugin_config_hash(&with_static_dir, std::path::Path::new("")),
             "static directory mapping changes must invalidate the graph cache"
         );
     }

@@ -414,6 +414,7 @@ async fn e2e_impact_closure_returns_json() {
         workspace: None,
         no_cache: None,
         threads: None,
+        max_output_bytes: None,
     })
     .unwrap();
     let result = run_fallow(&bin, &args).await.unwrap();
@@ -450,6 +451,7 @@ async fn e2e_inspect_target_file_returns_evidence_bundle() {
             type_aware_require: None,
             symbol_chain: None,
             include_churn: None,
+            max_output_bytes: None,
         },
     )
     .await
@@ -495,6 +497,7 @@ async fn e2e_inspect_target_symbol_returns_symbol_and_file_evidence() {
             type_aware_require: None,
             symbol_chain: None,
             include_churn: None,
+            max_output_bytes: None,
         },
     )
     .await

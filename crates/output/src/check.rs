@@ -77,7 +77,7 @@ pub struct CheckOutput {
     ///   `malformed-tsconfig`, `tsconfig-reference-dir-missing`;
     /// - source discovery, during the file walk: `skipped-large-file`,
     ///   `skipped-minified-file`, `skipped-source-dotdir`,
-    ///   `source-read-failure`;
+    ///   `source-read-failure`, `source-parse-degraded`;
     /// - dead-code analysis, from the dependency-catalog and override
     ///   detectors: `malformed-pnpm-workspace-yaml`,
     ///   `bun-lockb-override-resolution-skipped`.

@@ -825,6 +825,7 @@ impl AnalysisSession {
                     cache_hits: 0,
                     cache_misses: 0,
                     parse_cpu_ms: 0.0,
+                    cache_rejection: None,
                 },
             };
         }
@@ -891,19 +892,31 @@ fn parse_files_with_config(
 ) -> ParsedModules {
     let parse_start = Instant::now();
     let cache_max_size_bytes = crate::project_config::resolve_cache_max_size_bytes(config);
+    let mut cache_rejection = None;
     let mut cache = if config.no_cache {
         None
     } else {
-        fallow_extract::cache::CacheStore::load(
+        match fallow_extract::cache::CacheStore::load(
             &config.cache_dir,
+            &config.root,
             config.cache_config_hash,
             cache_max_size_bytes,
-        )
+        ) {
+            Ok(store) => Some(store),
+            Err(rejection) => {
+                cache_rejection = Some(rejection);
+                None
+            }
+        }
     };
     let parse_result =
         crate::source::parse_all_files(files, cache.as_ref(), need_complexity, cancellation);
-    let source_diagnostics =
+    let mut source_diagnostics =
         fallow_config::record_source_read_failures(&config.root, &parse_result.read_failures);
+    source_diagnostics.extend(fallow_config::record_source_parse_degradations(
+        &config.root,
+        &parse_result.parse_degradations,
+    ));
     let mut modules = parse_result.modules;
     for module in &mut modules {
         module.prepare_analysis_facts();
@@ -912,7 +925,7 @@ fn parse_files_with_config(
     let cache_ms = if token_is_set(cancellation) {
         0.0
     } else {
-        update_parse_cache_if_enabled(config, &mut cache, &modules, files)
+        update_parse_cache_if_enabled(config, &mut cache, &modules, files, need_complexity)
     };
     let metrics = core_backend::ParseMetrics {
         parse_ms,
@@ -920,6 +933,7 @@ fn parse_files_with_config(
         cache_hits: parse_result.cache_hits,
         cache_misses: parse_result.cache_misses,
         parse_cpu_ms: parse_result.parse_cpu_ms,
+        cache_rejection,
     };
     ParsedModules {
         modules,
@@ -935,6 +949,7 @@ fn reused_parse_metrics() -> core_backend::ParseMetrics {
         cache_hits: 0,
         cache_misses: 0,
         parse_cpu_ms: 0.0,
+        cache_rejection: None,
     }
 }
 
@@ -955,6 +970,7 @@ fn update_parse_cache_if_enabled(
     cache: &mut Option<fallow_extract::cache::CacheStore>,
     modules: &[ModuleInfo],
     files: &[DiscoveredFile],
+    need_complexity: bool,
 ) -> f64 {
     let start = Instant::now();
     if config.no_cache {
@@ -962,8 +978,8 @@ fn update_parse_cache_if_enabled(
     }
 
     let cache_max_size_bytes = crate::project_config::resolve_cache_max_size_bytes(config);
-    let store = cache.get_or_insert_with(fallow_extract::cache::CacheStore::new);
-    if update_parse_cache(store, modules, files)
+    let store = cache.get_or_insert_with(|| fallow_extract::cache::CacheStore::new(&config.root));
+    if update_parse_cache(store, modules, files, need_complexity)
         && let Err(error) = store.save(
             &config.cache_dir,
             config.cache_config_hash,
@@ -975,10 +991,15 @@ fn update_parse_cache_if_enabled(
     start.elapsed().as_secs_f64() * 1000.0
 }
 
+/// Mirror of `fallow_core`'s `update_cache` for session-owned parsing: rewrite
+/// an unchanged entry only when its metadata moved or when this run can add
+/// complexity the entry lacks, and never let a complexity-blind run strip the
+/// complexity a `health` run stored.
 fn update_parse_cache(
     store: &mut fallow_extract::cache::CacheStore,
     modules: &[ModuleInfo],
     files: &[DiscoveredFile],
+    need_complexity: bool,
 ) -> bool {
     let mut dirty = false;
     for module in modules {
@@ -987,11 +1008,22 @@ fn update_parse_cache(
             if let Some(cached) = store.get_by_path_only(&file.path)
                 && cached.content_hash == module.content_hash
             {
-                if cached.source_fingerprint() != fingerprint {
+                let stale_metadata = cached.source_fingerprint() != fingerprint;
+                let adds_complexity = need_complexity && !cached.complexity_extracted;
+                if stale_metadata || adds_complexity {
                     let preserved_last_access = cached.last_access_secs;
-                    let mut refreshed =
-                        fallow_extract::cache::module_to_cached(module, fingerprint);
+                    let preserved_complexity = (!need_complexity && cached.complexity_extracted)
+                        .then(|| cached.complexity.clone());
+                    let mut refreshed = fallow_extract::cache::module_to_cached(
+                        module,
+                        fingerprint,
+                        need_complexity,
+                    );
                     refreshed.last_access_secs = preserved_last_access;
+                    if let Some(complexity) = preserved_complexity {
+                        refreshed.complexity = complexity;
+                        refreshed.complexity_extracted = true;
+                    }
                     store.insert(&file.path, refreshed);
                     dirty = true;
                 }
@@ -999,7 +1031,7 @@ fn update_parse_cache(
             }
             store.insert(
                 &file.path,
-                fallow_extract::cache::module_to_cached(module, fingerprint),
+                fallow_extract::cache::module_to_cached(module, fingerprint, need_complexity),
             );
             dirty = true;
         }
@@ -1665,7 +1697,7 @@ wrapper();
             cold.graph.as_ref().expect("cold graph retained"),
         );
         assert!(
-            fallow_graph::cache::GraphCacheStore::load(&cold_session.config().cache_dir).is_some(),
+            fallow_graph::cache::GraphCacheStore::load(&cold_session.config().cache_dir).is_ok(),
             "cold analysis must persist the graph cache"
         );
 
