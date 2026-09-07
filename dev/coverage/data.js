@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788775860918,
+  "lastUpdate": 1788783332589,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "c3df8857ec0fca10f1b359946ec89a0208a50715",
-          "message": "perf(benchmarks): cover Bun lock override analysis",
-          "timestamp": "2026-08-22T09:29:16Z",
-          "tree_id": "43e370925077f83b46ba7073598895fb2f8ae382",
-          "url": "https://github.com/fallow-rs/fallow/commit/c3df8857ec0fca10f1b359946ec89a0208a50715"
-        },
-        "date": 1787391431462,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.5,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/c55ba1ba3c98c6e4ad48f0aed0e0f256c256d959"
         },
         "date": 1788775857774,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.3,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "cdc5c0ee05031c77cb420b635de403164733d958",
+          "message": "chore(docker): pin FALLOW_VERSION 3.23.0 with refreshed checksums",
+          "timestamp": "2026-09-07T14:06:24+02:00",
+          "tree_id": "0cdd881d3c9e5ed647639962932bae7ed312e739",
+          "url": "https://github.com/fallow-rs/fallow/commit/cdc5c0ee05031c77cb420b635de403164733d958"
+        },
+        "date": 1788783328768,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
