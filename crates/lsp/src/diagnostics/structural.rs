@@ -8,25 +8,7 @@ use ls_types::{
 use fallow_api::EditorAnalysisResults as AnalysisResults;
 
 use super::{FIRST_LINE_RANGE, doc_link_for_code};
-use crate::position::PositionMapper;
-
-fn line_range_from_byte_col(
-    mapper: &mut PositionMapper,
-    path: &std::path::Path,
-    line: u32,
-    col: u32,
-) -> Range {
-    Range {
-        start: Position {
-            line,
-            character: mapper.utf16_col(path, line, col),
-        },
-        end: Position {
-            line,
-            character: u32::MAX,
-        },
-    }
-}
+use crate::position::{PositionMapper, line_range_from_byte_col};
 
 /// Basename of `path`, falling back to the full display string.
 fn cycle_file_name(path: &std::path::Path) -> String {

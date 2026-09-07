@@ -10,7 +10,7 @@ use fallow_api::{
 
 use crate::diagnostics::security::security_label;
 use crate::markdown::format_inline_code;
-use crate::position::PositionMapper;
+use crate::position::{PositionMapper, line_range_from_byte_col};
 
 /// Typed input for building hover information from editor analysis state.
 #[derive(Clone, Copy)]
@@ -134,16 +134,6 @@ fn check_component_hover(
     check_react_component_intel(results, file_path, position, mapper)
 }
 
-fn utf16_span(
-    mapper: &mut PositionMapper,
-    path: &Path,
-    line: u32,
-    col: u32,
-    text: &str,
-) -> (u32, u32) {
-    mapper.utf16_col_span(path, line, col, text)
-}
-
 fn position_in_span(position: Position, start: u32, end: u32) -> bool {
     position.character >= start && position.character < end
 }
@@ -157,25 +147,6 @@ fn span_range(line: u32, start: u32, end: u32) -> Range {
         end: Position {
             line,
             character: end,
-        },
-    }
-}
-
-fn line_range_from_byte_col(
-    mapper: &mut PositionMapper,
-    path: &Path,
-    line: u32,
-    col: u32,
-) -> Range {
-    let start = mapper.utf16_col(path, line, col);
-    Range {
-        start: Position {
-            line,
-            character: start,
-        },
-        end: Position {
-            line,
-            character: u32::MAX,
         },
     }
 }
@@ -356,13 +327,8 @@ fn check_unused_export(
             if export_line != position.line {
                 continue;
             }
-            let (start_col, end_col) = utf16_span(
-                mapper,
-                &export.path,
-                export_line,
-                export.col,
-                &export.export_name,
-            );
+            let (start_col, end_col) =
+                mapper.utf16_col_span(&export.path, export_line, export.col, &export.export_name);
             if !position_in_span(position, start_col, end_col) {
                 continue;
             }
@@ -400,13 +366,8 @@ fn check_used_export(
         if usage_line != position.line {
             continue;
         }
-        let (start_col, end_col) = utf16_span(
-            mapper,
-            &usage.path,
-            usage_line,
-            usage.col,
-            &usage.export_name,
-        );
+        let (start_col, end_col) =
+            mapper.utf16_col_span(&usage.path, usage_line, usage.col, &usage.export_name);
         if !position_in_span(position, start_col, end_col) {
             continue;
         }
@@ -522,13 +483,8 @@ fn unused_member_hover(
     if member_line != position.line {
         return None;
     }
-    let (start_col, end_col) = utf16_span(
-        mapper,
-        &member.path,
-        member_line,
-        member.col,
-        &member.member_name,
-    );
+    let (start_col, end_col) =
+        mapper.utf16_col_span(&member.path, member_line, member.col, &member.member_name);
     if !position_in_span(position, start_col, end_col) {
         return None;
     }
@@ -564,7 +520,7 @@ fn check_unrendered_component(
             continue;
         }
         let (start_col, end_col) =
-            utf16_span(mapper, &c.path, component_line, c.col, &c.component_name);
+            mapper.utf16_col_span(&c.path, component_line, c.col, &c.component_name);
         if !position_in_span(position, start_col, end_col) {
             continue;
         }
@@ -611,7 +567,7 @@ fn check_unused_component_prop(
         if prop_line != position.line {
             continue;
         }
-        let (start_col, end_col) = utf16_span(mapper, &p.path, prop_line, p.col, &p.prop_name);
+        let (start_col, end_col) = mapper.utf16_col_span(&p.path, prop_line, p.col, &p.prop_name);
         if !position_in_span(position, start_col, end_col) {
             continue;
         }
@@ -649,7 +605,7 @@ fn check_unused_component_emit(
         if emit_line != position.line {
             continue;
         }
-        let (start_col, end_col) = utf16_span(mapper, &e.path, emit_line, e.col, &e.emit_name);
+        let (start_col, end_col) = mapper.utf16_col_span(&e.path, emit_line, e.col, &e.emit_name);
         if !position_in_span(position, start_col, end_col) {
             continue;
         }
@@ -687,7 +643,7 @@ fn check_unused_component_input(
         if input_line != position.line {
             continue;
         }
-        let (start_col, end_col) = utf16_span(mapper, &i.path, input_line, i.col, &i.input_name);
+        let (start_col, end_col) = mapper.utf16_col_span(&i.path, input_line, i.col, &i.input_name);
         if !position_in_span(position, start_col, end_col) {
             continue;
         }
@@ -725,7 +681,8 @@ fn check_unused_component_output(
         if output_line != position.line {
             continue;
         }
-        let (start_col, end_col) = utf16_span(mapper, &o.path, output_line, o.col, &o.output_name);
+        let (start_col, end_col) =
+            mapper.utf16_col_span(&o.path, output_line, o.col, &o.output_name);
         if !position_in_span(position, start_col, end_col) {
             continue;
         }
@@ -763,7 +720,7 @@ fn check_unused_svelte_event(
         if event_line != position.line {
             continue;
         }
-        let (start_col, end_col) = utf16_span(mapper, &e.path, event_line, e.col, &e.event_name);
+        let (start_col, end_col) = mapper.utf16_col_span(&e.path, event_line, e.col, &e.event_name);
         if !position_in_span(position, start_col, end_col) {
             continue;
         }
@@ -801,7 +758,8 @@ fn check_unused_server_action(
         if action_line != position.line {
             continue;
         }
-        let (start_col, end_col) = utf16_span(mapper, &a.path, action_line, a.col, &a.action_name);
+        let (start_col, end_col) =
+            mapper.utf16_col_span(&a.path, action_line, a.col, &a.action_name);
         if !position_in_span(position, start_col, end_col) {
             continue;
         }
@@ -839,7 +797,7 @@ fn check_unused_load_data_key(
         if key_line != position.line {
             continue;
         }
-        let (start_col, end_col) = utf16_span(mapper, &k.path, key_line, k.col, &k.key_name);
+        let (start_col, end_col) = mapper.utf16_col_span(&k.path, key_line, k.col, &k.key_name);
         if !position_in_span(position, start_col, end_col) {
             continue;
         }
@@ -882,7 +840,7 @@ fn check_react_prop_intel(
                 continue;
             }
             let (start_col, end_col) =
-                utf16_span(mapper, &intel.path, prop_line, prop.anchor_col, &prop.name);
+                mapper.utf16_col_span(&intel.path, prop_line, prop.anchor_col, &prop.name);
             if !position_in_span(position, start_col, end_col) {
                 continue;
             }
@@ -946,8 +904,7 @@ fn check_react_component_intel(
         if component_line != position.line {
             continue;
         }
-        let (start_col, end_col) = utf16_span(
-            mapper,
+        let (start_col, end_col) = mapper.utf16_col_span(
             &intel.path,
             component_line,
             intel.anchor_col,

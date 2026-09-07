@@ -24,7 +24,9 @@
 //! cross-run (ADR-004), so sorting by FileId == sorting by path. The only choice
 //! point in the topological sort is a min-pick over sorted `module_dir` strings.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
+
+use super::relativize;
 
 use fallow_types::discover::FileId;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -332,13 +334,6 @@ fn module_dir_key(path: &Path) -> String {
     path.parent()
         .map(|p| p.to_string_lossy().replace('\\', "/"))
         .unwrap_or_default()
-}
-
-/// Strip `root` and forward-slash-normalize a module path for cross-platform
-/// JSON parity (mirrors `impact_closure::relativize`).
-fn relativize(path: &Path, root: &Path) -> String {
-    let rel: PathBuf = path.strip_prefix(root).unwrap_or(path).to_path_buf();
-    rel.to_string_lossy().replace('\\', "/")
 }
 
 /// Root-relativize a `module_dir` key (a forward-slashed directory string).

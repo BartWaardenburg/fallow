@@ -5,7 +5,28 @@
 
 use std::path::{Path, PathBuf};
 
+use ls_types::{Position, Range};
 use rustc_hash::FxHashMap;
+
+/// Range covering a byte column through to the end of its line, converted to
+/// UTF-16 at the protocol boundary. `u32::MAX` is the LSP idiom for end-of-line.
+pub fn line_range_from_byte_col(
+    mapper: &mut PositionMapper,
+    path: &Path,
+    line: u32,
+    col: u32,
+) -> Range {
+    Range {
+        start: Position {
+            line,
+            character: mapper.utf16_col(path, line, col),
+        },
+        end: Position {
+            line,
+            character: u32::MAX,
+        },
+    }
+}
 
 /// Lazily maps byte columns from analysis results into LSP UTF-16 columns.
 #[derive(Default)]
