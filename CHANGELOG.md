@@ -7,17 +7,141 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-- **Zed now exposes the best available Fallow parity through the shared LSP
+## [3.23.0] - 2026-09-07
+
+### Added
+
+- **`fallow doctor` reports project readiness without running an analysis.**
+  Setting Fallow up on an unfamiliar repository used to mean running a real
+  analysis and working backwards from the output to guess what had gone wrong:
+  an unreadable config, a workspace root that resolved somewhere unexpected, a
+  plugin that never loaded. The new command checks the project root, the
+  configuration, workspace discovery, external plugin resolution, and the
+  optional type-aware companion, and reports each one as a readiness result.
+  Every check is a local read, so it is safe as the first command on a
+  repository and cheap enough for a CI preflight step. A required check that
+  fails exits `2`.
+
+- **Oxlint configurations that declare JS plugins are understood.** `jsPlugins`
+  entries in an Oxlint config now count as referenced dependencies, so a
+  project whose lint plugins are wired through Oxlint stops seeing them
+  reported as unused. Ultracite-style setups are covered by a fixture.
+
+- **Zed reaches the parity its extension API allows, through the shared LSP
   contract.** Teams can commit exact diagnostic codes in
   `initialization_options.mutedCategories`, opt into inline complexity Code
   Lens through `health.inlineComplexity`, and enable advisory security
   candidate diagnostics through project rules. The Zed guide now separates
   those LSP features from complete `fallow health` and `fallow security` CLI
-  runs, including their exit-code contract, and makes clear that the current
-  Zed extension API has no contribution points for a Fallow-owned sidebar or
-  status-bar item. This is editor parity where the host API supports it, not a
-  claim of full VS Code UI parity. (Closes
+  runs, including their exit-code contract, and says plainly that the current
+  Zed extension API offers no contribution point for a Fallow-owned sidebar or
+  status-bar item. (Closes
   [#2542](https://github.com/fallow-rs/fallow/issues/2542).)
+
+### Changed
+
+- **Duplication collision handles no longer depend on where the checkout
+  lives.** Groups sharing a full content hash used to take an ordinal derived
+  from absolute-path digests, so moving an unchanged checkout could hand the
+  same handle to a different group. Those groups now use report-scoped
+  `dup:<16hex>-rN` handles whose ordinal comes from canonical fragment,
+  location, and metric ordering. Ordinary `dup:<8hex>` and widened
+  `dup:<16hex>` handles are unchanged.
+
+  Legacy numeric collision handles (`dup:<16hex>-N`) stay valid input syntax,
+  and they are deliberately not aliases for the corrected ones, so an old
+  collision suppression or baseline key resurfaces its finding for review
+  instead of quietly selecting a different group. Regenerate the report, review
+  the affected group, then refresh its `ignoredClones` key or baseline. Update
+  every analyzer installation before storing `-rN` keys, since older versions
+  reject that syntax; `minimumVersion` pins the released version a shared
+  config requires.
+
+- **Health complexity ties resolve by source location.** Descending metric
+  priority is unchanged. Ties now break on ascending project-relative path,
+  line, column, and function name, so discovery order and checkout location no
+  longer decide which tied finding `--top` selects.
+
+- **Every MCP tool parameter carries a description.** The descriptions come
+  from the CLI help, so a tool's parameters read the same way in an agent as
+  they do in a terminal. `guard` now states its contract: an empty rule set for
+  unzoned paths, config-only, no analysis. The server instructions point at
+  `tools/list` and the resources, which keeps them from drifting every time the
+  tool roster changes.
+  ([#2544](https://github.com/fallow-rs/fallow/pull/2544).)
+
+- **The agent-facing instruction surface was rewritten after a prompt audit.**
+  Numbers that had rotted were deleted outright, since a refreshed number rots
+  again on the next release. `--changed-since` is now described as the scope
+  filter it is. The separate GitHub and GitLab reviewers collapse into one
+  `ci-integration-reviewer` that picks its provider from the touched paths, and
+  the agent CLI reference names `fallow dead-code` in the three places it still
+  used the legacy `check` alias, including a quoted stderr string that no
+  longer matched what the binary prints.
+  ([#2544](https://github.com/fallow-rs/fallow/pull/2544),
+  [#2540](https://github.com/fallow-rs/fallow/pull/2540).)
+
+- **A rule name that no longer exists cannot be offered as a typo fix.** The
+  known-rule list was guarded in the forward direction only, so a removed or
+  renamed rule left in the list stayed there silently, and
+  `closest_known_rule_name` would hand it to a user as the correction for their
+  typo. The reverse direction is proven now too.
+  ([#2541](https://github.com/fallow-rs/fallow/pull/2541).)
+
+### Fixed
+
+- **Class members reached through object properties are credited.** A member
+  referenced through an object container or an object alias, instead of
+  directly on the instance, was never followed, and the member was reported
+  unused. Both shapes resolve now. (Closes
+  [#2546](https://github.com/fallow-rs/fallow/issues/2546). Thanks
+  [@Ericlm](https://github.com/Ericlm) for the report.)
+
+- **`fallow-ignore-next-line` suppresses `unused-catalog-entry`.** The finding
+  suggested the directive itself, and the directive then did nothing, because
+  quoted YAML scalar content was lost in catalog parsing. (Closes
+  [#2548](https://github.com/fallow-rs/fallow/issues/2548). Thanks
+  [@michalius](https://github.com/michalius) for the report.)
+
+- **Binaries invoked through `varlock run -- <bin>` are credited.** Shell
+  argument boundaries survive package-script parsing now, so a dependency
+  reached only through a wrapper command stops being reported as unused.
+  (Closes [#2551](https://github.com/fallow-rs/fallow/issues/2551). Thanks
+  [@PrinceD96](https://github.com/PrinceD96) for the report and the fix in
+  [#2552](https://github.com/fallow-rs/fallow/pull/2552).)
+
+- **Scoped package names render in `review --brief`.** Names under an npm scope
+  appeared as empty strings in the new third-party dependencies section.
+  (Closes [#2553](https://github.com/fallow-rs/fallow/issues/2553). Thanks
+  [@Elia97](https://github.com/Elia97) for the report.)
+
+- **A branch hoisted to module scope no longer reads as an in-place split.**
+  The split signature counts units as functions, so counting module-scope
+  branching as a synthetic unit made a hoist out of a function look exactly
+  like a split, with the branching held, the count up by one, and the worst
+  function smaller. The module unit stays in the branch-point total and in the
+  unit count, because those decision points are real and run at import time,
+  but the signature now judges on authored functions, so the unit no longer
+  counts towards the tax a split adds. Tests pin both directions.
+  ([#2539](https://github.com/fallow-rs/fallow/pull/2539).)
+
+- **Inline review comments carry clone evidence.** A duplication comment now
+  names the stable `dup:` handle with its line and instance counts, and lists
+  each peer copy as a repository-relative range, so a reviewer can open the
+  other copies and suppress the group from the comment itself. (Thanks
+  [@Jerc92](https://github.com/Jerc92) for the fix in
+  [#2550](https://github.com/fallow-rs/fallow/pull/2550).)
+
+- **The VS Code integration frames LSP messages by bytes.** A workspace path
+  containing non-ASCII characters could desynchronize the message stream. The
+  subprocess regressions and the extension-host suite now exercise Unicode
+  workspace paths and navigation.
+
+- **A git failure in the review app reaches its error state.** Such a failure
+  used to surface as an empty diff, which a reader takes to mean the diff was
+  clean rather than that the command never ran. The signed setup launcher also
+  preserves termination status, and the sidecar cache always performs its
+  required integrity check.
 
 ## [3.22.0] - 2026-09-01
 
@@ -7684,7 +7808,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[Unreleased]: https://github.com/fallow-rs/fallow/compare/v3.22.0...HEAD
+[Unreleased]: https://github.com/fallow-rs/fallow/compare/v3.23.0...HEAD
+[3.23.0]: https://github.com/fallow-rs/fallow/compare/v3.22.0...v3.23.0
 [3.22.0]: https://github.com/fallow-rs/fallow/compare/v3.21.0...v3.22.0
 [3.21.0]: https://github.com/fallow-rs/fallow/compare/v3.20.0...v3.21.0
 [3.20.0]: https://github.com/fallow-rs/fallow/compare/v3.19.0...v3.20.0
