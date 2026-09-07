@@ -267,6 +267,36 @@ fn cli_json_documents_conform_to_output_schema() {
     );
 }
 
+/// `fallow trace-error` is its own published root kind. Both extremes are
+/// validated: a trace that resolves something, and a trace nothing in it is
+/// recognised from, which has the emptiest body and is the one a schema
+/// regression would let through.
+#[test]
+fn trace_error_documents_conform_to_output_schema() {
+    let fixture = git_fixture();
+    let root = fixture.path();
+    let schema = load_schema_root();
+
+    std::fs::write(
+        root.join("resolving.txt"),
+        "TypeError: used is not a function\n\
+         \x20   at used (src/lib.ts:1:14)\n\
+         \x20   at Object.<anonymous> (src/index.ts:3:3)\n\
+         \x20   at Module._compile (node:internal/modules/cjs/loader:1105:14)\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("unrecognised.txt"),
+        "something went wrong\nsee the logs\n",
+    )
+    .unwrap();
+    std::fs::write(root.join("empty.txt"), "").unwrap();
+
+    for trace in ["resolving.txt", "unrecognised.txt", "empty.txt"] {
+        run_and_validate(&schema, root, &["trace-error", trace], "trace-error");
+    }
+}
+
 /// The structured error envelope (`--format json` failure path) has no `kind`,
 /// so it is a document-root branch (`ErrorOutput`) rather than a `FallowOutput`
 /// variant. Validate a real emitted error document against the whole schema so

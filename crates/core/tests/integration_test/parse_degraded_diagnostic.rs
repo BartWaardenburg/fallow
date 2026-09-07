@@ -10,6 +10,7 @@
 use std::path::Path;
 
 use fallow_config::{WorkspaceDiagnostic, WorkspaceDiagnosticKind};
+use fallow_types::output_dead_code::ReachabilityConfidenceFlag;
 
 use super::common::create_config_with_cache;
 
@@ -111,10 +112,53 @@ fn a_project_that_parses_cleanly_reports_no_degradation() {
     .expect("write valid entry module");
     let config = create_config_with_cache(root, temp.path().join("cache"));
 
-    let _ = fallow_core::analyze(&config).expect("analysis succeeds");
+    let results = fallow_core::analyze(&config).expect("analysis succeeds");
 
     assert!(
         degraded_diagnostics(&config.root).is_empty(),
         "a clean parse must not be reported as degraded"
+    );
+    assert!(
+        results
+            .unused_files
+            .iter()
+            .all(|issue| issue.confidence.is_empty())
+            && results
+                .unused_exports
+                .iter()
+                .all(|issue| issue.confidence.is_empty()),
+        "a project that parses cleanly must carry no confidence marker anywhere"
+    );
+}
+
+/// The diagnostic alone leaves the caveat at the top of the envelope while the
+/// finding it distorts sits far away with a `delete-file` action on it. The
+/// finding has to carry the caveat itself.
+#[test]
+fn a_finding_a_degraded_parse_can_distort_carries_the_caveat() {
+    let temp = tempfile::tempdir().expect("create temp dir");
+    let root = temp.path().join("project");
+    write_broken_project(&root);
+    let config = create_config_with_cache(root, temp.path().join("cache"));
+
+    let results = fallow_core::analyze(&config).expect("analysis succeeds on a broken source");
+
+    let helper = results
+        .unused_files
+        .iter()
+        .find(|issue| issue.file.path.ends_with("src/helper.ts"))
+        .expect("the file the broken entry imports is still reported unused");
+    assert_eq!(
+        helper.confidence,
+        vec![ReachabilityConfidenceFlag::IncompleteImportGraph],
+        "the entry file that failed to parse is reachable, so the verdict on the file it \
+         imports rests on an import graph fallow knows is incomplete"
+    );
+
+    // Report-only stands: the caveat is advisory provenance, not a gate.
+    assert_eq!(
+        helper.actions.len(),
+        2,
+        "the marker must not withhold or trim the finding's actions"
     );
 }

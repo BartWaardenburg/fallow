@@ -88,6 +88,7 @@ mod suppressions;
 mod task_matrix;
 mod telemetry;
 mod trace_chain;
+mod trace_error;
 mod trace_path;
 mod type_aware_degrade;
 mod update_check;
@@ -187,6 +188,7 @@ Project inspection:
   list              List discovered files, entry points, plugins, boundaries, and workspaces
   inspect           Inspect one file or exported symbol as a bundled evidence query
   trace             Trace a symbol's call chain (best-effort, syntactic)
+  trace-error       Resolve a runtime stack trace's frames to project definitions
   guard             Show which architecture rules apply to files before editing
   decision-surface  Surface the structural decisions a change embeds (advisory)
   workspaces        Show monorepo workspace discovery diagnostics
@@ -932,6 +934,33 @@ enum Command {
         /// best-effort, so a shallow bound keeps the trace legible.
         #[arg(long, value_name = "N")]
         depth: Option<u32>,
+    },
+
+    /// Resolve a runtime stack trace's frames to the definitions they name
+    /// (best-effort, syntactic; OFF the ranked path)
+    ///
+    /// Reads a V8 / Node or SpiderMonkey / JavaScriptCore stack trace from a
+    /// file or from stdin, classifies every frame as in-project,
+    /// node-modules, or out-of-corpus, and asks the module graph which
+    /// definitions the in-project frames name.
+    ///
+    /// The result refuses to overclaim. A frame matching several definitions
+    /// reports `ambiguous` and lists all of them rather than picking one; a
+    /// frame matching nothing reports `not_found` rather than disappearing; a
+    /// frame the graph was never asked about reports `not_attempted`. Every
+    /// frame read stays in the array in input order and `counts` publishes the
+    /// per-outcome totals, so a caller can see what went unanswered.
+    ///
+    /// No source maps are read. A frame inside generated build output is
+    /// reported as such, because a stale map rebinds silently to the wrong
+    /// line.
+    #[command(name = "trace-error")]
+    TraceError {
+        /// Stack trace file, or `-` to read stdin. Defaults to stdin. A
+        /// relative path is resolved against the project root, matching
+        /// `--diff-file`.
+        #[arg(value_name = "FILE")]
+        trace_file: Option<String>,
     },
 
     /// Auto-fix issues: remove unused exports, dependencies, and enum
@@ -3644,6 +3673,19 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
             callees,
             depth,
         } => dispatch_trace_command(dispatch, symbol, &path, callers, callees, depth),
+        Command::TraceError { trace_file } => {
+            trace_error::run_trace_error(&trace_error::TraceErrorOptions {
+                root: dispatch.root,
+                config_path: &dispatch.cli.config,
+                output: dispatch.output,
+                json_style: dispatch.json_style,
+                no_cache: dispatch.cli.no_cache,
+                threads: dispatch.threads,
+                quiet: dispatch.quiet,
+                allow_remote_extends: dispatch.cli.allow_remote_extends,
+                trace_file: trace_file.as_deref(),
+            })
+        }
         fix @ Command::Fix { .. } => dispatch_fix_command(&fix, dispatch),
         init @ Command::Init { .. } => dispatch_init_command(init, root, quiet),
         Command::Hooks { subcommand } => {

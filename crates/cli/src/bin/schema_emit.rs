@@ -965,6 +965,15 @@ fn register_per_command_envelope_definitions(generator: &mut schemars::SchemaGen
     let _ = generator.subschema_for::<fallow_types::trace_chain::SymbolChainTrace>();
     // Shortest import path (`fallow trace --path`, `FallowOutput::Trace`).
     let _ = generator.subschema_for::<fallow_types::trace::ImportPathTrace>();
+    // Stack-trace frame resolution (`fallow trace-error`,
+    // `FallowOutput::TraceError`).
+    let _ = generator.subschema_for::<fallow_types::trace_error::ErrorTrace>();
+    let _ = generator.subschema_for::<fallow_types::trace_error::ErrorTraceFrame>();
+    let _ = generator.subschema_for::<fallow_types::trace_error::ErrorTraceCandidate>();
+    let _ = generator.subschema_for::<fallow_types::trace_error::ErrorTraceCounts>();
+    let _ = generator.subschema_for::<fallow_types::trace_error::ErrorTraceSchemaVersion>();
+    let _ = generator.subschema_for::<fallow_types::trace_error::FrameOrigin>();
+    let _ = generator.subschema_for::<fallow_types::trace_error::FrameResolution>();
     let _ = generator.subschema_for::<TraceOutput>();
     let _ = generator.subschema_for::<ImpactOutput>();
     let _ = generator.subschema_for::<SemanticSymbolTrace>();
@@ -1149,6 +1158,11 @@ const FALLOW_OUTPUT_VARIANTS: &[(&str, &[&str], &str)] = &[
             "SemanticSymbolTrace",
         ],
         "Export, member, file, dependency, clone, impact-closure, import-path, or\nsymbol-level trace, including exact TypeScript checker evidence when\nrequested.",
+    ),
+    (
+        "trace-error",
+        &["ErrorTrace"],
+        "`fallow trace-error [FILE|-] --format json`. Required `schema_version`\nsingleton plus `source`, `frames`, `counts`, and `reason`.",
     ),
     (
         "review-envelope",

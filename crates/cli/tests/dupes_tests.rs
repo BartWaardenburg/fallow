@@ -352,6 +352,55 @@ fn dupes_top_keeps_corpus_stats_and_discloses_the_split() {
     );
 }
 
+/// The human summary block must disclose the same split the envelope does.
+///
+/// `Clone families` and `Clone groups` count the rendered vectors while
+/// `Duplicated lines` and `Duplication rate` describe the measured corpus, so
+/// under `--top` the four aligned numbers come from two different scopes. The
+/// reader is told how many groups were withheld rather than being left to read
+/// the truncated count as the project total.
+#[test]
+fn dupes_summary_discloses_groups_a_display_limit_withheld() {
+    let full = parse_json(&run_fallow(
+        "dupes",
+        "duplicate-code",
+        &["--format", "json", "--quiet"],
+    ));
+    let corpus_groups = full["stats"]["clone_groups"].as_u64().unwrap();
+    assert!(
+        corpus_groups > 1,
+        "fixture must produce more than one clone group for --top to withhold any"
+    );
+
+    let limited = run_fallow(
+        "dupes",
+        "duplicate-code",
+        &["--summary", "--top", "1", "--quiet"],
+    );
+    assert!(
+        limited.stdout.contains(&format!(
+            "and {} more clone groups withheld",
+            corpus_groups - 1
+        )),
+        "the capped summary must name the withheld groups: {}",
+        limited.stdout
+    );
+    assert!(
+        limited
+            .stdout
+            .contains(&format!("rate cover all {corpus_groups}")),
+        "the capped summary must say which scope the measured stats describe: {}",
+        limited.stdout
+    );
+
+    let uncapped = run_fallow("dupes", "duplicate-code", &["--summary", "--quiet"]);
+    assert!(
+        !uncapped.stdout.contains("withheld"),
+        "an uncapped summary withholds nothing and must stay silent: {}",
+        uncapped.stdout
+    );
+}
+
 #[test]
 fn dupes_filters_atomic_function_call_clones() {
     let dir = tempdir().unwrap();

@@ -587,13 +587,16 @@ const envelopesEmbedding = (definitions, name) => {
   return versions;
 };
 
-test("a required output field cannot be dropped at a frozen schema_version", () => {
+test("a required output field cannot be dropped at a frozen schema_version", (t) => {
   const previous = spawnSync("git", ["show", `${RELEASED_TAG}:docs/output-schema.json`], {
     encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024,
   });
   if (previous.status !== 0) {
-    // A shallow clone without tags cannot answer this; the full-history lanes do.
+    // A clone without the released tag cannot answer this. Report it as
+    // skipped rather than passing: a green line here would say the schema was
+    // compared when nothing was.
+    t.skip(`${RELEASED_TAG} is not in this clone, so the schema baseline is unreachable`);
     return;
   }
 

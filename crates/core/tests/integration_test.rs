@@ -39,6 +39,8 @@ mod duplicate_prop_shape;
 mod dynamic_import_then;
 #[path = "integration_test/dynamic_imports.rs"]
 mod dynamic_imports;
+#[path = "integration_test/entry_point_spans.rs"]
+mod entry_point_spans;
 #[path = "integration_test/external_plugins.rs"]
 mod external_plugins;
 #[path = "integration_test/extraction.rs"]

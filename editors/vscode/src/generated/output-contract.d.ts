@@ -24,7 +24,7 @@
 
 
 /**
- * Schemas for the JSON output of fallow commands. Object-shaped envelopes covered by the `FallowOutput` contract carry a top-level `kind` discriminator. Current kind values: `audit`, `explain`, `inspect_target`, `trace`, `review-envelope`, `review-reconcile`, `coverage-setup`, `coverage-analyze`, `list-boundaries`, `list-workspaces`, `health`, `dupes`, `dead-code-grouped`, `impact`, `impact-cross-repo`, `security`, `security-survivors`, `security-blind-spots`, `dead-code`, `combined`, `feature-flags`, `audit-brief`, `decision-surface`, `review-walkthrough-guide`, `review-walkthrough-validation`, `suppression-inventory`, `doctor`, `type-aware-status`, `similar-code`, `similar-code-inspect`, `similar-code-review`. Consumers should branch on `kind` instead of probing for unique field presence. `CodeClimateOutput` is a bare JSON array (per the Code Climate / GitLab Code Quality spec) and stays a sibling root branch discriminated by checking whether the document root is an array. `ErrorOutput` is the `--format json` failure document, emitted on stdout with a non-zero exit; it carries no `kind` and is discriminated by the `error: true` field.
+ * Schemas for the JSON output of fallow commands. Object-shaped envelopes covered by the `FallowOutput` contract carry a top-level `kind` discriminator. Current kind values: `audit`, `explain`, `inspect_target`, `trace`, `trace-error`, `review-envelope`, `review-reconcile`, `coverage-setup`, `coverage-analyze`, `list-boundaries`, `list-workspaces`, `health`, `dupes`, `dead-code-grouped`, `impact`, `impact-cross-repo`, `security`, `security-survivors`, `security-blind-spots`, `dead-code`, `combined`, `feature-flags`, `audit-brief`, `decision-surface`, `review-walkthrough-guide`, `review-walkthrough-validation`, `suppression-inventory`, `doctor`, `type-aware-status`, `similar-code`, `similar-code-inspect`, `similar-code-review`. Consumers should branch on `kind` instead of probing for unique field presence. `CodeClimateOutput` is a bare JSON array (per the Code Climate / GitLab Code Quality spec) and stays a sibling root branch discriminated by checking whether the document root is an array. `ErrorOutput` is the `--format json` failure document, emitted on stdout with a non-zero exit; it carries no `kind` and is discriminated by the `error: true` field.
  */
 export type FallowJsonOutput = (FallowOutput | CodeClimateOutput | ErrorOutput)
 /**
@@ -52,6 +52,8 @@ kind: "explain"
 kind: "inspect_target"
 }) | ((ExportTrace | ClassMemberTrace | FileTrace | DependencyTrace | CloneTrace | ImpactClosureTrace | ImportPathTrace | SymbolChainTrace | SemanticSymbolTrace) & {
 kind: "trace"
+}) | (ErrorTrace & {
+kind: "trace-error"
 }) | (ReviewEnvelopeOutput & {
 kind: "review-envelope"
 }) | (ReviewReconcileOutput & {
@@ -289,6 +291,25 @@ export type AddToConfigValue = (string | IgnoreExportsRule[] | {
  * hold `Option<AuditIntroduced>`. Renders to the JSON wire as a bare boolean.
  */
 export type AuditIntroduced = boolean
+/**
+ * A per-finding confidence flag on a dead-code reachability verdict.
+ *
+ * Advisory provenance, in the same spirit as the fix path's
+ * `low_confidence_off_graph` / `low_confidence_unresolved_imports` skip
+ * reasons and the focus map's per-unit confidence flags: a flag NEVER
+ * withholds, reorders, downgrades, or re-severities the finding, and never
+ * changes an exit code. It records that the verdict was computed over an
+ * import graph fallow already knows is incomplete, so a reader who sees the
+ * finding also sees the caveat instead of having to notice a diagnostic at
+ * the other end of the envelope.
+ *
+ * Emitted only on the two verdicts a lost import edge can distort:
+ * `unused_files[]` and `unused_exports[]`. Sorted and deduplicated, absent
+ * from the wire when empty. The set is open in the same sense
+ * `workspace_diagnostics[].kind` is: treat an unrecognised value as "some
+ * confidence caveat" rather than as an error.
+ */
+export type ReachabilityConfidenceFlag = ("source-parse-degraded" | "incomplete-import-graph")
 /**
  * Where in package.json a dependency is listed.
  *
@@ -801,6 +822,26 @@ export type ImportPathTraceSchemaVersion = "1"
  * Best-effort classification of why a callee did not resolve to an edge.
  */
 export type UnresolvedReason = ("local-or-global" | "member-or-dynamic")
+/**
+ * Wire-version discriminator for [`ErrorTrace`]. Independent from the global
+ * `SchemaVersion` and from the other trace payloads, like
+ * [`crate::trace::ImportPathTraceSchemaVersion`]. Serializes as a string
+ * `const` so JSON consumers can switch on it.
+ */
+export type ErrorTraceSchemaVersion = "1"
+/**
+ * Where a frame's source location sits relative to the analysed project.
+ */
+export type FrameOrigin = ("in_project" | "node_modules" | "out_of_corpus")
+/**
+ * What the project graph could say about a frame's identifier.
+ *
+ * `not_attempted` is not a softer `not_found`: it records that the graph was
+ * never consulted, because the frame does not point at project source. Keeping
+ * them apart is what lets `resolved + ambiguous + not_found + not_attempted`
+ * equal the frame count without any of the four lying about what it measured.
+ */
+export type FrameResolution = ("resolved" | "ambiguous" | "not_found" | "not_attempted")
 /**
  * Singleton GitHub review-event marker.
  */
@@ -2620,6 +2661,12 @@ _meta?: (Meta | null)
  * forward slashes; the array is omitted when empty. The same list is
  * repeated on each top-level command's envelope so single-command
  * consumers see it without having to look at a separate top-level field.
+ *
+ * A diagnostic here is advisory and never withholds a finding. Where a
+ * `source-parse-degraded` entry can distort a reachability verdict, the
+ * affected `unused_files[]` and `unused_exports[]` entries additionally
+ * carry the caveat themselves in their own optional `confidence[]` array,
+ * so a reader who never scrolls back up to this list still sees it.
  */
 workspace_diagnostics?: WorkspaceDiagnostic[]
 /**
@@ -2857,6 +2904,13 @@ actions: IssueAction[]
  * the merge-base. `None` when serialized directly from Rust.
  */
 introduced?: (AuditIntroduced | null)
+/**
+ * Advisory caveats on the reachability verdict behind this finding.
+ * Sorted, deduplicated, and omitted from the wire when empty, so a run
+ * over a project that parses cleanly is byte-identical. Never gates the
+ * finding or the `delete-file` action.
+ */
+confidence?: ReachabilityConfidenceFlag[]
 }
 /**
  * A code-change fix. `type` is one of the kebab-case identifiers in
@@ -3058,6 +3112,12 @@ semantic?: (SemanticCandidateDecision | null)
  * the merge-base.
  */
 introduced?: (AuditIntroduced | null)
+/**
+ * Advisory caveats on the reachability verdict behind this finding.
+ * Sorted, deduplicated, and omitted from the wire when empty. Never gates
+ * the finding or the `remove-export` action.
+ */
+confidence?: ReachabilityConfidenceFlag[]
 }
 /**
  * Wire-shape envelope for an [`UnusedExport`] finding consumed under the
@@ -9725,6 +9785,178 @@ callee: string
 reason: UnresolvedReason
 }
 /**
+ * Result of resolving a runtime stack trace against the project graph.
+ */
+export interface ErrorTrace {
+schema_version: ErrorTraceSchemaVersion
+/**
+ * Where the trace was read from: `stdin`, or the path as the caller wrote
+ * it.
+ */
+source: string
+/**
+ * The first non-blank input line that preceded any recognised frame,
+ * verbatim. Conventionally the error type and message, but it is reported
+ * as read and NOT parsed into parts. Absent when the input began with a
+ * frame or was empty.
+ */
+header?: (string | null)
+/**
+ * Every recognised frame, in input order. Nothing is filtered out: a
+ * dependency or runtime-internal frame stays in the array with its origin
+ * recorded, so hop numbering matches the trace the caller pasted.
+ */
+frames: ErrorTraceFrame[]
+counts: ErrorTraceCounts
+/**
+ * Human-readable summary of the outcome.
+ */
+reason: string
+}
+/**
+ * One frame read from the input stack trace.
+ */
+export interface ErrorTraceFrame {
+/**
+ * 0-based position in the input trace, so a caller can quote a frame back
+ * even after filtering the array.
+ */
+index: number
+/**
+ * The input line this frame was read from, trimmed of surrounding
+ * whitespace and otherwise verbatim.
+ */
+raw: string
+/**
+ * The frame's function identifier as written by the runtime, with the
+ * `async` and `new` markers stripped and recorded separately. Absent for a
+ * frame the runtime emitted without one.
+ */
+function?: (string | null)
+/**
+ * Whether the runtime marked this frame as a constructor call (`new X`).
+ */
+is_constructor?: boolean
+/**
+ * Whether the runtime marked this frame as an async call.
+ */
+is_async?: boolean
+/**
+ * The frame's file as read from the trace, with any `file://` or
+ * `http(s)://` wrapper removed and separators forward-slashed. Reported as
+ * read: it is NOT rewritten to the module path it matched, so a caller can
+ * see what its runtime actually said. Absent for a frame with no location.
+ */
+file?: (string | null)
+/**
+ * 1-based line from the frame's location, when the runtime supplied one.
+ */
+line?: (number | null)
+/**
+ * 1-based column from the frame's location, when the runtime supplied one.
+ */
+column?: (number | null)
+origin: FrameOrigin
+resolution: FrameResolution
+/**
+ * Every definition the identifier could name, in deterministic order.
+ * Exactly one entry when `resolution` is `resolved`, more than one when it
+ * is `ambiguous`, and empty otherwise.
+ */
+candidates: ErrorTraceCandidate[]
+/**
+ * How many further candidates a presentation cap withheld.
+ * `candidates.len() + candidates_omitted` is the true match count, so an
+ * `ambiguous` frame never understates how ambiguous it is.
+ */
+candidates_omitted: number
+/**
+ * Human-readable statement of what happened to this frame.
+ */
+reason: string
+}
+/**
+ * One definition a frame's identifier could name.
+ */
+export interface ErrorTraceCandidate {
+/**
+ * Root-relative file declaring the definition.
+ */
+file: string
+/**
+ * The exported name. For a member match this is the owning export.
+ */
+symbol: string
+/**
+ * The member name, when the frame's identifier named a member of
+ * `symbol` rather than `symbol` itself. Absent for a direct export match.
+ */
+member?: (string | null)
+/**
+ * What kind of definition this is: `export`, or the member kind
+ * (`class-method`, `class-property`, `enum-member`, `store-member`,
+ * `namespace-member`).
+ */
+kind: string
+/**
+ * 1-based declaration line of the definition's identifier. Absent when the
+ * source file could not be read; never guessed.
+ */
+line?: (number | null)
+}
+/**
+ * Per-outcome totals for an [`ErrorTrace`].
+ *
+ * `resolved + ambiguous + not_found + not_attempted == frames`, and
+ * `in_project + node_modules + out_of_corpus == frames`. Both identities hold
+ * on every run, so a caller can verify that nothing was dropped.
+ */
+export interface ErrorTraceCounts {
+/**
+ * Frames reported in `frames`.
+ */
+frames: number
+/**
+ * Frames a cap withheld from `frames`. Their outcomes are NOT counted in
+ * the fields below, which describe the reported frames only.
+ */
+frames_omitted: number
+/**
+ * Frames whose file resolved to project source.
+ */
+in_project: number
+/**
+ * Frames whose file lives under an installed dependency tree.
+ */
+node_modules: number
+/**
+ * Frames outside the analysed corpus, including frames with no location.
+ */
+out_of_corpus: number
+/**
+ * Frames that matched exactly one definition.
+ */
+resolved: number
+/**
+ * Frames that matched more than one definition.
+ */
+ambiguous: number
+/**
+ * Frames the graph was asked about and could not name.
+ */
+not_found: number
+/**
+ * Frames the graph was never asked about.
+ */
+not_attempted: number
+/**
+ * Non-blank input lines that were neither recognised as a frame nor taken
+ * as `header`. A trace that is entirely unrecognised reports zero frames
+ * and a non-zero count here, rather than looking like an empty trace.
+ */
+unparsed_lines: number
+}
+/**
  * Envelope emitted by `fallow --format review-github` / `review-gitlab`.
  */
 export interface ReviewEnvelopeOutput {
@@ -11117,8 +11349,10 @@ project_surfacing?: (ImpactCounts | null)
  */
 project_trend?: (TrendSummary | null)
 /**
- * Recorded gate runs grouped by source. Absent when no gate run was ever
- * recorded. Local provenance, never an adoption metric.
+ * Recorded gate runs grouped by source, over the same bounded window of
+ * recorded runs `record_count` reports. A floor, not a lifetime total, and
+ * absent when no run in that window carries a gate source. Local
+ * provenance, never an adoption metric.
  */
 gate_runs?: (GateRunCounts | null)
 /**
@@ -11205,8 +11439,14 @@ current_total: number
 /**
  * Recorded gate runs grouped by the gate that produced them. Local
  * provenance only: the store never leaves the machine, so this answers "where
- * do my gate runs come from", never "how widely is fallow adopted". Absent
- * when the store holds no gate run at all.
+ * do my gate runs come from", never "how widely is fallow adopted".
+ *
+ * Counted over the recorded runs the store still holds, which is the same
+ * window `record_count` reports. The store keeps a bounded number of runs and
+ * drops the oldest, so on a long-lived project these are the shape of recent
+ * gate activity, not a lifetime total: read them as a floor. Absent when no
+ * run in that window carries a gate source, which is not the same as "no gate
+ * ever ran here".
  */
 export interface GateRunCounts {
 /**

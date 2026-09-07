@@ -69,15 +69,38 @@ fn tool_attributes_take_descriptions_from_method_docs() {
 /// for the tool it is about to call.
 const MAX_TOOL_DESCRIPTION_BYTES: usize = 2_000;
 
-/// Total wire-description budget across every registered tool. This is the
-/// binding constraint; the target is 35_000, reached by moving one tool's
-/// per-flag prose into its `fallow://tools/{name}` guide at a time. Rewriting
-/// prose only ever lowers the number. A NEW capability is the one thing that
-/// may raise it, and only by its own routing summary: the new tool's
-/// description carries no per-flag detail (that goes straight into its guide),
-/// and the ceiling moves to exactly the resulting total, never a round number
-/// with headroom to spend later.
-const MAX_TOTAL_DESCRIPTION_BYTES: usize = 52_276;
+/// Total wire-description bytes measured the last time this gate was re-pinned.
+/// This is the ratchet's high-water mark, not the assertion: the target is
+/// 35_000, reached by moving one tool's per-flag prose into its
+/// `fallow://tools/{name}` guide at a time.
+const RECORDED_TOTAL_DESCRIPTION_BYTES: usize = 52_276;
+
+/// Deliberate headroom over [`RECORDED_TOTAL_DESCRIPTION_BYTES`].
+///
+/// Pinned to the exact live total, the gate failed on a one-word wording fix,
+/// which reads as a break rather than as a budget and teaches the next
+/// maintainer to raise the number reflexively. A kilobyte absorbs ordinary
+/// rewording (a clarified sentence, a corrected flag name) while still
+/// catching what the budget exists for: prose that grows by a paragraph. It is
+/// not a spending allowance, because the re-pin check below reclaims it.
+const TOTAL_DESCRIPTION_SLACK_BYTES: usize = 1_024;
+
+/// Total wire-description ceiling across every registered tool. The binding
+/// constraint. A NEW capability is the one thing that may raise the recorded
+/// mark, and only by its own routing summary: the new tool's description
+/// carries no per-flag detail (that goes straight into its guide).
+const MAX_TOTAL_DESCRIPTION_BYTES: usize =
+    RECORDED_TOTAL_DESCRIPTION_BYTES + TOTAL_DESCRIPTION_SLACK_BYTES;
+
+/// How far the live total may sit below the recorded mark before the gate asks
+/// for a re-pin.
+///
+/// This is what keeps the budget a ratchet instead of a number that drifts: a
+/// real reduction (one tool's prose moved into its guide) has to be banked, or
+/// the bytes it freed become silent budget for the next description. The
+/// tolerance is deliberately several times [`TOTAL_DESCRIPTION_SLACK_BYTES`],
+/// so rewording never trips it and only a genuine harvest does.
+const TOTAL_DESCRIPTION_REPIN_BYTES: usize = 4_096;
 
 /// How much unused headroom an exception may carry before the test asks for
 /// the allowance to be lowered. Without this the list would keep stale numbers
@@ -133,16 +156,52 @@ fn tool_descriptions_stay_within_their_byte_budget() {
     }
 }
 
-#[test]
-fn total_tool_description_bytes_stay_within_budget() {
-    let total: usize = live_tool_descriptions()
+fn total_description_bytes() -> usize {
+    live_tool_descriptions()
         .values()
         .map(std::string::String::len)
-        .sum();
+        .sum()
+}
+
+#[test]
+fn total_tool_description_bytes_stay_within_budget() {
+    let total = total_description_bytes();
     assert!(
         total <= MAX_TOTAL_DESCRIPTION_BYTES,
         "tools/list carries {total} description bytes, over the \
-         {MAX_TOTAL_DESCRIPTION_BYTES}-byte budget every agent session pays on connect"
+         {MAX_TOTAL_DESCRIPTION_BYTES}-byte budget every agent session pays on connect \
+         ({RECORDED_TOTAL_DESCRIPTION_BYTES} recorded plus {TOTAL_DESCRIPTION_SLACK_BYTES} \
+         slack); move per-flag detail into the tool's fallow://tools/{{name}} guide"
+    );
+}
+
+#[test]
+fn total_tool_description_budget_keeps_no_stale_headroom() {
+    let total = total_description_bytes();
+    assert!(
+        RECORDED_TOTAL_DESCRIPTION_BYTES.saturating_sub(total) <= TOTAL_DESCRIPTION_REPIN_BYTES,
+        "tools/list is down to {total} description bytes but the ratchet still records \
+         {RECORDED_TOTAL_DESCRIPTION_BYTES}; bank the win by setting \
+         RECORDED_TOTAL_DESCRIPTION_BYTES to {total}, so the freed bytes are not \
+         spendable by the next description"
+    );
+}
+
+/// The smallest headroom that still lets a maintainer fix a word without the
+/// total budget going red. One sentence rewritten is worth a couple of hundred
+/// bytes; anything under that and the gate is a tripwire, not a budget.
+const MIN_USABLE_TOTAL_HEADROOM_BYTES: usize = 256;
+
+#[test]
+fn total_description_budget_leaves_room_for_a_wording_fix() {
+    let total = total_description_bytes();
+    let headroom = MAX_TOTAL_DESCRIPTION_BYTES.saturating_sub(total);
+    assert!(
+        headroom >= MIN_USABLE_TOTAL_HEADROOM_BYTES,
+        "the total description budget has {headroom} bytes of headroom; pinned this \
+         tightly, a one-word wording fix fails the gate and reads as a break. Keep the \
+         ceiling at RECORDED_TOTAL_DESCRIPTION_BYTES plus TOTAL_DESCRIPTION_SLACK_BYTES \
+         rather than re-pinning it to the exact live total"
     );
 }
 

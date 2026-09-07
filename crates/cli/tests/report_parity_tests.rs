@@ -618,22 +618,36 @@ fn changed_project(label: &str) -> tempfile::TempDir {
         assert!(status.success(), "git {args:?}");
     };
 
-    std::fs::create_dir(root.join("src")).expect("create source directory");
+    std::fs::create_dir_all(root.join("src/core")).expect("create core directory");
+    std::fs::create_dir_all(root.join("src/ui")).expect("create ui directory");
     std::fs::write(
         root.join("package.json"),
         format!(r#"{{"name":"rerun-{label}","private":true,"main":"src/index.ts"}}"#),
     )
     .expect("write manifest");
+    // Two zones, so the changed commit below can cross one. Without a zoned
+    // project the decision surface has no coupling candidate to rank.
+    std::fs::write(
+        root.join("fallow.toml"),
+        "[[boundaries.zones]]\nname = \"core\"\npatterns = [\"src/core/**\"]\n\n\
+         [[boundaries.zones]]\nname = \"ui\"\npatterns = [\"src/ui/**\"]\n",
+    )
+    .expect("write config");
     std::fs::write(
         root.join("src/index.ts"),
-        "import { helper } from './helper';\nexport const entry = helper();\n",
+        "export { helper } from './core/helper';\n",
     )
     .expect("write entrypoint");
     std::fs::write(
-        root.join("src/helper.ts"),
+        root.join("src/core/helper.ts"),
         "export const helper = (): number => 1;\n",
     )
     .expect("write helper");
+    std::fs::write(
+        root.join("src/ui/view.ts"),
+        "import { helper } from '../core/helper';\nexport const view = (): number => helper();\n",
+    )
+    .expect("write view");
     git(&["init", "--quiet", "--initial-branch=main"]);
     git(&["add", "."]);
     git(&[
@@ -645,6 +659,32 @@ fn changed_project(label: &str) -> tempfile::TempDir {
         "base",
     ]);
 
+    // The second commit is deliberately decision-bearing: it widens the public
+    // API, crosses the core -> ui boundary, and declares a new dependency, so
+    // the ranked `decisions[]` list this gate compares is not empty. A rerun
+    // comparison over an empty list proves nothing about ranking stability.
+    std::fs::write(
+        root.join("package.json"),
+        format!(
+            r#"{{"name":"rerun-{label}","private":true,"main":"src/index.ts","dependencies":{{"left-pad":"^1.3.0"}}}}"#
+        ),
+    )
+    .expect("rewrite manifest");
+    std::fs::write(
+        root.join("src/index.ts"),
+        "export { helper, second, third, usesView } from './core/helper';\n\
+         export { view } from './ui/view';\n",
+    )
+    .expect("widen entrypoint");
+    std::fs::write(
+        root.join("src/core/helper.ts"),
+        "import { view } from '../ui/view';\nimport leftPad from 'left-pad';\n\
+         export const helper = (): string => leftPad('1', 2);\n\
+         export const second = (): number => 2;\n\
+         export const third = (): number => 3;\n\
+         export const usesView = (): number => view();\n",
+    )
+    .expect("write changed file");
     std::fs::write(
         root.join("src/changed.ts"),
         "export const changed = (value: number): number => value + 1;\nexport const alsoDead = 2;\n",
@@ -715,6 +755,19 @@ fn decision_surface_rerun_is_byte_identical() {
         root,
         "json",
         &["--base", "HEAD~1"],
+    );
+
+    // Coverage guard. A rerun comparison over an empty `decisions[]` array
+    // compares two empty lists and reports green whatever the ranking does, so
+    // pin that the fixture still produces a ranked list to compare.
+    let surface: serde_json::Value =
+        serde_json::from_slice(&run(root, &args).stdout).expect("decision-surface JSON");
+    let ranked = surface["decisions"]
+        .as_array()
+        .expect("decision-surface carries a decisions array");
+    assert!(
+        ranked.len() >= 2,
+        "the rerun gate needs at least two ranked decisions to compare an order: {surface}"
     );
 
     assert_rerun_is_byte_identical(root, &args, &[], "decision-surface");

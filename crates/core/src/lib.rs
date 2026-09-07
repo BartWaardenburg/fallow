@@ -51,7 +51,7 @@ use fallow_config::{
     find_undeclared_workspaces_with_ignores,
 };
 use fallow_types::cache_rejection::CacheRejection;
-use fallow_types::trace::PipelineTimings;
+use fallow_types::trace::{EntryPointSpans, PipelineTimings};
 use rayon::prelude::*;
 use results::AnalysisResults;
 use rustc_hash::FxHashSet;
@@ -660,6 +660,7 @@ impl<'a> AnalysisSession<'a> {
             modules,
             entry_point_count: entry_points.count,
             entry_points_ms: entry_points.elapsed_ms,
+            entry_point_spans: entry_points.spans,
             resolve_ms: resolved.elapsed_ms,
             graph_ms: graph.elapsed_ms,
             analyze_ms: analysis.elapsed_ms,
@@ -839,6 +840,12 @@ impl DeadCodeEntryPoints {
     #[must_use]
     pub fn elapsed_ms(&self) -> f64 {
         self.inner.elapsed_ms
+    }
+
+    /// Sub-phase attribution for the discovery stage this result timed.
+    #[must_use]
+    pub fn spans(&self) -> EntryPointSpans {
+        self.inner.spans
     }
 }
 
@@ -1062,6 +1069,7 @@ struct TimedEntryPoints {
     summary: results::EntryPointSummary,
     count: usize,
     elapsed_ms: f64,
+    spans: EntryPointSpans,
 }
 
 struct TimedResolvedModules {
@@ -1097,7 +1105,7 @@ struct TimedAnalysis {
 
 fn discover_analysis_entry_points(input: &AnalysisCoreSharedInput<'_>) -> TimedEntryPoints {
     let t = Instant::now();
-    let entry_points = discover_all_entry_points(DiscoverAllEntryPointsInput {
+    let (entry_points, spans) = discover_all_entry_points(DiscoverAllEntryPointsInput {
         config: input.config,
         files: input.files,
         workspaces: input.workspaces,
@@ -1114,6 +1122,7 @@ fn discover_analysis_entry_points(input: &AnalysisCoreSharedInput<'_>) -> TimedE
         summary,
         count,
         elapsed_ms,
+        spans,
     }
 }
 
@@ -1346,6 +1355,7 @@ struct OwnedAnalysisCore {
     modules: Vec<extract::ModuleInfo>,
     entry_point_count: usize,
     entry_points_ms: f64,
+    entry_point_spans: EntryPointSpans,
     resolve_ms: f64,
     graph_ms: f64,
     analyze_ms: f64,
@@ -1366,6 +1376,7 @@ fn full_pipeline_profile(
         parse_ms: parse.parse_ms,
         cache_ms: parse.cache_ms,
         entry_points_ms: core.entry_points_ms,
+        entry_point_spans: core.entry_point_spans,
         resolve_ms: core.resolve_ms,
         graph_ms: core.graph_ms,
         analyze_ms: core.analyze_ms,
@@ -1391,6 +1402,7 @@ struct PipelineProfile {
     parse_ms: f64,
     cache_ms: f64,
     entry_points_ms: f64,
+    entry_point_spans: EntryPointSpans,
     resolve_ms: f64,
     graph_ms: f64,
     analyze_ms: f64,
@@ -1507,6 +1519,7 @@ fn retained_pipeline_timings(retain: bool, profile: &PipelineProfile) -> Option<
         graph_cache_rejection: profile.graph_cache_rejection,
         cache_update_ms: profile.cache_ms,
         entry_points_ms: profile.entry_points_ms,
+        entry_point_spans: profile.entry_point_spans,
         entry_point_count: profile.entry_point_count,
         resolve_imports_ms: profile.resolve_ms,
         build_graph_ms: profile.graph_ms,
@@ -2156,7 +2169,9 @@ fn analyze_ci_scripts(
 /// Discover all entry points from static patterns, workspaces, plugins, and infrastructure.
 fn discover_all_entry_points(
     input: DiscoverAllEntryPointsInput<'_>,
-) -> discover::CategorizedEntryPoints {
+) -> (discover::CategorizedEntryPoints, EntryPointSpans) {
+    let mut spans = EntryPointSpans::default();
+    let mut mark = Instant::now();
     let mut entry_points = discover::CategorizedEntryPoints::default();
     let root_discovery = discover::discover_entry_points_with_warnings_from_pkg(
         input.config,
@@ -2164,6 +2179,7 @@ fn discover_all_entry_points(
         input.root_pkg,
         input.workspaces.is_empty(),
     );
+    spans.root_ms = split_ms(&mut mark);
 
     let workspace_pkg_by_root: rustc_hash::FxHashMap<std::path::PathBuf, &PackageJson> = input
         .workspace_pkgs
@@ -2211,21 +2227,43 @@ fn discover_all_entry_points(
     discover::warn_skipped_entry_summary(&skipped_entries);
     entry_points.extend_runtime(ws_entries);
     entry_points.extend_support(ws_support_entries);
+    spans.workspaces_ms = split_ms(&mut mark);
 
-    let plugin_entries =
-        discover::discover_plugin_entry_point_sets(input.plugin_result, input.config, input.files);
-    entry_points.extend(plugin_entries);
+    let plugin_entries = discover::discover_plugin_entry_point_sets_timed(
+        input.plugin_result,
+        input.config,
+        input.files,
+    );
+    spans.plugin_glob_build_ms = plugin_entries.build_ms;
+    spans.plugin_glob_match_ms = plugin_entries.match_ms;
+    entry_points.extend(plugin_entries.entries);
+    spans.plugins_ms = split_ms(&mut mark);
 
     let infra_entries = discover::discover_infrastructure_entry_points(&input.config.root);
     entry_points.extend_runtime(infra_entries);
+    spans.infrastructure_ms = split_ms(&mut mark);
 
     if !input.config.dynamically_loaded.is_empty() {
         let dynamic_entries =
             discover::discover_dynamically_loaded_entry_points(input.config, input.files);
         entry_points.extend_runtime(dynamic_entries);
     }
+    spans.dynamic_ms = split_ms(&mut mark);
 
-    entry_points.dedup()
+    let deduped = entry_points.dedup();
+    spans.dedup_ms = split_ms(&mut mark);
+    (deduped, spans)
+}
+
+/// Elapsed milliseconds since `mark`, resetting `mark` to now.
+///
+/// Consecutive calls carve one stage into adjacent spans with no gap between
+/// them, so the spans sum to the stage they subdivide.
+fn split_ms(mark: &mut Instant) -> f64 {
+    let now = Instant::now();
+    let elapsed = now.duration_since(*mark).as_secs_f64() * 1000.0;
+    *mark = now;
+    elapsed
 }
 
 /// Summarize entry points by source category for user-facing output.

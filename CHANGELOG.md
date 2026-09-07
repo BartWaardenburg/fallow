@@ -7,6 +7,233 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`fallow trace --path <FROM> <TO>` reports how one module reaches
+  another.** The symbol positional is now optional and mutually exclusive with
+  `--path`, which walks the import graph and returns the shortest chain of
+  imports between two modules. Type-only hops are reported with
+  `type_only: true` rather than skipped, because an `import type` chain is a
+  real compile-time coupling. Two answers are not errors and both report
+  `hops: 0`: an unreachable pair (`reachable: false`) and the same module on
+  both sides (`reachable: true`), so branch on `reachable`, never on the hop
+  count. Equal-length routes resolve to the same route on every run. The
+  payload carries its own `schema_version`, and the question is reachable over
+  MCP as `trace_import_path`.
+
+- **`fallow doctor` checks installed dependencies and cache reuse.** Two
+  advisory checks are appended after the existing five, so the earlier checks
+  keep their positions. `dependencies` warns when the project has no
+  `node_modules` tree and is not a Deno project that runs without one, which
+  is the state where package `exports` cannot be read, plugins that activate
+  on an installed package stay inactive, and dependency classification
+  degrades. `cache` warns when a persisted extraction cache exists but would
+  not be reused, naming the reason and the on-disk size; a project with no
+  cache yet passes. Neither check can fail, so a project without installed
+  dependencies now reports the aggregate `warn` where it reported `pass`,
+  still exiting 0. The envelope moves to `schema_version` 2.
+
+- **Duplication output can leave the source text out.** `fallow dupes
+  --no-fragments`, and the MCP `find_dupes` tool through its new
+  `include_fragments` parameter, return location-only clone instances. Each
+  instance still carries `file`, `start_line`, `end_line`, `start_col`, and
+  `end_col`, which address the same code, and fingerprints, suggested names,
+  and refactoring suggestions are computed before serialization, so dropping
+  the text changes no other value. The CLI keeps emitting fragments by
+  default; the MCP parameter defaults to false, where the text was most of
+  what an agent paid for.
+
+- **`fallow impact` records which gate produced a run.** The local store keeps
+  the `--gate-marker` value the installed gates pass (`agent`, `pre-commit`,
+  `ci`) instead of only a boolean, so the report can say where your gate runs
+  come from. JSON gains an optional `gate_runs` object with a run count per
+  source, absent when the store holds none, and the human report gains one
+  line naming the non-zero sources. The store is local, never leaves the
+  machine, and is never written in CI, so these counts are run provenance and
+  not an adoption measure.
+
+- **CLI failures carry a machine-readable code and a remediation hint.** The
+  `--format json` error document may now carry `code` (a stable identifier
+  such as `unknown_issue_type`) and `help` beside `message` and `exit_code`,
+  and human output appends the hint on its own `hint:` line. Commands whose
+  failure already had a structured code stop flattening the three fields into
+  one message string. Both fields are omitted when the failure has neither, so
+  every unchanged failure path is byte-identical.
+
+- **An unrecognized selector suggests the nearest registered one.** `fallow
+  explain <token>` and the Code Mode `fallow.run(tool, ...)` host call answer
+  an unknown name with the registered token one or two edits away instead of a
+  fixed example list. The matcher is the bounded, deterministic one config
+  rule-name typo detection already uses, and it stays silent when nothing is
+  close, so a novel token keeps the previous message. Exit codes are
+  unchanged.
+
+### Changed
+
+- **The three analysis caches change format together, so the first run after
+  upgrading is cold.** Extraction cache entries now carry the inode change
+  time beside the modification time, record whether complexity was actually
+  extracted, record what a degraded parse produced, and key on the
+  root-relative path with the root stored in the header; the graph cache keys
+  its manifest on file content rather than modification time. Older blobs are
+  refused on version and rebuilt, and nothing about the cache location, the
+  `cache` config field, or `--no-cache` changes. Two consequences are worth
+  naming: a warm tree copied with `cp -Rp` to a sibling path is reused instead
+  of reparsed, and on Windows, where the inode change time is unavailable, the
+  metadata-only fast path is disabled and every entry is read and
+  content-hashed before it is reused.
+
+- **A detector that found nothing says whether it was asked to look.** A run
+  with no boundary zones and a run whose zones are all clean both reported
+  zero boundary violations, and the same held for rule packs. Both now record
+  a `boundaries-not-configured` or `rule-packs-not-configured` workspace
+  diagnostic, so the zero can be read as "nothing configured" rather than
+  "nothing found". A project that sets `boundary-violation` or
+  `policy-violation` to `off` chose that silence and is not reported. A
+  project with no installed dependency tree is reported the same way, as
+  `node-modules-missing`.
+
+- **`workspace_diagnostics[]` has a stable order.** Analysis-stage diagnostics
+  are recorded from a parallel detector pool, so their arrival order followed
+  the thread schedule: the same command over the same commit emitted them in a
+  different order at one worker than at eight. They are now ordered by path,
+  then kind, then message, at the single point every consumer reads them. The
+  list a section captured from its own discovery walk keeps its meaningful
+  order and still comes first. A consumer that pinned the old positional order
+  should key on `kind` and `path` instead.
+
+- **Churn is measured against the commit, not the wall clock.** Recency
+  weighting, ownership staleness, and the churn window read the system clock
+  at three separate points, so `weighted_commits` drifted on every run and
+  `stale_days` flipped its fixed thresholds as the day rolled over. All three
+  now resolve one reference instant per run from HEAD's committer timestamp,
+  and the window is passed to git as an absolute epoch instead of a phrase git
+  re-resolved against the wall clock, so two runs over one commit produce the
+  same churn-derived numbers on any machine. `FALLOW_CLOCK_EPOCH` pins the
+  instant explicitly. Imported churn in a non-git project has no commit to
+  read and warns that it fell back to the wall clock. The on-disk churn cache
+  is keyed on the window duration rather than a resolved date, and a warm load
+  prunes to the same cutoff a cold history read applies, so a cache minted
+  months ago no longer reports history a fresh run excludes.
+
+- **The review brief stops publishing a component nothing measured.** The
+  focus score's `security_taint` is omitted from the wire while it is zero,
+  the treatment `runtime` already had. It is permanently zero today, since no
+  security pass is threaded onto the brief path, and publishing it as a
+  required field made it read as a measurement that found nothing rather than
+  as something nothing measured. A consumer that sums the components must read
+  an absent component as zero; `total` still equals the sum of every component
+  that ran. Removing a wire field bumps the brief `schema_version` from 8 to
+  9.
+
+- **The MCP tool list stops carrying detail an agent pays for on connect.**
+  Every `tools/list` byte is resident in every session, whether or not the
+  tool is called. The `inspect_similar_code` snapshot parameter no longer
+  inlines the candidate-snapshot shape, which was its largest input schema:
+  that shape is published once as the `fallow://schema/similar-code-snapshot`
+  resource, and a snapshot that is not a candidate snapshot is now refused by
+  the handler with a code, `exit_code: 2`, and a `help` pointing at the
+  resource, rather than a raw parser message. Per-flag prose is moving the
+  same way, into a new `fallow://tools/{name}` guide resource an agent reads
+  once for the tool it is about to call; `check_health` is the first tool
+  split this way, with its content preserved and relocated. A caller passing
+  the snapshot back unchanged, as documented, sees no difference. The six
+  parameters nearly every tool carries (`root`, `config`,
+  `allow_remote_extends`, `workspace`, `no_cache`, `threads`) now describe
+  themselves in one sentence, worded identically everywhere they appear; only
+  the prose changed, and no request that was accepted before is refused now.
+
+- **An MCP response over the byte cap is a bounded answer, not an empty
+  error.** It used to return a contentless tool error. It now returns a
+  success result whose body carries `ok: false`, `truncated: true`,
+  `result_bytes`, `result_preview`, `limit_bytes`, and `stream`, keeping the
+  existing error code, so a caller learns what the stream actually produced
+  and where it was cut. The field names match the Code Mode result refusal, so
+  an agent parses one shape on both surfaces. Subprocess-backed tools also
+  accept an optional `max_output_bytes` per call, which may only lower the
+  default.
+
+- **The GitHub Action and the GitLab template scope their cache to the
+  analyzed root.** Two roots in one repository shared one cache entry, so a
+  matrix over roots could restore a sibling's cache. The cache key and the
+  restore keys now include the root.
+
+### Fixed
+
+- **A file that does not parse is reported instead of counted as empty.** A
+  source file that failed to parse silently yielded zero imports, so a broken
+  importer made its healthy import target look unreachable and the target was
+  reported as dead. The failure is now recorded as a `source-parse-degraded`
+  workspace diagnostic carrying the error count and whether the parser
+  panicked. It is reported and never gated on: the parser also emits
+  recoverable errors for valid syntax newer than it, so gating on a degraded
+  parse would mute real findings project-wide.
+
+  Where a degraded parse can distort a reachability verdict, the affected
+  `unused_files[]` and `unused_exports[]` entries carry the caveat themselves,
+  in an optional `confidence[]` array, so a reader who never scrolls back to
+  the diagnostics list still sees it. The array is advisory: it never
+  withholds, filters, downgrades, or re-severities a finding, and never changes
+  an exit code. It is omitted when empty, so a project that parses cleanly is
+  byte-identical.
+
+- **A size-preserving edit with a restored modification time no longer serves
+  a stale warm result.** The extraction fingerprint compared modification time
+  and size only, so a rewrite that preserved both read back the previous
+  file's analysis, up to and including an auto-fixable suggestion to remove an
+  export the new bytes still use. The fingerprint carries the inode change
+  time now, which a content rewrite always moves.
+
+- **`fallow dupes --top` no longer reports two scopes in one object.**
+  `--top N` truncated `clone_groups[]` and then rewrote `stats.clone_groups`
+  and `stats.clone_instances` from the truncated array, while
+  `stats.files_with_clones` and `stats.duplication_percentage` beside them
+  stayed corpus-wide. All four now describe the corpus the run measured, and
+  two required integers say what the presentation cap did:
+  `clone_groups_shown` is the length of the array and `clone_groups_omitted`
+  is what was withheld, so the two always sum to `stats.clone_groups` and are
+  `0` on an untruncated run. Scope filters still recompute `stats` against the
+  narrowed corpus and therefore omit nothing. The `dupes` envelope moves to
+  schema version 10 and the programmatic duplication envelope to 4. Because
+  the clone-instance shape no longer guarantees the fragment text, the `audit`
+  envelope moves to 11 and the bare combined envelope to 12; neither of those
+  paths can suppress the text today, so their wire is byte-identical.
+
+  The human `--summary` block had the same split: `Clone families` and `Clone
+  groups` counted the rendered vectors while `Duplicated lines` and
+  `Duplication rate` beside them described the corpus. It now names how many
+  groups a display limit withheld and which total the two measured numbers
+  cover, so the four aligned numbers can no longer be read as one scope.
+
+- **A complexity run after a dead-code run reuses the cache.** An empty
+  complexity vector was treated as a not-cached sentinel, but a dead-code run
+  writes one legitimately, and so does a file that genuinely has no functions.
+  Cache entries record whether the run that wrote them actually extracted
+  complexity, so a complexity consumer hits on a rich entry and a
+  complexity-blind run cannot downgrade one.
+
+- **`fallow agent status` reports a gate that would not gate.** An installed
+  gate whose script was written by an older fallow, and one whose run-time
+  prerequisites are missing, both rendered as `installed`. Both report `stale`
+  now, with the reason in `detail` and a matching entry in `next_actions[]`:
+  `gate-requires-jq` for the missing prerequisite, which makes the script exit
+  0 after one stderr line that a Claude Code PreToolUse hook never surfaces,
+  and `gate-path-version` for a gate that runs the `fallow` on PATH rather
+  than the build that installed it. No field was added, removed, or retyped
+  and `state` gained no value, but a consumer keyed on `installed` versus
+  `stale` now sees `stale` where the gate would not have gated, so the three
+  agent envelopes move to `schema_version` 2.
+
+- **An empty half of a `FILE:SYMBOL` selector fails with the format
+  diagnosis.** `inspect --symbol`, `trace <target>`, `check --trace`, and
+  `check --symbol-impact` each carried their own split and the emptiness guard
+  had drifted, so `check --trace ":"` parsed into two empty halves and failed
+  later with an error naming neither. One parser answers for every selector
+  now. The exit code is 2 either way, so only the message changed. Selectors
+  still split on the last colon, so Windows drive letters and
+  workspace-qualified paths keep theirs, and surviving halves are still passed
+  through verbatim.
+
 ## [3.23.0] - 2026-09-07
 
 ### Added

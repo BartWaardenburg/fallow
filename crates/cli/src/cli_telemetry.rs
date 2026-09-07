@@ -260,6 +260,7 @@ pub fn telemetry_workflow_for_command(
             Command::Inspect { .. }
             | Command::Guard { .. }
             | Command::Trace { .. }
+            | Command::TraceError { .. }
             | Command::List { .. }
             | Command::Workspaces
             | Command::Suppressions { .. }

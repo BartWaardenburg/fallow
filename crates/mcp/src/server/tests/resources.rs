@@ -396,6 +396,28 @@ fn unknown_uri_is_a_structured_resource_not_found_error() {
 }
 
 #[test]
+fn near_miss_uri_names_the_resource_the_caller_meant() {
+    let error = read_resource("fallow://task-matrx").expect_err("unknown uri must fail");
+    assert!(
+        error
+            .message
+            .contains("did you mean 'fallow://task-matrix'?"),
+        "near-miss uri should be named: {}",
+        error.message
+    );
+}
+
+#[test]
+fn novel_uri_stays_silent_rather_than_guessing() {
+    let error = read_resource("file:///etc/passwd").expect_err("unknown uri must fail");
+    assert!(
+        !error.message.contains("did you mean"),
+        "a completely novel uri must not get a misleading suggestion: {}",
+        error.message
+    );
+}
+
+#[test]
 fn unknown_issue_type_lists_nearest_matches() {
     let error = read_resource("fallow://explain/unused-exprt").expect_err("unknown issue type");
     assert_eq!(error.code, ErrorCode::RESOURCE_NOT_FOUND);

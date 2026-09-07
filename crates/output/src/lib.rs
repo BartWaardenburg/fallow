@@ -365,7 +365,7 @@ pub use suppressions::{
     SuppressionInventorySchemaVersion, SuppressionInventorySummary, SuppressionKindCount,
     build_suppression_inventory_output, serialize_suppression_inventory_json_output,
 };
-pub use trace_envelopes::serialize_trace_json_output;
+pub use trace_envelopes::{serialize_trace_error_json_output, serialize_trace_json_output};
 pub use type_aware_envelopes::{
     TYPE_AWARE_STATUS_SCHEMA_VERSION, TypeAwareStatusOutput,
     serialize_type_aware_status_json_output,

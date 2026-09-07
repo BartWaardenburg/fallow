@@ -355,8 +355,12 @@ fn unknown_uri_error(uri: &str) -> McpError {
         .filter(|info| info.template)
         .map(|info| info.uri)
         .collect();
+    let suggestion = fallow_api::closest_match(uri, known.iter().copied())
+        .map_or_else(String::new, |nearest| {
+            format!("; did you mean '{nearest}'?")
+        });
     McpError::resource_not_found(
-        format!("unknown fallow resource '{uri}'"),
+        format!("unknown fallow resource '{uri}'{suggestion}"),
         Some(serde_json::json!({
             "uri": uri,
             "known_uris": known,

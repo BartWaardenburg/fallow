@@ -10,6 +10,7 @@ mod members;
 mod misplaced_directive;
 mod mixed_barrel;
 mod package_json_utils;
+mod parse_confidence;
 mod policy;
 mod predicates;
 mod prop_drilling;
@@ -836,6 +837,11 @@ pub(crate) fn find_dead_code_full(
         collect_usages,
         results: &mut results,
     });
+
+    // Last, so every finding the detectors and the post-detection passes put
+    // into the two arrays carries the caveat, including ones moved between
+    // arrays by reclassification.
+    parse_confidence::DegradedParseContext::new(graph, modules).annotate(&mut results);
 
     results.sort();
 

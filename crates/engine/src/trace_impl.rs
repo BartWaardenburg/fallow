@@ -23,7 +23,7 @@ use crate::graph::{
 ///
 /// Handles monorepo scenarios where module paths may be canonicalized
 /// (symlinks resolved) while user-provided paths are not.
-fn path_matches(module_path: &Path, root: &Path, user_path: &str) -> bool {
+pub fn path_matches(module_path: &Path, root: &Path, user_path: &str) -> bool {
     let user_path_norm = user_path.replace('\\', "/");
     let rel = module_path.strip_prefix(root).unwrap_or(module_path);
     let rel_str = rel.to_string_lossy().replace('\\', "/");
@@ -1048,7 +1048,7 @@ fn resolve_import_path_hops(
 }
 
 /// Relativize a module path against the project root, forward-slashed.
-fn relativize(path: &Path, root: &Path) -> String {
+pub fn relativize(path: &Path, root: &Path) -> String {
     path.strip_prefix(root)
         .unwrap_or(path)
         .to_string_lossy()

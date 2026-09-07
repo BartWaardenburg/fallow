@@ -71,6 +71,10 @@ impl DeadCodeEntryPoints {
     pub fn elapsed_ms(&self) -> f64 {
         self.inner.elapsed_ms()
     }
+
+    pub fn spans(&self) -> fallow_types::trace::EntryPointSpans {
+        self.inner.spans()
+    }
 }
 
 pub struct DeadCodeResolvedModules {
@@ -328,6 +332,7 @@ pub fn dead_code_pipeline_profile(
             graph_cache_rejection: None,
             cache_update_ms: parse_metrics.cache_ms,
             entry_points_ms: entry_points.elapsed_ms(),
+            entry_point_spans: entry_points.spans(),
             entry_point_count: entry_points.count(),
             resolve_imports_ms: resolved.elapsed_ms,
             build_graph_ms: graph.elapsed_ms,

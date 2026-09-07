@@ -88,6 +88,12 @@ pub struct CheckOutput {
     /// forward slashes; the array is omitted when empty. The same list is
     /// repeated on each top-level command's envelope so single-command
     /// consumers see it without having to look at a separate top-level field.
+    ///
+    /// A diagnostic here is advisory and never withholds a finding. Where a
+    /// `source-parse-degraded` entry can distort a reachability verdict, the
+    /// affected `unused_files[]` and `unused_exports[]` entries additionally
+    /// carry the caveat themselves in their own optional `confidence[]` array,
+    /// so a reader who never scrolls back up to this list still sees it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
     /// Read-only follow-up commands computed from this run's findings, emitted
@@ -983,7 +989,7 @@ mod tests {
     use super::*;
     use crate::{ComplexityViolation, ExceededThreshold, FindingSeverity, HealthFinding};
     use fallow_types::output_dead_code::{
-        UnusedExportFinding, UnusedFileFinding, UnusedTypeFinding,
+        ReachabilityConfidenceFlag, UnusedExportFinding, UnusedFileFinding, UnusedTypeFinding,
     };
     use fallow_types::results::{UnusedExport, UnusedFile};
     use fallow_types::workspace::WorkspaceDiagnosticKind;
@@ -1149,6 +1155,74 @@ mod tests {
 
         assert_eq!(value["kind"], "dead-code");
         assert_eq!(value["_meta"]["telemetry"]["analysis_run_id"], "run-check");
+    }
+
+    /// The degraded-parse caveat has to travel WITH the finding it can distort,
+    /// because a reader looking at a `delete-file` action never sees the
+    /// diagnostic at the other end of the envelope. It is advisory only: the
+    /// actions are untouched, and a clean finding stays byte-identical.
+    #[test]
+    fn reachability_confidence_is_absent_when_clean_and_named_when_flagged() {
+        let mut results = AnalysisResults::default();
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: "/project/src/clean.ts".into(),
+            }));
+        let mut flagged = UnusedFileFinding::with_actions(UnusedFile {
+            path: "/project/src/orphan.ts".into(),
+        });
+        flagged.confidence = vec![
+            ReachabilityConfidenceFlag::SourceParseDegraded,
+            ReachabilityConfidenceFlag::IncompleteImportGraph,
+        ];
+        results.unused_files.push(flagged);
+
+        let output = build_check_output(CheckOutputInput {
+            schema_version: 7,
+            version: "0.0.0".to_string(),
+            elapsed: Duration::from_millis(1),
+            results,
+            config_fixable: false,
+            meta: None,
+            workspace_diagnostics: Vec::new(),
+            next_steps: Vec::new(),
+        });
+        let value = serialize_check_json_output(output, RootEnvelopeMode::Tagged, None)
+            .expect("dead-code output should serialize");
+
+        let entries = value["unused_files"]
+            .as_array()
+            .expect("unused_files array")
+            .clone();
+        let find = |name: &str| {
+            entries
+                .iter()
+                .find(|entry| {
+                    entry["path"]
+                        .as_str()
+                        .is_some_and(|path| path.ends_with(name))
+                })
+                .cloned()
+                .expect("finding present")
+        };
+
+        assert!(
+            find("clean.ts").get("confidence").is_none(),
+            "a finding with no caveat must keep the previous wire shape exactly"
+        );
+
+        let flagged = find("orphan.ts");
+        assert_eq!(
+            flagged["confidence"],
+            serde_json::json!(["source-parse-degraded", "incomplete-import-graph"]),
+            "both caveats are named on the wire, in declaration order"
+        );
+        assert_eq!(
+            flagged["actions"].as_array().map(Vec::len),
+            Some(2),
+            "the caveat is advisory: it never trims the finding's actions"
+        );
     }
 
     #[test]

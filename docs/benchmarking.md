@@ -48,6 +48,15 @@ Fast PR shards:
 
 - `fallow-core/analysis`: core parser, graph, cache, resolver, and duplicate
   detector paths.
+- `fallow-core/entry_point_discovery`: entry-point discovery on a monorepo
+  fixture, covering root-package discovery, per-workspace discovery, and
+  plugin-glob discovery (triggered by `crates/core/src/discover/` changes).
+  The package-shaped probes scale package count rather than source size,
+  because that half of the stage is filesystem probing per `package.json`
+  entry field. The plugin-glob probes scale pattern count instead: compiling
+  the pattern set and matching it against every discovered file is CPU work
+  that does no filesystem probing, and measurement on real projects put it at
+  roughly 78 to 88 percent of the stage.
 - `fallow-engine/dupes_detect`: duplicate-detection engine paths (triggered by
   `crates/engine/`, `crates/extract/`, and `crates/types/` changes).
 - `fallow-benchmarks/programmatic_stable`: deterministic programmatic API,
@@ -90,6 +99,7 @@ Use the smallest shard that matches the path being measured:
 - Add architecture-layer probes to the matching `component_*` shard.
 - Add engine-level duplicate-detection probes to `dupes_detect`; keep only
   broad parser, graph, and cache probes in `analysis`.
+- Add entry-point discovery probes to `entry_point_discovery`.
 - Add large synthetic or high-variance probes only to full shards.
 
 Keep benchmark names globally unique across `crates/*/benches/*.rs`.

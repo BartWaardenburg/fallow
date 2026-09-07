@@ -92,6 +92,8 @@ pub mod task_matrix;
 pub mod trace;
 /// Symbol-level trace-chain output contracts.
 pub mod trace_chain;
+/// Stack-trace frame resolution output contracts (`fallow trace-error`).
+pub mod trace_error;
 /// Workspace and source-discovery diagnostic data types
 /// (`WorkspaceDiagnostic`, `WorkspaceDiagnosticKind`). Re-exported by
 /// `fallow-config` for back-compat; embedded directly by `fallow-output` so

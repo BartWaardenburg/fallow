@@ -1,12 +1,15 @@
 use colored::Colorize;
 use fallow_types::cache_rejection::CacheRejection;
-use fallow_types::trace::PipelineTimings;
+use fallow_types::trace::{EntryPointSpans, PipelineTimings};
 
 /// Stages below this wall-clock time are too cheap to annotate as parallel;
 /// the multiplier would be noise.
 const PARALLEL_FLOOR_MS: f64 = 5.0;
 /// Minimum CPU-to-wall ratio before a stage is worth flagging as parallel.
 const MIN_PARALLEL_RATIO: f64 = 1.5;
+/// Entry-point discovery below this wall-clock time is not worth subdividing;
+/// the sub-spans would be six rows of rounding noise.
+const ENTRY_POINT_BREAKDOWN_FLOOR_MS: f64 = 5.0;
 
 /// Build the ` (parallel: ~Nms CPU)` suffix for a stage that ran across rayon
 /// workers, or an empty string when the stage is too cheap or shows no real
@@ -133,6 +136,7 @@ fn push_analysis_stage_lines(lines: &mut Vec<String>, t: &PipelineTimings) {
             t.entry_points_ms, t.entry_point_count
         ),
     );
+    push_entry_point_span_lines(lines, t.entry_points_ms, t.entry_point_spans);
     push_dimmed(
         lines,
         &format!("│  resolve imports:  {:>8.1}ms", t.resolve_imports_ms),
@@ -146,6 +150,30 @@ fn push_analysis_stage_lines(lines: &mut Vec<String>, t: &PipelineTimings) {
         lines,
         &format!("│  analyze:          {:>8.1}ms", t.analyze_ms),
     );
+}
+
+/// Subdivide the entry-point stage into its discovery sections.
+///
+/// These rows are indented under `entry points` because they partition that
+/// stage rather than add to it; `displayed_stage_sum` must keep ignoring them
+/// or the `(other)` row would go negative. Rows are printed in pipeline order
+/// rather than sorted by cost so two runs of the same project diff cleanly.
+fn push_entry_point_span_lines(lines: &mut Vec<String>, stage_ms: f64, spans: EntryPointSpans) {
+    if stage_ms < ENTRY_POINT_BREAKDOWN_FLOOR_MS {
+        return;
+    }
+    for (label, value) in [
+        ("root package", spans.root_ms),
+        ("workspaces", spans.workspaces_ms),
+        ("plugin globs", spans.plugins_ms),
+        ("  compile", spans.plugin_glob_build_ms),
+        ("  match", spans.plugin_glob_match_ms),
+        ("infrastructure", spans.infrastructure_ms),
+        ("dynamic globs", spans.dynamic_ms),
+        ("dedup", spans.dedup_ms),
+    ] {
+        push_dimmed(lines, &format!("│    {label:<16}{value:>8.1}ms"));
+    }
 }
 
 fn displayed_stage_sum(t: &PipelineTimings) -> f64 {
@@ -319,6 +347,7 @@ mod tests {
             graph_cache_rejection: None,
             cache_update_ms: 5.0,
             entry_points_ms: 0.5,
+            entry_point_spans: EntryPointSpans::default(),
             entry_point_count: 10,
             resolve_imports_ms: 8.0,
             build_graph_ms: 15.0,
@@ -369,6 +398,7 @@ mod tests {
             graph_cache_rejection: None,
             cache_update_ms: 2.0,
             entry_points_ms: 0.3,
+            entry_point_spans: EntryPointSpans::default(),
             entry_point_count: 5,
             resolve_imports_ms: 3.0,
             build_graph_ms: 5.0,
@@ -403,6 +433,7 @@ mod tests {
             graph_cache_rejection: None,
             cache_update_ms: 2.0,
             entry_points_ms: 0.3,
+            entry_point_spans: EntryPointSpans::default(),
             entry_point_count: 5,
             resolve_imports_ms: 3.0,
             build_graph_ms: 5.0,
@@ -439,6 +470,84 @@ mod tests {
         );
     }
 
+    /// A slow discovery stage names which section paid, instead of leaving one
+    /// opaque number that can only be guessed at.
+    #[test]
+    fn performance_output_subdivides_a_slow_entry_point_stage() {
+        let mut timings = pipeline_timings_with_parse(20.0, 20.0);
+        timings.entry_points_ms = 121.0;
+        timings.entry_point_spans = EntryPointSpans {
+            root_ms: 96.0,
+            workspaces_ms: 18.0,
+            plugins_ms: 4.0,
+            plugin_glob_build_ms: 1.0,
+            plugin_glob_match_ms: 3.0,
+            infrastructure_ms: 1.0,
+            dynamic_ms: 0.0,
+            dedup_ms: 2.0,
+        };
+
+        let text = plain(&build_performance_human_lines(&timings));
+
+        assert!(text.contains("root package"), "{text}");
+        assert!(text.contains("96.0ms"), "{text}");
+        assert!(text.contains("workspaces"), "{text}");
+        assert!(text.contains("18.0ms"), "{text}");
+        assert!(text.contains("plugin globs"), "{text}");
+        assert!(text.contains("compile"), "{text}");
+        assert!(text.contains("match"), "{text}");
+        assert!(text.contains("3.0ms"), "{text}");
+        assert!(text.contains("infrastructure"), "{text}");
+        assert!(text.contains("dynamic globs"), "{text}");
+        assert!(text.contains("dedup"), "{text}");
+    }
+
+    /// The sub-rows subdivide the stage rather than adding to it, so they must
+    /// not inflate the stage sum and drive `(other)` to zero.
+    #[test]
+    fn entry_point_subdivision_does_not_change_the_other_row() {
+        let mut without = pipeline_timings_with_parse(20.0, 20.0);
+        without.entry_points_ms = 121.0;
+        without.total_ms = 300.0;
+        let mut with_spans = pipeline_timings_with_parse(20.0, 20.0);
+        with_spans.entry_points_ms = 121.0;
+        with_spans.total_ms = 300.0;
+        with_spans.entry_point_spans = EntryPointSpans {
+            root_ms: 96.0,
+            workspaces_ms: 18.0,
+            plugins_ms: 4.0,
+            plugin_glob_build_ms: 1.0,
+            plugin_glob_match_ms: 3.0,
+            infrastructure_ms: 1.0,
+            dynamic_ms: 0.0,
+            dedup_ms: 2.0,
+        };
+
+        let plain_sum = displayed_stage_sum(&without);
+        let subdivided_sum = displayed_stage_sum(&with_spans);
+
+        assert!(
+            (plain_sum - subdivided_sum).abs() < 1e-9,
+            "sub-rows must subdivide the stage, not add to it: {plain_sum} vs {subdivided_sum}"
+        );
+    }
+
+    /// A cheap stage is not worth six rows of rounding noise.
+    #[test]
+    fn performance_output_omits_the_breakdown_for_a_cheap_entry_point_stage() {
+        let mut timings = pipeline_timings_with_parse(20.0, 20.0);
+        timings.entry_points_ms = 0.3;
+        timings.entry_point_spans = EntryPointSpans {
+            root_ms: 0.2,
+            ..EntryPointSpans::default()
+        };
+
+        let text = plain(&build_performance_human_lines(&timings));
+
+        assert!(!text.contains("root package"), "{text}");
+        assert!(!text.contains("plugin globs"), "{text}");
+    }
+
     fn pipeline_timings_with_parse(parse_extract_ms: f64, parse_cpu_ms: f64) -> PipelineTimings {
         PipelineTimings {
             discover_files_ms: 10.0,
@@ -456,6 +565,7 @@ mod tests {
             graph_cache_rejection: None,
             cache_update_ms: 2.0,
             entry_points_ms: 0.3,
+            entry_point_spans: EntryPointSpans::default(),
             entry_point_count: 5,
             resolve_imports_ms: 3.0,
             build_graph_ms: 5.0,

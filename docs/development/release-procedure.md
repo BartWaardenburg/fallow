@@ -110,6 +110,13 @@ invariants in this file.
    A release is never blocked on a re-measurement. A stale but internally
    consistent capture is correct; a README that quotes numbers no benchmark
    run produced is not.
+
+   One more constant is version-bearing and no generator touches it:
+   `RELEASED_TAG` in `scripts/repository-policy.test.mjs`. It names the
+   published release the required-field schema policy compares against. Set it
+   to the tag just published, in the first commit after the release. Left
+   stale, the policy still runs but weakens: an envelope that bumped in an
+   earlier release satisfies it for a field dropped in a later one.
 9. Run package dry-runs, generated-contract checks, companion-repository
    checks, and the repository's full release gates. Review the exact staged
    paths before creating a signed release commit. Do not create the version tag

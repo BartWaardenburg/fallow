@@ -53,6 +53,7 @@ Every fallow command with its purpose and key flags. The table is regenerated fr
 | `similar-code` | Find semantically similar functions with a pinned local model (opt-in) | `--threshold`, `--min-lines`, `--top`, `--file` |
 | `inspect` | Compose one evidence bundle for a file or exported symbol | `--file <path>`, `--symbol <file>:<export>` |
 | `trace` | Trace a symbol's call chain (best-effort, syntactic; OFF the ranked path) | `symbol`, `--callers`, `--callees`, `--depth` |
+| `trace-error` | Resolve a runtime stack trace's frames to the definitions they name (best-effort, syntactic; OFF the ranked path) | `trace_file` |
 | `fix` | Auto-remove unused exports/deps | `--dry-run`, `--yes` (required in non-TTY) |
 | `init` | Generate config file, AGENTS.md agent guide, or pre-commit hook | `--toml`, `--agents`, `--hooks`, `--branch` |
 | `hooks` | Inspect, install, or remove fallow-managed Git and agent hooks | `status`, `install --target git`, `install --target agent`, `uninstall --target git`, `uninstall --target agent` |

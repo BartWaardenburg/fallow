@@ -489,13 +489,29 @@ pub(in crate::report) fn print_duplication_summary(
         outln!("{}", "Duplication Summary".bold());
         outln!();
     }
+    let shown_groups = report.clone_groups.len();
     outln!("  {:>6}  Clone families", report.clone_families.len());
-    outln!("  {:>6}  Clone groups", report.clone_groups.len());
+    outln!("  {:>6}  Clone groups", shown_groups);
     outln!(
         "  {:>6}  Duplicated lines",
         thousands(stats.duplicated_lines)
     );
     outln!("  {:>5.1}%  Duplication rate", stats.duplication_percentage);
+    // A presentation cap such as `--top` truncates the rendered vectors while
+    // the two measured stats keep describing the whole corpus, so without this
+    // line the block reads as four numbers from one scope when it is two.
+    if stats.clone_groups > shown_groups {
+        outln!(
+            "  {}",
+            format!(
+                "... and {} more clone groups withheld by a display limit; \
+                 duplicated lines and rate cover all {}",
+                stats.clone_groups - shown_groups,
+                stats.clone_groups
+            )
+            .dimmed()
+        );
+    }
 
     if !quiet {
         eprintln!(

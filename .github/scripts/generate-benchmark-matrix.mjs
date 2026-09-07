@@ -19,6 +19,17 @@ export const FAST_BENCHMARKS = [
     ],
   },
   {
+    label: "core entry point discovery",
+    cache_key: "core-entry-point-discovery",
+    package: "fallow-core",
+    bench: "entry_point_discovery",
+    paths: [
+      "crates/core/benches/entry_point_discovery.rs",
+      "crates/core/benches/helpers.rs",
+      "crates/core/src/discover/",
+    ],
+  },
+  {
     label: "engine dupes detect",
     cache_key: "engine-dupes-detect",
     package: "fallow-engine",

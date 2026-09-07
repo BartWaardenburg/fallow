@@ -95,6 +95,74 @@ fn suppress_line(comment: &str) -> IssueAction {
     })
 }
 
+/// A per-finding confidence flag on a dead-code reachability verdict.
+///
+/// Advisory provenance, in the same spirit as the fix path's
+/// `low_confidence_off_graph` / `low_confidence_unresolved_imports` skip
+/// reasons and the focus map's per-unit confidence flags: a flag NEVER
+/// withholds, reorders, downgrades, or re-severities the finding, and never
+/// changes an exit code. It records that the verdict was computed over an
+/// import graph fallow already knows is incomplete, so a reader who sees the
+/// finding also sees the caveat instead of having to notice a diagnostic at
+/// the other end of the envelope.
+///
+/// Emitted only on the two verdicts a lost import edge can distort:
+/// `unused_files[]` and `unused_exports[]`. Sorted and deduplicated, absent
+/// from the wire when empty. The set is open in the same sense
+/// `workspace_diagnostics[].kind` is: treat an unrecognised value as "some
+/// confidence caveat" rather than as an error.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum ReachabilityConfidenceFlag {
+    /// This finding's own file is the subject of a `source-parse-degraded`
+    /// workspace diagnostic: it was read but did not parse cleanly, so the
+    /// export and import lists extracted from it may stop short of the real
+    /// ones. That reaches an `unused-file` verdict directly, because the
+    /// "is any export of this file referenced from a reachable module" test
+    /// reads exactly that truncated export list.
+    SourceParseDegraded,
+    /// At least one module that IS reachable from an entry point parsed with
+    /// errors, so its import list is incomplete and an import that would have
+    /// credited this path may never have been seen.
+    ///
+    /// The limit, stated because an approximation presented as exact is worse
+    /// than nothing: this is a RUN-level condition, not proof that a degraded
+    /// module imports this path. An import the parser never saw cannot be
+    /// attributed to a target, so the link cannot be narrowed further without
+    /// re-reading the source. It does narrow in one direction, and soundly:
+    /// when every degraded module is itself unreachable, no missing edge
+    /// attributable to a degraded parse can change a reachability verdict,
+    /// because the first missing edge on any entry-point path leaves from a
+    /// module that is observed reachable. The flag is then absent. Read
+    /// `workspace_diagnostics[]` for which files degraded.
+    IncompleteImportGraph,
+}
+
+impl ReachabilityConfidenceFlag {
+    /// The wire token.
+    #[must_use]
+    pub const fn token(self) -> &'static str {
+        match self {
+            Self::SourceParseDegraded => "source-parse-degraded",
+            Self::IncompleteImportGraph => "incomplete-import-graph",
+        }
+    }
+
+    /// A one-line explanation for human and agent-facing renderers.
+    #[must_use]
+    pub const fn message(self) -> &'static str {
+        match self {
+            Self::SourceParseDegraded => {
+                "low: this file did not parse cleanly, so its extracted exports and imports may be incomplete"
+            }
+            Self::IncompleteImportGraph => {
+                "low: a module reachable from an entry point did not parse cleanly, so an import that would credit this may be missing"
+            }
+        }
+    }
+}
+
 /// Wire-shape envelope for an [`UnusedFile`] finding. The bare finding
 /// flattens in via `#[serde(flatten)]`, with a typed `actions` array
 /// populated at construction time and the audit-pass `introduced` flag
@@ -112,6 +180,12 @@ pub struct UnusedFileFinding {
     /// the merge-base. `None` when serialized directly from Rust.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub introduced: Option<AuditIntroduced>,
+    /// Advisory caveats on the reachability verdict behind this finding.
+    /// Sorted, deduplicated, and omitted from the wire when empty, so a run
+    /// over a project that parses cleanly is byte-identical. Never gates the
+    /// finding or the `delete-file` action.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub confidence: Vec<ReachabilityConfidenceFlag>,
 }
 
 impl UnusedFileFinding {
@@ -144,6 +218,7 @@ impl UnusedFileFinding {
             file,
             actions,
             introduced: None,
+            confidence: Vec::new(),
         }
     }
 }
@@ -657,6 +732,11 @@ pub struct UnusedExportFinding {
     /// the merge-base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub introduced: Option<AuditIntroduced>,
+    /// Advisory caveats on the reachability verdict behind this finding.
+    /// Sorted, deduplicated, and omitted from the wire when empty. Never gates
+    /// the finding or the `remove-export` action.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub confidence: Vec<ReachabilityConfidenceFlag>,
 }
 
 impl UnusedExportFinding {
@@ -695,6 +775,7 @@ impl UnusedExportFinding {
             actions,
             semantic: None,
             introduced: None,
+            confidence: Vec::new(),
         }
     }
 

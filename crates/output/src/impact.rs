@@ -33,8 +33,14 @@ impl ImpactCounts {
 
 /// Recorded gate runs grouped by the gate that produced them. Local
 /// provenance only: the store never leaves the machine, so this answers "where
-/// do my gate runs come from", never "how widely is fallow adopted". Absent
-/// when the store holds no gate run at all.
+/// do my gate runs come from", never "how widely is fallow adopted".
+///
+/// Counted over the recorded runs the store still holds, which is the same
+/// window `record_count` reports. The store keeps a bounded number of runs and
+/// drops the oldest, so on a long-lived project these are the shape of recent
+/// gate activity, not a lifetime total: read them as a floor. Absent when no
+/// run in that window carries a gate source, which is not the same as "no gate
+/// ever ran here".
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct GateRunCounts {
@@ -206,8 +212,10 @@ pub struct ImpactReport {
     /// `trend`. None until two full `fallow` runs exist. v1.6.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project_trend: Option<TrendSummary>,
-    /// Recorded gate runs grouped by source. Absent when no gate run was ever
-    /// recorded. Local provenance, never an adoption metric.
+    /// Recorded gate runs grouped by source, over the same bounded window of
+    /// recorded runs `record_count` reports. A floor, not a lifetime total, and
+    /// absent when no run in that window carries a gate source. Local
+    /// provenance, never an adoption metric.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gate_runs: Option<GateRunCounts>,
     /// Lifetime count of commit-gate containment events.

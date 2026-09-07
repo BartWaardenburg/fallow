@@ -212,14 +212,18 @@ fn apply_issue_type_filter(filters: &mut DeadCodeFilters, issue_type: &str) -> R
     Ok(())
 }
 
+/// Refusal for an issue-type selector the `analyze` tool does not accept.
+///
+/// The accepted vocabulary is in hand at the refusal point, so a near miss
+/// names the selector the caller meant instead of leaving them to diff their
+/// token against the full list.
 fn unknown_issue_type_error(issue_type: &str) -> String {
-    let valid = ISSUE_TYPE_FLAGS
-        .iter()
-        .map(|&(name, _)| name)
-        .collect::<Vec<_>>()
-        .join(", ");
+    let names = ISSUE_TYPE_FLAGS.iter().map(|&(name, _)| name);
+    let suggestion = fallow_api::closest_match(issue_type, names.clone())
+        .map_or_else(String::new, |nearest| format!(" Did you mean '{nearest}'?"));
+    let valid = names.collect::<Vec<_>>().join(", ");
     validation_error_body(format!(
-        "Unknown issue type '{issue_type}'. Valid values: {valid}"
+        "Unknown issue type '{issue_type}'.{suggestion} Valid values: {valid}"
     ))
 }
 
@@ -335,6 +339,34 @@ mod tests {
 
         let err = dead_code_options_from_params(&params).expect_err("invalid issue type");
         assert!(err.contains("Unknown issue type"));
+    }
+
+    #[test]
+    fn near_miss_issue_type_names_the_selector_the_caller_meant() {
+        let params = AnalyzeParams {
+            issue_types: Some(vec!["unused-exort".to_string()]),
+            ..AnalyzeParams::default()
+        };
+
+        let err = dead_code_options_from_params(&params).expect_err("invalid issue type");
+        assert!(
+            err.contains("Did you mean 'unused-exports'?"),
+            "near-miss selector should name the intended one: {err}"
+        );
+    }
+
+    #[test]
+    fn novel_issue_type_stays_silent_rather_than_guessing() {
+        let params = AnalyzeParams {
+            issue_types: Some(vec!["teleport".to_string()]),
+            ..AnalyzeParams::default()
+        };
+
+        let err = dead_code_options_from_params(&params).expect_err("invalid issue type");
+        assert!(
+            !err.contains("Did you mean"),
+            "a completely novel selector must not get a misleading suggestion: {err}"
+        );
     }
 
     #[test]

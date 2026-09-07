@@ -219,6 +219,38 @@ pub struct DependencyTrace {
     pub import_count: usize,
 }
 
+/// Sub-phase attribution inside the entry-point discovery stage.
+///
+/// `PipelineTimings::entry_points_ms` is a single opaque number; these are the
+/// consecutive wall-clock spans that make it up, so a slow discovery stage can
+/// be attributed instead of guessed at. The spans cover the discovery sections
+/// only, so they sum to slightly less than `entry_points_ms`: the summary and
+/// count that follow discovery are not attributed to any span.
+#[derive(Debug, Clone, Copy, Default, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct EntryPointSpans {
+    /// Root-package discovery: manual entry globs, root `package.json` fields,
+    /// and the nested `package.json` scan under the conventional monorepo
+    /// directories.
+    pub root_ms: f64,
+    /// Runtime script seed collection plus per-workspace discovery.
+    pub workspaces_ms: f64,
+    /// Plugin entry-point glob compilation and matching.
+    pub plugins_ms: f64,
+    /// The part of `plugins_ms` spent compiling plugin patterns into a glob
+    /// set. Scales with active pattern count, not with project size.
+    pub plugin_glob_build_ms: f64,
+    /// The part of `plugins_ms` spent matching the compiled set against every
+    /// discovered file. Scales with file count times pattern count.
+    pub plugin_glob_match_ms: f64,
+    /// Infrastructure config-file probing at the project root.
+    pub infrastructure_ms: f64,
+    /// Configured `dynamicallyLoaded` glob expansion. Zero when unconfigured.
+    pub dynamic_ms: f64,
+    /// Sorting and deduplicating the merged entry set.
+    pub dedup_ms: f64,
+}
+
 /// Pipeline performance timings.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -257,6 +289,8 @@ pub struct PipelineTimings {
     pub cache_update_ms: f64,
     /// Time spent categorizing entry points.
     pub entry_points_ms: f64,
+    /// Sub-phase attribution for `entry_points_ms`.
+    pub entry_point_spans: EntryPointSpans,
     /// Number of entry points considered.
     pub entry_point_count: usize,
     /// Time spent resolving imports.

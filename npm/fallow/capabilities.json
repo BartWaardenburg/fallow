@@ -1024,6 +1024,18 @@
       ]
     },
     {
+      "name": "trace-error",
+      "description": "Resolve a runtime stack trace's frames to the definitions they name (best-effort, syntactic; OFF the ranked path)",
+      "flags": [
+        {
+          "name": "trace_file",
+          "type": "string",
+          "required": false,
+          "description": "Stack trace file, or `-` to read stdin. Defaults to stdin. A relative path is resolved against the project root, matching `--diff-file`"
+        }
+      ]
+    },
+    {
       "name": "fix",
       "description": "Auto-fix issues: remove unused exports, dependencies, and enum members; add duplicate-export rules to a fallow config file",
       "flags": [
