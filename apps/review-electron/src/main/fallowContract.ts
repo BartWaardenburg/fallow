@@ -1,6 +1,12 @@
 import type { AuditBrief } from "../model/adapter";
 
-export const REVIEW_BRIEF_SCHEMA_VERSION = 8;
+/**
+ * Oldest review-brief envelope this app can read. The header guard accepts this
+ * version or newer, so a fallow release that bumps the brief schema keeps
+ * working as long as the fields below stay present. Raise it only when an older
+ * envelope genuinely cannot be parsed.
+ */
+export const MIN_REVIEW_BRIEF_SCHEMA_VERSION = 8;
 
 type JsonRecord = Record<string, unknown>;
 type Guard<T> = (value: unknown) => value is T;
@@ -72,7 +78,7 @@ const hasHeader = (value: unknown, kind: string): value is JsonRecord =>
   value["kind"] === kind &&
   value["command"] === kind &&
   isNumber(value["schema_version"]) &&
-  value["schema_version"] >= REVIEW_BRIEF_SCHEMA_VERSION;
+  value["schema_version"] >= MIN_REVIEW_BRIEF_SCHEMA_VERSION;
 
 const isScore = (value: unknown): value is JsonRecord =>
   isRecord(value) &&
@@ -214,7 +220,7 @@ const parseContract = <T>(stdout: string, command: string, kind: string, guard: 
   const value = parseJson(stdout);
   if (guard(value)) return value;
   throw new Error(
-    `${command} returned incompatible JSON; expected ${kind} schema version ${REVIEW_BRIEF_SCHEMA_VERSION}.`,
+    `${command} returned incompatible JSON; expected ${kind} schema version ${MIN_REVIEW_BRIEF_SCHEMA_VERSION} or newer.`,
   );
 };
 
