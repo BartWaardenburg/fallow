@@ -128,7 +128,12 @@ if render_with_fallow review-gitlab fallow-review.json; then
       --envelope fallow-review.json > fallow-review-post.json 2> fallow-review-post-stderr.log; then
     if jq -e '((.apply_errors // []) | length > 0) or ((.post_errors // []) | length > 0)' fallow-review-post.json > /dev/null 2>&1; then
       HINT=$(jq -r '.apply_hint // "refresh provider state and rerun the job"' fallow-review-post.json)
-      echo "WARNING: fallow post-review incomplete: $HINT"
+      UNAPPLIED=$(jq -r '(.unapplied_fingerprints // []) | join(", ")' fallow-review-post.json)
+      if [ -n "$UNAPPLIED" ]; then
+        echo "WARNING: fallow post-review incomplete: $HINT (unapplied fingerprints: $UNAPPLIED)"
+      else
+        echo "WARNING: fallow post-review incomplete: $HINT"
+      fi
     fi
     ACTION=$(jq -r '.action // "unknown"' fallow-review-post.json)
     POSTED=$(jq -r '.comments_posted // 0' fallow-review-post.json)

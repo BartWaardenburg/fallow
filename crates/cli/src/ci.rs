@@ -687,7 +687,7 @@ struct ApplyResult {
 impl ApplyResult {
     fn hint(&self) -> Option<String> {
         (!self.errors.is_empty()).then(|| {
-            "Reconcile apply stopped before all provider lifecycle operations were applied. Refresh provider state and rerun the job; fingerprints listed in unapplied_fingerprints were not fully applied.".to_owned()
+            "Some provider lifecycle operations failed. Fingerprints listed in unapplied_fingerprints were not fully applied; refresh provider state and rerun the job to retry them.".to_owned()
         })
     }
 
@@ -1109,8 +1109,6 @@ fn apply_github_reconcile(
     result
 }
 
-/// Apply each staged GitHub operation in order, recording a failure (with the
-/// not-yet-applied suffix) and stopping at the first error.
 /// The GitHub PR connection context (agent + repo/PR coordinates + auth)
 /// shared by every staged operation, bundled so the operation runner takes one
 /// parameter instead of five.
@@ -1123,6 +1121,15 @@ struct GithubConnection<'a> {
     api: &'a str,
 }
 
+/// Apply each staged GitHub operation in order. A failure blocks only the
+/// remaining operations that carry the same fingerprint, so that lifecycle is
+/// retried whole on the next run while every other fingerprint still gets
+/// applied. The block is keyed on the fingerprint, not on a single thread, so
+/// it also covers a sibling discussion of the same fingerprint and the
+/// re-close pass that `stage_github_operations` appends for a
+/// provider-reopened thread that already carries a resolution marker. That is
+/// deliberate: a fingerprint whose first mutation failed is left entirely to
+/// the next run rather than half-applied here.
 fn run_github_operations(
     operations: &[GithubApplyOperation],
     conn: GithubConnection<'_>,
@@ -1135,7 +1142,12 @@ fn run_github_operations(
         token,
         api,
     } = conn;
-    for (index, operation) in operations.iter().enumerate() {
+    let mut blocked: BTreeSet<&str> = BTreeSet::new();
+    for operation in operations {
+        let fingerprint = operation.fingerprint();
+        if blocked.contains(fingerprint) {
+            continue;
+        }
         if let Err(failure) = apply_github_operation(&mut GithubOperationInput {
             operation,
             agent,
@@ -1145,13 +1157,8 @@ fn run_github_operations(
             api,
             result,
         }) {
-            result.record_failure(
-                failure,
-                operations[index..]
-                    .iter()
-                    .map(GithubApplyOperation::fingerprint_owned),
-            );
-            return;
+            blocked.insert(fingerprint);
+            result.record_failure(failure, [fingerprint.to_owned()]);
         }
     }
 }
@@ -1327,6 +1334,11 @@ fn apply_github_operation(input: &mut GithubOperationInput<'_>) -> Result<(), Ap
             comment_id,
             body,
         } => {
+            // GitHub attaches every standalone review-comment reply to a
+            // review, so it auto-creates an empty-bodied COMMENTED review to
+            // hold this one and the PR timeline renders that as a content-free
+            // "reviewed" row. Fallow never posts that review itself and there
+            // is no batch reply endpoint that avoids it.
             let payload = serde_json::json!({ "body": body });
             let url = format!(
                 "{}/repos/{}/pulls/{}/comments/{comment_id}/replies",
@@ -1658,8 +1670,15 @@ struct GitlabConnection<'a> {
     api: &'a str,
 }
 
-/// Apply each staged GitLab operation in order, recording a failure (with the
-/// not-yet-applied suffix) and stopping at the first error.
+/// Apply each staged GitLab operation in order. A failure blocks only the
+/// remaining operations that carry the same fingerprint, so that lifecycle is
+/// retried whole on the next run while every other fingerprint still gets
+/// applied. The block is keyed on the fingerprint, not on a single discussion,
+/// so it also covers a sibling discussion of the same fingerprint and the
+/// re-close pass that `stage_gitlab_operations` appends for a provider-reopened
+/// discussion that already carries a resolution marker. That is deliberate: a
+/// fingerprint whose first mutation failed is left entirely to the next run
+/// rather than half-applied here.
 fn run_gitlab_operations(
     operations: &[GitlabApplyOperation],
     conn: GitlabConnection<'_>,
@@ -1672,7 +1691,12 @@ fn run_gitlab_operations(
         token,
         api,
     } = conn;
-    for (index, operation) in operations.iter().enumerate() {
+    let mut blocked: BTreeSet<&str> = BTreeSet::new();
+    for operation in operations {
+        let fingerprint = operation.fingerprint();
+        if blocked.contains(fingerprint) {
+            continue;
+        }
         if let Err(failure) = apply_gitlab_operation(&mut GitlabOperationInput {
             operation,
             agent,
@@ -1682,13 +1706,8 @@ fn run_gitlab_operations(
             api,
             result,
         }) {
-            result.record_failure(
-                failure,
-                operations[index..]
-                    .iter()
-                    .map(GitlabApplyOperation::fingerprint_owned),
-            );
-            return;
+            blocked.insert(fingerprint);
+            result.record_failure(failure, [fingerprint.to_owned()]);
         }
     }
 }

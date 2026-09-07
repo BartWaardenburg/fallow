@@ -85,6 +85,15 @@ an exit code.
   `health.coverageRoot` it never reads.
 - Audit worktree cleanup must be scoped to Fallow-owned paths and registrations.
   Never prune unrelated user worktrees.
+- `ci reconcile-review` and `ci post-review` isolate provider lifecycle
+  failures per fingerprint: a failed mutation blocks only the remaining
+  operations of that fingerprint, and every other stale fingerprint is still
+  resolved in the same run. Both commands report `apply_hint`,
+  `failed_fingerprints`, and `unapplied_fingerprints` so a wrapper can name what
+  was left for the next run. Neither command creates or mutates a provider
+  review; the content-free "reviewed" row that follows a resolution reply is
+  GitHub's own wrapper around a standalone review-comment reply, and no
+  available endpoint avoids it.
 - JSON mode emits structured errors on stdout and keeps progress off stdout.
 - Reported project paths remain relative unless an editor or protocol contract
   explicitly requires absolute paths.

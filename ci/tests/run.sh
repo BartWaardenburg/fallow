@@ -1263,7 +1263,7 @@ if [ "${1:-}" = "ci" ]; then
   elif [ "${2:-}" = "post-review" ]; then
     case "${MOCK_POST_REVIEW_ERRORS:-}" in
       apply)
-        printf '{"action":"post_review","comments_posted":1,"apply_errors":["resolve failed"],"post_errors":[],"apply_hint":"refresh provider state"}\n'
+        printf '{"action":"post_review","comments_posted":1,"apply_errors":["resolve failed"],"post_errors":[],"apply_hint":"refresh provider state","failed_fingerprints":["a"],"unapplied_fingerprints":["a"]}\n'
         ;;
       post)
         printf '{"action":"post_review","comments_posted":0,"apply_errors":[],"post_errors":["post failed"],"apply_hint":"rerun the job"}\n'
@@ -1494,6 +1494,9 @@ assert_not_contains "$(cat "$CI_TYPED_WORK/review-clean.out")" "WARNING: fallow 
 assert_contains "$(cat "$CI_TYPED_WORK/review-apply-error.out")" \
   "WARNING: fallow post-review incomplete: refresh provider state" \
   "review.sh warns when applying reconciliation is incomplete"
+assert_contains "$(cat "$CI_TYPED_WORK/review-apply-error.out")" \
+  "(unapplied fingerprints: a)" \
+  "review.sh names the fingerprints reconciliation did not apply"
 assert_contains "$(cat "$CI_TYPED_WORK/review-post-error.out")" \
   "WARNING: fallow post-review incomplete: rerun the job" \
   "review.sh warns when posting review comments is incomplete"
