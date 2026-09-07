@@ -3339,6 +3339,50 @@ mod tests {
     }
 
     #[test]
+    fn survivors_candidate_loader_preserves_validation_errors() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let candidates = dir.path().join("candidates.json");
+
+        for contents in ["{}", r#"{"security_findings":{}}"#] {
+            std::fs::write(&candidates, contents).expect("write candidates");
+            let error = load_candidate_map(&candidates)
+                .map(|_| ())
+                .expect_err("invalid shape should fail");
+            assert!(error.contains("security_findings array"));
+        }
+
+        std::fs::write(
+            &candidates,
+            r#"{"security_findings":[{"finding_id":"sec-a"}]}"#,
+        )
+        .expect("write malformed candidate");
+        let malformed = load_candidate_map(&candidates)
+            .map(|_| ())
+            .expect_err("malformed finding should fail");
+        assert!(malformed.contains("malformed security finding"));
+
+        let finding = survivor_candidate_json(
+            "sec-a",
+            "src/a.ts",
+            1,
+            SecurityFindingKind::TaintedSink,
+            Some("ssrf"),
+        );
+        std::fs::write(
+            &candidates,
+            serde_json::json!({
+                "security_findings": [finding.clone(), finding]
+            })
+            .to_string(),
+        )
+        .expect("write duplicate candidates");
+        let duplicate = load_candidate_map(&candidates)
+            .map(|_| ())
+            .expect_err("duplicate finding should fail");
+        assert!(duplicate.contains("duplicate finding_id `sec-a`"));
+    }
+
+    #[test]
     fn blind_spots_benchmark_normalizes_without_project_io() {
         let root = Path::new("/removed/security-benchmark-project");
         let diagnostics: Vec<_> = (0..64)

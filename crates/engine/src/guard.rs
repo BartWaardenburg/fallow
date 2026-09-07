@@ -513,6 +513,78 @@ mod tests {
     }
 
     #[test]
+    fn compiled_rule_scopes_match_individual_file_reports() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let mut config = resolve(temp.path(), |config| {
+            config.boundaries = BoundaryConfig {
+                zones: vec![
+                    BoundaryZone {
+                        name: "domain".to_string(),
+                        patterns: vec!["src/domain/**".to_string()],
+                        auto_discover: Vec::new(),
+                        root: None,
+                    },
+                    BoundaryZone {
+                        name: "app".to_string(),
+                        patterns: vec!["src/app/**".to_string()],
+                        auto_discover: Vec::new(),
+                        root: None,
+                    },
+                ],
+                ..BoundaryConfig::default()
+            };
+        });
+        let mut domain_rule = rule("domain-only", RulePackRuleKind::BannedImport);
+        domain_rule.files = vec!["src/domain/**".to_string()];
+        domain_rule.exclude = vec!["src/domain/generated/**".to_string()];
+        let mut app_rule = rule("app-zone", RulePackRuleKind::BannedCall);
+        app_rule.zones = vec!["app".to_string()];
+        let mut invalid_glob_rule = rule("invalid-glob", RulePackRuleKind::BannedExport);
+        invalid_glob_rule.files = vec!["[".to_string()];
+        config.rule_packs = vec![pack(vec![domain_rule, app_rule, invalid_glob_rule])];
+
+        let files = vec![
+            "src/domain/user.ts".to_string(),
+            "src/domain/generated/client.ts".to_string(),
+            "src/app/page.ts".to_string(),
+            "src/other.ts".to_string(),
+        ];
+        let batch = build_guard_report(&config, &files).expect("batch report");
+        let individual = files
+            .iter()
+            .flat_map(|file| {
+                build_guard_report(&config, std::slice::from_ref(file))
+                    .expect("individual report")
+                    .files
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            serde_json::to_value(&batch.files).expect("serialize batch reports"),
+            serde_json::to_value(&individual).expect("serialize individual reports")
+        );
+        let rule_ids = batch
+            .files
+            .iter()
+            .map(|file| {
+                file.policy_rules
+                    .iter()
+                    .map(|rule| rule.rule_id.as_str())
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            rule_ids,
+            vec![
+                vec!["domain-only", "invalid-glob"],
+                vec!["invalid-glob"],
+                vec!["app-zone", "invalid-glob"],
+                vec!["invalid-glob"],
+            ]
+        );
+    }
+
+    #[test]
     fn nonexistent_target_reports_exists_false() {
         let temp = tempfile::tempdir().expect("tempdir");
         let config = resolve(temp.path(), |_| {});
