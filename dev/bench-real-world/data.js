@@ -1,110 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788694878922,
+  "lastUpdate": 1788787593342,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Real-World Benchmarks": [
-      {
-        "commit": {
-          "author": {
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg",
-            "email": "bart@waardenburg.dev"
-          },
-          "committer": {
-            "name": "GitHub",
-            "username": "web-flow",
-            "email": "noreply@github.com"
-          },
-          "id": "005462b33c2696e8a810721f3fdd4a92495498d0",
-          "message": "fix(plugins): credit oxlint CLI tooling packages (oxlint-tsgolint) as used (#802)\n\n* fix(plugins): credit oxlint CLI tooling packages (oxlint-tsgolint) as used\n\noxlint-tsgolint is the type-aware companion package the oxlint binary loads\nat runtime (via --type-aware / options.typeAware). It is never imported in\nsource nor listed in an .oxlintrc.json jsPlugins array, so the #607 jsPlugins\ncredit does not cover it. When declared in prod dependencies (where the general\ntooling-prefix credit does not apply, that only covers devDependencies), it was\nfalsely reported as unused.\n\nAdd oxlint-tsgolint to the oxlint plugin's tooling_dependencies, which is honored\nfor both prod and dev categories and is gated on the oxlint plugin being active.\nExact-name credit, not an oxlint- prefix, so an unrelated oxlint-prefixed prod\ndependency still reports.\n\nFixes #753\n\n* docs(plugins): document oxlint CLI tooling credit (oxlint-tsgolint)\n\ndetection.md + plugins.md note the exact-name oxlint-tsgolint tooling credit,\nCHANGELOG [Unreleased] gets the user-facing entry, and the agent-file baseline\nis re-blessed for the two edited rule files.\n\nRefs #753",
-          "timestamp": "2026-05-30T05:37:34Z",
-          "url": "https://github.com/fallow-rs/fallow/commit/005462b33c2696e8a810721f3fdd4a92495498d0"
-        },
-        "date": 1780132763233,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "preact (cold)",
-            "value": 165,
-            "unit": "ms"
-          },
-          {
-            "name": "preact (warm)",
-            "value": 154,
-            "unit": "ms"
-          },
-          {
-            "name": "fastify (cold)",
-            "value": 257,
-            "unit": "ms"
-          },
-          {
-            "name": "fastify (warm)",
-            "value": 258,
-            "unit": "ms"
-          },
-          {
-            "name": "zod (cold)",
-            "value": 144,
-            "unit": "ms"
-          },
-          {
-            "name": "zod (warm)",
-            "value": 130,
-            "unit": "ms"
-          },
-          {
-            "name": "vue-core (cold)",
-            "value": 453,
-            "unit": "ms"
-          },
-          {
-            "name": "vue-core (warm)",
-            "value": 384,
-            "unit": "ms"
-          },
-          {
-            "name": "svelte (cold)",
-            "value": 1302,
-            "unit": "ms"
-          },
-          {
-            "name": "svelte (warm)",
-            "value": 1158,
-            "unit": "ms"
-          },
-          {
-            "name": "query (cold)",
-            "value": 929,
-            "unit": "ms"
-          },
-          {
-            "name": "query (warm)",
-            "value": 900,
-            "unit": "ms"
-          },
-          {
-            "name": "vite (cold)",
-            "value": 816,
-            "unit": "ms"
-          },
-          {
-            "name": "vite (warm)",
-            "value": 741,
-            "unit": "ms"
-          },
-          {
-            "name": "next.js (cold)",
-            "value": 7534,
-            "unit": "ms"
-          },
-          {
-            "name": "next.js (warm)",
-            "value": 6797,
-            "unit": "ms"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -9399,6 +9297,98 @@ window.BENCHMARK_DATA = {
           {
             "name": "vite (warm)",
             "value": 1017,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg",
+            "email": "bart@waardenburg.dev"
+          },
+          "committer": {
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg",
+            "email": "bart@waardenburg.dev"
+          },
+          "id": "4503f09c0f324f4c55e2cff6c581f7fd92c36d6f",
+          "message": "fix(guard): state the coverage requirement for unzoned files\n\nAn unzoned file under boundaries.coverage.requireAllFiles was told it was\nunrestricted while an analysis run would report it as a boundary-coverage\nviolation. guard_notes never read coverage_required, which the JSON already\ncarried, so the human output contradicted the JSON for the same file.\n\nThe unrestricted note now names what it actually covers, import and call\nchecks, and a second note states the coverage requirement when it applies.\nPaths exempted by allowUnmatched keep the old single note.",
+          "timestamp": "2026-09-07T13:18:33Z",
+          "url": "https://github.com/fallow-rs/fallow/commit/4503f09c0f324f4c55e2cff6c581f7fd92c36d6f"
+        },
+        "date": 1788787589075,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "preact (cold)",
+            "value": 205,
+            "unit": "ms"
+          },
+          {
+            "name": "preact (warm)",
+            "value": 205,
+            "unit": "ms"
+          },
+          {
+            "name": "fastify (cold)",
+            "value": 308,
+            "unit": "ms"
+          },
+          {
+            "name": "fastify (warm)",
+            "value": 205,
+            "unit": "ms"
+          },
+          {
+            "name": "zod (cold)",
+            "value": 205,
+            "unit": "ms"
+          },
+          {
+            "name": "zod (warm)",
+            "value": 205,
+            "unit": "ms"
+          },
+          {
+            "name": "vue-core (cold)",
+            "value": 616,
+            "unit": "ms"
+          },
+          {
+            "name": "vue-core (warm)",
+            "value": 409,
+            "unit": "ms"
+          },
+          {
+            "name": "svelte (cold)",
+            "value": 1646,
+            "unit": "ms"
+          },
+          {
+            "name": "svelte (warm)",
+            "value": 1328,
+            "unit": "ms"
+          },
+          {
+            "name": "query (cold)",
+            "value": 1230,
+            "unit": "ms"
+          },
+          {
+            "name": "query (warm)",
+            "value": 1026,
+            "unit": "ms"
+          },
+          {
+            "name": "vite (cold)",
+            "value": 1435,
+            "unit": "ms"
+          },
+          {
+            "name": "vite (warm)",
+            "value": 1431,
             "unit": "ms"
           }
         ]
