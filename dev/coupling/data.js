@@ -1,57 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788794970884,
+  "lastUpdate": 1788799874313,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Module Coupling": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "9450f933307dcbad05b7ee2e80df5251221d8ebf",
-          "message": "perf(benchmarks): cover list boundaries",
-          "timestamp": "2026-08-20T10:14:48+02:00",
-          "tree_id": "c7534b59d2992a42abe31ae713b31cd36ab90199",
-          "url": "https://github.com/fallow-rs/fallow/commit/9450f933307dcbad05b7ee2e80df5251221d8ebf"
-        },
-        "date": 1787213762374,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Max Fan-In (non-framework)",
-            "value": 47,
-            "unit": "deps"
-          },
-          {
-            "name": "Max Fan-Out (non-framework)",
-            "value": 28,
-            "unit": "deps"
-          },
-          {
-            "name": "Modules >20 Fan-In (%)",
-            "value": 1.32,
-            "unit": "%"
-          },
-          {
-            "name": "Total Modules",
-            "value": 455,
-            "unit": "count"
-          },
-          {
-            "name": "Total Edges",
-            "value": 1232,
-            "unit": "count"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4874,6 +4825,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/9e690609e1f918887937d3ff5d890adba4f2feba"
         },
         "date": 1788794967630,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Max Fan-In (non-framework)",
+            "value": 52,
+            "unit": "deps"
+          },
+          {
+            "name": "Max Fan-Out (non-framework)",
+            "value": 29,
+            "unit": "deps"
+          },
+          {
+            "name": "Modules >20 Fan-In (%)",
+            "value": 1.27,
+            "unit": "%"
+          },
+          {
+            "name": "Total Modules",
+            "value": 472,
+            "unit": "count"
+          },
+          {
+            "name": "Total Edges",
+            "value": 1284,
+            "unit": "count"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "ca508ed0aaca90e0ac3d23bb61d8f60f943ed935",
+          "message": "refactor: replace copied helpers with one definition each\n\nFour report surfaces in the graph crate each carried a byte-identical\nrelativize, and their doc comments named the other copies as the thing to\nkeep in sync. A cross-platform key invariant shared by four outputs was\nenforced by prose. One pub(super) helper now owns it.\n\nranges_to_gaps and push_region were copied whole from sfc into astro, which\nalready imports SourceRegion from sfc. The sorted-input precondition the\nfunction depends on was implied only by the sort call sitting above it, so it\nis now written down.\n\nline_range_from_byte_col was defined twice, and hover wrapped\nutf16_col_span in a forwarder that added nothing. Both move to position.rs,\nwhich already owns the byte-column to UTF-16 boundary.",
+          "timestamp": "2026-09-07T18:46:01+02:00",
+          "tree_id": "4e1407a84e73c484101ba6e0d89ec4709332933c",
+          "url": "https://github.com/fallow-rs/fallow/commit/ca508ed0aaca90e0ac3d23bb61d8f60f943ed935"
+        },
+        "date": 1788799870869,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
