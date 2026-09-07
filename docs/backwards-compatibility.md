@@ -245,6 +245,50 @@ These are documented for the rare CI script that depended on the old behavior. N
   unchanged; only the exit code is. To keep the previous outcome, set the rule
   to `off` rather than `warn`, or drop the strict flag for that job.
 
+- **Review brief schema 9 replaces the duplicated blast-radius list with a
+  count, a capped sample, and a directory rollup.** The `audit-brief` envelope
+  shared by `fallow audit --brief --format json` and `fallow review --format
+  json`, and the brief digest embedded in the review walkthrough guide, used to
+  carry the impact closure's affected-but-not-in-diff paths TWICE, in full:
+  `graph_facts.reachable_from` was a verbatim clone of
+  `impact_closure.affected_not_shown`, and neither was capped. On a
+  single-file change to a mid-sized project the two lists together were more
+  than half the envelope, dwarfing the judgement payload the brief exists to
+  deliver.
+
+  `graph_facts.reachable_from` is REMOVED. Stage 1 keeps `exports_added`,
+  `api_width_delta`, and `boundaries_touched`; the blast radius belongs to
+  Stage 3, which now owns both its magnitude and its paths. Consumers reading
+  `graph_facts.reachable_from` read `impact_closure` instead.
+
+  `impact_closure` gains three fields and caps one. `affected_count` is the
+  FULL number of affected-but-not-in-diff files, computed before any capping,
+  so the magnitude is never understated. `affected_not_shown` is now a capped,
+  path-sorted SAMPLE of at most 10 paths: it is a prefix of the sorted set, so
+  it clusters in whichever directory sorts first and must not be used to
+  enumerate the blast radius or to infer its shape. `affected_by_dir` is the
+  shape: the affected files rolled up by parent directory as `{ dir, count }`
+  rows, heaviest directory first with the directory path breaking ties, at most
+  25 rows, with `affected_by_dir_omitted` counting the lighter directories that
+  did not fit. Every row's `count` is exact.
+
+  Nothing that ranks or gates moved. The decision surface reads its blast
+  metric from the uncapped engine closure, not from this envelope, so decisions,
+  ranks, verdicts, and exit codes are unchanged. The human brief and the human
+  walkthrough report `affected_count`, so their counts are unchanged too, and
+  the human brief additionally names the heaviest directory with its exact
+  share. That line routes a reader to `--format json` only when nothing was
+  omitted from `affected_by_dir`; past the rollup cap it says how many of the
+  remaining directories the JSON actually carries. `coordination_gap`
+  is untouched and uncapped; it is not a subset of `affected_not_shown`,
+  because the gap deliberately skips story and test consumers that the affected
+  set counts. To reconstruct the full affected set, run
+  `fallow check --impact-closure <path>` once per changed file and union the
+  results: that flag seeds from a single file, so no single command reproduces
+  the changeset-wide union.
+
+  Consumers that pinned `schema_version` to 8 must accept 9.
+
 - **Review brief schema 8 adds author actions, test adjacency, independent
   slices, and dependency decisions.** All additive. A `--walkthrough-file`
   judgment may carry `action` (`block`, `address`, `consider`, `fyi`); any
