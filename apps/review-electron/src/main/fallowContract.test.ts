@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { toWalkthroughDocument } from "../model/adapter";
 import {
-  REVIEW_BRIEF_SCHEMA_VERSION,
+  MIN_REVIEW_BRIEF_SCHEMA_VERSION,
   parseGuideContract,
   parseReviewContract,
   parseWalkthroughValidationContract,
@@ -14,19 +14,19 @@ const compatibilityError = (kind: string): string => {
       : kind === "review-walkthrough-guide"
         ? "fallow review --walkthrough-guide"
         : "fallow review --walkthrough-file";
-  return `${command} returned incompatible JSON; expected ${kind} schema version ${REVIEW_BRIEF_SCHEMA_VERSION}.`;
+  return `${command} returned incompatible JSON; expected ${kind} schema version ${MIN_REVIEW_BRIEF_SCHEMA_VERSION} or newer.`;
 };
 
 const minimumReview = (): Record<string, unknown> => ({
   kind: "audit-brief",
   command: "audit-brief",
-  schema_version: REVIEW_BRIEF_SCHEMA_VERSION,
+  schema_version: MIN_REVIEW_BRIEF_SCHEMA_VERSION,
 });
 
 const minimumGuide = (): Record<string, unknown> => ({
   kind: "review-walkthrough-guide",
   command: "review-walkthrough-guide",
-  schema_version: REVIEW_BRIEF_SCHEMA_VERSION,
+  schema_version: MIN_REVIEW_BRIEF_SCHEMA_VERSION,
   graph_snapshot_hash: "graph:1",
   digest: { decisions: { emitted_signal_ids: [] } },
   direction: { order: [] },
@@ -37,15 +37,17 @@ const minimumGuide = (): Record<string, unknown> => ({
 const minimumValidation = (): Record<string, unknown> => ({
   kind: "review-walkthrough-validation",
   command: "review-walkthrough-validation",
-  schema_version: REVIEW_BRIEF_SCHEMA_VERSION,
+  schema_version: MIN_REVIEW_BRIEF_SCHEMA_VERSION,
   graph_snapshot_hash: "graph:1",
   stale: false,
   accepted: [],
   rejected: [],
 });
 
-it("tracks the current Review Brief schema version", () => {
-  expect(REVIEW_BRIEF_SCHEMA_VERSION).toBe(8);
+it("pins the oldest Review Brief schema version it can read", () => {
+  // A floor, not the current version: fallow is on a newer brief schema and
+  // `hasHeader` accepts it. Raising this rejects envelopes the app can parse.
+  expect(MIN_REVIEW_BRIEF_SCHEMA_VERSION).toBe(8);
 });
 
 describe("parseReviewContract", () => {
@@ -69,7 +71,7 @@ describe("parseReviewContract", () => {
 
   it.each([
     ["missing", undefined],
-    ["older", REVIEW_BRIEF_SCHEMA_VERSION - 1],
+    ["older", MIN_REVIEW_BRIEF_SCHEMA_VERSION - 1],
   ])("rejects a %s schema version", (_label, schemaVersion) => {
     const value = minimumReview();
     if (schemaVersion === undefined) delete value["schema_version"];
@@ -84,7 +86,7 @@ describe("parseReviewContract", () => {
   // lockstep: a newer fallow build must not strand the app.
   it("accepts a newer schema version", () => {
     const value = minimumReview();
-    value["schema_version"] = REVIEW_BRIEF_SCHEMA_VERSION + 1;
+    value["schema_version"] = MIN_REVIEW_BRIEF_SCHEMA_VERSION + 1;
     expect(() => parseReviewContract(JSON.stringify(value))).not.toThrow();
   });
 
@@ -111,7 +113,7 @@ describe("parseReviewContract", () => {
     );
 
     expect(toWalkthroughDocument(parsed)).toMatchObject({
-      schemaVersion: REVIEW_BRIEF_SCHEMA_VERSION,
+      schemaVersion: MIN_REVIEW_BRIEF_SCHEMA_VERSION,
       stages: [],
       decisions: [],
     });
