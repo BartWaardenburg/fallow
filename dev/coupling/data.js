@@ -1,57 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788789454425,
+  "lastUpdate": 1788793629824,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Module Coupling": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "08565e1db1c5166af5dc4f2907894657fd347dda",
-          "message": "perf(benchmarks): track runtime coverage analysis",
-          "timestamp": "2026-08-20T09:08:41+02:00",
-          "tree_id": "8539fd70ef84c9dad35bfc6506a6a6046805f8c6",
-          "url": "https://github.com/fallow-rs/fallow/commit/08565e1db1c5166af5dc4f2907894657fd347dda"
-        },
-        "date": 1787210059449,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Max Fan-In (non-framework)",
-            "value": 47,
-            "unit": "deps"
-          },
-          {
-            "name": "Max Fan-Out (non-framework)",
-            "value": 28,
-            "unit": "deps"
-          },
-          {
-            "name": "Modules >20 Fan-In (%)",
-            "value": 1.32,
-            "unit": "%"
-          },
-          {
-            "name": "Total Modules",
-            "value": 455,
-            "unit": "count"
-          },
-          {
-            "name": "Total Edges",
-            "value": 1231,
-            "unit": "count"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4874,6 +4825,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/17c82aa7c56b2e946b6d0905355e532d4c7b5d77"
         },
         "date": 1788789450824,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Max Fan-In (non-framework)",
+            "value": 52,
+            "unit": "deps"
+          },
+          {
+            "name": "Max Fan-Out (non-framework)",
+            "value": 29,
+            "unit": "deps"
+          },
+          {
+            "name": "Modules >20 Fan-In (%)",
+            "value": 1.27,
+            "unit": "%"
+          },
+          {
+            "name": "Total Modules",
+            "value": 472,
+            "unit": "count"
+          },
+          {
+            "name": "Total Edges",
+            "value": 1284,
+            "unit": "count"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "dc8656e74ff5e58df08ccd03bc8aabac4966c594",
+          "message": "test: cover guard multi-file batches and candidate loader errors\n\nTwo gaps salvaged from unlanded optimization branches, without the\noptimizations themselves.\n\nEvery existing guard test passes exactly one file, so nothing caught state\nleaking across files in a batch. The new test asserts a four-file report\nserializes identically to the four single-file reports concatenated, and pins\nthe per-file rule-id ordering, including that an unparsable files glob applies\nto every file.\n\nload_candidate_map had no coverage of its three rejection paths. The verdict\nside was tested, the candidate side was not, so a missing security_findings\narray, a malformed finding, and a duplicate finding_id were all unguarded.",
+          "timestamp": "2026-09-07T17:03:32+02:00",
+          "tree_id": "63b88877e3eddebf22d21f468e060de7c6727e75",
+          "url": "https://github.com/fallow-rs/fallow/commit/dc8656e74ff5e58df08ccd03bc8aabac4966c594"
+        },
+        "date": 1788793626309,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
