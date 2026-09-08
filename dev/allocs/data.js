@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788881017273,
+  "lastUpdate": 1788884337446,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "f83974cf024b987f2f4dc5ba51a5a83fa6744976",
-          "message": "fix(extract): record JSX namespace member tags as member accesses\n\nThe syntactic dead-code scan only recorded plain-expression member accesses, so a namespace import rendered exclusively through JSX member tags (<SC.Wrapper />) kept its exports reported as unused, and in entry-point files every sibling export of the namespace target was falsely flagged. JSX member-expression tags now record member accesses like their plain-expression spelling, covering nested receivers, this receivers, and star re-export resolution. Behavior change: namespace imports in non-entry consumers narrow to the members actually used instead of marking every export used, so genuinely unused siblings surface for the first time. Extraction and graph cache versions were bumped, so the first run after upgrading performs one cold re-analysis.\n\nFixes #2348",
-          "timestamp": "2026-08-21T22:14:36+02:00",
-          "tree_id": "1b98e2f31f26ddbfb312439022ea6a7c60ca9c0e",
-          "url": "https://github.com/fallow-rs/fallow/commit/f83974cf024b987f2f4dc5ba51a5a83fa6744976"
-        },
-        "date": 1787344042264,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9725915,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 49196,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1190645,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8431,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8409,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bartwaardenburg@gmail.com",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "147004e79ecb8cbe0b8059036021c09596942fae",
+          "message": "Merge pull request #2590 from fallow-rs/feat/dependabot-batch\n\nchore: batch Dependabot updates",
+          "timestamp": "2026-09-08T18:13:16+02:00",
+          "tree_id": "8548dc61538a4e6f585ecbbc514d4ac74197ed5f",
+          "url": "https://github.com/fallow-rs/fallow/commit/147004e79ecb8cbe0b8059036021c09596942fae"
+        },
+        "date": 1788884332984,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 9870926,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 50738,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1204074,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8489,
             "unit": "allocations"
           }
         ]
