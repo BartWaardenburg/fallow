@@ -37,7 +37,7 @@ use crate::graph::ModuleGraph;
 use crate::resolve::ResolvedModule;
 use crate::results::{RenderFanInComponent, RenderFanInMetric};
 
-use super::predicates::is_react_file;
+use super::predicates::{declares_react_runtime, is_react_file};
 use super::react_resolve::{ChildResolver, CompKey};
 
 /// The same concentration floor `compute_coupling_concentration` uses
@@ -56,7 +56,7 @@ pub fn compute_render_fan_in(
     declared_deps: &FxHashSet<String>,
     root: &Path,
 ) -> Option<RenderFanInMetric> {
-    if !project_declares_react(declared_deps) {
+    if !declares_react_runtime(declared_deps) {
         return None;
     }
 
@@ -66,13 +66,6 @@ pub fn compute_render_fan_in(
     credit_render_edges(graph, &modules_by_id, &resolver, root, &mut counts);
 
     build_render_fan_in_metric(graph, counts)
-}
-
-fn project_declares_react(declared_deps: &FxHashSet<String>) -> bool {
-    declared_deps.contains("react")
-        || declared_deps.contains("react-dom")
-        || declared_deps.contains("next")
-        || declared_deps.contains("preact")
 }
 
 fn build_lookup_maps<'a>(

@@ -47,6 +47,10 @@ struct PostReviewResult {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     apply_errors: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
+    failed_fingerprints: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    unapplied_fingerprints: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     post_errors: Vec<String>,
 }
 
@@ -84,6 +88,10 @@ pub(super) fn post_review(
         CiProvider::Gitlab => post_gitlab_review(input, &envelope, &provider_state.fingerprints),
     };
     if !result.post_errors.is_empty() {
+        // A failed inline-comment post cancels the whole reconcile pass, so no
+        // stale thread is resolved in this run. That is a separate defect from
+        // the per-fingerprint isolation inside the apply loops, and it is not
+        // addressed here.
         return emit_post_review_result(&result, output, json_style);
     }
 
@@ -281,6 +289,8 @@ fn attach_reconcile_result(result: &mut PostReviewResult, stale: &[String], appl
     result.resolution_comments_posted = applied.resolution_comments_posted;
     result.threads_resolved = applied.threads_resolved;
     result.apply_hint = applied.hint();
+    result.failed_fingerprints = applied.failed_fingerprints.into_iter().collect();
+    result.unapplied_fingerprints = applied.unapplied_fingerprints.into_iter().collect();
     result.apply_errors = applied.errors;
 }
 

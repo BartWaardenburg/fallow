@@ -17,7 +17,7 @@ use rustc_hash::FxHashSet;
 
 use crate::asset_url::normalize_asset_url;
 use crate::html::is_remote_url;
-use crate::sfc::{SfcScript, SourceRegion};
+use crate::sfc::{SfcScript, SourceRegion, ranges_to_gaps};
 use crate::source_map::ExtractionResult;
 use crate::template_expression_scan::{
     TemplateScanMode, guarded_import_locals, import_declaration_ranges, merge_ranges,
@@ -541,34 +541,6 @@ pub fn extract_astro_style_regions(source: &str) -> Vec<SourceRegion> {
             })
         })
         .collect()
-}
-
-fn ranges_to_gaps(source: &str, ranges: &[(usize, usize)]) -> Vec<SourceRegion> {
-    let mut regions = Vec::new();
-    let mut cursor = 0;
-    for &(start, end) in ranges {
-        if start > cursor {
-            push_region(source, cursor, start, &mut regions);
-        }
-        cursor = cursor.max(end);
-    }
-    if cursor < source.len() {
-        push_region(source, cursor, source.len(), &mut regions);
-    }
-    regions
-}
-
-fn push_region(source: &str, start: usize, end: usize, regions: &mut Vec<SourceRegion>) {
-    let Some(body) = source.get(start..end) else {
-        return;
-    };
-    if body.trim().is_empty() {
-        return;
-    }
-    regions.push(SourceRegion {
-        body: body.to_string(),
-        byte_offset: start,
-    });
 }
 
 pub(crate) fn is_astro_file(path: &Path) -> bool {

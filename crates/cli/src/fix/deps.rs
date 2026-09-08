@@ -33,9 +33,6 @@ pub(super) struct DependencyFixInput<'a> {
     pub(super) plan: &'a mut FixPlan,
     pub(super) output: OutputFormat,
     pub(super) dry_run: bool,
-    /// Suppresses the stderr withholding notice, matching how the plan's own
-    /// skip records honour `--quiet`.
-    pub(super) quiet: bool,
     pub(super) fixes: &'a mut Vec<serde_json::Value>,
 }
 
@@ -75,11 +72,27 @@ pub(super) fn apply_dependency_fixes(input: &mut DependencyFixInput<'_>) {
         );
     }
 
-    let _ = input.root; // root was previously used to construct the path; now deps carry their own path
-
     for (&pkg_path, removals) in &deps_by_pkg {
         process_package_dependency_removals(input, pkg_path, removals.as_slice());
     }
+}
+
+/// The project-root-relative, forward-slash form of a `package.json` path.
+///
+/// Every other fix entry reports a project-relative path: `remove_export`
+/// strips the root, and the catalog fixers normalize separators on top of
+/// that. A dependency entry used to carry the absolute host path instead, so a
+/// single `fixes` array mixed `"path": "src/index.ts"` with an absolute
+/// `"file"`, and an agent holding fallow to its project-root-relative contract
+/// read a machine path that means nothing on its side of the wire. The
+/// absolute path the applier needs stays on the orchestrator-private
+/// `__target` field.
+fn relative_package_path(root: &Path, pkg_path: &Path) -> String {
+    pkg_path
+        .strip_prefix(root)
+        .unwrap_or(pkg_path)
+        .to_string_lossy()
+        .replace('\\', "/")
 }
 
 /// Read, edit, and (when not dry-run) stage one `package.json` for the
@@ -114,18 +127,16 @@ fn process_package_dependency_removals(
             && let Some(obj) = deps.as_object_mut()
             && obj.remove(package_name).is_some()
         {
+            let relative = relative_package_path(input.root, pkg_path);
             if input.dry_run {
                 if !matches!(input.output, OutputFormat::Json) {
-                    eprintln!(
-                        "Would remove `{package_name}` from {location} in {}",
-                        pkg_path.display()
-                    );
+                    eprintln!("Would remove `{package_name}` from {location} in {relative}");
                 }
                 input.fixes.push(serde_json::json!({
                     "type": "remove_dependency",
                     "package": package_name,
                     "location": location,
-                    "file": pkg_path.display().to_string(),
+                    "file": relative,
                 }));
             } else {
                 changed = true;
@@ -133,7 +144,7 @@ fn process_package_dependency_removals(
                     "type": "remove_dependency",
                     "package": package_name,
                     "location": location,
-                    "file": pkg_path.display().to_string(),
+                    "file": relative,
                     "applied": true,
                     "__target": pkg_path.display().to_string(),
                 }));
@@ -166,10 +177,19 @@ fn push_withheld_dependency_entry(
 ) {
     let package_name = removal.package_name;
     let location = removal.location;
-    if !input.quiet && !matches!(input.output, OutputFormat::Json) {
+    let relative = relative_package_path(input.root, pkg_path);
+    // Gated exactly like the `Would remove` line above: format only, never
+    // `--quiet`. A removal fallow WILL make survived `--quiet` while a removal
+    // it REFUSED did not, so the quiet plan read as complete when it was
+    // partial. A refusal is a measurement, not progress chatter.
+    if !matches!(input.output, OutputFormat::Json) {
+        // The message names the caveat the finding actually carries. Naming
+        // one cause ("did not parse cleanly") sent a reader of a run degraded
+        // by the size guard hunting for parse errors that do not exist.
+        let reason = fallow_types::output_dead_code::caveat_labels(removal.caveats)
+            .unwrap_or_else(|| "incomplete analysis".to_string());
         eprintln!(
-            "Kept `{package_name}` in {location} in {}: a source file did not parse cleanly, so the import that would credit it may never have been seen.",
-            pkg_path.display()
+            "Kept `{package_name}` in {location} in {relative}: {reason}, so the import that would credit it may never have been seen."
         );
     }
     let tokens: Vec<&str> = removal
@@ -181,7 +201,7 @@ fn push_withheld_dependency_entry(
         "type": "remove_dependency",
         "package": package_name,
         "location": location,
-        "file": pkg_path.display().to_string(),
+        "file": relative,
         "applied": false,
         "skipped": true,
         "skip_reason": SkipReason::LowConfidenceIncompleteAnalysis.as_wire_str(),
@@ -259,7 +279,6 @@ mod tests {
             plan: &mut plan,
             output,
             dry_run,
-            quiet: false,
             fixes,
         });
         if dry_run {
@@ -483,7 +502,6 @@ mod tests {
             plan: &mut plan,
             output: OutputFormat::Json,
             dry_run: false,
-            quiet: false,
             fixes: &mut fixes,
         });
         std::fs::write(&pkg_path, external).unwrap();
@@ -862,5 +880,81 @@ mod tests {
 
         let content = std::fs::read_to_string(&pkg_path).unwrap();
         assert!(content.ends_with('\n'), "output should end with newline");
+    }
+
+    /// Every `remove_dependency` entry, in all three of its states, must report
+    /// the manifest the same way `remove_export` reports a source file: as a
+    /// project-relative path. An agent consuming one `fixes` array cannot be
+    /// asked to guess which entries are relative to the project and which are
+    /// absolute on the machine that ran the analysis.
+    #[test]
+    fn every_dependency_entry_reports_a_project_relative_manifest() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let pkg_dir = root.join("packages").join("app");
+        std::fs::create_dir_all(&pkg_dir).unwrap();
+        let pkg_path = pkg_dir.join("package.json");
+
+        for (dry_run, caveated) in [(true, false), (false, false), (true, true)] {
+            std::fs::write(&pkg_path, r#"{"dependencies": {"lodash": "^4.0.0"}}"#).unwrap();
+
+            let mut results = fallow_types::results::AnalysisResults::default();
+            let mut finding = fallow_types::output_dead_code::UnusedDependencyFinding::with_actions(
+                unused_dep(&pkg_path, "lodash"),
+            );
+            if caveated {
+                finding.reachability_caveats = vec![ReachabilityCaveat::IncompleteImportGraph];
+            }
+            results.unused_dependencies.push(finding);
+
+            let mut fixes = Vec::new();
+            run_fix_deps(root, &results, OutputFormat::Json, dry_run, &mut fixes);
+
+            assert_eq!(fixes.len(), 1, "dry_run={dry_run} caveated={caveated}");
+            assert_eq!(
+                fixes[0]["file"], "packages/app/package.json",
+                "dry_run={dry_run} caveated={caveated}: {}",
+                fixes[0]
+            );
+        }
+    }
+
+    /// Relativizing the reported path must not disturb the private correlation
+    /// field the applier matches on, which is an absolute host path.
+    #[test]
+    fn the_applied_entry_keeps_an_absolute_private_target() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let pkg_path = root.join("package.json");
+        std::fs::write(&pkg_path, r#"{"dependencies": {"lodash": "^4.0.0"}}"#).unwrap();
+
+        let mut results = fallow_types::results::AnalysisResults::default();
+        results.unused_dependencies.push(
+            fallow_types::output_dead_code::UnusedDependencyFinding::with_actions(unused_dep(
+                &pkg_path, "lodash",
+            )),
+        );
+
+        let mut fixes = Vec::new();
+        run_fix_deps(root, &results, OutputFormat::Json, false, &mut fixes);
+
+        assert_eq!(fixes[0]["file"], "package.json");
+        assert_eq!(
+            fixes[0]["__target"],
+            serde_json::json!(pkg_path.display().to_string()),
+            "the applier resolves the real file through __target"
+        );
+    }
+
+    /// A manifest outside the project root has no relative form. Reporting the
+    /// absolute path is better than reporting a wrong relative one, so the
+    /// fallback must be the path itself rather than a truncated stem.
+    #[test]
+    fn a_manifest_outside_the_root_keeps_its_full_path() {
+        let outside = Path::new("/elsewhere/package.json");
+        assert_eq!(
+            relative_package_path(Path::new("/project"), outside),
+            "/elsewhere/package.json"
+        );
     }
 }

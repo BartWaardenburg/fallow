@@ -7,6 +7,7 @@ use fallow_output::{
     CodeClimateIssue, CodeClimateIssueInput, CodeClimateSeverity, build_codeclimate_issue,
     codeclimate_fingerprint_hash, normalize_uri,
 };
+use fallow_types::output_dead_code::{ReachabilityCaveat, caveat_suffix};
 use fallow_types::results::AnalysisResults;
 
 fn severity_to_codeclimate(s: Severity) -> CodeClimateSeverity {
@@ -31,6 +32,24 @@ fn fingerprint_hash(parts: &[&str]) -> String {
     codeclimate_fingerprint_hash(parts)
 }
 
+/// The caveat parenthetical a CodeClimate `description` ends with, or an empty
+/// string when the verdict rests on a fully analyzed run.
+///
+/// `description` is the one field GitLab renders inline on the MR diff, and it
+/// is also what `CiIssue` carries into the PR-comment and review-comment
+/// bodies. Those bodies offer a mutation, so the sentence that offers it has to
+/// say when the evidence behind it is incomplete. The suffix is the same
+/// parenthetical the human report and the SARIF message already use, so one
+/// finding reads identically across every surface.
+///
+/// Deliberately NOT part of the fingerprint: `codeclimate_fingerprint_hash` is
+/// fed rule id plus location by every call site in this file, never the
+/// description, so a finding that gains or loses a caveat keeps its identity
+/// and no previously resolved review thread reopens.
+fn cc_caveat_suffix(caveats: &[ReachabilityCaveat]) -> String {
+    caveat_suffix(caveats).unwrap_or_default()
+}
+
 /// Push CodeClimate issues for unused dependencies with a shared structure.
 fn push_dep_cc_issues<'a, I>(
     issues: &mut Vec<CodeClimateIssue>,
@@ -40,9 +59,14 @@ fn push_dep_cc_issues<'a, I>(
     location_label: &str,
     severity: Severity,
 ) where
-    I: IntoIterator<Item = &'a fallow_types::results::UnusedDependency>,
+    I: IntoIterator<
+        Item = (
+            &'a fallow_types::results::UnusedDependency,
+            &'a [ReachabilityCaveat],
+        ),
+    >,
 {
-    for dep in deps {
+    for (dep, caveats) in deps {
         let level = severity_to_codeclimate(severity);
         let path = cc_path(&dep.path, root);
         let line = if dep.line > 0 { Some(dep.line) } else { None };
@@ -61,8 +85,9 @@ fn push_dep_cc_issues<'a, I>(
         issues.push(build_codeclimate_issue(CodeClimateIssueInput {
             check_name: rule_id,
             description: &format!(
-                "Package '{}' is in {location_label} but never imported{workspace_context}",
-                dep.package_name
+                "Package '{}' is in {location_label} but never imported{workspace_context}{}",
+                dep.package_name,
+                cc_caveat_suffix(caveats)
             ),
             severity: level,
             category: "Bug Risk",
@@ -88,7 +113,10 @@ fn push_unused_file_issues(
         let fp = fingerprint_hash(&["fallow/unused-file", &path]);
         issues.push(build_codeclimate_issue(CodeClimateIssueInput {
             check_name: "fallow/unused-file",
-            description: "File is not reachable from any entry point",
+            description: &format!(
+                "File is not reachable from any entry point{}",
+                cc_caveat_suffix(&entry.reachability_caveats)
+            ),
             severity: level,
             category: "Bug Risk",
             path: &path,
@@ -115,9 +143,14 @@ struct UnusedExportIssuesInput<'a, I> {
 
 fn push_unused_export_issues<'a, I>(input: UnusedExportIssuesInput<'a, I>)
 where
-    I: IntoIterator<Item = &'a fallow_types::results::UnusedExport>,
+    I: IntoIterator<
+        Item = (
+            &'a fallow_types::results::UnusedExport,
+            &'a [ReachabilityCaveat],
+        ),
+    >,
 {
-    for export in input.exports {
+    for (export, caveats) in input.exports {
         let level = severity_to_codeclimate(input.severity);
         let path = cc_path(&export.path, input.root);
         let kind = if export.is_re_export {
@@ -132,8 +165,9 @@ where
             .push(build_codeclimate_issue(CodeClimateIssueInput {
                 check_name: input.rule_id,
                 description: &format!(
-                    "{kind} '{}' is never imported by other modules",
-                    export.export_name
+                    "{kind} '{}' is never imported by other modules{}",
+                    export.export_name,
+                    cc_caveat_suffix(caveats)
                 ),
                 severity: level,
                 category: "Bug Risk",
@@ -282,9 +316,14 @@ fn push_unused_member_issues<'a, I>(
     entity_label: &str,
     severity: Severity,
 ) where
-    I: IntoIterator<Item = &'a fallow_types::results::UnusedMember>,
+    I: IntoIterator<
+        Item = (
+            &'a fallow_types::results::UnusedMember,
+            &'a [ReachabilityCaveat],
+        ),
+    >,
 {
-    for member in members {
+    for (member, caveats) in members {
         let level = severity_to_codeclimate(severity);
         let path = cc_path(&member.path, root);
         let line_str = member.line.to_string();
@@ -298,8 +337,10 @@ fn push_unused_member_issues<'a, I>(
         issues.push(build_codeclimate_issue(CodeClimateIssueInput {
             check_name: rule_id,
             description: &format!(
-                "{entity_label} member '{}.{}' is never referenced",
-                member.parent_name, member.member_name
+                "{entity_label} member '{}.{}' is never referenced{}",
+                member.parent_name,
+                member.member_name,
+                cc_caveat_suffix(caveats)
             ),
             severity: level,
             category: "Bug Risk",
@@ -1414,7 +1455,11 @@ impl CodeClimateBuilder<'_> {
         );
         push_unused_export_issues(UnusedExportIssuesInput {
             issues: &mut self.issues,
-            exports: self.results.unused_exports.iter().map(|e| &e.export),
+            exports: self
+                .results
+                .unused_exports
+                .iter()
+                .map(|e| (&e.export, e.reachability_caveats.as_slice())),
             root: self.root,
             rule_id: "fallow/unused-export",
             direct_label: "Export",
@@ -1423,7 +1468,11 @@ impl CodeClimateBuilder<'_> {
         });
         push_unused_export_issues(UnusedExportIssuesInput {
             issues: &mut self.issues,
-            exports: self.results.unused_types.iter().map(|e| &e.export),
+            exports: self
+                .results
+                .unused_types
+                .iter()
+                .map(|e| (&e.export, e.reachability_caveats.as_slice())),
             root: self.root,
             rule_id: "fallow/unused-type",
             direct_label: "Type export",
@@ -1444,7 +1493,10 @@ impl CodeClimateBuilder<'_> {
     fn push_package_dependency_issues(&mut self) {
         push_dep_cc_issues(
             &mut self.issues,
-            self.results.unused_dependencies.iter().map(|f| &f.dep),
+            self.results
+                .unused_dependencies
+                .iter()
+                .map(|f| (&f.dep, f.reachability_caveats.as_slice())),
             self.root,
             "fallow/unused-dependency",
             "dependencies",
@@ -1452,7 +1504,10 @@ impl CodeClimateBuilder<'_> {
         );
         push_dep_cc_issues(
             &mut self.issues,
-            self.results.unused_dev_dependencies.iter().map(|f| &f.dep),
+            self.results
+                .unused_dev_dependencies
+                .iter()
+                .map(|f| (&f.dep, f.reachability_caveats.as_slice())),
             self.root,
             "fallow/unused-dev-dependency",
             "devDependencies",
@@ -1463,7 +1518,7 @@ impl CodeClimateBuilder<'_> {
             self.results
                 .unused_optional_dependencies
                 .iter()
-                .map(|f| &f.dep),
+                .map(|f| (&f.dep, f.reachability_caveats.as_slice())),
             self.root,
             "fallow/unused-optional-dependency",
             "optionalDependencies",
@@ -1495,7 +1550,10 @@ impl CodeClimateBuilder<'_> {
     fn push_member_issues(&mut self) {
         push_unused_member_issues(
             &mut self.issues,
-            self.results.unused_enum_members.iter().map(|m| &m.member),
+            self.results
+                .unused_enum_members
+                .iter()
+                .map(|m| (&m.member, m.reachability_caveats.as_slice())),
             self.root,
             "fallow/unused-enum-member",
             "Enum",
@@ -1503,7 +1561,10 @@ impl CodeClimateBuilder<'_> {
         );
         push_unused_member_issues(
             &mut self.issues,
-            self.results.unused_class_members.iter().map(|m| &m.member),
+            self.results
+                .unused_class_members
+                .iter()
+                .map(|m| (&m.member, m.reachability_caveats.as_slice())),
             self.root,
             "fallow/unused-class-member",
             "Class",
@@ -1511,7 +1572,12 @@ impl CodeClimateBuilder<'_> {
         );
         push_unused_member_issues(
             &mut self.issues,
-            self.results.unused_store_members.iter().map(|m| &m.member),
+            // Not in the caveated set: the analysis pass does not stamp
+            // `unused_store_members[]`, so the slice is empty by construction.
+            self.results
+                .unused_store_members
+                .iter()
+                .map(|m| (&m.member, [].as_slice())),
             self.root,
             "fallow/unused-store-member",
             "Store",
@@ -1752,5 +1818,135 @@ mod tests {
             .collect::<BTreeSet<_>>();
 
         assert_eq!(from_emitter, from_contracts);
+    }
+
+    mod caveats {
+        use std::path::{Path, PathBuf};
+
+        use fallow_config::RulesConfig;
+        use fallow_types::output_dead_code::{
+            ReachabilityCaveat, UnusedDependencyFinding, UnusedExportFinding, UnusedFileFinding,
+        };
+        use fallow_types::results::{
+            AnalysisResults, DependencyLocation, UnusedDependency, UnusedExport, UnusedFile,
+        };
+
+        use crate::dead_code_codeclimate::build_codeclimate;
+
+        /// One finding of each caveated kind, caveated or not.
+        fn results_with(root: &Path, caveated: bool) -> AnalysisResults {
+            let caveats = if caveated {
+                vec![ReachabilityCaveat::IncompleteImportGraph]
+            } else {
+                Vec::new()
+            };
+            let mut results = AnalysisResults::default();
+
+            let mut file = UnusedFileFinding::with_actions(UnusedFile {
+                path: root.join("src/lib.ts"),
+            });
+            file.reachability_caveats.clone_from(&caveats);
+            results.unused_files.push(file);
+
+            let mut export = UnusedExportFinding::with_actions(UnusedExport {
+                path: root.join("src/lib.ts"),
+                export_name: "needed".to_owned(),
+                is_type_only: false,
+                line: 3,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            });
+            export.reachability_caveats.clone_from(&caveats);
+            results.unused_exports.push(export);
+
+            let mut dep = UnusedDependencyFinding::with_actions(UnusedDependency {
+                package_name: "left-pad".to_owned(),
+                location: DependencyLocation::Dependencies,
+                path: root.join("package.json"),
+                line: 5,
+                used_in_workspaces: Vec::new(),
+            });
+            dep.reachability_caveats.clone_from(&caveats);
+            results.unused_dependencies.push(dep);
+
+            results
+        }
+
+        /// `description` is the field GitLab renders inline on the MR diff, and
+        /// the field `CiIssue` carries into the PR-comment and review-comment
+        /// bodies that offer the mutation. A verdict resting on a file the run
+        /// never read has to say so there.
+        #[test]
+        fn descriptions_name_the_caveat() {
+            let root = PathBuf::from("/project");
+
+            let issues =
+                build_codeclimate(&results_with(&root, true), &root, &RulesConfig::default());
+
+            let descriptions: Vec<&str> = issues
+                .iter()
+                .map(|issue| issue.description.as_str())
+                .collect();
+            assert!(
+                descriptions
+                    .iter()
+                    .all(|description| description.ends_with(" (caveat: incomplete import graph)")),
+                "every caveated finding hedges its description: {descriptions:?}"
+            );
+            assert!(
+                descriptions.contains(
+                    &"File is not reachable from any entry point (caveat: incomplete import graph)"
+                ),
+                "{descriptions:?}"
+            );
+        }
+
+        /// A clean run must stay byte-identical, so an integrator diffing
+        /// reports across versions sees no churn from a mechanism that did not
+        /// fire.
+        #[test]
+        fn a_clean_run_carries_no_caveat_text() {
+            let root = PathBuf::from("/project");
+
+            let issues =
+                build_codeclimate(&results_with(&root, false), &root, &RulesConfig::default());
+
+            assert!(
+                issues
+                    .iter()
+                    .all(|issue| !issue.description.contains("caveat")),
+                "{:?}",
+                issues
+                    .iter()
+                    .map(|issue| issue.description.as_str())
+                    .collect::<Vec<_>>()
+            );
+        }
+
+        /// The fingerprint is GitLab's and the review layer's comment identity.
+        /// It is computed from rule id plus location, never from the message,
+        /// so gaining a caveat must not reopen a resolved comment thread.
+        #[test]
+        fn the_caveat_does_not_move_the_fingerprint() {
+            let root = PathBuf::from("/project");
+
+            let clean =
+                build_codeclimate(&results_with(&root, false), &root, &RulesConfig::default());
+            let caveated =
+                build_codeclimate(&results_with(&root, true), &root, &RulesConfig::default());
+
+            let fingerprints = |issues: &[fallow_output::CodeClimateIssue]| {
+                issues
+                    .iter()
+                    .map(|issue| issue.fingerprint.clone())
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(fingerprints(&clean), fingerprints(&caveated));
+            assert_ne!(
+                clean[0].description, caveated[0].description,
+                "the guard is only meaningful while the description actually changed"
+            );
+        }
     }
 }

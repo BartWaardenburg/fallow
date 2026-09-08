@@ -52,11 +52,12 @@ fn build_file_report(config: &ResolvedConfig, input: &str) -> Result<GuardFileRe
     let rules = config.resolve_rules_for_path(&full_path);
     let zone_name = config.boundaries.classify_zone(&rel_path);
     let zone = zone_name.and_then(|name| guard_zone(&config.boundaries, name));
-    let notes = guard_notes(config, zone_name);
+    let boundary = guard_boundary(&config.boundaries, &rel_path, zone_name);
+    let notes = guard_notes(config, zone_name, boundary.coverage_required);
 
     Ok(GuardFileReport {
         exists: full_path.exists(),
-        boundary: guard_boundary(&config.boundaries, &rel_path, zone_name),
+        boundary,
         policy_rules: guard_policy_rules(config, &rel_path, rules.policy_violation),
         severities: GuardSeverities {
             boundary_violation: rules.boundary_violation.to_string(),
@@ -169,10 +170,22 @@ fn guard_boundary(
     }
 }
 
-fn guard_notes(config: &ResolvedConfig, zone_name: Option<&str>) -> Vec<String> {
+fn guard_notes(
+    config: &ResolvedConfig,
+    zone_name: Option<&str>,
+    coverage_required: bool,
+) -> Vec<String> {
     let mut notes = Vec::new();
     if boundaries_configured(&config.boundaries) && zone_name.is_none() {
-        notes.push("Files outside every zone are unrestricted for boundary checks.".to_string());
+        notes.push(
+            "Files outside every zone are unrestricted for import and call checks.".to_string(),
+        );
+        if coverage_required {
+            notes.push(
+                "boundaries.coverage.requireAllFiles is enabled: reachable files with no zone are reported as boundary-coverage violations."
+                    .to_string(),
+            );
+        }
     }
     if !boundaries_configured(&config.boundaries) && config.rule_packs.is_empty() {
         notes.push("No boundary zones or rule packs are configured.".to_string());
@@ -398,10 +411,8 @@ mod tests {
         assert!(file.notes.iter().any(|note| note.contains("Same-zone")));
     }
 
-    #[test]
-    fn unzoned_file_reports_required_coverage() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let config = resolve(temp.path(), |config| {
+    fn required_coverage_config(root: &Path) -> ResolvedConfig {
+        resolve(root, |config| {
             config.boundaries = BoundaryConfig {
                 zones: vec![BoundaryZone {
                     name: "domain".to_string(),
@@ -415,7 +426,13 @@ mod tests {
                 },
                 ..BoundaryConfig::default()
             };
-        });
+        })
+    }
+
+    #[test]
+    fn unzoned_file_reports_required_coverage() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let config = required_coverage_config(temp.path());
 
         let report =
             build_guard_report(&config, &["src/ui/button.ts".to_string()]).expect("report");
@@ -433,6 +450,39 @@ mod tests {
         let allowed =
             build_guard_report(&config, &["src/generated/client.ts".to_string()]).expect("report");
         assert!(!allowed.files[0].boundary.coverage_required);
+    }
+
+    #[test]
+    fn required_coverage_notes_state_the_requirement() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let config = required_coverage_config(temp.path());
+
+        let report =
+            build_guard_report(&config, &["src/ui/button.ts".to_string()]).expect("report");
+        let notes = &report.files[0].notes;
+
+        assert!(
+            notes
+                .iter()
+                .any(|note| note.contains("requireAllFiles") && note.contains("boundary-coverage")),
+            "unzoned file under required coverage must state the requirement: {notes:?}"
+        );
+        assert!(
+            !notes
+                .iter()
+                .any(|note| note.contains("unrestricted for boundary checks")),
+            "the unrestricted note must not claim to cover the coverage check: {notes:?}"
+        );
+
+        let allowed =
+            build_guard_report(&config, &["src/generated/client.ts".to_string()]).expect("report");
+        assert!(
+            !allowed.files[0]
+                .notes
+                .iter()
+                .any(|note| note.contains("requireAllFiles")),
+            "allowUnmatched paths must not state a coverage requirement"
+        );
     }
 
     #[test]
@@ -460,6 +510,78 @@ mod tests {
             "policy-violation:team-policy/pure-domain"
         );
         assert_eq!(rules[0].severity, "warn");
+    }
+
+    #[test]
+    fn compiled_rule_scopes_match_individual_file_reports() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let mut config = resolve(temp.path(), |config| {
+            config.boundaries = BoundaryConfig {
+                zones: vec![
+                    BoundaryZone {
+                        name: "domain".to_string(),
+                        patterns: vec!["src/domain/**".to_string()],
+                        auto_discover: Vec::new(),
+                        root: None,
+                    },
+                    BoundaryZone {
+                        name: "app".to_string(),
+                        patterns: vec!["src/app/**".to_string()],
+                        auto_discover: Vec::new(),
+                        root: None,
+                    },
+                ],
+                ..BoundaryConfig::default()
+            };
+        });
+        let mut domain_rule = rule("domain-only", RulePackRuleKind::BannedImport);
+        domain_rule.files = vec!["src/domain/**".to_string()];
+        domain_rule.exclude = vec!["src/domain/generated/**".to_string()];
+        let mut app_rule = rule("app-zone", RulePackRuleKind::BannedCall);
+        app_rule.zones = vec!["app".to_string()];
+        let mut invalid_glob_rule = rule("invalid-glob", RulePackRuleKind::BannedExport);
+        invalid_glob_rule.files = vec!["[".to_string()];
+        config.rule_packs = vec![pack(vec![domain_rule, app_rule, invalid_glob_rule])];
+
+        let files = vec![
+            "src/domain/user.ts".to_string(),
+            "src/domain/generated/client.ts".to_string(),
+            "src/app/page.ts".to_string(),
+            "src/other.ts".to_string(),
+        ];
+        let batch = build_guard_report(&config, &files).expect("batch report");
+        let individual = files
+            .iter()
+            .flat_map(|file| {
+                build_guard_report(&config, std::slice::from_ref(file))
+                    .expect("individual report")
+                    .files
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            serde_json::to_value(&batch.files).expect("serialize batch reports"),
+            serde_json::to_value(&individual).expect("serialize individual reports")
+        );
+        let rule_ids = batch
+            .files
+            .iter()
+            .map(|file| {
+                file.policy_rules
+                    .iter()
+                    .map(|rule| rule.rule_id.as_str())
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            rule_ids,
+            vec![
+                vec!["domain-only", "invalid-glob"],
+                vec!["invalid-glob"],
+                vec!["app-zone", "invalid-glob"],
+                vec!["invalid-glob"],
+            ]
+        );
     }
 
     #[test]

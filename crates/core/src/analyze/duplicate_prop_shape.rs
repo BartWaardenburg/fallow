@@ -72,7 +72,7 @@ use crate::discover::FileId;
 use crate::graph::ModuleGraph;
 use crate::results::{DuplicatePropShape, DuplicatePropShapeMember};
 
-use super::predicates::is_react_file;
+use super::predicates::{declares_react_runtime, is_react_file};
 use super::{LineOffsetsMap, byte_offset_to_line_col};
 
 /// The minimum number of SIGNIFICANT props (declared names surviving the
@@ -167,13 +167,6 @@ pub fn find_duplicate_prop_shapes(
         groups,
         components_scanned,
     }
-}
-
-fn declares_react_runtime(declared_deps: &FxHashSet<String>) -> bool {
-    declared_deps.contains("react")
-        || declared_deps.contains("react-dom")
-        || declared_deps.contains("next")
-        || declared_deps.contains("preact")
 }
 
 /// Bucket eligible components by their significant prop-name vector. The key is

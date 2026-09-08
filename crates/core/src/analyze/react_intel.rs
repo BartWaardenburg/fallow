@@ -31,7 +31,7 @@ use crate::graph::ModuleGraph;
 use crate::resolve::ResolvedModule;
 use crate::results::{ReactComponentIntel, ReactHookSummary, ReactPropDrill, ReactPropIntel};
 
-use super::predicates::is_react_file;
+use super::predicates::{declares_react_runtime, is_react_file};
 use super::prop_drilling::find_prop_drilling_chains;
 use super::react_resolve::{ChildResolver, CompKey};
 use super::{LineOffsetsMap, byte_offset_to_line_col};
@@ -55,7 +55,7 @@ pub fn compute_react_component_intel(
     root: &Path,
     line_offsets_by_file: &LineOffsetsMap<'_>,
 ) -> Vec<ReactComponentIntel> {
-    if !project_declares_react(declared_deps) {
+    if !declares_react_runtime(declared_deps) {
         return Vec::new();
     }
 
@@ -110,13 +110,6 @@ pub fn compute_react_component_intel(
             .then_with(|| a.component_name.cmp(&b.component_name))
     });
     intel
-}
-
-fn project_declares_react(declared_deps: &FxHashSet<String>) -> bool {
-    declared_deps.contains("react")
-        || declared_deps.contains("react-dom")
-        || declared_deps.contains("next")
-        || declared_deps.contains("preact")
 }
 
 /// Per-component render aggregation: total sites, distinct parents, and the

@@ -14,6 +14,7 @@
 use std::path::Path;
 use std::process::ExitCode;
 
+use fallow_types::output_dead_code::caveat_labels_for_tokens;
 use serde_json::Value;
 
 use super::github::{
@@ -214,6 +215,26 @@ fn joined_strs(item: &Value, key: &str, separator: &str) -> String {
         .join(separator)
 }
 
+/// The qualifier appended to a dead-code annotation whose reachability
+/// verdict rests on a file this run never fully read. Empty when the finding
+/// carries no `reachability_caveats[]`, so a clean run's annotation stream is
+/// byte-identical to what it was before this hedge existed.
+///
+/// An annotation is the surface that suggests the mutation ("Run: npm
+/// uninstall x", "remove the export keyword"), so the qualifier has to travel
+/// with it: a suggestion that reads as confident while the evidence behind it
+/// is incomplete is the exact failure this mechanism exists to prevent.
+fn caveat_note(item: &Value) -> String {
+    caveat_labels_for_tokens(arr(item, "reachability_caveats").filter_map(Value::as_str)).map_or_else(
+        String::new,
+        |labels| {
+            format!(
+                "\n\nCaveat: {labels}. A file this run did not fully read can hide the reference that would credit this, so verify before removing."
+            )
+        },
+    )
+}
+
 fn workspace_context(item: &Value) -> String {
     let workspaces = joined_strs(item, "used_in_workspaces", ", ");
     if workspaces.is_empty() {
@@ -233,10 +254,11 @@ fn dependency_action(item: &Value, pm: PackageManager) -> String {
 
 fn unused_dependency_message(item: &Value, section: &str, pm: PackageManager) -> String {
     format!(
-        "Package '{}' is listed in {section} but never imported by this package.{}\n\n{}",
+        "Package '{}' is listed in {section} but never imported by this package.{}\n\n{}{}",
         s(item, "package_name"),
         workspace_context(item),
         dependency_action(item, pm),
+        caveat_note(item),
     )
 }
 
@@ -253,8 +275,11 @@ fn collect_check(env: &Value, pm: PackageManager, out: &mut Vec<Annotation>) {
 }
 
 fn collect_check_files_and_exports(env: &Value, out: &mut Vec<Annotation>) {
-    push_each(out, env, "unused_files", "Unused file", no_anchor, |_| {
-        "This file is not imported by any other module and unreachable from entry points.\nConsider removing it or importing it where needed.".to_owned()
+    push_each(out, env, "unused_files", "Unused file", no_anchor, |it| {
+        format!(
+            "This file is not imported by any other module and unreachable from entry points.\nConsider removing it or importing it where needed.{}",
+            caveat_note(it),
+        )
     });
     push_each(
         out,
@@ -264,7 +289,7 @@ fn collect_check_files_and_exports(env: &Value, out: &mut Vec<Annotation>) {
         Anchor::line_col,
         |it| {
             format!(
-                "{} {} '{}' is never imported by other modules.\n\nIf this export is part of a public API, consider adding it to the entry configuration.\nOtherwise, remove the export keyword or delete the declaration.",
+                "{} {} '{}' is never imported by other modules.\n\nIf this export is part of a public API, consider adding it to the entry configuration.\nOtherwise, remove the export keyword or delete the declaration.{}",
                 if b(it, "is_re_export") {
                     "Re-exported"
                 } else {
@@ -276,6 +301,7 @@ fn collect_check_files_and_exports(env: &Value, out: &mut Vec<Annotation>) {
                     "value"
                 },
                 s(it, "export_name"),
+                caveat_note(it),
             )
         },
     );
@@ -287,13 +313,14 @@ fn collect_check_files_and_exports(env: &Value, out: &mut Vec<Annotation>) {
         Anchor::line_col,
         |it| {
             format!(
-                "{} type '{}' is never imported by other modules.\n\nIf only used internally, remove the export keyword.",
+                "{} type '{}' is never imported by other modules.\n\nIf only used internally, remove the export keyword.{}",
                 if b(it, "is_re_export") {
                     "Re-exported"
                 } else {
                     "Exported"
                 },
                 s(it, "export_name"),
+                caveat_note(it),
             )
         },
     );
@@ -404,9 +431,10 @@ fn collect_check_members(env: &Value, out: &mut Vec<Annotation>) {
         Anchor::line_col,
         |it| {
             format!(
-                "Enum member '{}.{}' is never referenced in the codebase.\n\nConsider removing it to keep the enum minimal.",
+                "Enum member '{}.{}' is never referenced in the codebase.\n\nConsider removing it to keep the enum minimal.{}",
                 s(it, "parent_name"),
                 s(it, "member_name"),
+                caveat_note(it),
             )
         },
     );

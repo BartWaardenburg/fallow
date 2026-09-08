@@ -66,6 +66,11 @@ const FULL_ONLY_COMMANDS = [
     args: ["--test", "scripts/*.test.mjs"],
   },
   {
+    label: "Workflow script tests",
+    command: "node",
+    args: ["--test", ".github/scripts/*.test.mjs"],
+  },
+  {
     label: "npm wrapper tests",
     command: "npm",
     args: ["--prefix", "npm/fallow", "test"],

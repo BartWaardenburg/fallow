@@ -228,8 +228,12 @@ pub use store::{GRAPH_CACHE_FILE, GraphCacheStore};
 /// whose contents had changed and replay the previous run's graph. Content
 /// hashing is also portable in a way ctime is not: `cp -Rp` and every CI cache
 /// restore preserve mtime but reset ctime, so keying on ctime here would break
-/// cross-checkout reuse instead of protecting it.
-pub const GRAPH_CACHE_VERSION: u32 = 49;
+/// content reuse after metadata changes. The graph itself remains root-bound.
+///
+/// Bumped to 50: the manifest records the project root. The persisted graph
+/// contains absolute module paths, so moving a cache to another root must
+/// rebuild it instead of reporting findings and actions in the old checkout.
+pub const GRAPH_CACHE_VERSION: u32 = 50;
 
 /// Cached form of a resolved target.
 ///
@@ -951,6 +955,8 @@ impl GraphCacheFile {
 /// Manifest inputs required to trust a persisted graph cache entry.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct GraphCacheManifest {
+    /// Root anchoring the absolute paths retained in the graph and resolver payload.
+    pub root: PathBuf,
     /// Schema version used by the persisted graph-cache entry.
     pub version: u32,
     /// Graph-affecting option dimensions.
@@ -962,9 +968,10 @@ pub struct GraphCacheManifest {
 impl GraphCacheManifest {
     /// Build a manifest and sort files by stable key for deterministic compare.
     #[must_use]
-    fn new(mode: GraphCacheMode, mut files: Vec<GraphCacheFile>) -> Self {
+    fn new(root: &Path, mode: GraphCacheMode, mut files: Vec<GraphCacheFile>) -> Self {
         sort_files(&mut files);
         Self {
+            root: root.to_path_buf(),
             version: GRAPH_CACHE_VERSION,
             mode,
             files,
@@ -984,7 +991,7 @@ impl GraphCacheManifest {
                 GraphCacheFile::from_discovered_file(root, file, content_hash_for_file(file))
             })
             .collect();
-        Self::new(mode, rows)
+        Self::new(root, mode, rows)
     }
 
     /// True when a persisted manifest matches the current graph inputs.
@@ -992,6 +999,7 @@ impl GraphCacheManifest {
     pub fn matches_inputs(&self, current: &Self) -> bool {
         self.version == GRAPH_CACHE_VERSION
             && current.version == GRAPH_CACHE_VERSION
+            && self.root == current.root
             && self.mode == current.mode
             && self.files == current.files
     }
@@ -1007,6 +1015,9 @@ impl GraphCacheManifest {
     pub fn classify_resolution_mismatch(&self, current: &Self) -> Option<CacheRejection> {
         if self.version != GRAPH_CACHE_VERSION || current.version != GRAPH_CACHE_VERSION {
             return Some(CacheRejection::VersionMismatch);
+        }
+        if self.root != current.root {
+            return Some(CacheRejection::RootMismatch);
         }
         if self.mode != current.mode {
             return Some(CacheRejection::ModeMismatch);
@@ -1037,6 +1048,7 @@ impl GraphCacheManifest {
     pub fn matches_resolution_inputs(&self, current: &Self) -> bool {
         self.version == GRAPH_CACHE_VERSION
             && current.version == GRAPH_CACHE_VERSION
+            && self.root == current.root
             && self.mode == current.mode
             && self.files.len() == current.files.len()
             && self

@@ -19,6 +19,9 @@ pub struct FixJsonOutputInput<'a> {
     /// Dependency removals withheld because the finding carried a
     /// reachability caveat.
     pub skipped_low_confidence_dependencies: usize,
+    /// Enum- and class-member removals withheld because the finding carried a
+    /// reachability caveat.
+    pub skipped_low_confidence_members: usize,
 }
 
 /// JSON root emitted by `fallow fix --format json`.
@@ -46,6 +49,12 @@ pub struct FixJsonOutput<'a> {
     /// so the two names stay honest; both are intentional and neither moves
     /// the exit code.
     pub skipped_low_confidence_dependencies: usize,
+    /// Enum- and class-member removals withheld because the finding carried a
+    /// reachability caveat. A third counter for the same reason the second
+    /// one exists: a member is neither an export nor a dependency, and
+    /// folding it into either name would make that name lie. Intentional,
+    /// exit-code-neutral, and `0` on a run that read every file it found.
+    pub skipped_low_confidence_members: usize,
 }
 
 /// Count fix entries whose `applied` flag is true.
@@ -92,6 +101,7 @@ pub fn build_fix_json_output(input: FixJsonOutputInput<'_>) -> FixJsonOutput<'_>
         skipped_mixed_line_endings: input.skipped_mixed_line_endings,
         skipped_low_confidence_exports: input.skipped_low_confidence_exports,
         skipped_low_confidence_dependencies: input.skipped_low_confidence_dependencies,
+        skipped_low_confidence_members: input.skipped_low_confidence_members,
     }
 }
 
@@ -123,6 +133,11 @@ mod tests {
                 "skipped": true,
                 "skip_reason": "low_confidence_incomplete_analysis",
             }),
+            json!({
+                "type": "remove_enum_member",
+                "skipped": true,
+                "skip_reason": "low_confidence_incomplete_analysis",
+            }),
         ];
 
         let output = build_fix_json_output(FixJsonOutputInput {
@@ -132,6 +147,7 @@ mod tests {
             skipped_mixed_line_endings: 2,
             skipped_low_confidence_exports: 3,
             skipped_low_confidence_dependencies: 4,
+            skipped_low_confidence_members: 5,
         });
 
         assert!(output.dry_run);
@@ -145,6 +161,11 @@ mod tests {
             "a withheld dependency belongs to its own counter, not the generic skip count"
         );
         assert_eq!(output.skipped_low_confidence_dependencies, 4);
+        assert_eq!(
+            output.skipped, 1,
+            "a withheld enum member belongs to its own counter too"
+        );
+        assert_eq!(output.skipped_low_confidence_members, 5);
     }
 
     #[test]
@@ -157,6 +178,7 @@ mod tests {
             skipped_mixed_line_endings: 0,
             skipped_low_confidence_exports: 0,
             skipped_low_confidence_dependencies: 0,
+            skipped_low_confidence_members: 0,
         })
         .expect("fix output serializes");
 

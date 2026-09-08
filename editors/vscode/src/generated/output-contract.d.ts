@@ -1067,7 +1067,7 @@ export type FeatureFlagActionType = ("investigate-flag" | "suppress-line")
  * Independently-versioned wire-version newtype for the brief envelope.
  * Serializes as the integer `REVIEW_BRIEF_SCHEMA_VERSION`.
  */
-export type ReviewBriefSchemaVersion = 9
+export type ReviewBriefSchemaVersion = 10
 /**
  * The exactly-three shippable decision categories (the SOLID-3). No cut category
  * (abstraction / deletion / convention / irreversibility) is representable: this
@@ -2944,6 +2944,14 @@ type: FixActionType
  * Filter on this bool of each individual action, not on `type`. See the
  * [`IssueAction`] enum-level docs for the full list of per-instance
  * flips.
+ *
+ * One flip is RUN-level rather than finding-level: a dead-code finding
+ * carrying `reachability_caveats` reports `false` here, because a file
+ * this run never fully read may hold the reference that credits it. Every
+ * mutation surface honours the same gate, so a plan built from this flag
+ * never expects a write `fallow fix`, the MCP fix tools, or the LSP quick
+ * fix will refuse. The action stays in the array at the same position and
+ * names the reason in [`Self::note`].
  */
 auto_fixable: boolean
 /**
@@ -3184,6 +3192,14 @@ semantic?: (SemanticCandidateDecision | null)
  * the merge-base.
  */
 introduced?: (AuditIntroduced | null)
+/**
+ * Advisory caveats on the reachability verdict behind this finding.
+ * A type export rests on exactly the reachability test an
+ * `unused_exports[]` entry does, and the LSP offers the same
+ * remove-the-`export`-keyword quick fix for both, so the two must render
+ * with the same confidence. Sorted, deduplicated, omitted when empty.
+ */
+reachability_caveats?: ReachabilityCaveat[]
 }
 /**
  * Wire-shape envelope for a [`PrivateTypeLeak`] finding. Mirrors
@@ -3405,6 +3421,15 @@ actions: IssueAction[]
  * the merge-base.
  */
 introduced?: (AuditIntroduced | null)
+/**
+ * Advisory caveats on the verdict behind this finding. A member's usage
+ * is collected by walking the member accesses of every module the run
+ * parsed, so a member whose only reference lives in a file the run never
+ * read reads as unused exactly like an export does. Sorted,
+ * deduplicated, and omitted from the wire when empty. Never gates the
+ * finding; it does withhold the `remove-enum-member` mutation.
+ */
+reachability_caveats?: ReachabilityCaveat[]
 }
 /**
  * Wire-shape envelope for an [`UnusedMember`] finding consumed under the
@@ -3448,6 +3473,16 @@ semantic?: (SemanticCandidateDecision | null)
  * the merge-base.
  */
 introduced?: (AuditIntroduced | null)
+/**
+ * Advisory caveats on the verdict behind this finding. A class member's
+ * usage is collected by the same reachability-free member-access walk an
+ * enum member's is, so it takes the enum-member rule unchanged: any module
+ * this run analyzed incompletely can hold the access that credits it.
+ * Sorted, deduplicated, and omitted from the wire when empty. Never gates
+ * the finding; it does withhold the `remove-class-member` mutation that
+ * the type-aware pass would otherwise open.
+ */
+reachability_caveats?: ReachabilityCaveat[]
 }
 /**
  * Wire-shape envelope for an [`UnusedMember`] finding consumed under the
@@ -5475,7 +5510,11 @@ prop_drilling_chains?: PropDrillingChainFinding[]
  */
 hotspots?: HotspotFinding[]
 /**
- * Hotspot analysis summary (only set with `--hotspots`).
+ * Hotspot analysis summary.
+ *
+ * Set whenever the run measured churn, which needs readable git history;
+ * `--hotspots` adds the per-file [`hotspots`](Self::hotspots) listing
+ * beside it rather than gating this summary.
  */
 hotspot_summary?: (HotspotSummary | null)
 /**
@@ -10622,7 +10661,11 @@ prop_drilling_chains?: PropDrillingChainFinding[]
  */
 hotspots?: HotspotFinding[]
 /**
- * Hotspot analysis summary (only set with `--hotspots`).
+ * Hotspot analysis summary.
+ *
+ * Set whenever the run measured churn, which needs readable git history;
+ * `--hotspots` adds the per-file [`hotspots`](Self::hotspots) listing
+ * beside it rather than gating this summary.
  */
 hotspot_summary?: (HotspotSummary | null)
 /**
@@ -13031,12 +13074,11 @@ review_effort: ReviewEffort
 /**
  * Stage 1 of the brief: graph-derived orientation facts.
  *
- * `boundaries_touched` is derived from the run's boundary-violation zones;
- * `reachable_from` is populated by the impact closure (the affected-not-shown
- * set: modules the changed code is reachable from / affects, none in the diff).
- * `exports_added` and `api_width_delta` both report the exports-aware public API
- * widening count. Removed exports are not represented in this widening-only
- * signal.
+ * `boundaries_touched` is derived from the run's boundary-violation zones.
+ * `exports_added` and `api_width_delta` both report the exports-aware public
+ * API widening count. Removed exports are not represented in this
+ * widening-only signal. The set of modules the changed code reaches is Stage
+ * 3's `impact_closure`, which owns both its magnitude and its paths.
  */
 export interface GraphFacts {
 /**
@@ -13050,12 +13092,6 @@ exports_added: number
  * were added.
  */
 api_width_delta: number
-/**
- * Root-relative paths of modules the changed code is reachable from / affects
- * (the impact closure's affected-but-not-in-diff set), deduped and sorted.
- * Empty when no graph was retained or nothing depends on the changed files.
- */
-reachable_from: string[]
 /**
  * Architecture boundary zones touched by the changeset, deduped and sorted.
  * Derived from the run's boundary-violation findings.
@@ -13120,15 +13156,64 @@ files: string[]
  */
 export interface ImpactClosureFacts {
 /**
- * Root-relative paths transitively affected by the changeset (reverse-deps +
- * re-export chains) that are NOT in the diff, deduped and sorted.
+ * The FULL number of files transitively affected by the changeset
+ * (reverse-deps + re-export chains) that are NOT in the diff. Computed
+ * BEFORE [`affected_not_shown`](Self::affected_not_shown) is capped to a
+ * sample, so it is always the true magnitude of the blast radius.
+ */
+affected_count: number
+/**
+ * A capped, path-sorted sample of the affected root-relative paths (at most
+ * [`AFFECTED_SAMPLE_CAP`]), deduped. The full count lives in
+ * [`affected_count`](Self::affected_count) and the distribution in
+ * [`affected_by_dir`](Self::affected_by_dir); use this list to jump to
+ * representative files, NEVER to enumerate the blast radius or to infer its
+ * shape. Because it is a prefix of the sorted set, it clusters in whichever
+ * directory sorts first. To reconstruct the full set, run
+ * `fallow check --impact-closure <path>` once per changed file and union the
+ * results: that flag seeds from a single file, so no single command
+ * reproduces this changeset-wide union.
  */
 affected_not_shown: string[]
 /**
+ * The blast radius rolled up by parent directory: how the affected files
+ * distribute, heaviest directory first, ties broken by directory path so the
+ * order is deterministic. This is the SHAPE signal, and unlike
+ * [`affected_not_shown`](Self::affected_not_shown) its counts are exact for
+ * every directory it lists. At most [`AFFECTED_DIR_CAP`] entries.
+ */
+affected_by_dir: AffectedDirectory[]
+/**
+ * How many directories did not fit within [`AFFECTED_DIR_CAP`] and are
+ * absent from [`affected_by_dir`](Self::affected_by_dir). They are the
+ * lightest ones; their files are still counted in
+ * [`affected_count`](Self::affected_count). Zero when nothing was omitted.
+ * Add this to `affected_by_dir.len()` for the true number of directories
+ * the change reaches.
+ */
+affected_by_dir_omitted: number
+/**
  * Coordination gaps: a changed file exports a contract consumed by a module
- * absent from the diff. One entry per (changed file, consumer) pair.
+ * absent from the diff. One entry per (changed file, consumer) pair. NOT a
+ * subset of [`affected_not_shown`](Self::affected_not_shown): the gap
+ * deliberately skips story and test consumers that the affected set counts.
  */
 coordination_gap: CoordinationGapFact[]
+}
+/**
+ * One directory of the blast radius and how many affected files it holds.
+ */
+export interface AffectedDirectory {
+/**
+ * Root-relative parent directory, forward-slashed. The empty string is the
+ * repository root.
+ */
+dir: string
+/**
+ * How many affected-but-not-in-diff files live directly in `dir`. Exact,
+ * never sampled.
+ */
+count: number
 }
 /**
  * One coordination-gap entry: a changed file exports symbols consumed by a

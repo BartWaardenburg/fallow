@@ -303,11 +303,15 @@ fn tool_guide_template_serves_the_prose_kept_out_of_tools_list() {
     ] {
         assert!(topics.contains(topic), "guide missing {topic}: {topics:?}");
     }
+    // The guide exists because the detail did not fit on the wire beside the
+    // summary. Assert that relationship rather than a character count, which a
+    // wording pass moves without changing what the resource is for.
     for section in sections {
-        assert!(section["summary"].is_string(), "{section}");
+        let summary = section["summary"].as_str().expect("section summary");
+        let detail = section["detail"].as_str().expect("section detail");
         assert!(
-            section["detail"].as_str().is_some_and(|d| d.len() > 100),
-            "{section}"
+            detail.len() > summary.len(),
+            "a guide section must say more than the summary it expands: {section}"
         );
     }
 }
@@ -328,13 +332,37 @@ fn tool_guide_prose_stays_out_of_the_tools_catalogue() {
 }
 
 #[test]
-fn unknown_tool_guide_suggests_the_nearest_documented_tool() {
+fn misspelled_tool_guide_suggests_the_nearest_documented_tool() {
     let error = read_resource("fallow://tools/check_helth").expect_err("unknown tool guide");
     let data = error.data.expect("structured error data");
-    assert_eq!(data["code"], "no_tool_guide");
+    assert_eq!(data["code"], "unknown_tool");
+    assert_eq!(data["registered_tool"], false);
     assert_eq!(
         data["nearest_matches"],
         serde_json::json!(["fallow://tools/check_health"])
+    );
+}
+
+/// A typo and a real tool that simply has no guide are different problems with
+/// different fixes. They used to return byte-identical bodies, so a caller
+/// could not tell "correct the name" from "stop looking, the description is
+/// the whole contract".
+#[test]
+fn a_typo_and_an_undocumented_tool_are_distinguishable() {
+    let undocumented =
+        read_resource("fallow://tools/fix_apply").expect_err("fix_apply has no guide");
+    let typo = read_resource("fallow://tools/totally_made_up").expect_err("not a tool");
+
+    let undocumented_data = undocumented.data.expect("structured error data");
+    let typo_data = typo.data.expect("structured error data");
+
+    assert_eq!(undocumented_data["code"], "no_tool_guide");
+    assert_eq!(undocumented_data["registered_tool"], true);
+    assert_eq!(typo_data["code"], "unknown_tool");
+    assert_eq!(typo_data["registered_tool"], false);
+    assert_ne!(
+        undocumented.message, typo.message,
+        "a registered tool with no guide must not read like a hallucinated name"
     );
 }
 

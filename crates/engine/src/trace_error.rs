@@ -28,7 +28,7 @@ use rustc_hash::FxHashMap;
 
 use crate::graph::ModuleGraph;
 use crate::module_graph::RetainedModuleGraph;
-use crate::trace::trace_impl::{path_matches, relativize};
+use crate::trace::trace_impl::{matching_module_indexes, relativize};
 
 /// Largest stack trace this verb will read, from a file or from stdin.
 ///
@@ -606,13 +606,7 @@ fn classify_and_look_up(
     let resolved = context.root_relative(path);
     let match_path = resolved.as_deref().unwrap_or(path);
     let root = context.root;
-    let module_indexes: Vec<usize> = graph
-        .modules
-        .iter()
-        .enumerate()
-        .filter(|(_, module)| path_matches(&module.path, root, match_path))
-        .map(|(index, _)| index)
-        .collect();
+    let module_indexes = matching_module_indexes(graph, root, match_path);
     if module_indexes.is_empty() {
         return (
             FrameOrigin::OutOfCorpus,
@@ -708,9 +702,7 @@ fn look_up(
         }
         _ => (
             FrameResolution::Ambiguous,
-            format!(
-                "'{name}' names {total} definitions; every match is listed and none is preferred"
-            ),
+            format!("'{name}' names {total} definitions; none is preferred"),
         ),
     };
 

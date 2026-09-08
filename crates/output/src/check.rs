@@ -1163,8 +1163,10 @@ mod tests {
 
     /// The degraded-parse caveat has to travel WITH the finding it can distort,
     /// because a reader looking at a `delete-file` action never sees the
-    /// diagnostic at the other end of the envelope. It is advisory only: the
-    /// actions are untouched, and a clean finding stays byte-identical.
+    /// diagnostic at the other end of the envelope. It is advisory about the
+    /// FINDING and decisive only about the MUTATION: the actions array keeps
+    /// its shape and its order, the mutating action reports
+    /// `auto_fixable: false`, and a clean finding stays byte-identical.
     #[test]
     fn reachability_caveats_are_absent_when_clean_and_named_when_flagged() {
         let mut results = AnalysisResults::default();
@@ -1225,7 +1227,16 @@ mod tests {
         assert_eq!(
             flagged["actions"].as_array().map(Vec::len),
             Some(2),
-            "the caveat is advisory: it never trims the finding's actions"
+            "the caveat never trims the finding's actions"
+        );
+        assert_eq!(
+            flagged["actions"][0]["type"], "delete-file",
+            "nor reorders them, so a consumer reading actions[0].type is unaffected"
+        );
+        assert_eq!(
+            flagged["actions"][0]["auto_fixable"],
+            serde_json::json!(false),
+            "but the mutation it gates must not advertise itself as applicable"
         );
     }
 

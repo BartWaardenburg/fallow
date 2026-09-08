@@ -28,8 +28,8 @@ pub struct ParseCacheStatus {
 
 /// Inspect the persisted extraction cache the way an analysis run would.
 ///
-/// This decodes the blob, which is the only way to learn the version and the
-/// config hash it was written under, so the cost is that of a cache load and
+/// This reads the header and decodes the blob to learn its config hash, so
+/// the cost is that of a cache load and
 /// nothing more: no analysis, no writes, no network. `config.no_cache` is
 /// deliberately ignored, because the question is what state the cache is in,
 /// not whether this particular invocation would consult it.
@@ -59,9 +59,9 @@ pub fn inspect_parse_cache(config: &ResolvedConfig) -> ParseCacheStatus {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GraphCacheStatus {
     /// Why the persisted graph could not be loaded, or `None` when it decodes
-    /// into the current shape.
+    /// into the current shape and belongs to this project root.
     ///
-    /// Loading is all this can answer. Whether a run would REUSE the graph also
+    /// Whether a run would REUSE the graph also
     /// depends on the resolver options, entry points, and per-file
     /// fingerprints, and comparing those means running discovery and
     /// extraction, which doctor deliberately does not do.
@@ -78,7 +78,10 @@ pub struct GraphCacheStatus {
 #[must_use]
 pub fn inspect_graph_cache(config: &ResolvedConfig) -> GraphCacheStatus {
     let size_bytes = cache_entry_size(&config.cache_dir, fallow_graph::cache::GRAPH_CACHE_FILE);
-    let rejection = fallow_graph::cache::GraphCacheStore::load(&config.cache_dir).err();
+    let rejection = match fallow_graph::cache::GraphCacheStore::load(&config.cache_dir) {
+        Ok(store) => (store.manifest.root != config.root).then_some(CacheRejection::RootMismatch),
+        Err(rejection) => Some(rejection),
+    };
     GraphCacheStatus {
         rejection,
         size_bytes,
@@ -144,11 +147,10 @@ mod tests {
         assert!(status.size_bytes.is_some_and(|bytes| bytes > 0));
     }
 
-    /// A blob this binary cannot frame was written by a build with a different
-    /// cache format. Reporting that as a decode failure told upgrading users
-    /// their cache was corrupt.
+    /// An unframed blob may be an old cache or foreign data. Report the decode
+    /// failure and size without claiming which one it is.
     #[test]
-    fn a_cache_from_another_build_reports_a_format_change_with_its_size() {
+    fn a_foreign_cache_blob_reports_a_decode_failure_with_its_size() {
         let root = tempfile::tempdir().expect("temp root");
         let config = config_for(root.path(), true);
         std::fs::create_dir_all(&config.cache_dir).expect("cache dir");
@@ -156,8 +158,33 @@ mod tests {
 
         let status = inspect_parse_cache(&config);
 
-        assert_eq!(status.rejection, Some(CacheRejection::VersionMismatch));
+        assert_eq!(status.rejection, Some(CacheRejection::Undecodable));
         assert_eq!(status.size_bytes, Some(7));
+    }
+
+    /// A blob that DOES carry fallow's framing, under a version this build
+    /// never writes, came from another fallow build. Reporting that as a
+    /// decode failure told an upgrading user their cache was corrupt.
+    ///
+    /// The header is spelled out here because the magic is an on-disk constant
+    /// rather than a crate export. That is safe in both directions: if the
+    /// magic ever moved, this blob would stop framing and the assertion would
+    /// fail loudly rather than quietly testing the other branch.
+    #[test]
+    fn a_cache_from_another_build_reports_a_format_change_with_its_size() {
+        let root = tempfile::tempdir().expect("temp root");
+        let config = config_for(root.path(), true);
+        std::fs::create_dir_all(&config.cache_dir).expect("cache dir");
+        let mut blob = Vec::from(*b"FLWX");
+        blob.extend_from_slice(&u32::MAX.to_le_bytes());
+        blob.extend_from_slice(b"payload");
+        std::fs::write(config.cache_dir.join("cache.bin"), &blob)
+            .expect("cache from another build");
+
+        let status = inspect_parse_cache(&config);
+
+        assert_eq!(status.rejection, Some(CacheRejection::VersionMismatch));
+        assert_eq!(status.size_bytes, Some(15));
     }
 
     #[test]
@@ -169,8 +196,10 @@ mod tests {
         assert_eq!(status.size_bytes, None);
     }
 
+    /// The graph blob is framed by the same rule as the extraction blob, with
+    /// its own magic, and preserves the same uncertainty for unframed data.
     #[test]
-    fn a_graph_cache_from_another_build_reports_a_format_change_with_its_size() {
+    fn a_foreign_graph_cache_blob_reports_a_decode_failure_with_its_size() {
         let root = tempfile::tempdir().expect("temp root");
         let config = config_for(root.path(), true);
         std::fs::create_dir_all(&config.cache_dir).expect("cache dir");
@@ -182,7 +211,65 @@ mod tests {
 
         let status = inspect_graph_cache(&config);
 
-        assert_eq!(status.rejection, Some(CacheRejection::VersionMismatch));
+        assert_eq!(status.rejection, Some(CacheRejection::Undecodable));
         assert_eq!(status.size_bytes, Some(7));
+    }
+
+    #[test]
+    fn a_graph_cache_from_another_build_reports_a_format_change_with_its_size() {
+        let root = tempfile::tempdir().expect("temp root");
+        let config = config_for(root.path(), true);
+        std::fs::create_dir_all(&config.cache_dir).expect("cache dir");
+        let mut blob = Vec::from(*b"FLWG");
+        blob.extend_from_slice(&u32::MAX.to_le_bytes());
+        blob.extend_from_slice(b"payload");
+        std::fs::write(
+            config.cache_dir.join(fallow_graph::cache::GRAPH_CACHE_FILE),
+            &blob,
+        )
+        .expect("graph cache from another build");
+
+        let status = inspect_graph_cache(&config);
+
+        assert_eq!(status.rejection, Some(CacheRejection::VersionMismatch));
+        assert_eq!(status.size_bytes, Some(15));
+    }
+
+    #[test]
+    fn a_loadable_graph_from_another_root_reports_the_known_mismatch() {
+        let original = tempfile::tempdir().expect("original root");
+        let root = original.path().canonicalize().expect("canonical root");
+        std::fs::create_dir(root.join("src")).expect("source directory");
+        std::fs::write(root.join("src/index.ts"), "export const entry = 1;\n").expect("source");
+        crate::session::AnalysisSession::load_default(&root)
+            .analyze_dead_code_with_artifacts(false, true)
+            .expect("prime graph cache");
+        let original_config = config_for(&root, true);
+        assert_eq!(inspect_graph_cache(&original_config).rejection, None);
+
+        let relocated = tempfile::tempdir().expect("relocated root");
+        let mut relocated_config = config_for(relocated.path(), true);
+        relocated_config.cache_dir = original_config.cache_dir;
+        assert_eq!(
+            inspect_graph_cache(&relocated_config).rejection,
+            Some(CacheRejection::RootMismatch)
+        );
+    }
+
+    #[test]
+    fn unreadable_cache_paths_are_not_reported_as_absent() {
+        let root = tempfile::tempdir().expect("temp root");
+        let config = config_for(root.path(), true);
+        for name in ["cache.bin", fallow_graph::cache::GRAPH_CACHE_FILE] {
+            std::fs::create_dir_all(config.cache_dir.join(name)).expect("unreadable cache path");
+        }
+        assert_eq!(
+            inspect_parse_cache(&config).rejection,
+            Some(CacheRejection::Unreadable)
+        );
+        assert_eq!(
+            inspect_graph_cache(&config).rejection,
+            Some(CacheRejection::Unreadable)
+        );
     }
 }

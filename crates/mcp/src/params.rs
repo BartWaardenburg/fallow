@@ -70,14 +70,15 @@ pub struct AnalyzeParams {
     /// Path to a fallow config file.
     pub config: Option<String>,
 
-    /// Allow trusted HTTPS config `extends` for this request.
+    /// Allow trusted HTTPS config `extends` for this request. Defaults to false
+    /// and never grants process-global trust.
     pub allow_remote_extends: Option<bool>,
 
     /// Production mode: exclude test, story, and dev files, only start/build
     /// scripts, and report type-only dependencies.
     pub production: Option<bool>,
 
-    /// Workspace packages to analyze: name, comma-separated list, globs, `!` negation.
+    /// Workspace packages to analyze: name or repo-relative path, comma-separated list, globs, `!` negation.
     pub workspace: Option<String>,
 
     /// Issue types to include, for example `["unused-exports", "unused-files"]`;
@@ -143,14 +144,15 @@ pub struct CombinedParams {
     /// Path to a fallow config file.
     pub config: Option<String>,
 
-    /// Allow trusted HTTPS config `extends` for this request.
+    /// Allow trusted HTTPS config `extends` for this request. Defaults to false
+    /// and never grants process-global trust.
     pub allow_remote_extends: Option<bool>,
 
     /// Production mode: exclude test, story, and dev files, only start/build
     /// scripts, and report type-only dependencies.
     pub production: Option<bool>,
 
-    /// Workspace packages to analyze: name, comma-separated list, globs, `!` negation.
+    /// Workspace packages to analyze: name or repo-relative path, comma-separated list, globs, `!` negation.
     pub workspace: Option<String>,
 
     /// Git ref to compare against when limiting all combined sections to
@@ -242,14 +244,15 @@ pub struct CheckChangedParams {
     /// Path to a fallow config file.
     pub config: Option<String>,
 
-    /// Allow trusted HTTPS config `extends` for this request.
+    /// Allow trusted HTTPS config `extends` for this request. Defaults to false
+    /// and never grants process-global trust.
     pub allow_remote_extends: Option<bool>,
 
     /// Production mode: exclude test, story, and dev files, only start/build
     /// scripts, and report type-only dependencies.
     pub production: Option<bool>,
 
-    /// Workspace packages to analyze: name, comma-separated list, globs, `!` negation.
+    /// Workspace packages to analyze: name or repo-relative path, comma-separated list, globs, `!` negation.
     pub workspace: Option<String>,
 
     /// Compare results against a saved baseline file. Only new issues (not in
@@ -296,7 +299,8 @@ pub struct SecurityCandidatesParams {
     /// Path to a fallow config file.
     pub config: Option<String>,
 
-    /// Allow trusted HTTPS config `extends` for this request.
+    /// Allow trusted HTTPS config `extends` for this request. Defaults to false
+    /// and never grants process-global trust.
     pub allow_remote_extends: Option<bool>,
 
     /// Workspace packages to scope candidates to; mutually exclusive with `changed_workspaces`.
@@ -346,7 +350,8 @@ pub struct FindSimilarCodeParams {
     /// Path to a fallow config file.
     pub config: Option<String>,
 
-    /// Allow trusted HTTPS config `extends` for this request.
+    /// Allow trusted HTTPS config `extends` for this request. Defaults to false
+    /// and never grants process-global trust.
     pub allow_remote_extends: Option<bool>,
 
     /// Workspace packages to scope candidates to; mutually exclusive with `changed_workspaces`.
@@ -395,6 +400,12 @@ pub struct InspectSimilarCodeParams {
     /// enrichment. Read `fallow://schema/similar-code-snapshot` for the full
     /// object shape; a snapshot that does not match it is refused with
     /// `FALLOW_MCP_INVALID_CANDIDATE_SNAPSHOT`.
+    ///
+    /// Deserialized as an untyped `Value` because the shape check lives in the
+    /// handler, but published with the `object` constraint it always had:
+    /// unconstrained, a client-side validator would accept a string or a
+    /// number here and only the server would say no.
+    #[schemars(with = "std::collections::BTreeMap<String, serde_json::Value>")]
     pub snapshot: serde_json::Value,
 
     /// Project root; defaults to the working directory.
@@ -403,7 +414,8 @@ pub struct InspectSimilarCodeParams {
     /// Path to a fallow config file.
     pub config: Option<String>,
 
-    /// Allow trusted HTTPS config `extends` for this request.
+    /// Allow trusted HTTPS config `extends` for this request. Defaults to false
+    /// and never grants process-global trust.
     pub allow_remote_extends: Option<bool>,
 
     /// Byte cap for this call's response. Lowers the 16 MiB default; over it,
@@ -419,10 +431,11 @@ pub struct FindDupesParams {
     /// Path to a fallow config file.
     pub config: Option<String>,
 
-    /// Allow trusted HTTPS config `extends` for this request.
+    /// Allow trusted HTTPS config `extends` for this request. Defaults to false
+    /// and never grants process-global trust.
     pub allow_remote_extends: Option<bool>,
 
-    /// Workspace packages to analyze: name, comma-separated list, globs, `!` negation.
+    /// Workspace packages to analyze: name or repo-relative path, comma-separated list, globs, `!` negation.
     pub workspace: Option<String>,
 
     /// Detection mode: "strict", "mild", "weak", or "semantic". Defaults to
@@ -505,14 +518,15 @@ pub struct FixParams {
     /// Path to a fallow config file.
     pub config: Option<String>,
 
-    /// Allow trusted HTTPS config `extends` for this request.
+    /// Allow trusted HTTPS config `extends` for this request. Defaults to false
+    /// and never grants process-global trust.
     pub allow_remote_extends: Option<bool>,
 
     /// Production mode: exclude test, story, and dev files, only start/build
     /// scripts, and report type-only dependencies.
     pub production: Option<bool>,
 
-    /// Workspace packages to analyze: name, comma-separated list, globs, `!` negation.
+    /// Workspace packages to analyze: name or repo-relative path, comma-separated list, globs, `!` negation.
     pub workspace: Option<String>,
 
     /// Refuse to create a new fallow config file when none exists. Use this
@@ -539,7 +553,8 @@ pub struct ProjectInfoParams {
     /// Path to a fallow config file.
     pub config: Option<String>,
 
-    /// Allow trusted HTTPS config `extends` for this request.
+    /// Allow trusted HTTPS config `extends` for this request. Defaults to false
+    /// and never grants process-global trust.
     pub allow_remote_extends: Option<bool>,
 
     /// Include entry-point patterns in the response.
@@ -578,7 +593,8 @@ pub struct InspectTargetParams {
     /// Path to a fallow config file.
     pub config: Option<String>,
 
-    /// Allow trusted HTTPS config `extends` for this request.
+    /// Allow trusted HTTPS config `extends` for this request. Defaults to false
+    /// and never grants process-global trust.
     pub allow_remote_extends: Option<bool>,
 
     /// Production mode: exclude test, story, and dev files, only start/build
@@ -586,7 +602,7 @@ pub struct InspectTargetParams {
     /// analyses that support it: trace, dead-code, and health.
     pub production: Option<bool>,
 
-    /// Workspace packages to analyze: name, comma-separated list, globs, `!` negation.
+    /// Workspace packages to analyze: name or repo-relative path, comma-separated list, globs, `!` negation.
     pub workspace: Option<String>,
 
     /// Disable the incremental parse cache.
@@ -630,7 +646,8 @@ pub struct GuardParams {
     /// Project root; defaults to the working directory.
     pub root: Option<String>,
 
-    /// Allow trusted HTTPS config `extends` for this request.
+    /// Allow trusted HTTPS config `extends` for this request. Defaults to false
+    /// and never grants process-global trust.
     pub allow_remote_extends: Option<bool>,
 
     /// Byte cap for this call's response. Lowers the 16 MiB default; over it,
@@ -669,14 +686,15 @@ pub struct TraceExportParams {
     /// Path to a fallow config file.
     pub config: Option<String>,
 
-    /// Allow trusted HTTPS config `extends` for this request.
+    /// Allow trusted HTTPS config `extends` for this request. Defaults to false
+    /// and never grants process-global trust.
     pub allow_remote_extends: Option<bool>,
 
     /// Production mode: exclude test, story, and dev files, only start/build
     /// scripts, and report type-only dependencies.
     pub production: Option<bool>,
 
-    /// Workspace packages to analyze: name, comma-separated list, globs, `!` negation.
+    /// Workspace packages to analyze: name or repo-relative path, comma-separated list, globs, `!` negation.
     pub workspace: Option<String>,
 
     /// Disable the incremental parse cache.
@@ -702,7 +720,8 @@ pub struct SemanticSymbolParams {
     /// Path to a fallow config file.
     pub config: Option<String>,
 
-    /// Allow trusted HTTPS config `extends` for this request.
+    /// Allow trusted HTTPS config `extends` for this request. Defaults to false
+    /// and never grants process-global trust.
     pub allow_remote_extends: Option<bool>,
 
     /// Explicit tsconfig paths. Project auto-discovery is used when omitted.
@@ -765,7 +784,8 @@ pub struct SemanticImpactParams {
     /// Path to a fallow config file.
     pub config: Option<String>,
 
-    /// Allow trusted HTTPS config `extends` for this request.
+    /// Allow trusted HTTPS config `extends` for this request. Defaults to false
+    /// and never grants process-global trust.
     pub allow_remote_extends: Option<bool>,
 
     /// Explicit tsconfig paths. Project auto-discovery is used when omitted.
@@ -809,7 +829,8 @@ struct SemanticImpactParamsSchema {
     root: Option<String>,
     /// Path to a fallow config file.
     config: Option<String>,
-    /// Allow trusted HTTPS config `extends` for this request.
+    /// Allow trusted HTTPS config `extends` for this request. Defaults to false
+    /// and never grants process-global trust.
     allow_remote_extends: Option<bool>,
     /// Explicit tsconfig paths. Project auto-discovery is used when omitted.
     type_aware_projects: Option<Vec<String>>,
@@ -862,14 +883,15 @@ pub struct TraceFileParams {
     /// Path to a fallow config file.
     pub config: Option<String>,
 
-    /// Allow trusted HTTPS config `extends` for this request.
+    /// Allow trusted HTTPS config `extends` for this request. Defaults to false
+    /// and never grants process-global trust.
     pub allow_remote_extends: Option<bool>,
 
     /// Production mode: exclude test, story, and dev files, only start/build
     /// scripts, and report type-only dependencies.
     pub production: Option<bool>,
 
-    /// Workspace packages to analyze: name, comma-separated list, globs, `!` negation.
+    /// Workspace packages to analyze: name or repo-relative path, comma-separated list, globs, `!` negation.
     pub workspace: Option<String>,
 
     /// Disable the incremental parse cache.
@@ -895,14 +917,15 @@ pub struct TraceImportPathParams {
     /// Path to a fallow config file.
     pub config: Option<String>,
 
-    /// Allow trusted HTTPS config `extends` for this request.
+    /// Allow trusted HTTPS config `extends` for this request. Defaults to false
+    /// and never grants process-global trust.
     pub allow_remote_extends: Option<bool>,
 
     /// Production mode: exclude test, story, and dev files, only start/build
     /// scripts, and report type-only dependencies.
     pub production: Option<bool>,
 
-    /// Workspace packages to analyze: name, comma-separated list, globs, `!` negation.
+    /// Workspace packages to analyze: name or repo-relative path, comma-separated list, globs, `!` negation.
     pub workspace: Option<String>,
 
     /// Disable the incremental parse cache.
@@ -927,14 +950,15 @@ pub struct TraceErrorParams {
     /// Path to a fallow config file.
     pub config: Option<String>,
 
-    /// Allow trusted HTTPS config `extends` for this request.
+    /// Allow trusted HTTPS config `extends` for this request. Defaults to false
+    /// and never grants process-global trust.
     pub allow_remote_extends: Option<bool>,
 
     /// Production mode: exclude test, story, and dev files, only start/build
     /// scripts, and report type-only dependencies.
     pub production: Option<bool>,
 
-    /// Workspace packages to analyze: name, comma-separated list, globs, `!` negation.
+    /// Workspace packages to analyze: name or repo-relative path, comma-separated list, globs, `!` negation.
     pub workspace: Option<String>,
 
     /// Disable the incremental parse cache.
@@ -956,14 +980,15 @@ pub struct ImpactClosureParams {
     /// Path to a fallow config file.
     pub config: Option<String>,
 
-    /// Allow trusted HTTPS config `extends` for this request.
+    /// Allow trusted HTTPS config `extends` for this request. Defaults to false
+    /// and never grants process-global trust.
     pub allow_remote_extends: Option<bool>,
 
     /// Production mode: exclude test, story, and dev files, only start/build
     /// scripts, and report type-only dependencies.
     pub production: Option<bool>,
 
-    /// Workspace packages to analyze: name, comma-separated list, globs, `!` negation.
+    /// Workspace packages to analyze: name or repo-relative path, comma-separated list, globs, `!` negation.
     pub workspace: Option<String>,
 
     /// Disable the incremental parse cache.
@@ -989,14 +1014,15 @@ pub struct TraceDependencyParams {
     /// Path to a fallow config file.
     pub config: Option<String>,
 
-    /// Allow trusted HTTPS config `extends` for this request.
+    /// Allow trusted HTTPS config `extends` for this request. Defaults to false
+    /// and never grants process-global trust.
     pub allow_remote_extends: Option<bool>,
 
     /// Production mode: exclude test, story, and dev files, only start/build
     /// scripts, and report type-only dependencies.
     pub production: Option<bool>,
 
-    /// Workspace packages to analyze: name, comma-separated list, globs, `!` negation.
+    /// Workspace packages to analyze: name or repo-relative path, comma-separated list, globs, `!` negation.
     pub workspace: Option<String>,
 
     /// Disable the incremental parse cache.
@@ -1029,10 +1055,11 @@ pub struct TraceCloneParams {
     /// Path to a fallow config file.
     pub config: Option<String>,
 
-    /// Allow trusted HTTPS config `extends` for this request.
+    /// Allow trusted HTTPS config `extends` for this request. Defaults to false
+    /// and never grants process-global trust.
     pub allow_remote_extends: Option<bool>,
 
-    /// Workspace packages to analyze: name, comma-separated list, globs, `!` negation.
+    /// Workspace packages to analyze: name or repo-relative path, comma-separated list, globs, `!` negation.
     pub workspace: Option<String>,
 
     /// Detection mode: "strict", "mild", "weak", or "semantic". Defaults to
@@ -1083,7 +1110,8 @@ pub struct HealthParams {
     /// Path to a fallow config file.
     pub config: Option<String>,
 
-    /// Allow trusted HTTPS config `extends` for this request.
+    /// Allow trusted HTTPS config `extends` for this request. Defaults to false
+    /// and never grants process-global trust.
     pub allow_remote_extends: Option<bool>,
 
     /// Maximum cyclomatic complexity threshold. Functions exceeding this are reported.
@@ -1178,7 +1206,7 @@ pub struct HealthParams {
     /// file is authoritative).
     pub churn_file: Option<String>,
 
-    /// Workspace packages to analyze: name, comma-separated list, globs, `!` negation.
+    /// Workspace packages to analyze: name or repo-relative path, comma-separated list, globs, `!` negation.
     pub workspace: Option<String>,
 
     /// Only analyze production code (excludes tests, stories, dev files).
@@ -1307,13 +1335,14 @@ pub struct CheckRuntimeCoverageParams {
     /// Path to a fallow config file.
     pub config: Option<String>,
 
-    /// Allow trusted HTTPS config `extends` for this request.
+    /// Allow trusted HTTPS config `extends` for this request. Defaults to false
+    /// and never grants process-global trust.
     pub allow_remote_extends: Option<bool>,
 
     /// Only analyze production code (excludes tests, stories, dev files).
     pub production: Option<bool>,
 
-    /// Workspace packages to analyze: name, comma-separated list, globs, `!` negation.
+    /// Workspace packages to analyze: name or repo-relative path, comma-separated list, globs, `!` negation.
     pub workspace: Option<String>,
 
     /// Minimum invocation count for a function to be classified as a hot
@@ -1368,7 +1397,8 @@ pub struct AuditParams {
     /// Path to a fallow config file.
     pub config: Option<String>,
 
-    /// Allow trusted HTTPS config `extends` for this request.
+    /// Allow trusted HTTPS config `extends` for this request. Defaults to false
+    /// and never grants process-global trust.
     pub allow_remote_extends: Option<bool>,
 
     /// Git ref to compare against (e.g., "main", "HEAD~5"). When unset, the
@@ -1398,7 +1428,7 @@ pub struct AuditParams {
     /// `--no-css-deep` on the CLI fallback path.
     pub css_deep: Option<bool>,
 
-    /// Workspace packages to analyze: name, comma-separated list, globs, `!` negation.
+    /// Workspace packages to analyze: name or repo-relative path, comma-separated list, globs, `!` negation.
     pub workspace: Option<String>,
 
     /// Disable the incremental parse cache.
@@ -1519,7 +1549,8 @@ pub struct ListBoundariesParams {
     /// Path to a fallow config file.
     pub config: Option<String>,
 
-    /// Allow trusted HTTPS config `extends` for this request.
+    /// Allow trusted HTTPS config `extends` for this request. Defaults to false
+    /// and never grants process-global trust.
     pub allow_remote_extends: Option<bool>,
 
     /// Disable the incremental parse cache.
@@ -1598,13 +1629,14 @@ pub struct FeatureFlagsParams {
     /// Path to a fallow config file.
     pub config: Option<String>,
 
-    /// Allow trusted HTTPS config `extends` for this request.
+    /// Allow trusted HTTPS config `extends` for this request. Defaults to false
+    /// and never grants process-global trust.
     pub allow_remote_extends: Option<bool>,
 
     /// Only analyze production code (excludes tests, stories, dev files).
     pub production: Option<bool>,
 
-    /// Workspace packages to analyze: name, comma-separated list, globs, `!` negation.
+    /// Workspace packages to analyze: name or repo-relative path, comma-separated list, globs, `!` negation.
     pub workspace: Option<String>,
 
     /// Show only the top N flags.
@@ -1629,13 +1661,14 @@ pub struct ListSuppressionsParams {
     /// Path to a fallow config file.
     pub config: Option<String>,
 
-    /// Allow trusted HTTPS config `extends` for this request.
+    /// Allow trusted HTTPS config `extends` for this request. Defaults to false
+    /// and never grants process-global trust.
     pub allow_remote_extends: Option<bool>,
 
     /// Only analyze production code (excludes tests, stories, dev files).
     pub production: Option<bool>,
 
-    /// Workspace packages to analyze: name, comma-separated list, globs, `!` negation.
+    /// Workspace packages to analyze: name or repo-relative path, comma-separated list, globs, `!` negation.
     pub workspace: Option<String>,
 
     /// Git ref (e.g. "main", "HEAD~5"). Scopes the inventory to files changed
@@ -1665,7 +1698,8 @@ pub struct DecisionSurfaceParams {
     /// Path to a fallow config file.
     pub config: Option<String>,
 
-    /// Allow trusted HTTPS config `extends` for this request.
+    /// Allow trusted HTTPS config `extends` for this request. Defaults to false
+    /// and never grants process-global trust.
     pub allow_remote_extends: Option<bool>,
 
     /// Git ref to compare against (e.g., "main", "HEAD~5"). When unset, the
@@ -1679,7 +1713,7 @@ pub struct DecisionSurfaceParams {
     /// 1).
     pub max_decisions: Option<usize>,
 
-    /// Workspace packages to analyze: name, comma-separated list, globs, `!` negation.
+    /// Workspace packages to analyze: name or repo-relative path, comma-separated list, globs, `!` negation.
     pub workspace: Option<String>,
 
     /// Disable the incremental parse cache.
@@ -1704,7 +1738,8 @@ pub struct GetTokenBlastRadiusParams {
     /// Path to a fallow config file.
     pub config: Option<String>,
 
-    /// Allow trusted HTTPS config `extends` for this request.
+    /// Allow trusted HTTPS config `extends` for this request. Defaults to false
+    /// and never grants process-global trust.
     pub allow_remote_extends: Option<bool>,
 
     /// Disable the incremental parse cache.

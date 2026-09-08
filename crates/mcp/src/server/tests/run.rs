@@ -951,28 +951,62 @@ Start-Sleep -Seconds 600
     );
 }
 
-/// An over-limit response is a measurement, not a failure: the analysis ran
-/// and the caller needs to know how much came back and what it looked like.
-/// A contentless error made the caller guess whether to retry or narrow.
+/// An over-limit response is a REFUSAL that carries its measurement. The
+/// caller got no analysis, so the three signals an agent already gates on
+/// (protocol `isError`, `error: true`, `exit_code`) must all say so; the
+/// measurement fields ride along so the caller still knows how much came back
+/// and what it looked like, instead of guessing whether to retry or narrow.
 #[cfg(unix)]
 #[tokio::test]
-async fn run_fallow_output_limit_reports_truncation_with_a_preview() {
+async fn run_fallow_output_limit_refuses_and_reports_truncation_with_a_preview() {
     let script = r#"i=0; while [ "$i" -lt 2048 ]; do printf x; i=$((i + 1)); done"#;
     let result =
         run_fallow_with_output_limit("/bin/sh", &["-c".to_string(), script.to_string()], 1024)
             .await
             .expect("output limit should stay a tool result");
 
-    assert_eq!(result.is_error, Some(false));
+    assert_eq!(
+        result.is_error,
+        Some(true),
+        "an agent gating on isError must not read a 256-byte preview as a completed analysis"
+    );
     let body: serde_json::Value =
         serde_json::from_str(extract_text(&result)).expect("output-limit body is JSON");
+    assert_eq!(body["error"], true);
+    assert_eq!(body["exit_code"], 2);
     assert_eq!(body["ok"], false);
     assert_eq!(body["truncated"], true);
     assert_eq!(body["result_bytes"], 2048);
     assert_eq!(body["limit_bytes"], 1024);
     assert_eq!(body["stream"], "stdout");
     assert_eq!(body["code"], "FALLOW_MCP_SUBPROCESS_OUTPUT_LIMIT");
+    assert_eq!(body["context"], "subprocess");
     assert_eq!(body["result_preview"], "x".repeat(256));
+}
+
+/// The over-limit help must not advise an action that cannot work:
+/// `max_output_bytes` only ever LOWERS the 16 MiB default, so a caller who
+/// never set it has nothing to raise.
+#[cfg(unix)]
+#[tokio::test]
+async fn run_fallow_output_limit_help_never_advises_raising_the_cap() {
+    let script = r#"i=0; while [ "$i" -lt 2048 ]; do printf x; i=$((i + 1)); done"#;
+    let result =
+        run_fallow_with_output_limit("/bin/sh", &["-c".to_string(), script.to_string()], 1024)
+            .await
+            .expect("output limit should stay a tool result");
+
+    let body: serde_json::Value =
+        serde_json::from_str(extract_text(&result)).expect("output-limit body is JSON");
+    let help = body["help"].as_str().expect("help string");
+    assert!(
+        !help.contains("raise max_output_bytes for this call"),
+        "help advises an impossible action: {help}"
+    );
+    assert!(
+        help.contains("only LOWERS"),
+        "help must state the cap is a bound, not a suggestion: {help}"
+    );
 }
 
 #[cfg(unix)]

@@ -39,6 +39,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::discover::FileId;
 use crate::graph::{ExportNamespace, ModuleGraph};
+use crate::trace::trace_impl::path_matches;
 
 /// Trace the symbol-level call chain for `query.symbol` in `query.file`.
 ///
@@ -407,26 +408,6 @@ fn imported_name_label(name: &ImportedName) -> String {
 
 fn relativize(path: &Path, root: &Path) -> PathBuf {
     path.strip_prefix(root).unwrap_or(path).to_path_buf()
-}
-
-/// Match a user-provided file path against a module's actual path. Mirrors
-/// `trace::path_matches` (kept local to avoid widening that private helper).
-fn path_matches(module_path: &Path, root: &Path, user_path: &str) -> bool {
-    let user_path_norm = user_path.replace('\\', "/");
-    let rel = module_path.strip_prefix(root).unwrap_or(module_path);
-    let rel_str = rel.to_string_lossy().replace('\\', "/");
-    let module_str = module_path.to_string_lossy().replace('\\', "/");
-    if rel_str == user_path_norm || module_str == user_path_norm {
-        return true;
-    }
-    if dunce::canonicalize(root).is_ok_and(|canonical_root| {
-        module_path
-            .strip_prefix(&canonical_root)
-            .is_ok_and(|rel| rel.to_string_lossy().replace('\\', "/") == user_path_norm)
-    }) {
-        return true;
-    }
-    module_str.ends_with(&format!("/{user_path_norm}"))
 }
 
 #[cfg(test)]

@@ -3,6 +3,7 @@ use std::path::Path;
 use fallow_engine::duplicates::CloneFingerprintSet;
 use fallow_output::normalize_uri;
 use fallow_types::duplicates::DuplicationReport;
+use fallow_types::output_dead_code::ReachabilityCaveat;
 use fallow_types::results::{AnalysisResults, UnusedExport, UnusedMember};
 
 use crate::ResultGroup;
@@ -13,6 +14,28 @@ fn relative_path<'a>(path: &'a Path, root: &Path) -> &'a Path {
 
 fn compact_path(path: &Path, root: &Path) -> String {
     normalize_uri(&relative_path(path, root).display().to_string())
+}
+
+/// The trailing `,caveat=<tokens>` field a compact record carries when the
+/// verdict behind it rests on a file this run never fully analyzed, or an empty
+/// string when it does not.
+///
+/// Compact records are not fixed at four colon-separated fields: duplication
+/// already appends `,fingerprint=...,group=...,tokens=...` after its location,
+/// so a trailing `,key=value` is the format's existing extension point and a
+/// parser that splits on the leading `:` fields is unaffected. Wire tokens are
+/// used rather than the prose labels the human report shows, because compact is
+/// consumed by scripts: `caveat=incomplete-import-graph` greps exactly.
+/// Multiple caveats join with `+`, since `,` already separates fields.
+fn compact_caveat_field(caveats: &[ReachabilityCaveat]) -> String {
+    if caveats.is_empty() {
+        return String::new();
+    }
+    let tokens: Vec<&str> = caveats
+        .iter()
+        .map(|caveat| ReachabilityCaveat::token(*caveat))
+        .collect();
+    format!(",caveat={}", tokens.join("+"))
 }
 
 fn compact_circular_dependency_line(
@@ -192,57 +215,70 @@ impl<'a> CompactLineBuilder<'a> {
         compact_path(path, self.root)
     }
 
-    fn unused_export_line(&self, export: &UnusedExport) -> String {
+    fn unused_export_line(&self, export: &UnusedExport, caveats: &[ReachabilityCaveat]) -> String {
         let tag = if export.is_re_export {
             "unused-re-export"
         } else {
             "unused-export"
         };
         format!(
-            "{}:{}:{}:{}",
+            "{}:{}:{}:{}{}",
             tag,
             self.rel(&export.path),
             export.line,
-            export.export_name
+            export.export_name,
+            compact_caveat_field(caveats)
         )
     }
 
-    fn unused_type_line(&self, export: &UnusedExport) -> String {
+    fn unused_type_line(&self, export: &UnusedExport, caveats: &[ReachabilityCaveat]) -> String {
         let tag = if export.is_re_export {
             "unused-re-export-type"
         } else {
             "unused-type"
         };
         format!(
-            "{}:{}:{}:{}",
+            "{}:{}:{}:{}{}",
             tag,
             self.rel(&export.path),
             export.line,
-            export.export_name
+            export.export_name,
+            compact_caveat_field(caveats)
         )
     }
 
-    fn compact_member(&self, member: &UnusedMember, kind: &str) -> String {
+    fn compact_member(
+        &self,
+        member: &UnusedMember,
+        kind: &str,
+        caveats: &[ReachabilityCaveat],
+    ) -> String {
         format!(
-            "{}:{}:{}:{}.{}",
+            "{}:{}:{}:{}.{}{}",
             kind,
             self.rel(&member.path),
             member.line,
             member.parent_name,
-            member.member_name
+            member.member_name,
+            compact_caveat_field(caveats)
         )
     }
 
     fn push_core_lines(&mut self) {
         for file in &self.results.unused_files {
-            self.lines
-                .push(format!("unused-file:{}", self.rel(&file.file.path)));
+            self.lines.push(format!(
+                "unused-file:{}{}",
+                self.rel(&file.file.path),
+                compact_caveat_field(&file.reachability_caveats)
+            ));
         }
         for export in &self.results.unused_exports {
-            self.lines.push(self.unused_export_line(&export.export));
+            self.lines
+                .push(self.unused_export_line(&export.export, &export.reachability_caveats));
         }
         for export in &self.results.unused_types {
-            self.lines.push(self.unused_type_line(&export.export));
+            self.lines
+                .push(self.unused_type_line(&export.export, &export.reachability_caveats));
         }
         for leak in &self.results.private_type_leaks {
             self.lines.push(format!(
@@ -257,31 +293,48 @@ impl<'a> CompactLineBuilder<'a> {
 
     fn push_unused_dependency_lines(&mut self) {
         for dep in &self.results.unused_dependencies {
-            self.lines
-                .push(format!("unused-dep:{}", dep.dep.package_name));
+            self.lines.push(format!(
+                "unused-dep:{}{}",
+                dep.dep.package_name,
+                compact_caveat_field(&dep.reachability_caveats)
+            ));
         }
         for dep in &self.results.unused_dev_dependencies {
-            self.lines
-                .push(format!("unused-devdep:{}", dep.dep.package_name));
+            self.lines.push(format!(
+                "unused-devdep:{}{}",
+                dep.dep.package_name,
+                compact_caveat_field(&dep.reachability_caveats)
+            ));
         }
         for dep in &self.results.unused_optional_dependencies {
-            self.lines
-                .push(format!("unused-optionaldep:{}", dep.dep.package_name));
+            self.lines.push(format!(
+                "unused-optionaldep:{}{}",
+                dep.dep.package_name,
+                compact_caveat_field(&dep.reachability_caveats)
+            ));
         }
     }
 
     fn push_member_lines(&mut self) {
         for member in &self.results.unused_enum_members {
-            self.lines
-                .push(self.compact_member(&member.member, "unused-enum-member"));
+            self.lines.push(self.compact_member(
+                &member.member,
+                "unused-enum-member",
+                &member.reachability_caveats,
+            ));
         }
         for member in &self.results.unused_class_members {
-            self.lines
-                .push(self.compact_member(&member.member, "unused-class-member"));
+            self.lines.push(self.compact_member(
+                &member.member,
+                "unused-class-member",
+                &member.reachability_caveats,
+            ));
         }
+        // Store members stay outside the caveated set: the analysis pass does
+        // not stamp that array, because no surface offers a mutation for one.
         for member in &self.results.unused_store_members {
             self.lines
-                .push(self.compact_member(&member.member, "unused-store-member"));
+                .push(self.compact_member(&member.member, "unused-store-member", &[]));
         }
         for import in &self.results.unresolved_imports {
             self.lines.push(format!(
@@ -1071,6 +1124,63 @@ mod tests {
             });
             assert_eq!(build_compact_lines(&results, root), vec![expected]);
         }
+    }
+
+    /// A compact record is what a CI script greps to decide what to delete, so
+    /// a verdict resting on a file the run never read has to say so on the same
+    /// line. The field rides in the trailing `,key=value` slot duplication
+    /// records already use, so the leading colon-separated fields a parser
+    /// splits on are untouched.
+    #[test]
+    fn a_caveated_finding_carries_a_trailing_caveat_field() {
+        use fallow_types::output_dead_code::{ReachabilityCaveat, UnusedDependencyFinding};
+        use fallow_types::results::{UnusedDependency, UnusedExport};
+
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+
+        let mut file = UnusedFileFinding::with_actions(UnusedFile {
+            path: root.join("src/dead.ts"),
+        });
+        file.reachability_caveats = vec![ReachabilityCaveat::IncompleteImportGraph];
+        results.unused_files.push(file);
+
+        let mut export =
+            fallow_types::output_dead_code::UnusedExportFinding::with_actions(UnusedExport {
+                path: root.join("src/lib.ts"),
+                export_name: "needed".to_owned(),
+                is_type_only: false,
+                line: 3,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            });
+        export.reachability_caveats = vec![
+            ReachabilityCaveat::IncompleteFileAnalysis,
+            ReachabilityCaveat::IncompleteImportGraph,
+        ];
+        results.unused_exports.push(export);
+
+        let mut dep = UnusedDependencyFinding::with_actions(UnusedDependency {
+            package_name: "left-pad".to_owned(),
+            location: fallow_types::results::DependencyLocation::Dependencies,
+            path: root.join("package.json"),
+            line: 5,
+            used_in_workspaces: Vec::new(),
+        });
+        dep.reachability_caveats = vec![ReachabilityCaveat::IncompleteImportGraph];
+        results.unused_dependencies.push(dep);
+
+        let lines = build_compact_lines(&results, &root);
+
+        assert_eq!(
+            lines,
+            vec![
+                "unused-file:src/dead.ts,caveat=incomplete-import-graph",
+                "unused-export:src/lib.ts:3:needed,caveat=incomplete-file-analysis+incomplete-import-graph",
+                "unused-dep:left-pad,caveat=incomplete-import-graph",
+            ]
+        );
     }
 
     #[test]

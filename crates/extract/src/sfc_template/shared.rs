@@ -492,32 +492,7 @@ fn strip_wrapping(source: &str, open: char, close: char) -> Option<&str> {
 /// be misinterpreted, and even without a second binding the colon-before-comma
 /// rule could not be enforced.
 fn strip_trailing_type_annotation(pattern: &str) -> &str {
-    let mut depth = 0_i32;
-    let mut in_single = false;
-    let mut in_double = false;
-    let mut in_backtick = false;
-    let mut escape = false;
-
-    for (idx, ch) in pattern.char_indices() {
-        if escape {
-            escape = false;
-            continue;
-        }
-        match ch {
-            '\\' if in_single || in_double || in_backtick => {
-                escape = true;
-            }
-            '\'' if !in_double && !in_backtick => in_single = !in_single,
-            '"' if !in_single && !in_backtick => in_double = !in_double,
-            '`' if !in_single && !in_double => in_backtick = !in_backtick,
-            _ if in_single || in_double || in_backtick => {}
-            '(' | '[' | '{' => depth += 1,
-            ')' | ']' | '}' => depth -= 1,
-            ':' if depth == 0 => return &pattern[..idx],
-            _ => {}
-        }
-    }
-    pattern
+    split_top_level_once(pattern, ':').map_or(pattern, |(lhs, _)| lhs)
 }
 
 fn trim_outer_parens(source: &str) -> &str {

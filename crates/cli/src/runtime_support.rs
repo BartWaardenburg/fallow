@@ -520,9 +520,9 @@ fn resolve_cache_max_size_env() -> Option<u32> {
         .filter(|mb| *mb > 0)
 }
 
-/// Read `FALLOW_CACHE_DIR` into an optional project-root-resolved cache path.
-/// Relative values use the same project-root base as `cache.dir`.
-fn resolve_cache_dir_env() -> Option<PathBuf> {
+/// Read the non-empty `FALLOW_CACHE_DIR` override. Callers resolve relative
+/// values from the project root, using the same base as `cache.dir`.
+pub fn resolve_cache_dir_env() -> Option<PathBuf> {
     std::env::var_os("FALLOW_CACHE_DIR")
         .map(PathBuf::from)
         .filter(|path| !path.as_os_str().is_empty())

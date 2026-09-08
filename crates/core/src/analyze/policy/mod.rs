@@ -13,7 +13,9 @@ use crate::graph::ModuleGraph;
 use crate::suppress::SuppressionContext;
 
 use super::boundary_calls::canonical_callee_path;
-use super::security::{CalleePattern, catalogue_matchers};
+use super::security::{
+    CalleePattern, catalogue_matchers, import_source_matches, requires_binding_trace,
+};
 use super::{LineOffsetsMap, byte_offset_to_line_col};
 
 /// One rule-pack rule with its matchers compiled for evaluation.
@@ -657,34 +659,6 @@ fn provenance_satisfied(
                     .iter()
                     .any(|name| name == leading_ident))
     })
-}
-
-fn requires_binding_trace(matcher: &super::security::Matcher) -> bool {
-    matches!(
-        matcher.id.as_str(),
-        "command-injection"
-            | "permissive-cors"
-            | "electron-unsafe-webpreferences"
-            | "insecure-temp-file"
-            | "jwt-alg-none"
-            | "jwt-verify-missing-algorithms"
-            | "tls-validation-disabled"
-            | "mysql-multiple-statements"
-            | "world-writable-permission"
-    ) || (matcher.id == "weak-crypto" && matcher.is_literal_aware())
-}
-
-fn import_source_matches(source: &str, spec: &str) -> bool {
-    fn strip_node_prefix(value: &str) -> &str {
-        value.strip_prefix("node:").unwrap_or(value)
-    }
-
-    let source = strip_node_prefix(source);
-    let spec = strip_node_prefix(spec);
-    source == spec
-        || source
-            .strip_prefix(spec)
-            .is_some_and(|rest| rest.starts_with('/'))
 }
 
 /// Segment-aware raw-specifier match: the pattern matches exactly or at a

@@ -1171,11 +1171,21 @@ fn try_load_analysis_graph_cache(
     }
 
     if let Some(rejection) = store.manifest.classify_resolution_mismatch(&current) {
-        tracing::warn!(
-            reason = rejection.id(),
-            "Graph cache decoded but not reused: {}",
-            rejection.describe()
-        );
+        // The level is the rejection's own judgement of whether the reader can
+        // do anything about it. Content drift is what a cache is for, so it
+        // stays off stderr and is read from doctor or the performance table
+        // instead; `describe()` already names the reason, so no field repeats it.
+        if rejection.discarded_existing_work() {
+            tracing::warn!(
+                "Graph cache decoded but not reused: {}",
+                rejection.describe()
+            );
+        } else {
+            tracing::debug!(
+                "Graph cache decoded but not reused: {}",
+                rejection.describe()
+            );
+        }
         return Err(Some(rejection));
     }
 
@@ -1207,8 +1217,10 @@ fn restore_cached_resolved_project(
         resolved_project,
     )
     .ok_or_else(|| {
-        tracing::warn!(
-            reason = CacheRejection::FileSetChanged.id(),
+        // Same file-set drift the manifest reports, and equally routine: at
+        // debug for the reason `CacheRejection::discarded_existing_work`
+        // documents.
+        tracing::debug!(
             "Graph cache decoded but its resolver payload no longer maps to the discovered files"
         );
         Some(CacheRejection::FileSetChanged)
@@ -2825,12 +2837,8 @@ mod tests {
         );
     }
 
-    /// The resolver hash used to include the project root, which made a cache
-    /// unusable anywhere but the directory that wrote it: a container job, a
-    /// matrix over roots, or a copied worktree decoded the whole blob and then
-    /// reused none of it. What discriminates two projects is their content, and
-    /// the manifest already compares every file's stable key and content hash,
-    /// so the root added nothing but a location lock.
+    /// Root identity is checked by the manifest. The resolver options hash
+    /// describes configuration independently of where the project resides.
     #[test]
     fn graph_cache_resolver_hash_is_independent_of_the_project_root() {
         let dir_a = tempfile::tempdir().expect("create temp dir a");
@@ -2841,17 +2849,15 @@ mod tests {
         assert_eq!(
             resolver_options_hash(&config_a),
             resolver_options_hash(&config_b),
-            "an identical project relocated to another path must still match"
+            "root identity is handled separately from resolver options"
         );
     }
 
-    /// The relocation above is safe only because the manifest itself still
-    /// discriminates on content: two different projects sharing one cache
-    /// directory must not reuse each other's graph.
+    /// A changed file set invalidates a graph even when its root and resolver
+    /// options are unchanged.
     #[test]
     fn graph_cache_manifest_still_rejects_a_different_file_set() {
         let dir_a = tempfile::tempdir().expect("create temp dir a");
-        let dir_b = tempfile::tempdir().expect("create temp dir b");
         let mode = crate::graph_cache::GraphCacheMode::new(1, 2, 3);
         let files_a = [crate::discover::DiscoveredFile {
             id: crate::discover::FileId(0),
@@ -2860,7 +2866,7 @@ mod tests {
         }];
         let files_b = [crate::discover::DiscoveredFile {
             id: crate::discover::FileId(0),
-            path: dir_b.path().join("src/b.ts"),
+            path: dir_a.path().join("src/b.ts"),
             size_bytes: 1,
         }];
 
@@ -2871,7 +2877,7 @@ mod tests {
             |_| 7,
         );
         let manifest_b = crate::graph_cache::GraphCacheManifest::from_discovered_files(
-            dir_b.path(),
+            dir_a.path(),
             &files_b,
             mode,
             |_| 7,

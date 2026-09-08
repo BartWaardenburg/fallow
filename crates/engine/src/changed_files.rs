@@ -476,16 +476,23 @@ fn collect_git_paths(
     Ok(files)
 }
 
+/// Decode one NUL-separated `git` output path into a `PathBuf`.
+///
+/// Unix keeps the raw bytes, so a non-UTF-8 tree path survives intact.
+/// Shared with `crate::churn`, which decodes the same `git` byte output under
+/// the same semantics.
 #[cfg(unix)]
-fn git_path_from_bytes(path: &[u8]) -> PathBuf {
+pub(crate) fn git_path_from_bytes(path: &[u8]) -> PathBuf {
     use std::ffi::OsString;
     use std::os::unix::ffi::OsStringExt;
 
     PathBuf::from(OsString::from_vec(path.to_vec()))
 }
 
+/// Windows counterpart: there is no byte-oriented `OsString`, so decode
+/// lossily and rewrite to backslash separators.
 #[cfg(windows)]
-fn git_path_from_bytes(path: &[u8]) -> PathBuf {
+pub(crate) fn git_path_from_bytes(path: &[u8]) -> PathBuf {
     PathBuf::from(String::from_utf8_lossy(path).replace('/', "\\"))
 }
 

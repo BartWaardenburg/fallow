@@ -53,14 +53,21 @@ impl GraphCacheStore {
     /// decoded. A format bump changes the encoded shape, so a blob
     /// from the previous release fails to decode and a version comparison made
     /// afterwards is unreachable on the one event that triggers it most: an
-    /// upgrade. `fallow doctor` reports this reason verbatim, and "could not be
-    /// decoded" reads as corruption when the truth is a routine version bump.
+    /// upgrade. `fallow doctor` reports this reason verbatim, so a routine
+    /// version bump must not read as corruption, and a file that is not a
+    /// fallow cache at all must not read as a version bump.
     ///
     /// A file that existed and was then refused logs at warn: the run paid the
     /// read and the decode and reused nothing. A missing file stays quiet.
     pub fn load(cache_dir: &Path) -> Result<Self, CacheRejection> {
         let cache_file = cache_dir.join(GRAPH_CACHE_FILE);
-        let data = std::fs::read(&cache_file).map_err(|_| CacheRejection::Absent)?;
+        let data = std::fs::read(&cache_file).map_err(|error| {
+            if error.kind() == std::io::ErrorKind::NotFound {
+                return CacheRejection::Absent;
+            }
+            tracing::warn!("Cache file could not be read; check the path and permissions");
+            CacheRejection::Unreadable
+        })?;
         let payload = read_header(&data)?;
         let mut store: Self = match postcard::from_bytes(payload) {
             Ok(store) => store,
@@ -119,12 +126,12 @@ impl GraphCacheStore {
     }
 }
 
-/// Marker written ahead of every graph-cache payload so the format version can
+/// Marker written ahead of new graph-cache payload so the format version can
 /// be read without decoding the payload it describes.
 ///
-/// A blob without it was written by a build that predates the framing, which is
-/// a different format version by definition, so it is reported as one instead
-/// of as a decode failure.
+/// Constant across format bumps: only the version field beside it moves. That
+/// lets future upgrades report an explicit version mismatch; older unframed
+/// caches still report an ambiguous decode failure.
 const GRAPH_CACHE_MAGIC: [u8; 4] = *b"FLWG";
 
 /// Bytes the framing adds ahead of the payload: the magic plus a little-endian
@@ -145,21 +152,20 @@ fn framed(version: u32, payload: &[u8]) -> Vec<u8> {
 
 /// Split a cache file into its declared version and its payload, refusing
 /// anything this binary cannot read WITHOUT decoding it first.
+///
+/// A recognized header exposes a version mismatch without decoding. Releases
+/// before framing wrote raw payloads, so a missing header cannot distinguish
+/// an older cache from foreign or damaged data. `Undecodable` keeps that
+/// uncertainty explicit and the next successful run replaces the blob.
 fn read_header(data: &[u8]) -> Result<&[u8], CacheRejection> {
     let Some((header, payload)) = data.split_at_checked(GRAPH_CACHE_HEADER_LEN) else {
-        tracing::warn!(
-            "Graph cache is too short to carry a format header, rebuilding (one-time cost after \
-             version bump)"
-        );
-        return Err(CacheRejection::VersionMismatch);
+        tracing::warn!("Graph cache is too short to carry a format header, rebuilding");
+        return Err(CacheRejection::Undecodable);
     };
     let (declared_magic, declared_version) = header.split_at(GRAPH_CACHE_MAGIC.len());
     if declared_magic != GRAPH_CACHE_MAGIC {
-        tracing::warn!(
-            "Graph cache was written by a build with a different cache format, rebuilding \
-             (one-time cost after version bump)"
-        );
-        return Err(CacheRejection::VersionMismatch);
+        tracing::warn!("Graph cache does not carry fallow's cache framing, rebuilding");
+        return Err(CacheRejection::Undecodable);
     }
     // The slice is exactly four bytes; the fallback only has to be a version
     // this binary never writes, so an impossible header is refused rather than
@@ -213,23 +219,21 @@ fn atomic_write(cache_file: &Path, data: &[u8]) -> std::io::Result<()> {
 mod tests {
     use super::*;
 
-    /// A blob written before the framing existed cannot be decoded into the
-    /// current shape at all, so a version comparison made after the decode
-    /// never ran. Every upgrade then reported a decode failure, which reads as
-    /// corruption in `fallow doctor`.
+    /// Unframed data may come from a release predating the header. Its origin
+    /// is unknown, so the error does not establish corruption.
     #[test]
-    fn a_blob_without_a_header_reports_a_version_change() {
+    fn a_blob_without_fallows_framing_is_undecodable() {
         assert_eq!(
             read_header(b"written-by-an-older-build").err(),
-            Some(CacheRejection::VersionMismatch)
+            Some(CacheRejection::Undecodable)
         );
     }
 
     #[test]
-    fn a_blob_too_short_to_carry_a_header_reports_a_version_change() {
+    fn a_blob_too_short_to_carry_a_header_is_undecodable() {
         assert_eq!(
             read_header(&[0_u8; 3]).err(),
-            Some(CacheRejection::VersionMismatch)
+            Some(CacheRejection::Undecodable)
         );
     }
 

@@ -706,19 +706,10 @@ fn read_json_file(path: &Path) -> Option<Value> {
     if let Ok(json) = serde_json::from_str::<Value>(&content) {
         return Some(json);
     }
-    jsonc_parser::parse_to_serde_value::<Value>(&content, &jsonc_parse_options()).ok()
-}
-
-fn jsonc_parse_options() -> jsonc_parser::ParseOptions {
-    jsonc_parser::ParseOptions {
-        allow_comments: true,
-        allow_loose_object_property_names: false,
-        allow_trailing_commas: true,
-        allow_missing_commas: false,
-        allow_single_quoted_strings: false,
-        allow_hexadecimal_numbers: false,
-        allow_unary_plus_numbers: false,
-    }
+    // tsconfig.json and package.json are foreign files, but fallow reads them
+    // with the same JSONC dialect it accepts for its own config, so the
+    // catalogue lives once in `fallow_config::jsonc`.
+    fallow_config::jsonc::parse_to_value::<Value>(&content).ok()
 }
 
 fn path_alias_pattern_matches(pattern: &str, specifier: &str) -> bool {

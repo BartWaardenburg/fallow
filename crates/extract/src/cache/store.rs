@@ -72,7 +72,9 @@ impl CacheStore {
     /// the most ordinary event there is (upgrading fallow) then reported
     /// "cache file could not be decoded", which reads as corruption and sent
     /// people looking for a damaged disk. With the version in front, an upgrade
-    /// says the format changed and `Undecodable` means what it says.
+    /// says the format changed. The framing is checked separately from the
+    /// version it carries, so an unframed or unreadable payload reports `Undecodable`
+    /// rather than borrowing the upgrade message.
     ///
     /// Every branch that refuses a file that DID exist logs at warn, because
     /// the user paid the read and got nothing back. Only the missing-file case
@@ -84,7 +86,13 @@ impl CacheStore {
         max_size_bytes: usize,
     ) -> Result<Self, CacheRejection> {
         let cache_file = cache_dir.join("cache.bin");
-        let data = std::fs::read(&cache_file).map_err(|_| CacheRejection::Absent)?;
+        let data = std::fs::read(&cache_file).map_err(|error| {
+            if error.kind() == std::io::ErrorKind::NotFound {
+                return CacheRejection::Absent;
+            }
+            tracing::warn!("Cache file could not be read; check the path and permissions");
+            CacheRejection::Unreadable
+        })?;
         let safety_ceiling = max_size_bytes.max(DEFAULT_CACHE_MAX_SIZE);
         if data.len() > safety_ceiling {
             tracing::warn!(
@@ -392,9 +400,9 @@ impl CacheStore {
 /// Marker written ahead of every cache payload so the format version can be
 /// read without decoding the payload it describes.
 ///
-/// A blob without it was written by a build that predates the framing, which is
-/// a different format version by definition, so it is reported as one instead
-/// of as a decode failure.
+/// Constant across format bumps: only the version field beside it moves. That
+/// lets future upgrades report an explicit version mismatch; older unframed
+/// caches still report an ambiguous decode failure.
 pub(super) const CACHE_MAGIC: [u8; 4] = *b"FLWX";
 
 /// Bytes the framing adds ahead of the payload: the magic plus a little-endian
@@ -420,21 +428,20 @@ pub(super) fn framed(version: u32, payload: &[u8]) -> Vec<u8> {
 /// shape, so a blob from the previous release fails to decode and a version
 /// comparison made after the decode is unreachable on the one event that
 /// triggers it most, an upgrade.
+///
+/// A recognized header exposes a version mismatch without decoding. Releases
+/// before framing wrote raw payloads, so a missing header cannot distinguish
+/// an older cache from foreign or damaged data. `Undecodable` keeps that
+/// uncertainty explicit and the next successful run replaces the blob.
 fn read_header(data: &[u8]) -> Result<&[u8], CacheRejection> {
     let Some((header, payload)) = data.split_at_checked(CACHE_HEADER_LEN) else {
-        tracing::warn!(
-            "Cache file is too short to carry a format header, rebuilding (one-time cost after \
-             version bump)"
-        );
-        return Err(CacheRejection::VersionMismatch);
+        tracing::warn!("Cache file is too short to carry a format header, rebuilding");
+        return Err(CacheRejection::Undecodable);
     };
     let (declared_magic, declared_version) = header.split_at(CACHE_MAGIC.len());
     if declared_magic != CACHE_MAGIC {
-        tracing::warn!(
-            "Cache file was written by a build with a different cache format, rebuilding \
-             (one-time cost after version bump)"
-        );
-        return Err(CacheRejection::VersionMismatch);
+        tracing::warn!("Cache file does not carry fallow's cache framing, rebuilding");
+        return Err(CacheRejection::Undecodable);
     }
     // The slice is exactly four bytes; the fallback only has to be a version
     // this binary never writes, so an impossible header is refused rather than

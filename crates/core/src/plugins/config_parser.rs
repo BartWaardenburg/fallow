@@ -159,11 +159,6 @@ pub(crate) fn extract_config_nested_shallow_strings(
     .unwrap_or_default()
 }
 
-/// Public wrapper for `find_config_object`.
-pub(crate) fn find_config_object_pub<'a>(program: &'a Program) -> Option<&'a ObjectExpression<'a>> {
-    find_config_object(program)
-}
-
 /// Get a top-level property expression from an object.
 pub(crate) fn property_expr<'a>(
     obj: &'a ObjectExpression<'a>,
@@ -1077,7 +1072,7 @@ fn push_unique_string(items: &mut Vec<String>, value: String) {
 /// - `const config: Config = { ... }; export default config;`
 /// - `module.exports = { ... }`
 /// - Top-level JSON object (for .json files)
-fn find_config_object<'a>(program: &'a Program) -> Option<&'a ObjectExpression<'a>> {
+pub(crate) fn find_config_object<'a>(program: &'a Program) -> Option<&'a ObjectExpression<'a>> {
     for stmt in &program.body {
         match stmt {
             Statement::ExportDefaultDeclaration(decl) => {

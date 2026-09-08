@@ -10,6 +10,10 @@ const MIN_PARALLEL_RATIO: f64 = 1.5;
 /// Entry-point discovery below this wall-clock time is not worth subdividing;
 /// the sub-spans would be six rows of rounding noise.
 const ENTRY_POINT_BREAKDOWN_FLOOR_MS: f64 = 5.0;
+/// A breakdown row below this cost rounds to `0.0ms` at the table's one decimal
+/// place, so it spends a line to say nothing. Sections under it fold into the
+/// `(other)` row of their level, which keeps that level's sum exact.
+const SPAN_ROW_FLOOR_MS: f64 = 0.05;
 
 /// Build the ` (parallel: ~Nms CPU)` suffix for a stage that ran across rayon
 /// workers, or an empty string when the stage is too cheap or shows no real
@@ -191,36 +195,63 @@ fn push_analysis_stage_lines(lines: &mut Vec<String>, t: &PipelineTimings) {
 /// rather than sorted by cost so two runs of the same project diff cleanly.
 ///
 /// Both nested levels close with their own `(other)` row: `compile + match +
-/// (other)` sums to `plugin globs`, and the six sections plus their `(other)`
+/// (other)` sums to `plugin globs`, and the sections plus their `(other)`
 /// sum to the stage, to within rounding, because every span here is carved
 /// from inside the entry-point stage's own clock. The outer table has no such
 /// property (see `push_performance_total_lines`). Without these rows the two
 /// nested sums silently fell short of the parents they claimed to divide, and
 /// a reader had no way to tell an unmeasured remainder from an arithmetic
 /// error.
+///
+/// A section under [`SPAN_ROW_FLOOR_MS`] renders as `0.0ms` and says nothing,
+/// so it is folded into its `(other)` row rather than printed. Both sums are
+/// computed from the rows that survive the floor, which keeps each level's
+/// arithmetic exact while spending lines only on the sections that cost
+/// something.
 fn push_entry_point_span_lines(lines: &mut Vec<String>, stage_ms: f64, spans: EntryPointSpans) {
     if stage_ms < ENTRY_POINT_BREAKDOWN_FLOOR_MS {
         return;
     }
-    let sections_sum = spans.root_ms
-        + spans.workspaces_ms
-        + spans.plugins_ms
-        + spans.infrastructure_ms
-        + spans.dynamic_ms
-        + spans.dedup_ms;
-    let glob_sum = spans.plugin_glob_build_ms + spans.plugin_glob_match_ms;
+    let mut rows: Vec<(&str, f64)> = Vec::with_capacity(10);
+    let mut sections_sum = 0.0;
+
     for (label, value) in [
         ("root package", spans.root_ms),
         ("workspaces", spans.workspaces_ms),
-        ("plugin globs", spans.plugins_ms),
-        ("  compile", spans.plugin_glob_build_ms),
-        ("  match", spans.plugin_glob_match_ms),
-        ("  (other)", other_ms(spans.plugins_ms, glob_sum)),
+    ] {
+        if value >= SPAN_ROW_FLOOR_MS {
+            sections_sum += value;
+            rows.push((label, value));
+        }
+    }
+    if spans.plugins_ms >= SPAN_ROW_FLOOR_MS {
+        sections_sum += spans.plugins_ms;
+        rows.push(("plugin globs", spans.plugins_ms));
+        let mut glob_sum = 0.0;
+        for (label, value) in [
+            ("  compile", spans.plugin_glob_build_ms),
+            ("  match", spans.plugin_glob_match_ms),
+        ] {
+            if value >= SPAN_ROW_FLOOR_MS {
+                glob_sum += value;
+                rows.push((label, value));
+            }
+        }
+        rows.push(("  (other)", other_ms(spans.plugins_ms, glob_sum)));
+    }
+    for (label, value) in [
         ("infrastructure", spans.infrastructure_ms),
         ("dynamic globs", spans.dynamic_ms),
         ("dedup", spans.dedup_ms),
-        ("(other)", other_ms(stage_ms, sections_sum)),
     ] {
+        if value >= SPAN_ROW_FLOOR_MS {
+            sections_sum += value;
+            rows.push((label, value));
+        }
+    }
+    rows.push(("(other)", other_ms(stage_ms, sections_sum)));
+
+    for (label, value) in rows {
         push_dimmed(lines, &format!("│    {label:<16}{value:>8.1}ms"));
     }
 }
@@ -249,6 +280,12 @@ fn displayed_stage_sum(t: &PipelineTimings) -> f64 {
 /// `(other)` clamps to `0.0ms`. Duplication is left out of the sum for the
 /// opposite reason: it runs concurrently with the stages above it. Read the
 /// rows as per-stage costs, not as a partition of TOTAL.
+///
+/// That caveat is printed, not only documented here. An `(other)` row above a
+/// horizontal rule above a TOTAL is summation grammar in every table a reader
+/// has met, and the entry-point breakdown one indent level down really does
+/// close its sums that way, so the reader has just been taught the opposite of
+/// what this level means.
 fn push_performance_total_lines(lines: &mut Vec<String>, t: &PipelineTimings) {
     push_dimmed(
         lines,
@@ -263,6 +300,10 @@ fn push_performance_total_lines(lines: &mut Vec<String>, t: &PipelineTimings) {
             .bold()
             .dimmed()
             .to_string(),
+    );
+    push_dimmed(
+        lines,
+        "│  rows are per-stage costs; several run outside or beside the TOTAL clock",
     );
     push_dimmed(
         lines,
@@ -543,7 +584,10 @@ mod tests {
             plugin_glob_build_ms: 1.0,
             plugin_glob_match_ms: 3.0,
             infrastructure_ms: 1.0,
-            dynamic_ms: 0.0,
+            // Every section carries a cost the table can show; a section that
+            // rounds to `0.0ms` folds into `(other)` instead, which
+            // `breakdown_rows_below_the_floor_fold_into_their_other_row` covers.
+            dynamic_ms: 0.5,
             dedup_ms: 2.0,
         };
 
@@ -744,6 +788,80 @@ mod tests {
         assert!(
             text.contains("│  (other):               0.0ms"),
             "an overshooting stage sum clamps the remainder to zero rather than going negative: {text}"
+        );
+        assert!(
+            text.contains(
+                "rows are per-stage costs; several run outside or beside the TOTAL clock"
+            ),
+            "the caveat that keeps the rule from reading as a sum must be on screen: {text}"
+        );
+    }
+
+    /// An `(other)` row, a rule, and a TOTAL is summation grammar, and the
+    /// entry-point breakdown one indent level down really does close its sums
+    /// that way. The explanation lived only in rustdoc and a test name, where
+    /// no reader of the table would find it.
+    #[test]
+    fn the_total_row_says_on_screen_that_it_is_not_a_sum() {
+        let timings = pipeline_timings_with_parse(20.0, 20.0);
+
+        let lines = build_performance_human_lines(&timings);
+        let text = plain(&lines);
+
+        let total_idx = lines
+            .iter()
+            .position(|line| plain(std::slice::from_ref(line)).contains("TOTAL:"))
+            .expect("the table prints a TOTAL row");
+        let note_idx = lines
+            .iter()
+            .position(|line| plain(std::slice::from_ref(line)).contains("rows are per-stage costs"))
+            .expect("the table prints the caveat");
+
+        assert_eq!(
+            note_idx,
+            total_idx + 1,
+            "the caveat belongs directly under TOTAL: {text}"
+        );
+    }
+
+    /// A section that renders as `0.0ms` spends a line to say nothing. Six of
+    /// them turned a 6.6ms stage into ten rows.
+    #[test]
+    fn breakdown_rows_below_the_floor_fold_into_their_other_row() {
+        let mut timings = pipeline_timings_with_parse(20.0, 20.0);
+        timings.entry_points_ms = 6.6;
+        timings.entry_point_spans = EntryPointSpans {
+            root_ms: 0.0,
+            workspaces_ms: 0.0,
+            plugins_ms: 6.0,
+            plugin_glob_build_ms: 5.5,
+            plugin_glob_match_ms: 0.0,
+            infrastructure_ms: 0.0,
+            dynamic_ms: 0.0,
+            dedup_ms: 0.0,
+        };
+
+        let text = plain(&build_performance_human_lines(&timings));
+
+        for silent in ["root package", "workspaces  ", "infrastructure", "dedup"] {
+            assert!(
+                !text.contains(silent),
+                "a section that rounds to 0.0ms must not spend a row: {silent:?} in {text}"
+            );
+        }
+        assert!(text.contains("plugin globs"), "{text}");
+        assert!(text.contains("compile"), "{text}");
+        assert!(
+            !text.contains("match "),
+            "a zero glob-match row folds into the nested (other): {text}"
+        );
+        assert!(
+            text.contains("│      (other)            0.5ms"),
+            "the nested (other) must still close against plugin globs: {text}"
+        );
+        assert!(
+            text.contains("│    (other)              0.6ms"),
+            "the section (other) must close against the stage using the shown rows: {text}"
         );
     }
 

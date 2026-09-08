@@ -181,7 +181,7 @@ pub fn trace_impact_closure(
 ///
 /// # Errors
 ///
-/// Returns the endpoint that did not resolve to a module in the graph.
+/// Returns the endpoint that did not resolve to exactly one module in the graph.
 pub fn trace_import_path(
     graph: &RetainedModuleGraph,
     root: &Path,

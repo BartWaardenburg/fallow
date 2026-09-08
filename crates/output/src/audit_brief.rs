@@ -6,7 +6,24 @@ use serde::Serialize;
 use serde_json::Value;
 
 /// Wire version for the `fallow audit --brief --format json` envelope.
-pub const REVIEW_BRIEF_SCHEMA_VERSION: u32 = 9;
+pub const REVIEW_BRIEF_SCHEMA_VERSION: u32 = 10;
+
+/// Maximum number of affected-but-not-in-diff paths sampled into
+/// [`ImpactClosureFacts::affected_not_shown`].
+///
+/// The full count is preserved in [`ImpactClosureFacts::affected_count`]
+/// (aggregate-before-truncate), so capping the sample never distorts the count,
+/// and the SHAPE of the reach is carried by
+/// [`ImpactClosureFacts::affected_by_dir`] rather than by which files landed in
+/// the sample. Nothing that ranks or gates reads this list: the decision surface
+/// takes its blast metric from the uncapped engine closure.
+pub const AFFECTED_SAMPLE_CAP: usize = 10;
+
+/// Maximum number of directories reported in
+/// [`ImpactClosureFacts::affected_by_dir`]. Directories beyond the cap are the
+/// lightest ones and are counted in
+/// [`ImpactClosureFacts::affected_by_dir_omitted`].
+pub const AFFECTED_DIR_CAP: usize = 25;
 
 /// Independently-versioned wire-version newtype for the brief envelope.
 /// Serializes as the integer `REVIEW_BRIEF_SCHEMA_VERSION`.
@@ -74,12 +91,11 @@ pub struct DiffTriage {
 
 /// Stage 1 of the brief: graph-derived orientation facts.
 ///
-/// `boundaries_touched` is derived from the run's boundary-violation zones;
-/// `reachable_from` is populated by the impact closure (the affected-not-shown
-/// set: modules the changed code is reachable from / affects, none in the diff).
-/// `exports_added` and `api_width_delta` both report the exports-aware public API
-/// widening count. Removed exports are not represented in this widening-only
-/// signal.
+/// `boundaries_touched` is derived from the run's boundary-violation zones.
+/// `exports_added` and `api_width_delta` both report the exports-aware public
+/// API widening count. Removed exports are not represented in this
+/// widening-only signal. The set of modules the changed code reaches is Stage
+/// 3's `impact_closure`, which owns both its magnitude and its paths.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct GraphFacts {
@@ -90,10 +106,6 @@ pub struct GraphFacts {
     /// Removed exports are not represented, so zero means no public API exports
     /// were added.
     pub api_width_delta: i64,
-    /// Root-relative paths of modules the changed code is reachable from / affects
-    /// (the impact closure's affected-but-not-in-diff set), deduped and sorted.
-    /// Empty when no graph was retained or nothing depends on the changed files.
-    pub reachable_from: Vec<String>,
     /// Architecture boundary zones touched by the changeset, deduped and sorted.
     /// Derived from the run's boundary-violation findings.
     pub boundaries_touched: Vec<String>,
@@ -108,12 +120,98 @@ pub struct GraphFacts {
 #[derive(Debug, Clone, Default, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ImpactClosureFacts {
-    /// Root-relative paths transitively affected by the changeset (reverse-deps +
-    /// re-export chains) that are NOT in the diff, deduped and sorted.
+    /// The FULL number of files transitively affected by the changeset
+    /// (reverse-deps + re-export chains) that are NOT in the diff. Computed
+    /// BEFORE [`affected_not_shown`](Self::affected_not_shown) is capped to a
+    /// sample, so it is always the true magnitude of the blast radius.
+    pub affected_count: usize,
+    /// A capped, path-sorted sample of the affected root-relative paths (at most
+    /// [`AFFECTED_SAMPLE_CAP`]), deduped. The full count lives in
+    /// [`affected_count`](Self::affected_count) and the distribution in
+    /// [`affected_by_dir`](Self::affected_by_dir); use this list to jump to
+    /// representative files, NEVER to enumerate the blast radius or to infer its
+    /// shape. Because it is a prefix of the sorted set, it clusters in whichever
+    /// directory sorts first. To reconstruct the full set, run
+    /// `fallow check --impact-closure <path>` once per changed file and union the
+    /// results: that flag seeds from a single file, so no single command
+    /// reproduces this changeset-wide union.
     pub affected_not_shown: Vec<String>,
+    /// The blast radius rolled up by parent directory: how the affected files
+    /// distribute, heaviest directory first, ties broken by directory path so the
+    /// order is deterministic. This is the SHAPE signal, and unlike
+    /// [`affected_not_shown`](Self::affected_not_shown) its counts are exact for
+    /// every directory it lists. At most [`AFFECTED_DIR_CAP`] entries.
+    pub affected_by_dir: Vec<AffectedDirectory>,
+    /// How many directories did not fit within [`AFFECTED_DIR_CAP`] and are
+    /// absent from [`affected_by_dir`](Self::affected_by_dir). They are the
+    /// lightest ones; their files are still counted in
+    /// [`affected_count`](Self::affected_count). Zero when nothing was omitted.
+    /// Add this to `affected_by_dir.len()` for the true number of directories
+    /// the change reaches.
+    pub affected_by_dir_omitted: usize,
     /// Coordination gaps: a changed file exports a contract consumed by a module
-    /// absent from the diff. One entry per (changed file, consumer) pair.
+    /// absent from the diff. One entry per (changed file, consumer) pair. NOT a
+    /// subset of [`affected_not_shown`](Self::affected_not_shown): the gap
+    /// deliberately skips story and test consumers that the affected set counts.
     pub coordination_gap: Vec<CoordinationGapFact>,
+}
+
+impl ImpactClosureFacts {
+    /// Build the facts from the full closure, capping the file sample and the
+    /// directory rollup while preserving the exact total.
+    ///
+    /// `affected` must arrive deduped and path-sorted (the engine closure
+    /// guarantees both); the sample is its prefix.
+    #[must_use]
+    pub fn new(affected: &[String], coordination_gap: Vec<CoordinationGapFact>) -> Self {
+        let (affected_by_dir, affected_by_dir_omitted) = roll_up_by_directory(affected);
+        Self {
+            affected_count: affected.len(),
+            affected_not_shown: affected.iter().take(AFFECTED_SAMPLE_CAP).cloned().collect(),
+            affected_by_dir,
+            affected_by_dir_omitted,
+            coordination_gap,
+        }
+    }
+}
+
+/// One directory of the blast radius and how many affected files it holds.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct AffectedDirectory {
+    /// Root-relative parent directory, forward-slashed. The empty string is the
+    /// repository root.
+    pub dir: String,
+    /// How many affected-but-not-in-diff files live directly in `dir`. Exact,
+    /// never sampled.
+    pub count: usize,
+}
+
+/// Roll the affected paths up by parent directory, heaviest first, capped at
+/// [`AFFECTED_DIR_CAP`]. Returns the kept rows and how many directories were
+/// dropped.
+///
+/// Sorting by count descending keeps the heaviest directories, which is the
+/// question a reviewer is actually asking ("did this leak somewhere new, or is
+/// it all inside the module I already changed?"). The directory path breaks
+/// ties so the order is total and stable across runs.
+fn roll_up_by_directory(affected: &[String]) -> (Vec<AffectedDirectory>, usize) {
+    let mut counts: rustc_hash::FxHashMap<&str, usize> = rustc_hash::FxHashMap::default();
+    for path in affected {
+        let dir = path.rsplit_once('/').map_or("", |(head, _)| head);
+        *counts.entry(dir).or_default() += 1;
+    }
+    let mut rows: Vec<AffectedDirectory> = counts
+        .into_iter()
+        .map(|(dir, count)| AffectedDirectory {
+            dir: dir.to_string(),
+            count,
+        })
+        .collect();
+    rows.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.dir.cmp(&b.dir)));
+    let omitted = rows.len().saturating_sub(AFFECTED_DIR_CAP);
+    rows.truncate(AFFECTED_DIR_CAP);
+    (rows, omitted)
 }
 
 /// One coordination-gap entry: a changed file exports symbols consumed by a
@@ -559,7 +657,6 @@ mod tests {
             graph_facts: GraphFacts {
                 exports_added: 0,
                 api_width_delta: 0,
-                reachable_from: Vec::new(),
                 boundaries_touched: Vec::new(),
             },
             partition: PartitionFacts::default(),
@@ -705,5 +802,143 @@ mod tests {
             value["_meta"]["telemetry"]["analysis_run_id"],
             "run-decision"
         );
+    }
+
+    /// `<dirs>` directories holding `<per_dir>` files each, path-sorted the way
+    /// the engine closure hands them over.
+    fn affected(dirs: usize, per_dir: usize) -> Vec<String> {
+        let mut paths: Vec<String> = (0..dirs)
+            .flat_map(|d| (0..per_dir).map(move |f| format!("src/zone{d:03}/file{f:03}.ts")))
+            .collect();
+        paths.sort();
+        paths
+    }
+
+    #[test]
+    fn a_closure_within_the_caps_is_reported_whole() {
+        let paths = affected(2, 3);
+        let facts = ImpactClosureFacts::new(&paths, Vec::new());
+
+        assert_eq!(facts.affected_count, 6);
+        assert_eq!(facts.affected_not_shown, paths);
+        assert_eq!(facts.affected_by_dir_omitted, 0);
+        assert_eq!(
+            facts
+                .affected_by_dir
+                .iter()
+                .map(|row| (row.dir.as_str(), row.count))
+                .collect::<Vec<_>>(),
+            vec![("src/zone000", 3), ("src/zone001", 3)]
+        );
+    }
+
+    #[test]
+    fn the_count_survives_capping_the_sample() {
+        let paths = affected(4, 40);
+        let facts = ImpactClosureFacts::new(&paths, Vec::new());
+
+        assert_eq!(
+            facts.affected_count, 160,
+            "the magnitude is computed before the sample is capped"
+        );
+        assert_eq!(facts.affected_not_shown.len(), AFFECTED_SAMPLE_CAP);
+        assert_eq!(
+            facts
+                .affected_by_dir
+                .iter()
+                .map(|row| row.count)
+                .sum::<usize>(),
+            facts.affected_count,
+            "an uncapped rollup accounts for every affected file"
+        );
+    }
+
+    #[test]
+    fn the_rollup_carries_weight_the_sample_cannot() {
+        // A prefix sample lands entirely in the directory that sorts first, so
+        // the rollup is the only thing that can say where the reach actually is.
+        let mut paths = affected(1, 12);
+        paths.extend((0..90).map(|f| format!("src/zzz_heavy/file{f:03}.ts")));
+        paths.sort();
+        let facts = ImpactClosureFacts::new(&paths, Vec::new());
+
+        assert!(
+            facts
+                .affected_not_shown
+                .iter()
+                .all(|path| path.starts_with("src/zone000/")),
+            "the fixture must produce a one-directory sample: {:?}",
+            facts.affected_not_shown
+        );
+        let heaviest = facts.affected_by_dir.first().expect("a rollup row");
+        assert_eq!(
+            (heaviest.dir.as_str(), heaviest.count),
+            ("src/zzz_heavy", 90)
+        );
+    }
+
+    #[test]
+    fn rollup_rows_beyond_the_cap_are_counted_not_dropped_silently() {
+        let paths = affected(AFFECTED_DIR_CAP + 7, 1);
+        let facts = ImpactClosureFacts::new(&paths, Vec::new());
+
+        assert_eq!(facts.affected_by_dir.len(), AFFECTED_DIR_CAP);
+        assert_eq!(facts.affected_by_dir_omitted, 7);
+        assert_eq!(facts.affected_count, AFFECTED_DIR_CAP + 7);
+    }
+
+    #[test]
+    fn equal_weight_directories_are_ordered_by_path() {
+        let facts = ImpactClosureFacts::new(&affected(3, 2), Vec::new());
+        let dirs: Vec<&str> = facts
+            .affected_by_dir
+            .iter()
+            .map(|row| row.dir.as_str())
+            .collect();
+        assert_eq!(
+            dirs,
+            vec!["src/zone000", "src/zone001", "src/zone002"],
+            "the path is the tie-break, so the order is total across runs"
+        );
+    }
+
+    #[test]
+    fn the_coordination_gap_is_never_capped() {
+        // The human brief routes a reader to `--format json` for the gaps and
+        // their symbols. That promise holds only while this constructor stores
+        // both whole, alongside two fields it does deliberately cap.
+        let symbols: Vec<String> = (0..40).map(|i| format!("symbol{i:02}")).collect();
+        let gaps: Vec<CoordinationGapFact> = (0..60)
+            .map(|i| CoordinationGapFact {
+                changed_file: "src/core.ts".to_string(),
+                consumer_file: format!("src/consumer{i:02}.ts"),
+                consumed_symbols: symbols.clone(),
+                note: String::new(),
+            })
+            .collect();
+        let facts = ImpactClosureFacts::new(&affected(40, 3), gaps);
+
+        assert_eq!(facts.coordination_gap.len(), 60);
+        assert!(
+            facts
+                .coordination_gap
+                .iter()
+                .all(|gap| gap.consumed_symbols.len() == 40),
+            "every consumed symbol survives, or the brief's json route is a lie"
+        );
+        assert!(
+            facts.affected_not_shown.len() < facts.affected_count
+                && facts.affected_by_dir_omitted > 0,
+            "the fixture must show the sibling fields really are capped"
+        );
+    }
+
+    #[test]
+    fn root_level_files_roll_up_under_the_empty_directory() {
+        let facts =
+            ImpactClosureFacts::new(&["play.ts".to_string(), "setup.ts".to_string()], Vec::new());
+        assert_eq!(facts.affected_by_dir.len(), 1);
+        assert_eq!(facts.affected_by_dir[0].dir, "");
+        assert_eq!(facts.affected_by_dir[0].count, 2);
     }
 }

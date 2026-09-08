@@ -729,3 +729,40 @@ fn manifest_matches_only_on_identical_inputs() {
     assert!(manifest_a.matches_inputs(&manifest_same));
     assert!(!manifest_a.matches_inputs(&manifest_other_mode));
 }
+
+#[test]
+fn a_graph_cache_from_another_root_never_reuses_original_checkout_paths() {
+    let temp = tempfile::tempdir().expect("temp root");
+    let original = temp.path().join("original");
+    let relocated = temp.path().join("relocated");
+    let cache = temp.path().join("cache");
+    std::fs::create_dir_all(original.join("src")).unwrap();
+    std::fs::write(
+        original.join("package.json"),
+        r#"{"name":"relocation","main":"src/index.ts"}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        original.join("src/index.ts"),
+        "import { used } from './lib'; console.log(used);\n",
+    )
+    .unwrap();
+    std::fs::write(
+        original.join("src/lib.ts"),
+        "export const used = 1; export const unused = 2;\n",
+    )
+    .unwrap();
+    let original_config = create_config_with_cache(original.clone(), cache.clone());
+    fallow_core::analyze(&original_config).expect("prime original cache");
+    copy_tree(&original, &relocated);
+    let mut relocated_config = create_config_with_cache(relocated.clone(), cache);
+    let warm = fallow_core::analyze(&relocated_config).expect("relocated warm analysis");
+    relocated_config.no_cache = true;
+    let cold = fallow_core::analyze(&relocated_config).expect("relocated uncached analysis");
+    assert_eq!(format!("{warm:#?}"), format!("{cold:#?}"));
+    assert!(
+        warm.unused_exports
+            .iter()
+            .all(|finding| finding.export.path.starts_with(&relocated))
+    );
+}

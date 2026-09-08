@@ -26,6 +26,7 @@ const FAST_COMMANDS = [
 
 const FULL_ONLY_COMMANDS = [
   ["node", ["--test", "scripts/*.test.mjs"]],
+  ["node", ["--test", ".github/scripts/*.test.mjs"]],
   ["npm", ["--prefix", "npm/fallow", "test"]],
   ["npm", ["--prefix", "npm/fallow-similar-code", "test"]],
   ["cargo", ["test", "--workspace", "--lib", "--bins", "--tests", "--examples"]],

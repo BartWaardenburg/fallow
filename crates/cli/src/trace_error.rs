@@ -41,7 +41,9 @@ pub struct TraceErrorOptions<'a> {
 pub fn run_trace_error(opts: &TraceErrorOptions<'_>) -> ExitCode {
     let (input, source) = match read_trace(opts.root, opts.trace_file) {
         Ok(pair) => pair,
-        Err(message) => return emit_error(&message, 2, opts.output),
+        Err((message, hint)) => {
+            return crate::error::emit_error_with_hint(&message, hint, 2, opts.output);
+        }
     };
 
     let config = match load_config_for_analysis(
@@ -81,21 +83,40 @@ pub fn run_trace_error(opts: &TraceErrorOptions<'_>) -> ExitCode {
 /// A relative path is resolved against the project root, matching how
 /// `--diff-file` resolves its input. The reported `source` keeps the caller's
 /// own spelling rather than the resolved absolute path.
-fn read_trace(root: &Path, trace_file: Option<&str>) -> Result<(String, String), String> {
+///
+/// Every failure carries the remedy for it. `Err` is `(message, hint)`, which
+/// the caller renders in the shared `Error: ... hint: ...` shape.
+fn read_trace(
+    root: &Path,
+    trace_file: Option<&str>,
+) -> Result<(String, String), (String, &'static str)> {
     let path = match trace_file {
         None | Some(STDIN_SENTINEL) => {
             let mut buffer = Vec::new();
             std::io::stdin()
                 .take(MAX_STACK_TRACE_BYTES + 1)
                 .read_to_end(&mut buffer)
-                .map_err(|err| format!("failed to read stack trace from stdin: {err}"))?;
+                .map_err(|err| {
+                    (
+                        format!("failed to read stack trace from stdin: {err}"),
+                        PIPE_HINT,
+                    )
+                })?;
             if buffer.len() as u64 > MAX_STACK_TRACE_BYTES {
-                return Err(format!(
-                    "stack trace from stdin exceeds the {MAX_STACK_TRACE_BYTES}-byte limit"
+                return Err((
+                    format!(
+                        "stack trace from stdin exceeds the {MAX_STACK_TRACE_BYTES}-byte limit"
+                    ),
+                    TRIM_HINT,
                 ));
             }
-            let text = String::from_utf8(buffer)
-                .map_err(|_| "stack trace from stdin is not valid UTF-8".to_string())?;
+            let text = String::from_utf8(buffer).map_err(|_| {
+                (
+                    "stack trace from stdin is not valid UTF-8".to_string(),
+                    "pipe the trace as text; a captured binary log or a mixed encoding cannot be \
+                     parsed",
+                )
+            })?;
             return Ok((text, "stdin".to_string()));
         }
         Some(path) => path,
@@ -109,15 +130,33 @@ fn read_trace(root: &Path, trace_file: Option<&str>) -> Result<(String, String),
             root.join(candidate)
         }
     };
-    let metadata = std::fs::metadata(&resolved)
-        .map_err(|err| format!("failed to read stack trace from '{path}': {err}"))?;
-    if metadata.len() > MAX_STACK_TRACE_BYTES {
-        return Err(format!(
-            "stack trace '{path}' exceeds the {MAX_STACK_TRACE_BYTES}-byte limit"
+    let file = std::fs::File::open(&resolved).map_err(|err| {
+        (
+            format!("failed to read stack trace from '{path}': {err}"),
+            PIPE_HINT,
+        )
+    })?;
+    let mut buffer = Vec::new();
+    file.take(MAX_STACK_TRACE_BYTES + 1)
+        .read_to_end(&mut buffer)
+        .map_err(|err| {
+            (
+                format!("failed to read stack trace from '{path}': {err}"),
+                PIPE_HINT,
+            )
+        })?;
+    if buffer.len() as u64 > MAX_STACK_TRACE_BYTES {
+        return Err((
+            format!("stack trace '{path}' exceeds the {MAX_STACK_TRACE_BYTES}-byte limit"),
+            TRIM_HINT,
         ));
     }
-    let text = std::fs::read_to_string(&resolved)
-        .map_err(|err| format!("failed to read stack trace from '{path}': {err}"))?;
+    let text = String::from_utf8(buffer).map_err(|_| {
+        (
+            format!("stack trace from '{path}' is not valid UTF-8"),
+            PIPE_HINT,
+        )
+    })?;
     Ok((text, path.to_string()))
 }
 
@@ -144,13 +183,24 @@ fn emit_trace_error(trace: ErrorTrace, opts: &TraceErrorOptions<'_>) -> ExitCode
             print_human(&trace, opts.quiet);
             ExitCode::SUCCESS
         }
-        _ => emit_error(
+        _ => crate::error::emit_error_with_hint(
             "trace-error supports --format json or human",
+            "re-run with `--format json` for a machine-readable answer, or drop `--format`",
             2,
             opts.output,
         ),
     }
 }
+
+/// The next step for an input that produced no frames, and the one thing the
+/// help text does not make obvious at the point of failure.
+const PIPE_HINT: &str =
+    "pass a stack-trace file, or pipe one: `node app.js 2>&1 | fallow trace-error -`";
+
+/// The remedy for an input over the size ceiling. The frames that matter sit at
+/// the top of a stack, so trimming is a real fix rather than a workaround.
+const TRIM_HINT: &str =
+    "keep the top frames and drop the rest; the innermost frames are the ones this resolves";
 
 fn print_human(trace: &ErrorTrace, quiet: bool) {
     outln!("Stack-trace frames (syntactic; OFF the ranked path)");
@@ -161,8 +211,15 @@ fn print_human(trace: &ErrorTrace, quiet: bool) {
     }
     outln!();
     if trace.frames.is_empty() {
-        outln!("No stack frames recognised.");
+        print_empty_human(trace);
+        return;
     }
+    // A reason explains a CLASS of frame, and a stack is usually one class
+    // repeated. Printing it per frame turned a 60-frame node_modules stack into
+    // 60 byte-identical lines between the reader and the counts. Each frame
+    // still carries its own `[origin/resolution]` labels, so a suppressed
+    // repeat loses nothing; a reason that CHANGES prints again.
+    let mut last_reason: Option<&str> = None;
     for frame in &trace.frames {
         let location = match (&frame.file, frame.line) {
             (Some(file), Some(line)) => format!("{file}:{line}"),
@@ -205,8 +262,11 @@ fn print_human(trace: &ErrorTrace, quiet: bool) {
         // A resolved frame normally needs no explanation, but one whose own
         // line disagrees with the definition it matched does: the note is the
         // only place that disagreement is written out.
-        if frame.resolution != FrameResolution::Resolved || frame.line_mismatch {
+        if (frame.resolution != FrameResolution::Resolved || frame.line_mismatch)
+            && last_reason != Some(frame.reason.as_str())
+        {
             outln!("        {}", frame.reason);
+            last_reason = Some(&frame.reason);
         }
     }
     outln!();
@@ -217,6 +277,26 @@ fn print_human(trace: &ErrorTrace, quiet: bool) {
         outln!();
         outln!("{}", trace.reason);
     }
+}
+
+/// The empty state: one statement of the fact, then what to do about it.
+///
+/// It used to state the same thing three times (a literal `No stack frames
+/// recognised.`, a counts line that was all zeroes, and the prose `reason`) and
+/// then stop, with no next step and nothing saying the input can be piped. The
+/// unparsed-line count is folded into the sentence rather than left on a counts
+/// line so it survives `--quiet`, which drops prose.
+fn print_empty_human(trace: &ErrorTrace) {
+    let unparsed = trace.counts.unparsed_lines;
+    if unparsed > 0 {
+        outln!(
+            "No stack frames recognised ({unparsed} input line{} did not parse as a frame).",
+            if unparsed == 1 { "" } else { "s" }
+        );
+    } else {
+        outln!("No stack frames recognised.");
+    }
+    outln!("  hint: {PIPE_HINT}");
 }
 
 /// The always-printed counts line.

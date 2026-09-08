@@ -93,8 +93,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its manifest on file content rather than modification time. Older blobs are
   refused on version and rebuilt, and nothing about the cache location, the
   `cache` config field, or `--no-cache` changes. Two consequences are worth
-  naming: a warm tree copied with `cp -Rp` to a sibling path is reused instead
-  of reparsed, and on Windows, where the inode change time is unavailable, the
+  naming: extraction entries in a warm tree copied with `cp -Rp` to a sibling
+  path are reused instead of reparsed, while the graph is rebuilt to avoid
+  retaining paths into the original checkout. On Windows, where the inode change time is unavailable, the
   metadata-only fast path is disabled and every entry is read and
   content-hashed before it is reused.
 
@@ -107,8 +108,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `source` (`head_commit`, `environment`, or `wall_clock`), the `epoch_secs` it
   resolved to, and `reproducible`. Pass `epoch_secs` back as
   `FALLOW_CLOCK_EPOCH` to reproduce a run. The field is additive and optional,
-  and `hotspot_summary` is emitted only with `--hotspots`, so a run without it
-  is byte-identical.
+  and `hotspot_summary` carries it whenever the run measured churn, which a
+  default health run over a git repository does; a project with no readable
+  git history has no `hotspot_summary` and is byte-identical.
 
 - **The performance table's nested rows add up.** In the entry-point breakdown,
   `compile` and `match` are the two measured halves of the `plugin globs` span
@@ -127,7 +129,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   documents it instead of implying the rows reconcile.
   The stage row formerly labelled `plugins` is now `plugin detection`, and it
   names the plugin-glob time that lands inside the entry-point stage
-  (`(+157.6ms plugin globs under entry points)` on a measured project), because
+  as a separate contribution, because
   the two are different stretches of wall clock that cannot be summed into one
   row without breaking the stage partition. A reader adding the two now sees the
   real plugin bill instead of the detection half alone.
@@ -227,15 +229,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   states its mutual exclusion with `changed_workspaces`. Only the prose
   changed, and no request that was accepted before is refused now.
 
-- **An MCP response over the byte cap is a bounded answer, not an empty
-  error.** It used to return a contentless tool error. It now returns a
-  success result whose body carries `ok: false`, `truncated: true`,
-  `result_bytes`, `result_preview`, `limit_bytes`, and `stream`, keeping the
-  existing error code, so a caller learns what the stream actually produced
-  and where it was cut. The field names match the Code Mode result refusal, so
-  an agent parses one shape on both surfaces. Subprocess-backed tools also
-  accept an optional `max_output_bytes` per call, which may only lower the
-  default.
+- **An MCP response over the byte cap carries its measurement.** It used to
+  return a contentless tool error: a refusal that said nothing about what the
+  stream produced. It is still a refusal, with `isError`, `error: true`, and
+  `exit_code: 2` intact, because a caller that got no result must not read the
+  call as having answered. The body now also carries `ok: false`,
+  `truncated: true`, `result_bytes`, `result_preview`, `limit_bytes`, and
+  `stream`, so a caller learns what the stream actually produced and where it
+  was cut. The field names match the Code Mode result refusal, which refuses
+  this class the same way, so an agent parses one shape on both surfaces.
+  Subprocess-backed tools also accept an optional `max_output_bytes` per call,
+  which may only lower the default, so the remedy is to narrow the analysis
+  rather than to raise the cap.
 
 - **The GitHub Action and the GitLab template stop sharing one cache entry
   between two roots.** A matrix over roots could restore a sibling's cache.
@@ -246,6 +251,67 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a distinct value of, and the cached path is scoped to the root.
 
 ### Fixed
+
+- **`dupes --top 0` no longer reports a clean project.** Both human surfaces
+  tested the length of `clone_groups[]` for their empty state, and `--top 0`
+  empties that array without changing what the run measured, so `fallow dupes
+  --top 0` printed a green "No code duplication found" (and `--summary` printed
+  "No duplication found") over a run whose own JSON reported dozens of clone
+  groups. Both clean states now test the measured corpus, so a fully capped
+  listing keeps its header and states that every group and family was withheld.
+  `dead-code --top 0` already behaved this way; the two commands agree again.
+
+- **`fix --quiet` reports the mutations it refused.** `--quiet` kept every
+  `Would remove` line for a removal fallow would make and dropped every `Kept`
+  line for one it refused, so a quiet plan read as complete when it was
+  partial. The withheld lines are now gated on output format alone, exactly
+  like the `Would remove` lines beside them; a JSON run still reads them off
+  `fixes[]` instead. `Dry run complete` and `Fixed N issue(s)` are progress and
+  stay gated on `--quiet`.
+
+- **A routine cache miss is no longer a warning.** Editing a file and re-running
+  printed `WARN Graph cache decoded but not reused: at least one file changed`,
+  which `fallow watch` emitted once per save and `--quiet` did not suppress.
+  Content drift is what a cache is for, so the two content-drift reasons log at
+  debug; the five reasons that need a change on disk or in the config stay on
+  stderr. Both reasons are still reported by `fallow doctor` and the
+  `--performance` table. The redundant `reason=` field, which restated the
+  sentence beside it, is gone.
+
+- **The `--performance` table says on screen that its rows are not a sum.** An
+  `(other)` row above a horizontal rule above `TOTAL` is summation grammar, and
+  the entry-point breakdown one indent level down really does close its sums
+  that way, so the outer rows exceeding `TOTAL` read as an arithmetic error. A
+  dimmed line under `TOTAL` now states that the rows are per-stage costs and
+  that several run outside or beside the `TOTAL` clock. The entry-point
+  breakdown also gained a per-row cost floor, so sections that render as
+  `0.0ms` fold into their `(other)` row instead of spending ten lines to
+  explain a 6.6ms stage.
+
+- **`trace --path` puts `reachable` in the human header.** `hops: 0` is the
+  answer for both an unreachable pair and the same module on both sides, and
+  the header carried only the ambiguous half while the JSON carried the answer.
+
+- **`trace-error` states a repeated frame reason once.** A 60-frame
+  `node_modules` stack printed 60 byte-identical explanations between the reader
+  and the counts. A reason now prints when it changes; every frame keeps its own
+  `[origin/resolution]` labels. The empty state stated the same fact three times
+  with no next step: it now states it once, keeps the unparsed-line count inside
+  that sentence so `--quiet` cannot hide it, and names how to pipe a trace in.
+
+- **Failures on the trace commands and on `dupes --top` with `--group-by` carry
+  a remedy.** Each uses the `Error: ... hint: ...` shape, and JSON callers read
+  the remedy off `help`. The `--top` with `--group-by` refusal was a single
+  279-character sentence that soft-wrapped to four lines and buried "run one or
+  the other" at the end; the actionable half is now one line with the reason on
+  a `hint:` line below it.
+
+- **Cache diagnostics distinguish unreadable paths from absent files.** A
+  recognized header reports an explicit format-version mismatch. An unframed
+  blob may come from an older release or contain damaged data, so its decode
+  failure states that uncertainty instead of claiming corruption. `fallow
+  doctor` also scales small sizes to KB or bytes, and oversize descriptions
+  report the file size and ceiling separately.
 
 - **`trace-error` counts the input lines it says it counted.** On a trace
   where nothing parsed as a frame, the summary read "no stack frames recognised
@@ -267,10 +333,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   parse would mute real findings project-wide.
 
   Where a file the run did not fully analyze can distort a verdict, the
-  affected `unused_files[]`, `unused_exports[]`, and unused-dependency entries
-  carry the caveat themselves, in an optional `reachability_caveats[]` array,
-  so a reader who never scrolls back to the diagnostics list still sees it. The
-  human report names it as a compact suffix on the finding line. A degraded
+  affected entries carry the caveat themselves, in an optional
+  `reachability_caveats[]` array, so a reader who never scrolls back to the
+  diagnostics list still sees it. Eight arrays carry it: `unused_files[]`,
+  `unused_exports[]`, `unused_types[]`, `unused_enum_members[]`,
+  `unused_class_members[]`, and the three dependency arrays. A caveated finding also reports `auto_fixable: false` on
+  its mutating action, with the reason in that action's `note`, so an agent
+  reading the actions contract no longer plans a write `fix` would refuse. The
+  human report names the caveat as a compact suffix on the finding line, and
+  every other surface that recommends acting on a finding names it too. A degraded
   parse is one cause; the others are a file that could not be read
   (`source-read-failure`) and a file discovery skipped before reading it
   (`skipped-large-file`, `skipped-minified-file`, `skipped-source-dotdir`). A
@@ -297,10 +368,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   skip: `skip_reason: "low_confidence_incomplete_analysis"`, the caveat tokens
   repeated on the entry so a caller can gate on the marker,
   `skipped_low_confidence_exports` and the new
-  `skipped_low_confidence_dependencies` counting them, no exit-code change, and
-  the finding still reported by `fallow dead-code` for manual confirmation. The
+  `skipped_low_confidence_dependencies` and `skipped_low_confidence_members`
+  counting them, no exit-code change, and the finding still reported by
+  `fallow dead-code` for manual confirmation. `remove-enum-member` is withheld
+  the same way, on its own rule: a member access is credited from any resolved
+  module, reachable or not, so any file the run did not read can hide one. The
   withholding follows the caveat rather than its cause, so a future reason a
   file goes unread inherits it.
+
+- **An unused class member no longer ships a one-click deletion off an
+  unread file.** `unused_class_members[]` sat outside the caveat gate, on the
+  argument that its removal starts withheld and only the type-aware sidecar
+  opens it. That argument covered `fallow fix` and nothing else. The two review
+  formats never asked: `--format review-github` and `--format review-gitlab`
+  dispatch the ```` ```suggestion ```` block on the rule id alone, so a member
+  whose only caller sat in a file the size guard skipped shipped as an inline
+  review comment with an empty suggestion block under it, which on GitHub is one
+  click from a commit that deletes the member. Raising the size limit made the
+  finding disappear entirely. The array is inside the gate now, on the
+  enum-member rule rather than a new one: both kinds are scanned against one
+  member-access map built with no reachability filter, so any module the run
+  analyzed incompletely can hold the access that credits either. The
+  `remove-class-member` action reports `auto_fixable: false` under a caveat, the
+  finding carries its `reachability_caveats[]` on the wire, and every surface
+  that names the caveat for an enum member now names it for a class member.
+  `unused_store_members[]` stays out, and can: no surface offers a mutation for
+  one.
+
+  Two paths that raise `auto_fixable` back up ask the gate now as well. The
+  semantic decision that grants closed-world eligibility no longer reopens a
+  caveated removal, and `fallow fix` no longer reads that eligibility flag on
+  its own: closed-world eligibility is proved over the program the sidecar could
+  see, which is the program the run parsed, so a member whose only call site
+  lives in an unread file is absent from that world for exactly the reason it is
+  absent from the syntactic verdict. A withheld class member is reported as a
+  `remove_class_member` entry with `applied: false`, `skipped: true`,
+  `skip_reason: "low_confidence_incomplete_analysis"` and its caveat tokens, and
+  is counted by the existing `skipped_low_confidence_members`.
+
+- **A caveated finding no longer renders a committable suggestion block.** The
+  review formats used to ship the ```` ```suggestion ```` edit and rely on the
+  caveat text several lines above it to hedge. A suggestion block is not part of
+  the finding, it is the mutation: one click commits it. Every other mutation
+  surface asks the same gate first, so this one does too. The finding still
+  ships, at the same location, with the same fingerprint (so no resolved review
+  thread reopens) and the same caveat text; in place of the block the body says
+  `No one-click fix offered` and points at `workspace_diagnostics[]`. A run that
+  read every file it discovered is unchanged.
+
+- **The unused-file review comment no longer recommends a flag that does not
+  exist.** Every `--format review-github` and `--format review-gitlab` comment
+  on an `unused-file` finding ended with ``Run `fallow fix --files` or delete
+  this file.`` There has never been a `--files` flag; the CLI answers
+  `unexpected argument '--files' found`, and `fallow fix` has no file-deletion
+  path at all, which is why `delete-file` ships `auto_fixable: false` on every
+  run. The comment now says so and names the two things a reader can actually
+  do: delete it by hand after confirming nothing loads it at runtime, or keep it
+  with a `// fallow-ignore-file unused-file` comment.
 
 - **A size-preserving edit with a restored modification time no longer serves
   a stale warm result.** The extraction fingerprint compared modification time
@@ -335,9 +459,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   including each `--group-by` bucket.
 
   The human report moved with the wire. The default `Duplicates (N clone
-  groups)` header and its `... and N more clone groups` footer name the
-  measured corpus instead of the capped listing, and the footer additionally
-  names the families a cap withheld. The `--summary` block had the same split:
+  groups)` header and its withheld-groups footer name the measured corpus
+  instead of the capped listing, and the footer additionally names the families
+  a cap withheld. The two footer lines name their own limits rather than
+  claiming one between them: groups read `... N of M clone groups withheld by a
+  display limit` (the ten-group render cap narrows them even without `--top`)
+  and families read `... N of M clone families withheld by --top` (only `--top`
+  rebuilds the family array). Both pluralize, and both hold at `--top 0`, where
+  nothing was listed and "and N more" had no antecedent. The `--summary` block
+  had the same split:
   `Clone families` and `Clone groups` counted the rendered vectors while
   `Duplicated lines` and `Duplication rate` beside them described the corpus.
   Its withheld-notice now covers both axes and states both corpus totals, so
@@ -375,6 +505,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   still split on the last colon, so Windows drive letters and
   workspace-qualified paths keep theirs, and surviving halves are still passed
   through verbatim.
+
+### Changed
+
+- **The rest of the human review brief holds to eighty columns too.** The
+  decision surface printed its question, trade-off and expert list on single
+  unbounded lines, and the focus map put an un-elided path and an unbounded
+  reason on one row. On a real project a decision question naming every widened
+  export ran to 159 columns and a focus entry to 103, so the two sections the
+  brief leads with were the two that wrapped unpredictably in a terminal. Both
+  now wrap under a hanging indent. Prose is re-flowed rather than cut: a
+  decision question ends in the actual ask, so truncating it would drop the
+  question. Only a single word that alone overruns its line is shortened, from
+  whichever end identifies it: a path keeps its file name, an owner identity
+  keeps its head.
+
+- **The human review brief's coordination-gap lines are bounded.** The brief
+  printed one line per gap, joining every consumed symbol and both full paths.
+  On a change to a barrel-adjacent module that rendered a single line 955
+  columns wide, and a project with thirty out-of-diff consumers produced sixty
+  lines, directly under a summary that holds to eighty. The section now names
+  how many consumers sit outside the diff, walks the three that take the most
+  symbols (the consumer on its own line, the contract it consumes on the next),
+  and closes with the remainder and where to read it. Paths are shortened from the left and the
+  symbol list is cut with a `+N more` suffix, so every line fits eighty
+  columns. `fallow review --format json` still carries every gap with every
+  symbol; only the terminal rendering is capped.
+
+- **The review brief no longer spends half its bytes on one list, printed
+  twice.** `fallow review --format json` and `fallow audit --brief --format
+  json` carried the impact closure's affected-but-not-in-diff paths in two
+  places, `graph_facts.reachable_from` and `impact_closure.affected_not_shown`,
+  with identical contents and no cap on either. On a one-file change to a
+  mid-sized project those two lists were more than half the envelope while the
+  focus map and the decision surface, the judgement the brief exists to
+  deliver, were under three percent of it. The brief is read into an agent's
+  context, so those bytes came straight out of the reviewing budget.
+
+  `graph_facts.reachable_from` is gone. `impact_closure` now reports
+  `affected_count`, the exact number of affected files, alongside a capped
+  ten-path sample and `affected_by_dir`, a rollup of the affected files by
+  parent directory with an exact count per directory, heaviest first. The
+  rollup is the part worth reading: it says whether a change stayed inside the
+  module it touched or leaked into somewhere new, which a truncated list of
+  paths cannot, and it does so in a fraction of the bytes the full list took.
+  The human brief reports the same shape: the file and directory totals, then
+  the heaviest directory with its exact share, then a pointer at the rest.
+
+  Decisions, ranks, verdicts, and exit codes are unchanged; the decision
+  surface takes its blast metric from the graph, not from this envelope. The
+  brief `schema_version` moves to 9. See
+  [backwards compatibility](docs/backwards-compatibility.md) for the field-level
+  contract.
 
 ## [3.23.0] - 2026-09-07
 
@@ -456,6 +638,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `closest_known_rule_name` would hand it to a user as the correction for their
   typo. The reverse direction is proven now too.
   ([#2541](https://github.com/fallow-rs/fallow/pull/2541).)
+
+- **The GitHub Action's cache no longer bleeds between sibling roots.** The
+  restore key interpolated `root` raw, and `restore-keys` are literal
+  string-prefix matches, so the prefix for `root: packages/app` was a prefix of
+  the real key for `root: packages/app-admin` and a matrix over roots could
+  restore a sibling's parse cache. The root now enters the key as a
+  fixed-width digest, which ends the segment at a known length. Existing caches
+  miss once on upgrade and repopulate on the same run. The GitLab template
+  needs no change: GitLab matches cache keys exactly and rejects `/` inside
+  one, so it never interpolated the root to begin with.
+
+- **The Action's fix summary agrees with the job that runs it.** The summary
+  read three of the five skip counters, so a run whose only outcome was a
+  withheld dependency or enum member printed "No fixable issues found" while
+  the same job reported fixable issues from the same envelope. All five reach
+  the headline now. The same summary also listed withheld removals under
+  "Dependency removals" and in the details block, reporting a write that never
+  happened; only entries that actually landed are counted there.
+  `skipped_low_confidence_members` additionally reached no summary at all and
+  now reaches both the native `github-summary` and the bundled jq fallback.
+
+- **A duplication listing no longer reports its own cap as the corpus.** The
+  bundled `summary-dupes.jq` labelled the details block "Clone Families (N)"
+  with N the length of the `--top`-truncated array, two lines under a header
+  correctly counting the whole corpus, and its "and N more" tail measured the
+  omission against the display limit rather than against the rows it actually
+  rendered, under-reporting what was withheld. Both listings now count the
+  corpus and name what they do not show. The combined gate keeps counting
+  visible clone groups (a filtered run has fewer actionable groups than `stats`
+  describes) and now adds `clone_groups_omitted`, so a presentation cap can
+  never quietly lower the value the Action publishes as `outputs.issues`.
+
+- **The Action's annotation fallback carries the reachability caveat.** Both
+  the native `github-annotations` renderer and the bundled
+  `annotations-check.jq` rendered "Run: npm uninstall x" and "remove the export
+  keyword" with no sign that the verdict behind them rests on a file the run
+  never fully read. Both now append the qualifier to the five finding types
+  that carry `reachability_caveats[]`. An unrecognised caveat token is rendered
+  as itself rather than dropped, because dropping it would turn a finding whose
+  evidence is incomplete back into a confident one.
 
 ### Fixed
 

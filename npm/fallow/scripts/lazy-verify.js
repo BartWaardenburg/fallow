@@ -27,8 +27,9 @@ const { resolveSentinelPath } = require("./sentinel-path");
 const { verifyInstalledSync, SKIP_ENV } = require("./verify-binary");
 
 // Bumped to 2 when SHA-256 + platformPkgDir binding landed (closes the
-// cross-install reuse gap in the shared $XDG fallback cache). v1 sentinels
-// without these fields are invalidated automatically.
+// cross-install reuse gap in the shared $XDG fallback cache), and to 3 when
+// the sentinel started tracking fallow-similar-code alongside the multicall
+// CLI. Sentinels written under an older schema are invalidated automatically.
 const SENTINEL_SCHEMA_VERSION = 3;
 const VERIFY_LOG_ENV = "FALLOW_VERIFY_LOG";
 

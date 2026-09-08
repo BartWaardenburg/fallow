@@ -25,6 +25,8 @@ pub enum CacheRejection {
     /// No cache file exists yet. The only variant that is not a refusal of
     /// existing work: a first run on a project reports this.
     Absent,
+    /// The cache path exists or could not be inspected, but reading it failed.
+    Unreadable,
     /// The cache file is larger than the safety ceiling, so it was never
     /// decoded. Reported with both figures so the operator can raise the
     /// configured ceiling or delete the blob.
@@ -34,8 +36,8 @@ pub enum CacheRejection {
         /// Ceiling the file exceeded, in bytes.
         ceiling_bytes: u64,
     },
-    /// The cache file exists but could not be decoded. Usually a blob written
-    /// by a different binary, occasionally a truncated write.
+    /// The cache could not be decoded: an older unframed format, foreign data,
+    /// or a damaged payload. This does not establish corruption.
     Undecodable,
     /// The decoded cache declares a different format version, so its entries
     /// cannot be read into the current shape.
@@ -43,9 +45,9 @@ pub enum CacheRejection {
     /// The cache was built under a different extraction-affecting config, so
     /// its entries describe a different analysis.
     ConfigHashMismatch,
-    /// The cache was built for a different project root. Entries are stored
-    /// root-relative, so a blob copied or restored under another root is
-    /// refused wholesale instead of missing silently on every lookup.
+    /// The graph cache was built for a different project root. Its retained
+    /// absolute paths cannot be reused in the relocated checkout. Extraction
+    /// entries remain independently reusable through their root-relative keys.
     RootMismatch,
     /// The graph cache decoded, but it was built with different resolver
     /// options, entry points, or plugin configuration.
@@ -63,6 +65,7 @@ impl CacheRejection {
     pub const fn id(&self) -> &'static str {
         match self {
             Self::Absent => "absent",
+            Self::Unreadable => "unreadable",
             Self::Oversize { .. } => "oversize",
             Self::Undecodable => "undecodable",
             Self::VersionMismatch => "version-mismatch",
@@ -80,15 +83,20 @@ impl CacheRejection {
     pub fn describe(&self) -> String {
         match self {
             Self::Absent => "no cache file yet".to_string(),
+            Self::Unreadable => {
+                "cache file could not be read; check the path and permissions".to_string()
+            }
             Self::Oversize {
                 size_bytes,
                 ceiling_bytes,
             } => format!(
-                "cache file is {} over the {} ceiling",
+                "cache file is {}, over the {} ceiling",
                 format_mb(*size_bytes),
                 format_mb(*ceiling_bytes)
             ),
-            Self::Undecodable => "cache file could not be decoded".to_string(),
+            Self::Undecodable => {
+                "cache file could not be decoded (older format or damaged data)".to_string()
+            }
             Self::VersionMismatch => "cache format version changed".to_string(),
             Self::ConfigHashMismatch => "extraction config changed".to_string(),
             Self::RootMismatch => "cache was written for a different project root".to_string(),
@@ -98,13 +106,26 @@ impl CacheRejection {
         }
     }
 
-    /// Whether a cache file was actually present and then refused.
+    /// Whether the refusal is worth putting on stderr.
     ///
-    /// A refusal of existing work is worth a warning: the user paid for the
-    /// blob and got nothing back. A missing file is normal and stays at info.
+    /// True when the cache was refused for a reason the user can act on: a
+    /// stale format, a config or root drift, a blob that would not decode. The
+    /// user paid for the blob and got nothing back, and something on disk or in
+    /// the config has to change before the next run does better.
+    ///
+    /// False for `Absent` and for the two content-drift variants. Editing a
+    /// file and re-running is the ordinary way to use fallow, so
+    /// `FileSetChanged` and `FingerprintChanged` describe a cache doing exactly
+    /// what it should: every edit-then-run cycle hit them, `fallow watch` hit
+    /// them once per save, and `--quiet` did not suppress the warning. Both
+    /// reasons stay on the `doctor` check and the performance table, where a
+    /// reader went looking for them.
     #[must_use]
     pub const fn discarded_existing_work(&self) -> bool {
-        !matches!(self, Self::Absent)
+        !matches!(
+            self,
+            Self::Absent | Self::FileSetChanged | Self::FingerprintChanged
+        )
     }
 }
 
@@ -123,33 +144,58 @@ mod tests {
     use super::*;
 
     #[test]
-    fn absent_is_the_only_rejection_that_discarded_nothing() {
-        assert!(!CacheRejection::Absent.discarded_existing_work());
+    fn actionable_refusals_are_worth_a_warning() {
         for rejection in [
+            CacheRejection::Oversize {
+                size_bytes: 1,
+                ceiling_bytes: 0,
+            },
             CacheRejection::Undecodable,
+            CacheRejection::Unreadable,
             CacheRejection::VersionMismatch,
             CacheRejection::ConfigHashMismatch,
             CacheRejection::RootMismatch,
             CacheRejection::ModeMismatch,
-            CacheRejection::FileSetChanged,
-            CacheRejection::FingerprintChanged,
         ] {
             assert!(
                 rejection.discarded_existing_work(),
-                "{} refused a cache file that existed",
+                "{} needs a change on disk or in the config before the next run does better",
                 rejection.id()
             );
         }
     }
 
+    /// Editing a file and re-running is the ordinary way to use fallow, so the
+    /// two content-drift reasons fired on every edit-then-run cycle and once
+    /// per save under `fallow watch`. They stay in doctor and the performance
+    /// table; they must not be a warning.
     #[test]
-    fn oversize_names_both_figures() {
+    fn a_routine_cache_miss_is_not_worth_a_warning() {
+        for rejection in [
+            CacheRejection::Absent,
+            CacheRejection::FileSetChanged,
+            CacheRejection::FingerprintChanged,
+        ] {
+            assert!(
+                !rejection.discarded_existing_work(),
+                "{} is what a cache is supposed to do after an edit",
+                rejection.id()
+            );
+        }
+    }
+
+    /// Without the comma the sentence reads as an excess of 300 MB rather than
+    /// a 300 MB file against a 256 MB ceiling.
+    #[test]
+    fn oversize_names_both_figures_without_reading_as_an_excess() {
         let described = CacheRejection::Oversize {
             size_bytes: 300 * 1024 * 1024,
             ceiling_bytes: 256 * 1024 * 1024,
         }
         .describe();
-        assert!(described.contains("300.0 MB"), "{described}");
-        assert!(described.contains("256.0 MB"), "{described}");
+        assert!(
+            described.contains("300.0 MB, over the 256.0 MB ceiling"),
+            "{described}"
+        );
     }
 }

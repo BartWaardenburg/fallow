@@ -4,8 +4,8 @@
 //! Its own surface (`kind: "trace"`, `schema_version: "1"`), like the other
 //! trace shapes: never folded into the ranked brief and never an input to the
 //! focus map. An unreachable pair is an ANSWER, not an error, so it exits 0
-//! with `reachable: false`; only an endpoint that is not a module in the graph
-//! exits 2.
+//! with `reachable: false`; an endpoint that names no module or an ambiguous
+//! abbreviation exits 2.
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -63,11 +63,22 @@ pub fn run_trace_path(opts: &TracePathOptions<'_>) -> ExitCode {
             Ok(Ok(trace)) => trace,
             Ok(Err(endpoint)) => {
                 let (label, value) = match endpoint {
-                    ImportPathEndpoint::From => (endpoint.label(), opts.from),
-                    ImportPathEndpoint::To => (endpoint.label(), opts.to),
+                    ImportPathEndpoint::From | ImportPathEndpoint::AmbiguousFrom => {
+                        (endpoint.label(), opts.from)
+                    }
+                    ImportPathEndpoint::To | ImportPathEndpoint::AmbiguousTo => {
+                        (endpoint.label(), opts.to)
+                    }
                 };
-                return emit_error(
-                    &format!("--path {label} module '{value}' not found in module graph"),
+                let problem = if endpoint.is_ambiguous() {
+                    "matches multiple modules; use the full project-relative path"
+                } else {
+                    "not found in module graph"
+                };
+                return crate::error::emit_error_with_hint(
+                    &format!("--path {label} module '{value}' {problem}"),
+                    "pass a path relative to the project root; `fallow list --files` prints every \
+                     file the run discovered",
                     2,
                     opts.output,
                 );
@@ -101,8 +112,9 @@ fn emit_trace_path(trace: ImportPathTrace, opts: &TracePathOptions<'_>) -> ExitC
             print_human(&trace, opts.quiet);
             ExitCode::SUCCESS
         }
-        _ => emit_error(
+        _ => crate::error::emit_error_with_hint(
             "trace --path supports --format json or human",
+            "re-run with `--format json` for a machine-readable answer, or drop `--format`",
             2,
             opts.output,
         ),
@@ -112,9 +124,17 @@ fn emit_trace_path(trace: ImportPathTrace, opts: &TracePathOptions<'_>) -> ExitC
 fn print_human(trace: &ImportPathTrace, quiet: bool) {
     outln!("Shortest import path (syntactic; OFF the ranked path)");
     outln!();
-    outln!("  from: {}", trace.from);
-    outln!("  to:   {}", trace.to);
-    outln!("  hops: {}", trace.hops);
+    outln!("  from:      {}", trace.from);
+    outln!("  to:        {}", trace.to);
+    // `hops: 0` means "same module" AND "no route exists", so the hop count
+    // cannot carry the answer this command exists to give. The payload has
+    // always separated the two on `reachable`; the header printed only the
+    // ambiguous half.
+    outln!(
+        "  reachable: {}",
+        if trace.reachable { "yes" } else { "no" }
+    );
+    outln!("  hops:      {}", trace.hops);
     outln!();
     if trace.path.is_empty() {
         outln!(

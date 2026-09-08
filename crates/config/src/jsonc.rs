@@ -92,4 +92,25 @@ mod tests {
             assert_eq!(actual, expected, "{case}");
         }
     }
+
+    #[test]
+    fn loose_extensions_stay_rejected() {
+        // The other half of the dialect contract in this module's doc: these
+        // shapes are what the five `false` flags in `parse_options` buy, and
+        // flipping any of them must fail a test rather than pass silently.
+        let cases = [
+            ("unquoted key", "{a: 1}"),
+            ("single-quoted string", r#"{"a": 'x'}"#),
+            ("hexadecimal number", r#"{"a": 0x1F}"#),
+            ("unary plus number", r#"{"a": +1}"#),
+            ("missing comma", r#"{"a": 1 "b": 2}"#),
+        ];
+
+        for (case, input) in cases {
+            assert!(
+                parse_to_value::<Value>(input).is_err(),
+                "{case}: `{input}` must stay rejected so files stay portable"
+            );
+        }
+    }
 }

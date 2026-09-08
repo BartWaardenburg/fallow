@@ -113,7 +113,7 @@ pub use coverage::{
 };
 pub use dead_code_codeclimate::build_codeclimate;
 pub use dead_code_sarif::build_sarif;
-pub use doctor::{DoctorOptions, run_doctor};
+pub use doctor::{DoctorOptions, run_doctor, run_doctor_with_cache_dir};
 pub use dupes_output::{
     AttributedCloneGroup, AttributedCloneGroupFinding, AttributedInstance, CloneDemotionReason,
     CloneFamilyFinding, CloneGroupFinding, DupesReportPayload, DuplicationGroup,

@@ -167,7 +167,11 @@ fn react_component_lens_title(intel: &fallow_api::editor_results::ReactComponent
 
 /// Build the `N hooks (a state, b effect, ...)` segment, or `None` when the
 /// component uses no hooks. Each kind sub-count is omitted when zero.
-fn react_hook_segment(hooks: &fallow_api::editor_results::ReactHookSummary) -> Option<String> {
+///
+/// Shared with the hover summary (`crate::hover::react_component_summary`) so
+/// the lens title and the hover line cannot describe the same
+/// `ReactComponentIntel` differently.
+pub fn react_hook_segment(hooks: &fallow_api::editor_results::ReactHookSummary) -> Option<String> {
     let total = u32::from(hooks.state)
         + u32::from(hooks.effect)
         + u32::from(hooks.memo)
@@ -199,7 +203,9 @@ fn react_hook_segment(hooks: &fallow_api::editor_results::ReactHookSummary) -> O
 }
 
 /// `count + " " + noun`, appending `s` when the count is not 1.
-fn pluralize(count: u32, noun: &str) -> String {
+///
+/// Shared with the hover summary so both React surfaces pluralize identically.
+pub fn pluralize(count: u32, noun: &str) -> String {
     if count == 1 {
         format!("1 {noun}")
     } else {

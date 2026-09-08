@@ -11,6 +11,8 @@ use std::sync::OnceLock;
 
 use serde::Deserialize;
 
+use crate::changed_files::git_path_from_bytes;
+
 pub use fallow_types::churn::ChurnTrend;
 
 /// Function pointer signature used by `set_spawn_hook` to intercept the
@@ -383,6 +385,18 @@ fn churn_event_state_from_doc(
     Ok(builder.finish())
 }
 
+/// The ceiling above which an imported event timestamp is rejected as
+/// implausible (almost always seconds-versus-milliseconds confusion).
+///
+/// This deliberately reads the wall clock rather than the run's
+/// [`crate::clock::AnalysisClock`]. The limit gates *acceptance* of an import,
+/// never a scored value, so it cannot move `weighted_commits` or `stale_days`
+/// the way a wall-clock "now" in the scoring path would. Pinning it to the run
+/// clock would instead make the gate reject real data: the run clock is HEAD's
+/// committer timestamp, so analyzing an older checkout while importing churn
+/// that covers today would drop every recent event. Wall-clock drift here is
+/// also one-directional, since a timestamp accepted today stays accepted on
+/// every later run.
 fn churn_file_future_limit() -> u64 {
     let now_secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -868,7 +882,11 @@ fn analyze_churn_events(
         return None;
     }
 
-    Some(parse_git_log_events_z(&output.stdout, root))
+    Some(parse_git_log_events_z(
+        &output.stdout,
+        root,
+        clock.epoch_secs(),
+    ))
 }
 
 /// Merge new churn events into cached event state.
@@ -904,12 +922,7 @@ fn merge_churn_states(base: &mut ChurnEventState, delta: ChurnEventState) {
 
 /// Parse `git log --numstat --format=format:%at|%ae` output into events.
 #[cfg(test)]
-fn parse_git_log_events(stdout: &str, root: &Path) -> ChurnEventState {
-    let now_secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-
+fn parse_git_log_events(stdout: &str, root: &Path, now_secs: u64) -> ChurnEventState {
     let mut parser = GitLogEventParser::new(root, now_secs);
 
     for line in stdout.lines() {
@@ -919,12 +932,10 @@ fn parse_git_log_events(stdout: &str, root: &Path) -> ChurnEventState {
     parser.finish()
 }
 
-fn parse_git_log_events_z(stdout: &[u8], root: &Path) -> ChurnEventState {
-    let now_secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-
+/// `now_secs` is the run clock's epoch, not the wall clock: it is the fallback
+/// timestamp for a numstat record that arrives before any commit header, so
+/// truncated or malformed git output still scores against the pinned instant.
+fn parse_git_log_events_z(stdout: &[u8], root: &Path, now_secs: u64) -> ChurnEventState {
     let mut parser = GitLogEventParser::new(root, now_secs);
     for record in stdout.split(|byte| *byte == 0) {
         let record = record.strip_prefix(b"\n").unwrap_or(record);
@@ -1074,19 +1085,6 @@ impl<'a> GitLogEventParser<'a> {
     }
 }
 
-#[cfg(unix)]
-fn git_path_from_bytes(path: &[u8]) -> PathBuf {
-    use std::ffi::OsString;
-    use std::os::unix::ffi::OsStringExt;
-
-    PathBuf::from(OsString::from_vec(path.to_vec()))
-}
-
-#[cfg(windows)]
-fn git_path_from_bytes(path: &[u8]) -> PathBuf {
-    PathBuf::from(String::from_utf8_lossy(path).replace('/', "\\"))
-}
-
 /// Aggregate one file's raw commit events into a [`FileChurn`], applying
 /// recency weighting, trend detection, and per-author accumulation.
 #[expect(
@@ -1191,7 +1189,7 @@ fn parse_git_log(stdout: &str, root: &Path) -> (FxHashMap<PathBuf, FileChurn>, V
         .unwrap_or_default()
         .as_secs();
     let result = build_churn_result(
-        parse_git_log_events(stdout, root),
+        parse_git_log_events(stdout, root, now_secs),
         false,
         crate::clock::AnalysisClock::pinned(now_secs),
     );
@@ -2021,15 +2019,6 @@ mod tests {
         assert!(warm.files.contains_key(&invalid_path));
     }
 
-    #[cfg(windows)]
-    #[test]
-    fn git_path_bytes_use_windows_separators() {
-        assert_eq!(
-            git_path_from_bytes(b"src/nested/file.ts"),
-            PathBuf::from(r"src\nested\file.ts")
-        );
-    }
-
     #[test]
     fn churn_cache_rejects_pre_lossless_path_encoding_version() {
         let cache_dir = tempfile::tempdir().expect("cache directory");
@@ -2373,5 +2362,51 @@ mod tests {
         let churn = &result.files[&PathBuf::from("/project/src/a.ts")];
         assert_eq!(churn.lines_added, u32::MAX);
         assert_eq!(churn.lines_deleted, u32::MAX);
+    }
+
+    /// A numstat row that arrives before any commit header (truncated or
+    /// malformed git output) must fall back to the run clock, so the recorded
+    /// timestamp, and therefore the file's weighted commits and staleness, is
+    /// the same on every run over one commit instead of moving with wall time.
+    #[test]
+    fn headerless_numstat_falls_back_to_the_run_clock() {
+        let root = Path::new("/project");
+        let pinned = 1_700_000_000;
+
+        let state = parse_git_log_events_z(b"10\t5\tsrc/a.ts", root, pinned);
+
+        let events = &state.files[&PathBuf::from("/project/src/a.ts")].events;
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].timestamp, pinned);
+        assert_eq!(events[0].committed_at, pinned);
+    }
+
+    /// The same truncated output parsed against two different run clocks must
+    /// disagree only by those clocks: nothing in the fallback path may consult
+    /// the system clock.
+    #[test]
+    fn headerless_numstat_tracks_only_the_supplied_clock() {
+        let root = Path::new("/project");
+        let record: &[u8] = b"1\t0\tsrc/a.ts";
+
+        let early = parse_git_log_events_z(record, root, 1_600_000_000);
+        let late = parse_git_log_events_z(record, root, 1_700_000_000);
+
+        let key = PathBuf::from("/project/src/a.ts");
+        assert_eq!(early.files[&key].events[0].timestamp, 1_600_000_000);
+        assert_eq!(late.files[&key].events[0].timestamp, 1_700_000_000);
+    }
+
+    /// A commit header still wins over the fallback: the clock only fills a gap.
+    #[test]
+    fn commit_header_timestamp_beats_the_run_clock_fallback() {
+        let root = Path::new("/project");
+        let record = b"1700000000|1700000500|dev@example.com\x002\t1\tsrc/a.ts";
+
+        let state = parse_git_log_events_z(record, root, 1_234_567_890);
+
+        let events = &state.files[&PathBuf::from("/project/src/a.ts")].events;
+        assert_eq!(events[0].timestamp, 1_700_000_000);
+        assert_eq!(events[0].committed_at, 1_700_000_500);
     }
 }

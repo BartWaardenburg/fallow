@@ -199,6 +199,25 @@ pub fn validation_error_body(message: impl Into<String>) -> String {
     .to_string()
 }
 
+/// [`validation_error_body`] plus the three fields the API-backed refusals
+/// carry, so an agent can branch on a stable `code` instead of matching prose.
+pub fn typed_validation_error_body(
+    message: impl Into<String>,
+    code: &str,
+    help: &str,
+    context: &str,
+) -> String {
+    serde_json::json!({
+        "error": true,
+        "message": message.into(),
+        "exit_code": 2,
+        "code": code,
+        "help": help,
+        "context": context,
+    })
+    .to_string()
+}
+
 fn timeout_duration_from(value: Option<&str>, default_secs: u64) -> Duration {
     value
         .and_then(|value| value.parse::<u64>().ok())
@@ -831,11 +850,19 @@ fn timeout_result(timeout: Duration, cleanup_errors: &[String]) -> CallToolResul
 /// caller can see what it would have received. Matches Code Mode's preview.
 const OUTPUT_PREVIEW_BYTES: usize = 256;
 
-/// Report an over-limit response as a bounded success rather than a contentless
-/// error: the analysis ran, and the caller can act on how much came back and
-/// what its first bytes look like. Field names match the Code Mode result
-/// refusal (`truncated`, `result_bytes`, `result_preview`) so an agent parses
-/// one shape on both surfaces.
+/// Report an over-limit response as a REFUSAL that still carries the
+/// measurement.
+///
+/// The caller received no analysis, so this stays `CallToolResult::error`:
+/// protocol-level `isError`, the `error: true` field every other fallow
+/// refusal carries, and `exit_code` are the three signals an agent already
+/// gates on, and a truncated 256-byte preview must never read as a completed
+/// run to any of them. What the earlier bounded-success shape was for is kept
+/// alongside them: `truncated`, `result_bytes`, `result_preview` and `stream`
+/// name how much came back and what it looked like, using the Code Mode
+/// result-refusal field names so an agent parses one shape on both surfaces.
+/// Code Mode refuses the same class of response with `isError: true` too, so
+/// the two surfaces now answer that question the same way.
 fn output_limit_result(output: &CapturedOutput, max_output_bytes: usize) -> CallToolResult {
     let (stream, pipe) = if output.stdout.exceeded {
         ("stdout", &output.stdout)
@@ -844,7 +871,9 @@ fn output_limit_result(output: &CapturedOutput, max_output_bytes: usize) -> Call
     };
     let captured = String::from_utf8_lossy(&pipe.bytes);
     let body = serde_json::json!({
+        "error": true,
         "ok": false,
+        "exit_code": 2,
         "truncated": true,
         "result_bytes": pipe.total,
         "result_preview": code_mode::clamp_utf8(
@@ -854,13 +883,16 @@ fn output_limit_result(output: &CapturedOutput, max_output_bytes: usize) -> Call
         "limit_bytes": max_output_bytes,
         "stream": stream,
         "code": "FALLOW_MCP_SUBPROCESS_OUTPUT_LIMIT",
+        "context": "subprocess",
         "message": format!(
             "fallow subprocess {stream} produced {} bytes, over the {max_output_bytes}-byte cap",
             pipe.total
         ),
-        "help": "Narrow the requested analysis, or raise max_output_bytes for this call.",
+        "help": "Narrow the requested analysis (filters, a workspace scope, a smaller issue-type \
+                 set). max_output_bytes only LOWERS the 16 MiB default, so raising it for this \
+                 call cannot help.",
     });
-    CallToolResult::success(vec![ContentBlock::text(body.to_string())])
+    CallToolResult::error(vec![ContentBlock::text(body.to_string())])
 }
 
 /// Execute fallow and ensure successful JSON responses have a top-level

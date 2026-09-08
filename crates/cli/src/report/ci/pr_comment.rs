@@ -68,16 +68,27 @@ fn short_hex_hash(value: &str) -> String {
     format!("{:06x}", (hash & 0x00ff_ffff) as u32)
 }
 
+/// Render the sticky comment body. `conclusion` is the gate outcome the caller
+/// already computed, folded into the severity-derived verdict by the renderer;
+/// `None` renders the severity-derived verdict alone.
 #[must_use]
-pub fn render_pr_comment(command: &str, provider: Provider, issues: &[CiIssue]) -> String {
-    fallow_output::render_pr_comment(&fallow_output::PrCommentRenderInput {
-        command,
-        provider,
-        issues,
-        marker_id: sticky_marker_id(),
-        max_comments: max_comments(),
-        category_for_rule: &category_for_rule,
-    })
+pub fn render_pr_comment(
+    command: &str,
+    provider: Provider,
+    issues: &[CiIssue],
+    conclusion: Option<PrDecisionConclusion>,
+) -> String {
+    fallow_output::render_pr_comment_with_verdict(
+        &fallow_output::PrCommentRenderInput {
+            command,
+            provider,
+            issues,
+            marker_id: sticky_marker_id(),
+            max_comments: max_comments(),
+            category_for_rule: &category_for_rule,
+        },
+        conclusion.map(super::review::review_conclusion),
+    )
 }
 
 /// Map a fallow rule id to its category for sticky-comment grouping.
@@ -85,11 +96,13 @@ pub fn render_pr_comment(command: &str, provider: Provider, issues: &[CiIssue]) 
 /// Single source of truth lives on `RuleDef::category` in `explain.rs`. This
 /// helper does the lookup so callers don't need to know about the registry;
 /// the look-up-then-fallback shape also keeps the renderer working for
-/// rules a downstream consumer added without registering (rare; produces
-/// the conservative "Dead code" default).
+/// rules a downstream consumer added without registering (rare). An
+/// unregistered rule id is an absence of information, not evidence of
+/// unreachable code, so it lands in "Other" rather than inflating the
+/// "Dead code" section.
 #[must_use]
 fn category_for_rule(rule_id: &str) -> &'static str {
-    crate::explain::rule_by_id(rule_id).map_or("Dead code", |def| def.category)
+    crate::explain::rule_by_id(rule_id).map_or("Other", |def| def.category)
 }
 
 pub(crate) fn max_comments() -> usize {
@@ -213,7 +226,7 @@ fn print_pr_comment_from_ci_issues(
     conclusion: PrDecisionConclusion,
     status_message: Option<&str>,
 ) -> ExitCode {
-    let mut body = render_pr_comment(command, provider, issues);
+    let mut body = render_pr_comment(command, provider, issues, Some(conclusion));
     if let Some(message) = status_message {
         body.push_str("\n\n> ");
         body.push_str(message);
@@ -274,6 +287,12 @@ fn build_issue_decision_surface(
     }
 }
 
+/// Gate outcome for the PR decision surface, which `ci_check_run` maps
+/// straight onto the GitHub check-run `conclusion`. Findings alone stay
+/// `Neutral` here on purpose: promoting them to `Failure` would turn an
+/// advisory check into a merge blocker for every consumer with a required
+/// check. The sticky comment's verdict line answers a different question
+/// (how severe are the findings), so the two intentionally differ.
 fn issue_decision_conclusion(is_clean: bool) -> PrDecisionConclusion {
     if is_clean {
         PrDecisionConclusion::Success
@@ -479,9 +498,9 @@ mod tests {
 
     #[test]
     fn sticky_marker_id_default_when_nothing_set() {
-        let body = render_pr_comment("check", Provider::Github, &[]);
+        let body = render_pr_comment("check", Provider::Github, &[], None);
         assert!(body.contains("<!-- fallow-id: fallow-results"));
-        assert!(body.contains("No GitHub PR/MR findings."));
+        assert!(body.contains("No findings for this pull request."));
     }
 
     #[test]

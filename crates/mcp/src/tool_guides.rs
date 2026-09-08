@@ -8,8 +8,11 @@
 //! reads them once and only for the tool it actually called.
 //!
 //! This is NOT the `fallow://tools` manifest resource: that one is the terse
-//! catalogue (one line per tool) and a drift test in `server/tests` keeps it
-//! shorter than the wire text. Long prose belongs in this template only.
+//! catalogue (one line per tool). Two drift tests in `server/tests` hold that
+//! line: one keeps guide prose out of the catalogue, and
+//! `tool_descriptions::catalogue_lines_stay_shorter_than_the_wire_description`
+//! keeps every catalogue line shorter than the tool's own `tools/list` text.
+//! Long prose belongs in this template only.
 
 /// One topic of a tool's long-form guide, keyed by the parameter or output
 /// section it explains.

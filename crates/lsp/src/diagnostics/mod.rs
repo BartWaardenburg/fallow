@@ -363,7 +363,8 @@ mod tests {
 ///
 /// 1. [`severity_gate_classifies_every_result_field`] exhaustively destructures
 ///    `AnalysisResults` with NO `..` rest pattern (the same compile-time pin as
-///    `merge_results_covers_all_fields` in `main.rs`, issue #444). Adding a new
+///    the `merge_test_source_with_all_fields` fixture in `tests.rs`, which names
+///    every field with no `..Default::default()`, issue #444). Adding a new
 ///    field is a COMPILE error here until the author drops it into one of the
 ///    two buckets: a diagnostic-emitting dead-code field (which must gain a row
 ///    in [`severity_gate_emits_expected_severity_per_kind`]) or a

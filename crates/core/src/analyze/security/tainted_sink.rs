@@ -25,7 +25,9 @@ use fallow_types::results::{
 };
 use fallow_types::suppress::IssueKind;
 
-use super::{LineOffsetsMap, byte_offset_to_line_col};
+use super::{
+    LineOffsetsMap, byte_offset_to_line_col, import_source_matches, requires_binding_trace,
+};
 use crate::discover::FileId;
 use crate::graph::{ModuleGraph, ModuleNode};
 use crate::suppress::SuppressionContext;
@@ -120,18 +122,7 @@ fn provenance_satisfied(matcher: &Matcher, module: &ModuleInfo, callee_path: &st
         return true;
     };
     let leading_ident = callee_path.split('.').next().unwrap_or(callee_path);
-    let want_binding_trace = matches!(
-        matcher.id.as_str(),
-        "command-injection"
-            | "permissive-cors"
-            | "electron-unsafe-webpreferences"
-            | "insecure-temp-file"
-            | "jwt-alg-none"
-            | "jwt-verify-missing-algorithms"
-            | "tls-validation-disabled"
-            | "mysql-multiple-statements"
-            | "world-writable-permission"
-    ) || (matcher.id == "weak-crypto" && matcher.is_literal_aware());
+    let want_binding_trace = requires_binding_trace(matcher);
     module.imports.iter().any(|imp| {
         let source_matches = import_source_matches(&imp.source, spec);
         if !source_matches {
@@ -143,22 +134,6 @@ fn provenance_satisfied(matcher: &Matcher, module: &ModuleInfo, callee_path: &st
             true
         }
     })
-}
-
-/// Compare an import source against a provenance spec, tolerant of the `node:`
-/// prefix on either side (`node:child_process` matches `child_process`) and
-/// package subpath imports (`mysql2/promise` matches `mysql2`).
-fn import_source_matches(source: &str, spec: &str) -> bool {
-    fn strip_node_prefix(value: &str) -> &str {
-        value.strip_prefix("node:").unwrap_or(value)
-    }
-
-    let source = strip_node_prefix(source);
-    let spec = strip_node_prefix(spec);
-    source == spec
-        || source
-            .strip_prefix(spec)
-            .is_some_and(|rest| rest.starts_with('/'))
 }
 
 /// Compiled glob set over [`PRODUCTION_EXCLUDE_PATTERNS`](crate::discover::PRODUCTION_EXCLUDE_PATTERNS),
@@ -752,20 +727,6 @@ mod tests {
         let f = CategoryFilter::new(None, Some(vec!["sql-injection".to_string()]));
         assert!(f.admits("dangerous-html"));
         assert!(!f.admits("sql-injection"));
-    }
-
-    #[test]
-    fn import_source_matches_node_prefix() {
-        assert!(import_source_matches("node:child_process", "child_process"));
-        assert!(import_source_matches("child_process", "node:child_process"));
-        assert!(!import_source_matches("child_process", "node:vm"));
-    }
-
-    #[test]
-    fn import_source_matches_package_subpath() {
-        assert!(import_source_matches("mysql2/promise", "mysql2"));
-        assert!(import_source_matches("@scope/pkg/subpath", "@scope/pkg"));
-        assert!(!import_source_matches("mysql2-promise", "mysql2"));
     }
 
     fn binding(local: &str, source_path: &str) -> TaintedBinding {

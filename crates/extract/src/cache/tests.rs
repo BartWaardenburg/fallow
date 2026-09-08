@@ -1843,8 +1843,9 @@ fn cache_load_refuses_a_blob_whose_format_marker_was_mangled() {
     let result = CacheStore::load(&dir, Path::new(""), 0, DEFAULT_CACHE_MAX_SIZE);
     assert_eq!(
         result.err(),
-        Some(CacheRejection::VersionMismatch),
-        "a blob this binary did not frame names its refusal instead of reading as a cold run"
+        Some(CacheRejection::Undecodable),
+        "a blob whose framing this binary did not write is corrupt, not stale: the remedy is to \
+         delete it, not to look for an upgrade"
     );
 
     let _ = std::fs::remove_dir_all(&dir);
@@ -4218,22 +4219,33 @@ fn cache_load_honors_user_max_size_above_default() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// A format bump changes the encoded shape, so the blob the previous release
-/// wrote cannot be decoded at all. When the version was compared AFTER the
-/// decode, that comparison was unreachable on the most ordinary event there is
-/// (upgrading fallow) and every upgrade reported "cache file could not be
-/// decoded", which reads as a damaged disk rather than a one-time rebuild.
+/// Unframed caches predate the header. A decode failure cannot establish
+/// whether the file came from an older release or carries damaged data.
 #[test]
-fn cache_load_reports_a_version_change_for_a_blob_from_an_older_format() {
-    let dir = test_cache_dir("older_format_blob");
+fn cache_load_reports_undecodable_for_a_blob_without_fallows_framing() {
+    let dir = test_cache_dir("unframed_blob");
     std::fs::create_dir_all(&dir).unwrap();
-    // A previous release wrote an unframed payload whose shape this binary
-    // cannot decode; only the framing tells the two apart without decoding.
     std::fs::write(dir.join("cache.bin"), bitcode::encode(&(7_u32, "legacy"))).unwrap();
 
     assert_eq!(
         CacheStore::load(&dir, Path::new(""), 0, DEFAULT_CACHE_MAX_SIZE).err(),
-        Some(CacheRejection::VersionMismatch)
+        Some(CacheRejection::Undecodable)
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A file too short to hold the header is refused the same way, and for the
+/// same reason: nothing in it says which format it claims to be.
+#[test]
+fn cache_load_reports_undecodable_for_a_truncated_file() {
+    let dir = test_cache_dir("truncated_blob");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("cache.bin"), b"FLW").unwrap();
+
+    assert_eq!(
+        CacheStore::load(&dir, Path::new(""), 0, DEFAULT_CACHE_MAX_SIZE).err(),
+        Some(CacheRejection::Undecodable)
     );
 
     let _ = std::fs::remove_dir_all(&dir);
@@ -4470,4 +4482,15 @@ fn entries_outside_the_root_keep_their_own_key() {
             .is_none(),
         "an outside path must not alias a root-relative one"
     );
+}
+
+#[test]
+fn cache_load_does_not_report_an_unreadable_cache_path_as_absent() {
+    let dir = test_cache_dir("unreadable_cache_path");
+    std::fs::create_dir_all(dir.join("cache.bin")).unwrap();
+    assert_eq!(
+        CacheStore::load(&dir, Path::new(""), 0, DEFAULT_CACHE_MAX_SIZE).err(),
+        Some(CacheRejection::Unreadable)
+    );
+    let _ = std::fs::remove_dir_all(&dir);
 }

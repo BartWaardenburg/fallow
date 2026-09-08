@@ -26,7 +26,36 @@ pub fn run_doctor(options: &DoctorOptions<'_>) -> DoctorOutput {
     run_doctor_with_discovery(options, &crate::type_aware::discover_companion)
 }
 
+/// Inspect readiness using an explicit cache-directory override.
+///
+/// The override takes precedence over `cache.dir`; relative paths resolve from
+/// the validated project root. Empty paths are ignored. Hosts can forward their
+/// environment settings here without making the API read ambient cache settings
+/// or changing existing [`DoctorOptions`] callers. Inspection never writes caches.
+#[must_use]
+pub fn run_doctor_with_cache_dir(
+    options: &DoctorOptions<'_>,
+    cache_dir: Option<&Path>,
+) -> DoctorOutput {
+    run_doctor_with_cache_dir_and_discovery(
+        options,
+        cache_dir,
+        &crate::type_aware::discover_companion,
+    )
+}
+
 fn run_doctor_with_discovery<F>(options: &DoctorOptions<'_>, discover_companion: &F) -> DoctorOutput
+where
+    F: Fn(&Path) -> Result<(), String>,
+{
+    run_doctor_with_cache_dir_and_discovery(options, None, discover_companion)
+}
+
+fn run_doctor_with_cache_dir_and_discovery<F>(
+    options: &DoctorOptions<'_>,
+    cache_dir: Option<&Path>,
+    discover_companion: &F,
+) -> DoctorOutput
 where
     F: Fn(&Path) -> Result<(), String>,
 {
@@ -72,13 +101,22 @@ where
     );
 
     match project {
-        Ok(readiness) => push_ready_project_checks(
-            &mut checks,
-            &root,
-            &readiness.project,
-            &readiness.configured_plugin_diagnostics,
-            discover_companion,
-        ),
+        Ok(mut readiness) => {
+            if let Some(path) = cache_dir.filter(|path| !path.as_os_str().is_empty()) {
+                readiness.project.config.cache_dir = if path.is_absolute() {
+                    path.to_path_buf()
+                } else {
+                    root.join(path)
+                };
+            }
+            push_ready_project_checks(
+                &mut checks,
+                &root,
+                &readiness.project,
+                &readiness.configured_plugin_diagnostics,
+                discover_companion,
+            );
+        }
         Err(error) => {
             push_project_failure_checks(&mut checks, error.message(), &root, options.config_path);
         }
@@ -291,14 +329,24 @@ fn graph_cache_check(config: &fallow_config::ResolvedConfig) -> DoctorCheck {
     }
 }
 
-/// Render a byte count as a megabyte figure with one decimal place.
+/// Render a byte count at a unit that shows it.
+///
+/// A fixed megabyte figure reported every small blob as `0.0 MB`, which reads
+/// as "empty" next to a message about a cache that exists and was refused: a
+/// corrupt 4 KB file and a truncated 40-byte one printed the same size.
 fn format_size_mb(bytes: u64) -> String {
     #[expect(
         clippy::cast_precision_loss,
         reason = "display-only size figure; precision loss past 2^53 bytes is irrelevant"
     )]
-    let mb = bytes as f64 / (1024.0 * 1024.0);
-    format!("{mb:.1} MB")
+    let scaled = bytes as f64;
+    if bytes >= 1024 * 1024 {
+        format!("{:.1} MB", scaled / (1024.0 * 1024.0))
+    } else if bytes >= 1024 {
+        format!("{:.1} KB", scaled / 1024.0)
+    } else {
+        format!("{bytes} bytes")
+    }
 }
 
 fn plugin_check(
@@ -856,11 +904,15 @@ mod tests {
         assert!(!cache.required);
     }
 
-    /// The message a user reads after upgrading. It used to say the cache
-    /// "could not be decoded", which describes corruption; the truth is a
-    /// format bump that costs one rebuild.
+    /// Framing this build never wrote is corruption, and must not be reported
+    /// as a format bump.
+    ///
+    /// "cache format version changed" sends the reader to look for an upgrade;
+    /// the fix for a blob with no fallow framing is to delete it. The upgrade
+    /// message has its own test below, on a blob that keeps the framing and
+    /// moves only the declared version.
     #[test]
-    fn a_cache_from_another_build_warns_with_a_format_reason_and_its_size() {
+    fn a_corrupt_cache_warns_as_undecodable_with_a_size_that_shows() {
         let root = tempfile::tempdir().expect("temp root");
         let cache_dir = root.path().join(".fallow");
         std::fs::create_dir_all(&cache_dir).expect("create cache dir");
@@ -886,6 +938,58 @@ mod tests {
         assert_eq!(cache.status, DoctorCheckStatus::Warn);
         assert!(!cache.required);
         assert!(
+            cache.message.contains("could not be decoded"),
+            "a blob without fallow's framing is corrupt, not stale: {}",
+            cache.message
+        );
+        assert!(
+            !cache.message.contains("cache format version changed"),
+            "corruption must not send the reader hunting for an upgrade: {}",
+            cache.message
+        );
+        assert!(
+            cache.message.contains("30 bytes"),
+            "a small blob must report a size that shows it exists, not 0.0 MB: {}",
+            cache.message
+        );
+        assert_ne!(
+            output.status,
+            DoctorStatus::Fail,
+            "a refused cache costs time, not correctness"
+        );
+    }
+
+    /// The message a user reads after upgrading. A blob that keeps fallow's
+    /// framing and declares a version this build does not write is stale, and
+    /// costs exactly one rebuild.
+    #[test]
+    fn a_cache_from_an_older_format_version_warns_as_a_format_change() {
+        let root = tempfile::tempdir().expect("temp root");
+        let cache_dir = root.path().join(".fallow");
+        std::fs::create_dir_all(&cache_dir).expect("create cache dir");
+        // `FLWX` plus a little-endian version, the framing `fallow-extract`
+        // writes. Version 1 is far below anything this build produces, so the
+        // blob is stale rather than foreign.
+        let mut framed = b"FLWX".to_vec();
+        framed.extend_from_slice(&1_u32.to_le_bytes());
+        framed.extend_from_slice(b"payload-from-an-older-release");
+        std::fs::write(cache_dir.join("cache.bin"), framed).expect("write stale cache");
+
+        let output = run_doctor_with_discovery(
+            &DoctorOptions {
+                root: root.path(),
+                config_path: None,
+            },
+            &|_| Err("missing companion".to_string()),
+        );
+
+        let cache = output
+            .checks
+            .iter()
+            .find(|check| check.id == DoctorCheckId::Cache)
+            .expect("cache check is reported");
+        assert_eq!(cache.status, DoctorCheckStatus::Warn);
+        assert!(
             cache.message.contains("cache format version changed"),
             "{}",
             cache.message
@@ -894,12 +998,6 @@ mod tests {
             !cache.message.contains("could not be decoded"),
             "an upgrade must not be reported as corruption: {}",
             cache.message
-        );
-        assert!(cache.message.contains("MB"), "{}", cache.message);
-        assert_ne!(
-            output.status,
-            DoctorStatus::Fail,
-            "a refused cache costs time, not correctness"
         );
     }
 
@@ -929,7 +1027,7 @@ mod tests {
     }
 
     #[test]
-    fn a_graph_cache_from_another_build_warns_with_its_reason_and_size() {
+    fn a_corrupt_graph_cache_warns_as_undecodable_with_a_size_that_shows() {
         let root = tempfile::tempdir().expect("temp root");
         let cache_dir = root.path().join(".fallow");
         std::fs::create_dir_all(&cache_dir).expect("create cache dir");
@@ -955,13 +1053,13 @@ mod tests {
         assert_eq!(graph_cache.status, DoctorCheckStatus::Warn);
         assert!(!graph_cache.required);
         assert!(
-            graph_cache.message.contains("cache format version changed"),
-            "{}",
+            graph_cache.message.contains("could not be decoded"),
+            "a blob without fallow's framing is corrupt, not stale: {}",
             graph_cache.message
         );
         assert!(
-            graph_cache.message.contains("MB"),
-            "{}",
+            graph_cache.message.contains("30 bytes"),
+            "a small blob must report a size that shows it exists, not 0.0 MB: {}",
             graph_cache.message
         );
         assert_ne!(
@@ -984,14 +1082,32 @@ mod tests {
             &|_| Err("missing companion".to_string()),
         );
 
+        // Look checks up by id, not by position: the report's completeness is
+        // the contract, the order in which the rows happen to be pushed is not.
+        let check = |id: DoctorCheckId| {
+            output
+                .checks
+                .iter()
+                .find(|check| check.id == id)
+                .unwrap_or_else(|| panic!("{id:?} is reported even when config fails"))
+        };
+
         assert_eq!(output.status, DoctorStatus::Fail);
-        assert_eq!(output.checks.len(), 8);
-        assert_eq!(output.checks[1].status, DoctorCheckStatus::Fail);
-        assert_eq!(output.checks[2].status, DoctorCheckStatus::Skipped);
+        assert_eq!(
+            output.checks.len(),
+            8,
+            "a failing config must not truncate the report"
+        );
+        assert_eq!(check(DoctorCheckId::Config).status, DoctorCheckStatus::Fail);
+        assert_eq!(
+            check(DoctorCheckId::Workspaces).status,
+            DoctorCheckStatus::Skipped
+        );
         assert!(
-            !output.checks[1]
+            !check(DoctorCheckId::Config)
                 .message
-                .contains(&root.path().display().to_string())
+                .contains(&root.path().display().to_string()),
+            "the failure must not echo the host path"
         );
     }
 

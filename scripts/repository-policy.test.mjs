@@ -3,6 +3,10 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { test } from "node:test";
+import {
+  QUERY_OPERATIONS,
+  WIRE_PROTOCOL_VERSION,
+} from "../tools/type-aware-sidecar/src/generated-protocol.mjs";
 import { checkRepositorySigningKeyParity } from "./signing-key-parity.mjs";
 
 const readJson = (path) => JSON.parse(readFileSync(path, "utf8"));
@@ -471,7 +475,19 @@ test("type-aware public surfaces expose only the stable protocol", () => {
   assert.doesNotMatch(protocol, /class-member-uses|operation === "batch"/u);
   assert.doesNotMatch(cli, /class-member-uses|operation === "batch"/u);
   assert.match(guide, /first stable semantic wire contract is version 6/u);
-  assert.match(readme, /Protocol\nv6 accepts/u);
+  for (const operation of QUERY_OPERATIONS) {
+    assert.ok(
+      readme.includes(`\`${operation}\``),
+      `README must name the ${operation} query the sidecar accepts`,
+    );
+  }
+  for (const [, version] of readme.matchAll(/\bprotocol\s+v?(\d+)/giu)) {
+    assert.equal(
+      Number(version),
+      WIRE_PROTOCOL_VERSION,
+      "README states a protocol version the sidecar no longer accepts",
+    );
+  }
 
   for (const surface of [guide, readme, readFileSync("README.md", "utf8")]) {
     assert.doesNotMatch(surface, /proof[- ]of[- ]concept|\bpoc\b/iu);
@@ -540,7 +556,7 @@ test("narrator comment guard runs for commits, Claude, and CI", () => {
 });
 
 /**
- * Every envelope that transitively embeds `name`, mapped to the numeric
+ * The envelope named `name` and every envelope embedding it, mapped to the numeric
  * `schema_version` it publishes. An envelope is a definition whose
  * `schema_version` property carries a `const` (or an `enum` of the closed
  * numeric set a shared CLI/programmatic shape uses).
@@ -563,7 +579,7 @@ const envelopesEmbedding = (definitions, name) => {
   };
   for (const [owner, schema] of Object.entries(definitions)) collect(schema, owner);
 
-  const reached = new Set();
+  const reached = new Set([name]);
   const stack = [name];
   while (stack.length > 0) {
     for (const parent of parents.get(stack.pop()) ?? []) {
@@ -586,6 +602,16 @@ const envelopesEmbedding = (definitions, name) => {
   }
   return versions;
 };
+
+test("schema policy includes a standalone envelope when its own fields change", () => {
+  const definitions = {
+    Report: { properties: { schema_version: { const: 1 } }, required: ["result"] },
+  };
+  const before = envelopesEmbedding(definitions, "Report");
+  const after = envelopesEmbedding({ Report: { ...definitions.Report, required: [] } }, "Report");
+  assert.equal(before.get("Report"), "1");
+  assert.equal(after.get("Report"), before.get("Report"));
+});
 
 test("a required output field cannot be dropped at a frozen schema_version", (t) => {
   const previous = spawnSync("git", ["show", `${RELEASED_TAG}:docs/output-schema.json`], {

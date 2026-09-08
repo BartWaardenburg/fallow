@@ -33,7 +33,12 @@ pub(in crate::report) fn print_duplication_human(
         eprintln!();
     }
 
-    if report.clone_groups.is_empty() {
+    // The clean state is a property of the measured corpus, not of the array
+    // a display cap left behind. `--top 0` empties `clone_groups[]` while
+    // `stats.clone_groups` still counts every group the run found, and testing
+    // the array printed "no duplication" over a report that had just measured
+    // dozens of clone groups.
+    if report.clone_groups_total() == 0 {
         if !quiet {
             eprintln!(
                 "{}",
@@ -121,7 +126,10 @@ struct DuplicationHumanBuilder<'a> {
 
 impl DuplicationHumanBuilder<'_> {
     fn build(mut self) -> Vec<String> {
-        if self.report.clone_groups.is_empty() && self.report.clone_families.is_empty() {
+        // Corpus counts, not array lengths: a report whose arrays a display cap
+        // emptied still has a header and a footer to render, and returning no
+        // lines at all is what let `--top 0` reach the clean-state branch.
+        if self.report.clone_groups_total() == 0 && self.report.clone_families_total() == 0 {
             return self.lines;
         }
 
@@ -219,15 +227,29 @@ impl DuplicationHumanBuilder<'_> {
         self.lines.push(String::new());
     }
 
-    /// Discloses everything the reader is not seeing: the rendering cap and an
-    /// explicit `--top` both narrow the listing, and `--top` also rebuilds the
-    /// families from the surviving groups.
+    /// Discloses everything the reader is not seeing, naming each axis' OWN
+    /// limit.
+    ///
+    /// The two counters answer different questions and are withheld by
+    /// different mechanisms, so neither line may claim the other's limit. The
+    /// group figure is the corpus minus what this listing rendered, which the
+    /// `MAX_CLONE_GROUPS` cap narrows even without `--top`. The family figure
+    /// is what `--top` withheld when it rebuilt the families from the groups
+    /// that survived; the render cap never touches it. Both count "of the
+    /// corpus" rather than "beyond what you see", so the wording holds at
+    /// `--top 0`, where nothing was rendered and "and N more" would have no
+    /// antecedent.
     fn push_clone_footer(&mut self, shown_groups: usize, corpus_groups: usize) {
         let rendered = shown_groups.min(MAX_CLONE_GROUPS);
-        if corpus_groups > rendered {
+        let groups_withheld = corpus_groups.saturating_sub(rendered);
+        if groups_withheld > 0 {
             self.lines.push(format!(
                 "  {}",
-                format!("... and {} more clone groups", corpus_groups - rendered).dimmed()
+                format!(
+                    "... {groups_withheld} of {corpus_groups} clone group{} withheld by a display limit",
+                    plural(corpus_groups)
+                )
+                .dimmed()
             ));
         }
         let families_omitted = self.report.clone_families_omitted();
@@ -235,7 +257,13 @@ impl DuplicationHumanBuilder<'_> {
             self.lines.push(format!(
                 "  {}",
                 format!(
-                    "... and {families_omitted} more clone families withheld by the same display limit"
+                    "... {families_omitted} of {} clone {} withheld by --top",
+                    self.report.clone_families_total(),
+                    if self.report.clone_families_total() == 1 {
+                        "family"
+                    } else {
+                        "families"
+                    }
                 )
                 .dimmed()
             ));
@@ -476,13 +504,18 @@ fn build_mirror_pair_map(
 }
 
 /// Print a concise duplication summary showing only aggregate counts.
+///
+/// The clean state tests the measured corpus for the same reason
+/// `print_duplication_human` does: `--top 0` empties the array without changing
+/// what the run found, and an array-length test turned that into a green
+/// "no duplication" over a non-zero `stats.clone_groups`.
 pub(in crate::report) fn print_duplication_summary(
     report: &DuplicationReport,
     elapsed: Duration,
     quiet: bool,
     heading: bool,
 ) {
-    if report.clone_groups.is_empty() {
+    if report.clone_groups_total() == 0 {
         if !quiet {
             eprintln!(
                 "{}",
@@ -846,12 +879,49 @@ mod tests {
             "the header must name the measured corpus: {text}"
         );
         assert!(
-            text.contains("... and 248 more clone groups"),
+            text.contains("... 248 of 251 clone groups withheld by a display limit"),
             "the footer must name the groups the cap withheld: {text}"
         );
         assert!(
-            text.contains("... and 162 more clone families withheld by the same display limit"),
+            text.contains("... 162 of 163 clone families withheld by --top"),
             "the footer must name the families the cap withheld: {text}"
+        );
+        assert!(
+            !text.contains("the same display limit"),
+            "the two axes are narrowed by different limits and must not claim one: {text}"
+        );
+    }
+
+    /// `--top 0` empties both arrays while `stats` still counts the corpus.
+    /// The listing has nothing to render, so it must say so with the measured
+    /// numbers rather than fall through to the clean state.
+    #[test]
+    fn duplication_footer_holds_when_the_cap_rendered_nothing() {
+        let root = PathBuf::from("/project");
+        let report = DuplicationReport {
+            clone_groups: vec![],
+            clone_families: vec![],
+            mirrored_directories: vec![],
+            stats: DuplicationStats {
+                clone_groups: 37,
+                clone_families: 12,
+                ..DuplicationStats::default()
+            },
+        };
+
+        let text = plain(&build_duplication_human_lines(&report, &root));
+
+        assert!(
+            text.contains("Duplicates (37 clone groups)"),
+            "a fully capped listing still names the corpus it measured: {text}"
+        );
+        assert!(
+            text.contains("... 37 of 37 clone groups withheld by a display limit"),
+            "every group was withheld and the footer must say so: {text}"
+        );
+        assert!(
+            text.contains("... 12 of 12 clone families withheld by --top"),
+            "every family was withheld and the footer must say so: {text}"
         );
     }
 
@@ -882,7 +952,10 @@ mod tests {
             "the header must name every measured group: {text}"
         );
         assert!(
-            text.contains("... and 2 more clone groups"),
+            text.contains(&format!(
+                "... 2 of {} clone groups withheld by a display limit",
+                MAX_CLONE_GROUPS + 2
+            )),
             "the footer must name what the rendering limit hid: {text}"
         );
         assert!(
@@ -1242,7 +1315,7 @@ mod tests {
         let lines = build_duplication_human_lines(&report, &root);
         let text = plain(&lines);
 
-        assert!(text.contains("... and 2 more clone groups"));
+        assert!(text.contains("... 2 of 12 clone groups withheld by a display limit"));
         assert!(text.contains("Mirrored: deno/lib/"));
         assert!(text.contains("src/"));
         assert!(text.contains("3 files, 30 lines"));

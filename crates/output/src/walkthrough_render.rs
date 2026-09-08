@@ -308,7 +308,6 @@ mod tests {
             graph_facts: GraphFacts {
                 exports_added: 0,
                 api_width_delta: 0,
-                reachable_from: Vec::new(),
                 boundaries_touched: Vec::new(),
             },
             partition: PartitionFacts::default(),

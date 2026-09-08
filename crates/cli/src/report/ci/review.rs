@@ -221,7 +221,10 @@ fn print_review_envelope_from_ci_issues(
     emit_json(&value, "review envelope")
 }
 
-const fn review_conclusion(conclusion: PrDecisionConclusion) -> ReviewCheckConclusion {
+/// Translate a gate conclusion into the review/check vocabulary. Shared with
+/// the sticky comment renderer so both surfaces phrase one gate outcome the
+/// same way.
+pub(crate) const fn review_conclusion(conclusion: PrDecisionConclusion) -> ReviewCheckConclusion {
     match conclusion {
         PrDecisionConclusion::Success => ReviewCheckConclusion::Success,
         PrDecisionConclusion::Failure => ReviewCheckConclusion::Failure,
@@ -420,7 +423,7 @@ mod tests {
     }
 
     #[test]
-    fn review_summary_body_leads_with_decision() {
+    fn review_summary_body_points_at_the_inline_comments() {
         let issues = vec![issue(
             "fallow/unused-file",
             "major",
@@ -435,9 +438,18 @@ mod tests {
         ));
         let body = envelope["body"].as_str().expect("body is string");
 
-        assert!(body.contains("Quality gate failed"), "{body}");
-        assert!(body.contains("1 inline finding selected"), "{body}");
+        assert!(!body.contains("Quality gate"), "{body}");
+        assert!(
+            body.contains(
+                "1 inline comment on the changed lines. Open the Files changed tab to review."
+            ),
+            "{body}"
+        );
         assert!(body.contains("<!-- fallow-review -->"), "{body}");
+        assert_eq!(
+            envelope["meta"]["check_conclusion"], "failure",
+            "{envelope}"
+        );
     }
 
     #[test]

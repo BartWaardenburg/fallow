@@ -49,6 +49,35 @@ pub fn emit_programmatic_error(
     ExitCode::from(error.exit_code)
 }
 
+/// Emit a failure together with the remedy for it.
+///
+/// The same shape [`emit_programmatic_error`] uses, for the call sites that
+/// have a hint in hand but no [`fallow_api::ProgrammaticError`]: JSON callers
+/// read the remedy off `help`, human callers get it on its own `hint:` line
+/// instead of one long sentence that soft-wraps.
+#[expect(
+    clippy::print_stdout,
+    clippy::print_stderr,
+    reason = "structured error emission for CLI surfaces"
+)]
+pub fn emit_error_with_hint(
+    message: &str,
+    hint: &str,
+    exit_code: u8,
+    output: OutputFormat,
+) -> ExitCode {
+    if matches!(output, OutputFormat::Json) {
+        let error_obj =
+            fallow_output::ErrorOutput::new(message, exit_code).with_help(Some(hint.to_string()));
+        if let Ok(json) = requested_json_style().serialize(&error_obj) {
+            println!("{json}");
+        }
+    } else {
+        eprintln!("Error: {message}\n  hint: {hint}");
+    }
+    ExitCode::from(exit_code)
+}
+
 #[expect(
     clippy::print_stdout,
     clippy::print_stderr,

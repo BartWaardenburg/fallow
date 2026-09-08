@@ -351,7 +351,10 @@ pub fn extract_sfc_styles(source: &str) -> Vec<SfcStyle> {
         .collect()
 }
 
-fn ranges_to_gaps(source: &str, ranges: &[(usize, usize)]) -> Vec<SourceRegion> {
+/// Turn masked `ranges` into the gap regions between them, preserving byte
+/// offsets. `ranges` must be sorted by start offset; unsorted input silently
+/// drops the gaps that precede an out-of-order range.
+pub(crate) fn ranges_to_gaps(source: &str, ranges: &[(usize, usize)]) -> Vec<SourceRegion> {
     let mut regions = Vec::new();
     let mut cursor = 0;
     for &(start, end) in ranges {

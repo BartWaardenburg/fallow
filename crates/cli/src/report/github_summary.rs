@@ -19,6 +19,7 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use fallow_output::{markdown_code_span, markdown_table_code_span, markdown_table_text};
+use fallow_types::output_dead_code::caveat_labels_for_tokens;
 use serde_json::Value;
 
 use super::github::{PathRebase, arr, b, fmt_num, num, resolve_render_options, s, u};
@@ -167,6 +168,22 @@ fn path_line(item: &Value) -> String {
 /// Escaped code-span table cell for an untrusted envelope string.
 fn code_cell(item: &Value, key: &str) -> String {
     markdown_table_code_span(s(item, key))
+}
+
+/// The italic caveat marker appended inside a dead-code table cell when the
+/// verdict behind the row rests on a file this run never fully read. Empty when
+/// the finding carries no `reachability_caveats[]`, so a clean run's summary is
+/// byte-identical to what it was before this hedge existed.
+///
+/// The job summary is where a reviewer decides what to delete, so the row that
+/// names the finding is the row that has to carry the qualifier. It rides
+/// inside an existing cell rather than in a new column: adding a column would
+/// change every table's shape, including the rows that carry no caveat.
+fn caveat_cell_suffix(item: &Value) -> String {
+    caveat_labels_for_tokens(arr(item, "reachability_caveats").filter_map(Value::as_str))
+        .map_or_else(String::new, |labels| {
+            format!(" *(caveat: {})*", markdown_table_text(&labels))
+        })
 }
 
 /// `` `path:line` `` cell with the audit-flavor path shortening.
@@ -450,7 +467,7 @@ fn check_sections_core() -> Vec<SectionSpec> {
             name: "Unused files",
             key: "unused_files",
             header: "Files not reachable from any entry point.\n\n| File |\n|------|\n",
-            row: |it| format!("| {} |", code_cell(it, "path")),
+            row: |it| format!("| {}{} |", code_cell(it, "path"), caveat_cell_suffix(it)),
         },
         SectionSpec {
             name: "Unused exports",
@@ -458,7 +475,7 @@ fn check_sections_core() -> Vec<SectionSpec> {
             header: "Exported symbols with no known consumers.\n\n| File | Line | Export |\n|------|-----:|--------|\n",
             row: |it| {
                 format!(
-                    "| {} | {} | {}{} |",
+                    "| {} | {} | {}{}{} |",
                     code_cell(it, "path"),
                     num(it, "line"),
                     code_cell(it, "export_name"),
@@ -467,6 +484,7 @@ fn check_sections_core() -> Vec<SectionSpec> {
                     } else {
                         ""
                     },
+                    caveat_cell_suffix(it),
                 )
             },
         },
@@ -476,10 +494,11 @@ fn check_sections_core() -> Vec<SectionSpec> {
             header: "Type exports with no known consumers.\n\n| File | Line | Type |\n|------|-----:|------|\n",
             row: |it| {
                 format!(
-                    "| {} | {} | {} |",
+                    "| {} | {} | {}{} |",
                     code_cell(it, "path"),
                     num(it, "line"),
                     code_cell(it, "export_name"),
+                    caveat_cell_suffix(it),
                 )
             },
         },
@@ -503,8 +522,9 @@ fn check_sections_core() -> Vec<SectionSpec> {
             header: "Listed in `dependencies` but never imported by the declaring workspace.\n\n| Package | Imported elsewhere |\n|---------|--------------------|\n",
             row: |it| {
                 format!(
-                    "| {} | {} |",
+                    "| {}{} | {} |",
                     code_cell(it, "package_name"),
+                    caveat_cell_suffix(it),
                     check_workspace_context(it),
                 )
             },
@@ -515,8 +535,9 @@ fn check_sections_core() -> Vec<SectionSpec> {
             header: "Listed in `devDependencies` but never imported or referenced by the declaring workspace.\n\n| Package | Imported elsewhere |\n|---------|--------------------|\n",
             row: |it| {
                 format!(
-                    "| {} | {} |",
+                    "| {}{} | {} |",
                     code_cell(it, "package_name"),
+                    caveat_cell_suffix(it),
                     check_workspace_context(it),
                 )
             },
@@ -527,8 +548,9 @@ fn check_sections_core() -> Vec<SectionSpec> {
             header: "Listed in `optionalDependencies` but never imported by the declaring workspace.\n\n| Package | Imported elsewhere |\n|---------|--------------------|\n",
             row: |it| {
                 format!(
-                    "| {} | {} |",
+                    "| {}{} | {} |",
                     code_cell(it, "package_name"),
+                    caveat_cell_suffix(it),
                     check_workspace_context(it),
                 )
             },
@@ -637,13 +659,18 @@ fn check_sections_core() -> Vec<SectionSpec> {
     ]
 }
 
+/// Shared by the enum, class, and store member sections. `caveat_cell_suffix`
+/// renders nothing for an array the analysis pass does not stamp, so the three
+/// sections stay correct without each knowing which set it belongs to, and a
+/// future array that starts carrying caveats needs no change here.
 fn member_row(it: &Value) -> String {
     format!(
-        "| {} | {} | {} | {} |",
+        "| {} | {} | {} | {}{} |",
         code_cell(it, "path"),
         num(it, "line"),
         code_cell(it, "parent_name"),
         code_cell(it, "member_name"),
+        caveat_cell_suffix(it),
     )
 }
 
@@ -1195,6 +1222,36 @@ fn sorted_clone_families(env: &Value) -> Vec<&Value> {
     families
 }
 
+/// What the measured corpus holds, which is what the headline beside this block
+/// counts: the entries that reached the envelope plus the ones a presentation
+/// cap such as `--top` withheld before it got here.
+///
+/// `clone_groups_omitted` / `clone_families_omitted` are `0` on an untruncated
+/// run, so this is the plain array length in the common case.
+fn dupes_corpus_total(env: &Value, listed: usize, omitted_key: &str) -> usize {
+    listed.saturating_add(u(env, omitted_key) as usize)
+}
+
+/// Name what this listing does not show, so the corpus total in the headline is
+/// never read as the size of the list below it.
+///
+/// `withheld` is measured against the corpus, not against the envelope array:
+/// two caps stack here, `--top` before the envelope was built and this block's
+/// own display limit after, and a reader who acts on the listing needs the
+/// total of both. Empty when the listing is complete, which keeps an
+/// untruncated run's summary byte-identical.
+fn dupes_omission_tail(withheld: usize, capped_by_top: usize, noun: &str) -> String {
+    if withheld == 0 {
+        return String::new();
+    }
+    if capped_by_top == 0 {
+        return format!("\n- *... and {withheld} more {noun}*");
+    }
+    format!(
+        "\n- *... and {withheld} more {noun}, {capped_by_top} of them withheld by a display limit before this report*"
+    )
+}
+
 fn dupes_details(env: &Value) -> String {
     let families = sorted_clone_families(env);
     if families.is_empty() {
@@ -1215,11 +1272,15 @@ fn dupes_details(env: &Value) -> String {
             })
             .collect::<Vec<_>>()
             .join("\n");
-        let tail = if groups.len() > 20 {
-            format!("\n- *... and {} more groups*", groups.len() - 20)
-        } else {
-            String::new()
-        };
+        // Subtract what this listing actually rendered, not the display limit:
+        // a `--top` below the limit leaves fewer rows than 20, and measuring
+        // the withholding against the limit would under-report it.
+        let total = dupes_corpus_total(env, groups.len(), "clone_groups_omitted");
+        let tail = dupes_omission_tail(
+            total.saturating_sub(groups.len().min(20)),
+            u(env, "clone_groups_omitted") as usize,
+            "groups",
+        );
         format!("{rows}{tail}")
     } else {
         let entries = families
@@ -1228,12 +1289,13 @@ fn dupes_details(env: &Value) -> String {
             .map(|family| dupes_family_entry(family))
             .collect::<Vec<_>>()
             .join("\n");
-        let tail = if families.len() > 15 {
-            format!("\n- *... and {} more families*", families.len() - 15)
-        } else {
-            String::new()
-        };
-        format!("**Clone Families ({})**\n\n{entries}{tail}", families.len())
+        let total = dupes_corpus_total(env, families.len(), "clone_families_omitted");
+        let tail = dupes_omission_tail(
+            total.saturating_sub(families.len().min(15)),
+            u(env, "clone_families_omitted") as usize,
+            "families",
+        );
+        format!("**Clone Families ({total})**\n\n{entries}{tail}")
     }
 }
 
@@ -2316,6 +2378,7 @@ pub fn render_fix_summary(env: &Value) -> String {
     let mixed_eol = u(env, "skipped_mixed_line_endings") as usize;
     let low_confidence = u(env, "skipped_low_confidence_exports") as usize;
     let low_confidence_deps = u(env, "skipped_low_confidence_dependencies") as usize;
+    let low_confidence_members = u(env, "skipped_low_confidence_members") as usize;
     let dry_run = b(env, "dry_run");
 
     if fix_attempts == 0
@@ -2323,6 +2386,7 @@ pub fn render_fix_summary(env: &Value) -> String {
         && mixed_eol == 0
         && low_confidence == 0
         && low_confidence_deps == 0
+        && low_confidence_members == 0
     {
         return "## Fallow - Auto-fix\n\nNo fixable issues found.".to_owned();
     }
@@ -2356,7 +2420,13 @@ pub fn render_fix_summary(env: &Value) -> String {
     if low_confidence_deps > 0 {
         let _ = write!(
             out,
-            ", kept {low_confidence_deps} declared package(s) whose only import may sit in a file that did not parse cleanly"
+            ", kept {low_confidence_deps} declared package(s) whose only import may sit in a file this run did not fully read"
+        );
+    }
+    if low_confidence_members > 0 {
+        let _ = write!(
+            out,
+            ", kept {low_confidence_members} unused enum member(s) whose only reference may sit in a file this run did not fully analyze"
         );
     }
     out.push_str("\n\n| Type | Count |\n|------|-------|\n");
@@ -2490,9 +2560,20 @@ fn combined_counts(env: &Value) -> CombinedCounts {
     let check = env
         .get("check")
         .map_or(0, |check| u(check, "total_issues") as usize);
-    let dupes = env
-        .get("dupes")
-        .map_or(0, |dupes| arr(dupes, "clone_groups").count());
+    // Visible groups plus what a presentation cap withheld, NOT
+    // `stats.clone_groups`. The two differ for two unrelated reasons and only
+    // one of them belongs here: a filtered combined run leaves `stats`
+    // describing the unfiltered corpus while `clone_groups[]` holds the
+    // actionable set, and counting `stats` there reports issues a reader
+    // cannot inspect (issue #1250); a presentation cap such as `--top`
+    // truncates the array while `stats` stays right. `clone_groups_omitted`
+    // counts only the second, and no combined envelope carries it today
+    // because the bare command takes no `--top`.
+    let dupes = env.get("dupes").map_or(0, |dupes| {
+        arr(dupes, "clone_groups")
+            .count()
+            .saturating_add(u(dupes, "clone_groups_omitted") as usize)
+    });
     let health = env.get("health").cloned().unwrap_or(Value::Null);
     let complex = health.get("summary").map_or(0, |summary| {
         u(summary, "functions_above_threshold") as usize

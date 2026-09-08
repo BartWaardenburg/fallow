@@ -175,9 +175,14 @@ if render_with_fallow review-github "$REVIEW_FILE"; then
       --pr "$PR_NUMBER" \
       --repo "$GH_REPO" \
       --envelope "$REVIEW_FILE" > "$POST_FILE" 2> "$POST_STDERR_FILE"; then
-    if jq -e '(.apply_errors // []) | length > 0 or (.post_errors // []) | length > 0' "$POST_FILE" > /dev/null 2>&1; then
+    if jq -e '((.apply_errors // []) | length > 0) or ((.post_errors // []) | length > 0)' "$POST_FILE" > /dev/null 2>&1; then
       HINT=$(jq -r '.apply_hint // "refresh provider state and rerun the job"' "$POST_FILE")
-      echo "::warning::fallow post-review incomplete: $HINT"
+      UNAPPLIED=$(jq -r '(.unapplied_fingerprints // []) | join(", ")' "$POST_FILE")
+      if [ -n "$UNAPPLIED" ]; then
+        echo "::warning::fallow post-review incomplete: $HINT (unapplied fingerprints: $UNAPPLIED)"
+      else
+        echo "::warning::fallow post-review incomplete: $HINT"
+      fi
     fi
     ACTION=$(jq -r '.action // "unknown"' "$POST_FILE")
     POSTED=$(jq -r '.comments_posted // 0' "$POST_FILE")

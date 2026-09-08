@@ -30,6 +30,7 @@ use rmcp::model::{
 };
 use serde_json::{Map, Value};
 
+use crate::nearest::nearest_names;
 use crate::tool_guides::{TOOL_GUIDE_NOTE, TOOL_GUIDES, ToolGuide, tool_guide};
 
 const FALLOW_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -251,23 +252,50 @@ pub fn read_resource(uri: &str) -> Result<ReadResourceResult, McpError> {
 
 fn read_tool_guide(uri: &str, tool: &str) -> Result<ReadResourceResult, McpError> {
     let Some(guide) = tool_guide(tool) else {
-        return Err(McpError::resource_not_found(
-            format!("no long-form guide for tool '{tool}'"),
-            Some(serde_json::json!({
-                "uri": uri,
-                "tool": tool,
-                "code": "no_tool_guide",
-                "nearest_matches": nearest_tool_guide_uris(tool),
-                "documented_tools": TOOL_GUIDES.iter().map(|guide| guide.tool).collect::<Vec<_>>(),
-                "index": "fallow://tools",
-            })),
-        ));
+        return Err(missing_tool_guide_error(uri, tool));
     };
     Ok(json_result(
         uri,
         tool_guide_payload(guide).to_string(),
         "application/json",
     ))
+}
+
+/// Refusal for a `fallow://tools/{name}` URI that resolves to no guide.
+///
+/// The two reasons are different problems with different fixes, so they get
+/// different codes: `unknown_tool` means the name is not a fallow MCP tool at
+/// all (a typo, or a tool an agent invented), and the caller should correct the
+/// name; `no_tool_guide` means the tool is real and its `tools/list`
+/// description is the whole contract, so the caller should stop looking. A
+/// single shared body made a typo and a documented-nowhere tool byte-identical.
+fn missing_tool_guide_error(uri: &str, tool: &str) -> McpError {
+    let registered = MCP_TOOLS.iter().any(|info| info.name == tool);
+    let (code, message) = if registered {
+        (
+            "no_tool_guide",
+            format!(
+                "tool '{tool}' has no long-form guide; its tools/list description is the whole contract"
+            ),
+        )
+    } else {
+        (
+            "unknown_tool",
+            format!("'{tool}' is not a fallow MCP tool, so it has no guide"),
+        )
+    };
+    McpError::resource_not_found(
+        message,
+        Some(serde_json::json!({
+            "uri": uri,
+            "tool": tool,
+            "code": code,
+            "registered_tool": registered,
+            "nearest_matches": nearest_tool_guide_uris(tool),
+            "documented_tools": TOOL_GUIDES.iter().map(|guide| guide.tool).collect::<Vec<_>>(),
+            "index": "fallow://tools",
+        })),
+    )
 }
 
 fn tool_guide_payload(guide: &ToolGuide) -> Value {
@@ -285,39 +313,14 @@ fn tool_guide_payload(guide: &ToolGuide) -> Value {
 /// Tool-guide URIs closest to an unknown tool name, so a near miss (a typo, or
 /// a sibling tool) answers with the guide the caller meant.
 fn nearest_tool_guide_uris(token: &str) -> Vec<String> {
-    let normalized = token.trim().to_ascii_lowercase();
-    let mut scored: Vec<(usize, &'static str)> = TOOL_GUIDES
-        .iter()
-        .filter_map(|guide| {
-            let score = name_affinity(guide.tool, &normalized);
-            (score > 0).then_some((score, guide.tool))
-        })
-        .collect();
-    scored.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| left.1.cmp(right.1)));
-    scored
-        .into_iter()
-        .take(MAX_NEAREST_MATCHES)
-        .map(|(_, tool)| format!("{TOOL_GUIDE_URI_PREFIX}{tool}"))
-        .collect()
-}
-
-/// Shared word overlap, substring containment, and common prefix between a
-/// known snake_case name and a caller token.
-fn name_affinity(known: &str, normalized: &str) -> usize {
-    let words: Vec<&str> = normalized
-        .split(['-', '_'])
-        .filter(|word| !word.is_empty())
-        .collect();
-    let shared_words = known.split('_').filter(|word| words.contains(word)).count();
-    let substring = usize::from(
-        !normalized.is_empty() && (known.contains(normalized) || normalized.contains(known)),
-    );
-    let prefix = known
-        .bytes()
-        .zip(normalized.bytes())
-        .take_while(|(left, right)| left == right)
-        .count();
-    shared_words * 8 + substring * 4 + prefix
+    nearest_names(
+        token,
+        TOOL_GUIDES.iter().map(|guide| guide.tool),
+        MAX_NEAREST_MATCHES,
+    )
+    .into_iter()
+    .map(|tool| format!("{TOOL_GUIDE_URI_PREFIX}{tool}"))
+    .collect()
 }
 
 fn read_explain(uri: &str, issue_type: &str) -> Result<ReadResourceResult, McpError> {

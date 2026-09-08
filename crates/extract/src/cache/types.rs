@@ -1045,11 +1045,11 @@ use crate::MemberKind;
 /// can report the degradation instead of silently inheriting a partial parse.
 /// Warm 287 entries have none of the three fields.
 ///
-/// The same 288 bump also re-keys `entries` on the root-relative path and adds
+/// The 289 bump also re-keys `entries` on the root-relative path and adds
 /// the root to the store header. A 287 blob is keyed on absolute paths, so
 /// reading it under the new scheme would miss every lookup after paying the
 /// full decode; refusing it by version is the honest outcome.
-pub(super) const CACHE_VERSION: u32 = 288;
+pub(super) const CACHE_VERSION: u32 = 289;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

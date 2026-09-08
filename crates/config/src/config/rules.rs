@@ -1127,14 +1127,12 @@ pub const KNOWN_RULE_NAMES: &[&str] = &[
 /// Find the closest known rule name to `input` when it is plausibly a typo.
 ///
 /// Thin wrapper over [`crate::levenshtein::closest_match`] that scopes the
-/// candidate set to [`KNOWN_RULE_NAMES`] and returns a `'static` reference so
-/// the suggestion can be embedded in tracing warnings without allocation.
+/// candidate set to [`KNOWN_RULE_NAMES`]. The `'static` lifetime comes from that
+/// slice, so the suggestion can be embedded in tracing warnings without
+/// allocation. `closest_match` lowercases `input` itself.
 #[must_use]
 pub fn closest_known_rule_name(input: &str) -> Option<&'static str> {
-    let input_lower = input.to_ascii_lowercase();
-    let candidates = KNOWN_RULE_NAMES.iter().copied();
-    let suggestion = crate::levenshtein::closest_match(&input_lower, candidates)?;
-    KNOWN_RULE_NAMES.iter().copied().find(|&c| c == suggestion)
+    crate::levenshtein::closest_match(input, KNOWN_RULE_NAMES.iter().copied())
 }
 
 /// An unknown key found inside a `rules` (or `overrides[].rules`) object.

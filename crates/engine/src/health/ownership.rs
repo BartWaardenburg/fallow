@@ -451,16 +451,6 @@ fn is_bot(email: &str, bot_globs: &GlobSet) -> bool {
     bot_globs.is_match(email)
 }
 
-/// Render an author email per the configured privacy mode.
-#[cfg(test)]
-fn render_email(email: &str, mode: EmailMode) -> String {
-    match mode {
-        EmailMode::Raw => email.to_string(),
-        EmailMode::Handle => extract_handle(email),
-        EmailMode::Anonymized | EmailMode::Hash => hash_email(email),
-    }
-}
-
 /// Extract a display handle from an email address.
 ///
 /// Strips the domain and unwraps GitHub-style numeric noreply prefixes
@@ -585,27 +575,34 @@ mod tests {
         assert_ne!(hash_email("alice@x"), hash_email("bob@x"));
     }
 
+    /// Raw mode is the default: `compute_ownership` reports the unmodified
+    /// address and labels the identifier format accordingly.
     #[test]
-    fn render_email_raw_passes_through() {
-        assert_eq!(
-            render_email("alice@example.com", EmailMode::Raw),
-            "alice@example.com"
-        );
+    fn raw_mode_reports_the_unmodified_address() {
+        let pool = vec!["alice@example.com".to_string()];
+        let churn = churn_with_authors("f.ts", &[(0, 5, 5.0, ts_days_ago(60), ts_days_ago(1))]);
+        let globs = empty_globs();
+        let ctx = ctx_with(&pool, &globs, None);
+        let m = compute_ownership(&churn, Path::new("f.ts"), &ctx).unwrap();
+        assert_eq!(m.top_contributor.identifier, "alice@example.com");
+        assert_eq!(m.top_contributor.format, ContributorIdentifierFormat::Raw);
     }
 
+    /// Handle mode with no local-part collision strips the domain and adds no
+    /// disambiguation suffix.
     #[test]
-    fn render_email_handle_strips_domain() {
+    fn handle_mode_strips_domain_without_collision() {
+        let pool = vec!["alice@example.com".to_string()];
+        let churn = churn_with_authors("f.ts", &[(0, 5, 5.0, ts_days_ago(60), ts_days_ago(1))]);
+        let globs = empty_globs();
+        let mut ctx = ctx_with(&pool, &globs, None);
+        ctx.email_mode = EmailMode::Handle;
+        let m = compute_ownership(&churn, Path::new("f.ts"), &ctx).unwrap();
+        assert_eq!(m.top_contributor.identifier, "alice");
         assert_eq!(
-            render_email("alice@example.com", EmailMode::Handle),
-            "alice"
+            m.top_contributor.format,
+            ContributorIdentifierFormat::Handle
         );
-    }
-
-    #[test]
-    fn render_email_hash_obfuscates() {
-        let r = render_email("alice@example.com", EmailMode::Anonymized);
-        assert!(r.starts_with("xxh3:"));
-        assert!(!r.contains("alice"));
     }
 
     #[test]

@@ -40,9 +40,7 @@ const handleArguments = (args, output) => {
     writeJson(output, createStatusResponse());
     return true;
   }
-  if (args.length === 1 && args[0] === "--session") {
-    return false;
-  }
+  // --session is dispatched by run() before this function is reached.
   if (args.length > 0) {
     throw new Error(`unknown argument: ${args[0]}`);
   }

@@ -27,7 +27,7 @@ use crate::discover::FileId;
 use crate::graph::{ModuleGraph, ModuleNode};
 use crate::results::UnusedComponentProp;
 
-use super::predicates::{component_name_for, is_react_file};
+use super::predicates::{component_name_for, declares_react_runtime, is_react_file};
 use super::{LineOffsetsMap, byte_offset_to_line_col};
 
 /// Result of the SFC (Vue/Svelte/Astro) prop scan: the findings plus the count
@@ -210,7 +210,7 @@ pub fn find_unused_react_props(
     line_offsets_by_file: &LineOffsetsMap<'_>,
     ignore_pattern: Option<&regex::Regex>,
 ) -> ReactPropScan {
-    if !has_react_runtime_dep(declared_deps) {
+    if !declares_react_runtime(declared_deps) {
         return ReactPropScan::default();
     }
 
@@ -245,13 +245,6 @@ pub fn find_unused_react_props(
             .then(a.prop_name.cmp(&b.prop_name))
     });
     scan
-}
-
-fn has_react_runtime_dep(declared_deps: &FxHashSet<String>) -> bool {
-    declared_deps.contains("react")
-        || declared_deps.contains("react-dom")
-        || declared_deps.contains("next")
-        || declared_deps.contains("preact")
 }
 
 fn collect_module_unused_react_props(

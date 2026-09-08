@@ -1589,11 +1589,22 @@ fn validation_errors_use_structured_json_body() {
     for body in &errors {
         let v: serde_json::Value = serde_json::from_str(body)
             .unwrap_or_else(|e| panic!("body should be valid JSON: `{body}` ({e})"));
-        assert_eq!(
-            v.as_object().map(serde_json::Map::len),
-            Some(3),
-            "exactly 3 keys expected in {body}"
-        );
+        let keys: Vec<&str> = v
+            .as_object()
+            .expect("refusal body is an object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        for key in &keys {
+            assert!(
+                matches!(
+                    *key,
+                    "error" | "message" | "exit_code" | "code" | "help" | "context"
+                ),
+                "unexpected key '{key}' in {body}; a refusal carries the three required fields \
+                 plus at most the three typed ones"
+            );
+        }
         assert_eq!(
             v["error"],
             serde_json::Value::Bool(true),

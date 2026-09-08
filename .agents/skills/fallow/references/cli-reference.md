@@ -1441,7 +1441,7 @@ Set `FALLOW_FORMAT=json` and `FALLOW_QUIET=1` in your agent environment to avoid
 
 `fallow ci reconcile-review` reads a typed review envelope (`--format review-github` / `review-gitlab`), looks up existing fingerprints on the PR/MR, and resolves stale review threads when their finding is no longer present in the new envelope. Posts an idempotent "Resolved in `<sha>`" follow-up comment per stale finding (skipped if a marker for the same fingerprint at the current SHA already exists).
 
-Provider mutations are fail-fast. If a preflight check, permission error, or provider mutation fails, JSON output keeps `apply_errors` and can add `apply_hint`, `failed_fingerprints`, and `unapplied_fingerprints` so agents and CI wrappers can report what was not fully applied.
+Provider mutations are isolated per fingerprint. A failed mutation blocks only the remaining operations of that same fingerprint, which is retried whole on the next run, while every other stale fingerprint is still applied. (A preflight failure is different: preflight runs before any mutation, and a failure there abandons the whole plan because the state snapshot is untrustworthy.) If a preflight check, permission error, or provider mutation fails, JSON output keeps `apply_errors` and can add `apply_hint`, `failed_fingerprints`, and `unapplied_fingerprints` so agents and CI wrappers can report what was not fully applied. `fallow ci post-review` reports those same three fields for the reconcile pass it runs after posting new inline comments.
 
 ### Flags
 

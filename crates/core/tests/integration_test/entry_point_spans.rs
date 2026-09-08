@@ -2,10 +2,15 @@
 //!
 //! `PipelineTimings::entry_points_ms` used to be a single opaque number, so a
 //! slow discovery stage could only be guessed at. These tests assert that the
-//! sub-spans are a real partition of that stage: they are populated on a run
-//! that does discovery work, they never exceed the stage they subdivide, and a
-//! section that did not run reports zero rather than borrowing another
-//! section's time.
+//! sub-spans are a real partition of that stage: every span is an elapsed time
+//! rather than a difference, together they never exceed the stage they
+//! subdivide, and a section that did not run does not absorb the work of the
+//! section next to it.
+//!
+//! None of these assertions is a duration threshold. A span's magnitude is a
+//! property of the machine, so the invariants here are shape (non-negative,
+//! contained in the parent stage) and relative attribution (a skipped section
+//! against a sibling that provably did filesystem work in the same run).
 
 use fallow_types::trace::EntryPointSpans;
 
@@ -27,20 +32,42 @@ fn entry_point_spans_partition_the_stage_they_subdivide() {
     let timings = output.timings.expect("trace timings retained");
     let spans = timings.entry_point_spans;
 
+    // The stage is only worth subdividing on a run that actually discovered
+    // something. Anchor that on the discovery result rather than on a duration:
+    // the fixture's root package.json contributes entry points every run, on
+    // any machine.
+    let summary = output
+        .results
+        .entry_point_summary
+        .expect("entry-point summary retained");
     assert!(
-        spans.root_ms > 0.0,
-        "root discovery always runs, got {}ms",
-        spans.root_ms
+        summary
+            .by_source
+            .iter()
+            .any(|(source, count)| source == "package.json" && *count > 0),
+        "root discovery must have produced package.json entry points, got {:?}",
+        summary.by_source
     );
+
+    for (name, value) in [
+        ("root", spans.root_ms),
+        ("workspaces", spans.workspaces_ms),
+        ("plugins", spans.plugins_ms),
+        ("infrastructure", spans.infrastructure_ms),
+        ("dynamic", spans.dynamic_ms),
+        ("dedup", spans.dedup_ms),
+    ] {
+        assert!(
+            value >= 0.0 && value.is_finite(),
+            "{name} span must be an elapsed time, got {value}ms"
+        );
+    }
+
     assert!(
         spans_total(spans) <= timings.entry_points_ms,
         "sub-spans must partition the stage: {} sub-span ms vs {} stage ms",
         spans_total(spans),
         timings.entry_points_ms
-    );
-    assert!(
-        timings.entry_points_ms > 0.0,
-        "the stage itself must still be timed"
     );
 }
 
@@ -132,8 +159,21 @@ fn plugin_glob_match_time_is_reported_when_a_plugin_contributes_globs() {
     );
 }
 
+/// Consecutive `split_ms` calls carve the stage into adjacent spans, so a
+/// misplaced split does not lose time: it moves a neighbour's work into the
+/// wrong span. The skipped dynamic branch is where that would show, because
+/// with no globs configured its span brackets no work at all.
+///
+/// The control is the span immediately before it. Infrastructure discovery
+/// stats its candidate config directories, lists the project root, and tries to
+/// read the root manifests, so it makes real filesystem syscalls on every run
+/// and on every machine. A branch that ran nothing cannot cost as much as one
+/// that made syscalls; if the dynamic split ever swallowed the section next to
+/// it, that ordering inverts. An absolute ceiling would not catch it: removing
+/// the infrastructure split moves roughly a tenth of a millisecond into this
+/// span, which the previous `< 1.0` assertion accepted.
 #[test]
-fn unconfigured_dynamic_globs_report_zero_rather_than_borrowed_time() {
+fn skipped_dynamic_discovery_does_not_absorb_the_section_before_it() {
     let config = create_config(fixture_path("workspace-project"));
     assert!(
         config.dynamically_loaded.is_empty(),
@@ -141,11 +181,17 @@ fn unconfigured_dynamic_globs_report_zero_rather_than_borrowed_time() {
     );
 
     let output = fallow_core::analyze_with_trace(&config).expect("workspace analysis");
-    let timings = output.timings.expect("trace timings retained");
+    let spans = output
+        .timings
+        .expect("trace timings retained")
+        .entry_point_spans;
 
     assert!(
-        timings.entry_point_spans.dynamic_ms < 1.0,
-        "a section that never ran must not carry another section's time, got {}ms",
-        timings.entry_point_spans.dynamic_ms
+        spans.dynamic_ms < spans.infrastructure_ms,
+        "the skipped dynamic section brackets no work, yet it is reported as \
+         costing at least as much as the infrastructure section that made \
+         filesystem calls: {} dynamic ms vs {} infrastructure ms",
+        spans.dynamic_ms,
+        spans.infrastructure_ms
     );
 }

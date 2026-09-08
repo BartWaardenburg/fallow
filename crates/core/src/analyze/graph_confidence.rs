@@ -73,17 +73,42 @@
 //! write was withheld, and resolving the diagnostic restores every removal.
 //!
 //! Nothing here suppresses, filters, reorders, or downgrades a finding. It
-//! does reach `fallow fix`, which withholds the removal of a caveated finding
-//! the same way it withholds an off-graph export; the finding stays reported.
-//! That withholding is driven by "this finding carries any caveat", never by
-//! which cause produced it, so widening the class here widens the protection
-//! without touching the fixer.
+//! does reach every mutation surface: `fallow fix`, the LSP quick fix, the MCP
+//! fix tools, and the `auto_fixable` flag an agent plans against all ask
+//! `MutationEvidence::may_auto_apply_mutation`, which is true exactly when the
+//! finding carries no caveat. That single predicate is why widening the class
+//! here widens the protection everywhere without touching a consumer, and why
+//! the write below goes through `set_reachability_caveats` rather than
+//! assigning the field: the setter enforces the gate on the finding's actions
+//! in the same call.
+//!
+//! Members join reachability findings and dependency findings as a third
+//! shape. `unused_enum_members[]` does not rest on reachability at all: member
+//! usage is collected by walking the member accesses of every module the run
+//! parsed, reachable or not, so a member whose only reference lives in an
+//! unread file reads as unused exactly like an export does, and the
+//! reachability narrowing above does not apply to it. `unused_class_members[]`
+//! is the SAME verdict off the SAME walk (`collect_direct_member_accesses`
+//! populates one `accessed_members` map that both arrays are scanned against;
+//! only the bucket the finding lands in differs by `MemberKind`), so it takes
+//! the member rule unchanged rather than one of its own. It reached this list
+//! late, on the argument that its removal starts withheld and only the
+//! type-aware sidecar opens it. That argument was about `fallow fix`, and the
+//! review formats never asked: they render a literal one-click ```suggestion```
+//! block for a class member on `rule_id` alone, so an unread file could ship a
+//! committable deletion with nothing on the comment saying the evidence was
+//! incomplete. `unused_store_members[]` stays out, and can: it exposes no
+//! mutation on any surface. `unused_types[]` rests
+//! on exactly the same reachability test as `unused_exports[]` and gets
+//! exactly the same caveats; a type export and a value export in the same file
+//! must not render with different confidence when the LSP offers the same
+//! quick fix for both.
 
 use std::path::Path;
 
 use rustc_hash::FxHashSet;
 
-use fallow_types::output_dead_code::ReachabilityCaveat;
+use fallow_types::output_dead_code::{CaveatedFinding, ReachabilityCaveat};
 use fallow_types::workspace::WorkspaceDiagnostic;
 
 use crate::extract::ModuleInfo;
@@ -168,26 +193,71 @@ impl<'a> GraphConfidenceContext<'a> {
         caveats
     }
 
+    /// The caveats on a MEMBER verdict reported in `path`.
+    ///
+    /// Members do not rest on reachability, so the narrowing [`Self::new`]
+    /// applies to the degraded-parse leg of `graph_incomplete` must not be
+    /// reused here. `collect_direct_member_accesses` walks the member accesses
+    /// of every module the run resolved with no reachability filter at all, so
+    /// an access inside an UNREACHABLE degraded module credits the member
+    /// exactly as one inside a reachable module does. The condition is
+    /// therefore "any module of this run was incompletely analyzed", the same
+    /// one the dependency arrays use, plus the own-file leg a dependency
+    /// finding cannot have because its path is a `package.json`.
+    ///
+    /// Enum members and class members share this rule because they share the
+    /// walk: one `accessed_members` map is built once and both kinds are
+    /// scanned against it, so nothing about a class member narrows further
+    /// than an enum member does.
+    fn member_caveats_for(&self, path: &Path) -> Vec<ReachabilityCaveat> {
+        let mut caveats = Vec::new();
+        if self.incomplete_paths.contains(path) {
+            caveats.push(ReachabilityCaveat::IncompleteFileAnalysis);
+        }
+        caveats.push(ReachabilityCaveat::IncompleteImportGraph);
+        caveats
+    }
+
     /// Stamp the caveats onto the verdicts a lost import edge can distort.
     /// A complete run returns without touching a finding.
+    ///
+    /// Every write goes through [`CaveatedFinding::set_reachability_caveats`],
+    /// which is also what withholds the finding's mutating actions, so a new
+    /// array added to this loop inherits the gate and one left out of it is a
+    /// finding with no caveat rather than a caveated finding with a live
+    /// auto-fix.
     pub(super) fn annotate(&self, results: &mut AnalysisResults) {
         if self.is_clean() {
             return;
         }
         for finding in &mut results.unused_files {
-            finding.reachability_caveats = self.caveats_for(&finding.file.path);
+            let caveats = self.caveats_for(&finding.file.path);
+            finding.set_reachability_caveats(caveats);
         }
         for finding in &mut results.unused_exports {
-            finding.reachability_caveats = self.caveats_for(&finding.export.path);
+            let caveats = self.caveats_for(&finding.export.path);
+            finding.set_reachability_caveats(caveats);
+        }
+        for finding in &mut results.unused_types {
+            let caveats = self.caveats_for(&finding.export.path);
+            finding.set_reachability_caveats(caveats);
+        }
+        for finding in &mut results.unused_enum_members {
+            let caveats = self.member_caveats_for(&finding.member.path);
+            finding.set_reachability_caveats(caveats);
+        }
+        for finding in &mut results.unused_class_members {
+            let caveats = self.member_caveats_for(&finding.member.path);
+            finding.set_reachability_caveats(caveats);
         }
         for finding in &mut results.unused_dependencies {
-            finding.reachability_caveats = DEPENDENCY_CAVEATS.to_vec();
+            finding.set_reachability_caveats(DEPENDENCY_CAVEATS.to_vec());
         }
         for finding in &mut results.unused_dev_dependencies {
-            finding.reachability_caveats = DEPENDENCY_CAVEATS.to_vec();
+            finding.set_reachability_caveats(DEPENDENCY_CAVEATS.to_vec());
         }
         for finding in &mut results.unused_optional_dependencies {
-            finding.reachability_caveats = DEPENDENCY_CAVEATS.to_vec();
+            finding.set_reachability_caveats(DEPENDENCY_CAVEATS.to_vec());
         }
     }
 }
@@ -197,8 +267,13 @@ mod tests {
     use super::*;
     use crate::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
     use crate::resolve::ResolvedModule;
-    use crate::results::{UnusedDependency, UnusedFile};
-    use fallow_types::output_dead_code::{UnusedDependencyFinding, UnusedFileFinding};
+    use crate::results::{UnusedDependency, UnusedExport, UnusedFile, UnusedMember};
+    use fallow_types::extract::MemberKind;
+    use fallow_types::output::IssueAction;
+    use fallow_types::output_dead_code::{
+        UnusedClassMemberFinding, UnusedDependencyFinding, UnusedEnumMemberFinding,
+        UnusedExportFinding, UnusedFileFinding, UnusedTypeFinding,
+    };
     use fallow_types::results::DependencyLocation;
     use fallow_types::workspace::WorkspaceDiagnosticKind;
     use std::path::PathBuf;
@@ -262,6 +337,61 @@ mod tests {
                 .collect(),
             ..AnalysisResults::default()
         }
+    }
+
+    /// One `unused_enum_members[]` finding for `Color.Blue`, declared in a file
+    /// that parsed perfectly. The narrowing that applies to reachability
+    /// verdicts must not reach it.
+    fn with_unused_enum_member(mut results: AnalysisResults) -> AnalysisResults {
+        results
+            .unused_enum_members
+            .push(UnusedEnumMemberFinding::with_actions(UnusedMember {
+                path: PathBuf::from(INDEX),
+                parent_name: "Color".to_string(),
+                member_name: "Blue".to_string(),
+                kind: MemberKind::EnumMember,
+                line: 3,
+                col: 2,
+            }));
+        results
+    }
+
+    /// One `unused_class_members[]` finding for `Widget.onlyUsedInBigFile`,
+    /// declared in the same perfectly-parsed file as the enum member above so
+    /// the two can be compared directly.
+    fn with_unused_class_member(mut results: AnalysisResults) -> AnalysisResults {
+        results
+            .unused_class_members
+            .push(UnusedClassMemberFinding::with_actions(UnusedMember {
+                path: PathBuf::from(INDEX),
+                parent_name: "Widget".to_string(),
+                member_name: "onlyUsedInBigFile".to_string(),
+                kind: MemberKind::ClassMethod,
+                line: 6,
+                col: 2,
+            }));
+        results
+    }
+
+    /// One `unused_exports[]` and one `unused_types[]` finding in the same
+    /// file, so the two can be compared directly.
+    fn with_unused_export_and_type(mut results: AnalysisResults) -> AnalysisResults {
+        let export = |name: &str| UnusedExport {
+            path: PathBuf::from(HELPER),
+            export_name: name.to_string(),
+            is_type_only: false,
+            line: 1,
+            col: 0,
+            span_start: 0,
+            is_re_export: false,
+        };
+        results
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(export("helper")));
+        results
+            .unused_types
+            .push(UnusedTypeFinding::with_actions(export("Shape")));
+        results
     }
 
     /// One `unused_dependencies[]` finding for `lodash`, on top of whatever
@@ -558,6 +688,161 @@ mod tests {
                     .reachability_caveats
                     .is_empty(),
             "only a file the run failed to read may raise a caveat"
+        );
+    }
+
+    /// A member's usage comes from walking the member accesses of every module
+    /// the run PARSED, with no reachability filter, so a member whose only
+    /// reference lives in a file the run never read reads as unused exactly
+    /// like an export does. Measured: `fix --yes` deleted `Color.Blue` while a
+    /// size-skipped file still referenced it.
+    ///
+    /// The caveat is what withholds that deletion, so this asserts the caveat
+    /// AND the action it gates, in one place: the enum member's own file
+    /// parsed perfectly here, which is exactly the case where an
+    /// own-file-only rule would have missed it.
+    #[test]
+    fn an_unread_file_caveats_an_enum_member_verdict_and_withholds_its_removal() {
+        let graph = graph();
+        let mut results = with_unused_enum_member(unused(&[]));
+        let diagnostics = vec![diagnostic(
+            "/p/src/huge.ts",
+            WorkspaceDiagnosticKind::SkippedLargeFile {
+                size_bytes: 6 * 1024 * 1024,
+            },
+        )];
+
+        GraphConfidenceContext::new(&graph, &modules([0, 0, 0]), &diagnostics)
+            .annotate(&mut results);
+
+        let member = &results.unused_enum_members[0];
+        assert_eq!(
+            member.reachability_caveats,
+            vec![ReachabilityCaveat::IncompleteImportGraph],
+            "the unread file may hold the only access to this member"
+        );
+        assert!(
+            !member.actions.iter().any(IssueAction::is_auto_fixable),
+            "the remove-enum-member action must not advertise itself as applicable"
+        );
+    }
+
+    /// An unreachable module that parsed degraded cannot change a reachability
+    /// verdict, so `unused_files[]` stays clean. It CAN hold the member access
+    /// that credits an enum member, because member collection ignores
+    /// reachability entirely. Pinning the divergence keeps a future refactor
+    /// from reusing the reachability narrowing for members.
+    #[test]
+    fn a_degraded_unreachable_module_caveats_a_member_but_not_a_file() {
+        let graph = graph();
+        let mut results = with_unused_class_member(with_unused_enum_member(unused(&[ORPHAN])));
+
+        // `helper.ts` (index 1) is unreachable and parsed with errors.
+        GraphConfidenceContext::new(&graph, &modules([0, 2, 0]), &[]).annotate(&mut results);
+
+        assert!(
+            results.unused_files[0].reachability_caveats.is_empty(),
+            "an unreachable degraded module cannot change a reachability verdict"
+        );
+        assert_eq!(
+            results.unused_enum_members[0].reachability_caveats,
+            vec![ReachabilityCaveat::IncompleteImportGraph],
+            "it can still hold the member access that credits this member"
+        );
+        assert_eq!(
+            results.unused_class_members[0].reachability_caveats,
+            results.unused_enum_members[0].reachability_caveats,
+            "a class member is the same verdict off the same access walk, so it must not \
+             render with more confidence than an enum member in the same file"
+        );
+    }
+
+    /// The measured blocker, at the layer that decides it: `src/big.ts` is the
+    /// only caller of `Widget.onlyUsedInBigFile` and the size guard skipped it,
+    /// so the member reads as unused solely because of a file the run never
+    /// opened. Verified against a release binary: with the guard raised the
+    /// finding disappears entirely.
+    ///
+    /// The caveat is what stops the review formats from rendering a one-click
+    /// deletion for it, so this asserts the caveat AND that no action on the
+    /// finding advertises itself as applicable.
+    #[test]
+    fn an_unread_file_caveats_a_class_member_verdict_and_withholds_its_removal() {
+        let graph = graph();
+        let mut results = with_unused_class_member(unused(&[]));
+        let diagnostics = vec![diagnostic(
+            "/p/src/big.ts",
+            WorkspaceDiagnosticKind::SkippedLargeFile {
+                size_bytes: 6 * 1024 * 1024,
+            },
+        )];
+
+        GraphConfidenceContext::new(&graph, &modules([0, 0, 0]), &diagnostics)
+            .annotate(&mut results);
+
+        let member = &results.unused_class_members[0];
+        assert_eq!(
+            member.reachability_caveats,
+            vec![ReachabilityCaveat::IncompleteImportGraph],
+            "the unread file may hold the only call to this member"
+        );
+        assert!(
+            !member.actions.iter().any(IssueAction::is_auto_fixable),
+            "the remove-class-member action must not advertise itself as applicable"
+        );
+    }
+
+    /// A type export rests on exactly the reachability test a value export
+    /// does, and the LSP offers the same remove-the-`export`-keyword quick fix
+    /// for both, so the two must not render with different confidence.
+    #[test]
+    fn a_type_export_carries_the_same_caveat_as_a_value_export() {
+        let graph = graph();
+        let mut results = with_unused_export_and_type(unused(&[]));
+        let diagnostics = vec![diagnostic(
+            "/p/src/huge.ts",
+            WorkspaceDiagnosticKind::SkippedLargeFile { size_bytes: 1 },
+        )];
+
+        GraphConfidenceContext::new(&graph, &modules([0, 0, 0]), &diagnostics)
+            .annotate(&mut results);
+
+        assert_eq!(
+            results.unused_types[0].reachability_caveats,
+            results.unused_exports[0].reachability_caveats,
+            "an unused type and an unused export in the same file must agree"
+        );
+        assert!(
+            !results.unused_types[0]
+                .actions
+                .iter()
+                .any(IssueAction::is_auto_fixable),
+            "and the type's removal is withheld the same way"
+        );
+    }
+
+    /// The whole mechanism is opt-in on evidence: a run that read every file it
+    /// discovered must keep every array byte-identical and every fix live.
+    #[test]
+    fn a_clean_run_leaves_the_new_arrays_untouched() {
+        let graph = graph();
+        let mut results = with_unused_enum_member(with_unused_export_and_type(unused(&[ORPHAN])));
+
+        GraphConfidenceContext::new(&graph, &modules([0, 0, 0]), &[]).annotate(&mut results);
+
+        assert!(
+            results.unused_enum_members[0]
+                .reachability_caveats
+                .is_empty()
+                && results.unused_types[0].reachability_caveats.is_empty(),
+            "a complete run stamps nothing"
+        );
+        assert!(
+            results.unused_enum_members[0]
+                .actions
+                .iter()
+                .any(IssueAction::is_auto_fixable),
+            "and withholds nothing"
         );
     }
 }

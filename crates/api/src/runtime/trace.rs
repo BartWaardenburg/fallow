@@ -106,14 +106,12 @@ pub fn run_trace_file(
 /// Trace the shortest import path between two modules.
 ///
 /// An unreachable pair is a RESULT, not an error: the output reports
-/// `reachable: false` with zero hops. Only an endpoint that is not a module in
-/// the graph is an error.
+/// `reachable: false` with zero hops. A missing or ambiguous endpoint is an error.
 ///
 /// # Errors
 ///
 /// Returns a structured programmatic error for invalid options, config load
-/// failures, graph construction failures, or an endpoint that is not in the
-/// module graph.
+/// failures, graph construction failures, or a missing or ambiguous endpoint.
 pub fn run_trace_import_path(
     options: &TraceImportPathOptions,
 ) -> ProgrammaticResult<TraceImportPathProgrammaticOutput> {
@@ -132,9 +130,17 @@ pub fn run_trace_import_path(
         .map_err(|endpoint| {
             let label = endpoint.label();
             let value = match endpoint {
-                fallow_engine::trace::ImportPathEndpoint::From => &options.from,
-                fallow_engine::trace::ImportPathEndpoint::To => &options.to,
+                fallow_engine::trace::ImportPathEndpoint::From
+                | fallow_engine::trace::ImportPathEndpoint::AmbiguousFrom => &options.from,
+                fallow_engine::trace::ImportPathEndpoint::To
+                | fallow_engine::trace::ImportPathEndpoint::AmbiguousTo => &options.to,
             };
+            if endpoint.is_ambiguous() {
+                return ProgrammaticError::new(format!("'{value}' ({label}) matches multiple modules"), 2)
+                    .with_code("FALLOW_TRACE_TARGET_AMBIGUOUS")
+                    .with_help("Use the full project-relative path; run project_info to list discovered files.")
+                    .with_context("trace_import_path");
+            }
             ProgrammaticError::new(format!("'{value}' ({label}) not found in module graph"), 2)
                 .with_code("FALLOW_TRACE_TARGET_NOT_FOUND")
                 .with_help(
@@ -162,16 +168,29 @@ pub fn run_trace_import_path(
 pub fn run_trace_error(
     options: &TraceErrorOptions,
 ) -> ProgrammaticResult<TraceErrorProgrammaticOutput> {
-    validate_non_empty("trace", &options.trace)?;
+    if options.trace.trim().is_empty() {
+        // Typed like the oversized-trace refusal below rather than through
+        // `validate_non_empty`: both are the same tool refusing the same
+        // argument, so both carry a `code`, a `help` and a `context`.
+        return Err(ProgrammaticError::new("trace must not be empty", 2)
+            .with_code("FALLOW_INVALID_TRACE_OPTIONS")
+            .with_help(
+                "Paste the stack trace text into `trace`, as your runtime printed it. \
+                 trace_error resolves frames against the project graph, so it has nothing \
+                 to resolve without them.",
+            )
+            .with_context("trace_error"));
+    }
     if options.trace.len() as u64 > fallow_engine::trace_error::MAX_STACK_TRACE_BYTES {
         let limit = fallow_engine::trace_error::MAX_STACK_TRACE_BYTES;
         return Err(ProgrammaticError::new(
             format!("stack trace exceeds the {limit}-byte limit"),
             2,
         )
-        .with_code("FALLOW_INVALID_OPTIONS")
+        .with_code("FALLOW_INVALID_TRACE_OPTIONS")
         .with_help(
-            "A stack trace is a handful of kilobytes. Pass the trace itself rather than a              redirected log file, and cut it to the frames that matter.",
+            "A stack trace is a handful of kilobytes. Pass the trace itself rather than a \
+             redirected log file, and cut it to the frames that matter.",
         )
         .with_context("trace_error"));
     }

@@ -29,7 +29,11 @@ Options:
 ";
 
 pub fn collect_report(root: &Path, config_path: Option<&Path>) -> DoctorOutput {
-    fallow_api::run_doctor(&fallow_api::DoctorOptions { root, config_path })
+    let cache_dir = crate::runtime_support::resolve_cache_dir_env();
+    fallow_api::run_doctor_with_cache_dir(
+        &fallow_api::DoctorOptions { root, config_path },
+        cache_dir.as_deref(),
+    )
 }
 
 pub fn render_report(

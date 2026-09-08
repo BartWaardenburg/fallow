@@ -323,7 +323,7 @@ fn a_trace_read_from_a_file_reports_the_path_as_its_source() {
 }
 
 #[test]
-fn an_unreadable_trace_file_exits_two() {
+fn an_unreadable_trace_file_exits_two_with_a_remedy() {
     let dir = tempdir().unwrap();
     write_project(dir.path());
 
@@ -334,6 +334,24 @@ fn an_unreadable_trace_file_exits_two() {
     );
 
     assert_eq!(output.code, 2, "stdout:\n{}", output.stdout);
+    let value: serde_json::Value = serde_json::from_str(output.stdout.trim()).unwrap();
+    assert!(
+        value["help"]
+            .as_str()
+            .is_some_and(|help| help.contains("fallow trace-error -")),
+        "the failure must name the next step, including that input can be piped: {}",
+        output.stdout
+    );
+
+    let human = run_fallow_in_root("trace-error", dir.path(), &["does-not-exist.txt"]);
+    assert_eq!(human.code, 2);
+    assert!(
+        human
+            .stderr
+            .contains("hint: pass a stack-trace file, or pipe one"),
+        "stderr was {}",
+        human.stderr
+    );
 }
 
 #[test]
@@ -538,6 +556,8 @@ fn a_frame_deep_inside_a_long_definition_is_not_flagged() {
     );
 }
 
+/// The empty state carries its own measurement, so `--quiet`, which drops
+/// prose, cannot leave an unrecognised input looking like an empty one.
 #[test]
 fn quiet_human_output_keeps_the_unparsed_line_count() {
     let dir = tempdir().unwrap();
@@ -551,9 +571,116 @@ fn quiet_human_output_keeps_the_unparsed_line_count() {
 
     assert_eq!(output.code, 0, "stderr:\n{}", output.stderr);
     assert!(
-        output.stdout.contains("unparsed lines 2"),
+        output
+            .stdout
+            .contains("No stack frames recognised (2 input lines did not parse as a frame)."),
         "--quiet must not hide the lines that were not read, or an unrecognised \
          input looks exactly like an empty trace; stdout:\n{}",
+        output.stdout
+    );
+}
+
+/// The empty state used to state the same fact three times (a literal notice,
+/// an all-zero counts line, and the prose `reason`) and then stop, with no next
+/// step and nothing saying the input can be piped.
+#[test]
+fn the_empty_state_states_the_fact_once_and_says_what_to_do() {
+    let dir = tempdir().unwrap();
+    write_project(dir.path());
+
+    let output = run_trace_error_stdin(dir.path(), "", &[]);
+
+    assert_eq!(output.code, 0, "stderr:\n{}", output.stderr);
+    assert_eq!(
+        output.stdout.matches("No stack frames recognised").count(),
+        1,
+        "one statement of the fact, not three; stdout:\n{}",
+        output.stdout
+    );
+    assert!(
+        !output.stdout.contains("frames 0 | resolved 0"),
+        "an all-zero counts line restates the sentence above it; stdout:\n{}",
+        output.stdout
+    );
+    assert!(
+        output
+            .stdout
+            .contains("hint: pass a stack-trace file, or pipe one"),
+        "the empty state must name the next step; stdout:\n{}",
+        output.stdout
+    );
+}
+
+/// One reason explains a class of frame, and a stack is usually one class
+/// repeated. Sixty byte-identical explanations sat between the reader and the
+/// counts; each frame still carries its own `[origin/resolution]` labels.
+#[test]
+fn a_repeated_frame_reason_is_stated_once() {
+    let dir = tempdir().unwrap();
+    write_project(dir.path());
+
+    use std::fmt::Write as _;
+
+    let mut trace = String::from("Error: boom\n");
+    for index in 0..20 {
+        let _ = writeln!(
+            trace,
+            "    at handler{index} (node_modules/vendor/index.js:{}:1)",
+            index + 1
+        );
+    }
+    let output = run_trace_error_stdin(dir.path(), &trace, &["--quiet"]);
+
+    assert_eq!(output.code, 0, "stderr:\n{}", output.stderr);
+    assert_eq!(
+        output
+            .stdout
+            .matches("frame is in an installed dependency, not in project source")
+            .count(),
+        1,
+        "one class of frame, one explanation; stdout:\n{}",
+        output.stdout
+    );
+    assert_eq!(
+        output
+            .stdout
+            .matches("[node-modules/not-attempted]")
+            .count(),
+        20,
+        "every frame keeps its own classification; stdout:\n{}",
+        output.stdout
+    );
+}
+
+/// A reason that CHANGES prints again, so suppressing repeats never hides a
+/// different answer.
+#[test]
+fn a_changed_frame_reason_prints_again() {
+    let dir = tempdir().unwrap();
+    write_project(dir.path());
+
+    let output = run_trace_error_stdin(
+        dir.path(),
+        "Error: boom\n\
+         \x20   at a (node_modules/vendor/index.js:1:1)\n\
+         \x20   at b (node_modules/vendor/index.js:2:1)\n\
+         \x20   at n (dist/bundle.js:1:200)\n",
+        &["--quiet"],
+    );
+
+    assert_eq!(output.code, 0, "stderr:\n{}", output.stderr);
+    assert_eq!(
+        output
+            .stdout
+            .matches("frame is in an installed dependency, not in project source")
+            .count(),
+        1,
+        "stdout:\n{}",
+        output.stdout
+    );
+    assert!(
+        output.stdout.contains("source map"),
+        "a different class of frame states its own reason; stdout:\n{}",
         output.stdout
     );
 }
@@ -605,4 +732,33 @@ fn the_counts_line_stays_clean_when_nothing_was_omitted() {
         "stdout:\n{}",
         output.stdout
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_trace_stream_file_cannot_bypass_the_byte_limit() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("trace.pipe");
+    let created = Command::new("mkfifo").arg(&path).status().unwrap();
+    assert!(created.success());
+    let writer_path = path.clone();
+    let writer = std::thread::spawn(move || {
+        let mut file = std::fs::File::create(writer_path).unwrap();
+        file.write_all(&vec![
+            b'x';
+            fallow_engine::trace_error::MAX_STACK_TRACE_BYTES
+                as usize
+                + 1
+        ])
+        .unwrap();
+    });
+    let output = run_fallow_in_root(
+        "trace-error",
+        dir.path(),
+        &[path.to_str().unwrap(), "--format", "json"],
+    );
+    writer.join().unwrap();
+    assert_eq!(output.code, 2, "{}", output.stdout);
+    let json: serde_json::Value = serde_json::from_str(&output.stdout).unwrap();
+    assert!(json["message"].as_str().unwrap().contains("byte limit"));
 }

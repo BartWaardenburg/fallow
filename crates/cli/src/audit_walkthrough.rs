@@ -971,7 +971,6 @@ mod tests {
             graph_facts: crate::audit_brief::GraphFacts {
                 exports_added: 0,
                 api_width_delta: 0,
-                reachable_from: Vec::new(),
                 boundaries_touched: Vec::new(),
             },
             partition: crate::audit_brief::PartitionFacts::default(),

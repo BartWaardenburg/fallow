@@ -345,10 +345,16 @@ fn filter_dupes_report(
 }
 
 /// Message for the one flag pair `dupes` cannot serve at once.
-const TOP_WITH_GROUP_BY_MESSAGE: &str = "--top and --group-by cannot be combined on \
-     dupes: grouped output reports per-bucket stats computed over every clone group in the bucket, \
-     so a global top-N truncation would leave those stats describing groups the output no longer \
-     lists. Run one or the other.";
+///
+/// The refusal and the reason for it are separate strings so the terminal shows
+/// the actionable half on one line. As a single sentence this soft-wrapped to
+/// four lines and buried "run one or the other" at the end of the fourth.
+const TOP_WITH_GROUP_BY_MESSAGE: &str = "--top and --group-by cannot be combined on dupes";
+
+/// The `hint:` half of [`TOP_WITH_GROUP_BY_MESSAGE`].
+const TOP_WITH_GROUP_BY_HINT: &str = "run one flag or the other; per-bucket stats cover every \
+     clone group in the bucket, so a global top-N would leave them describing groups the listing \
+     no longer holds";
 
 /// Refuse `--top` together with `--group-by` instead of dropping one of them.
 ///
@@ -361,7 +367,12 @@ const TOP_WITH_GROUP_BY_MESSAGE: &str = "--top and --group-by cannot be combined
 /// not carry.
 fn validate_dupes_flag_combination(opts: &DupesOptions<'_>) -> Result<(), ExitCode> {
     if opts.top.is_some() && opts.group_by.is_some() {
-        return Err(emit_error(TOP_WITH_GROUP_BY_MESSAGE, 2, opts.output));
+        return Err(crate::error::emit_error_with_hint(
+            TOP_WITH_GROUP_BY_MESSAGE,
+            TOP_WITH_GROUP_BY_HINT,
+            2,
+            opts.output,
+        ));
     }
     Ok(())
 }
@@ -1085,8 +1096,13 @@ mod tests {
             "the refusal must name both flags"
         );
         assert!(
-            TOP_WITH_GROUP_BY_MESSAGE.contains("per-bucket stats"),
-            "the refusal must say why the pair cannot be served"
+            TOP_WITH_GROUP_BY_HINT.contains("per-bucket stats"),
+            "the hint must say why the pair cannot be served"
+        );
+        assert!(
+            TOP_WITH_GROUP_BY_MESSAGE.len() < 60,
+            "the actionable half must fit one terminal line: {} chars",
+            TOP_WITH_GROUP_BY_MESSAGE.len()
         );
     }
 

@@ -1261,7 +1261,6 @@ dependencies = [
  "fallow-types",
  "fixedbitset",
  "globset",
- "jsonc-parser",
  "oxc_resolver",
  "oxc_span",
  "postcard",

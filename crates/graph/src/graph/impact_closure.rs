@@ -12,7 +12,9 @@
 //! Honest scope (ADR-001, syntactic): the coordination gap is an attention
 //! pointer at the exact inter-module failure mode, NOT a correctness proof.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
+
+use super::relativize;
 
 use fallow_types::discover::FileId;
 use fixedbitset::FixedBitSet;
@@ -268,13 +270,6 @@ fn is_dev_glue_path(path: &Path) -> bool {
             Some("__tests__" | "__mocks__" | "__stories__")
         )
     })
-}
-
-/// Strip `root` and forward-slash-normalize a module path for cross-platform
-/// JSON parity with the trace output path relativization.
-fn relativize(path: &Path, root: &Path) -> String {
-    let rel: PathBuf = path.strip_prefix(root).unwrap_or(path).to_path_buf();
-    rel.to_string_lossy().replace('\\', "/")
 }
 
 #[cfg(test)]

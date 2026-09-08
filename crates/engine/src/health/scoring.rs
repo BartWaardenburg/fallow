@@ -321,38 +321,6 @@ impl<'a> CrapCeilingLookup<'a> {
     }
 }
 
-/// Compute per-function CRAP scores using the static binary model.
-///
-/// Binary model: test-reachable file -> CRAP = CC, untested -> CRAP = CC^2 + CC.
-/// Superseded by `compute_crap_scores_estimated` but retained for test coverage
-/// of the binary formula behavior.
-///
-/// Returns `(max_crap, count_above_threshold)`.
-#[cfg(test)]
-#[expect(
-    clippy::suboptimal_flops,
-    reason = "cc * cc + cc matches the CRAP formula specification"
-)]
-fn compute_crap_scores_binary(
-    complexity: &[fallow_types::extract::FunctionComplexity],
-    is_test_reachable: bool,
-) -> (f64, usize) {
-    if complexity.is_empty() {
-        return (0.0, 0);
-    }
-    let mut max = 0.0_f64;
-    let mut above = 0usize;
-    for f in complexity {
-        let cc = f64::from(f.cyclomatic);
-        let crap = if is_test_reachable { cc } else { cc * cc + cc };
-        max = max.max(crap);
-        if crap >= CRAP_THRESHOLD {
-            above += 1;
-        }
-    }
-    ((max * 10.0).round() / 10.0, above)
-}
-
 /// Per-function CRAP data used to emit `--max-crap` findings.
 #[derive(Debug, Clone, Copy)]
 pub struct PerFunctionCrap {
@@ -5569,55 +5537,28 @@ mod tests {
         );
     }
 
+    /// Untested-file aggregation on the shipped estimated path: the reported
+    /// max is the highest rounded score, `above` counts only the units at or
+    /// over their effective ceiling, and the synthetic template and module
+    /// units leave the CRAP dimension entirely.
     #[test]
-    fn crap_scores_empty_complexity() {
-        let (max, above) = compute_crap_scores_binary(&[], true);
-        assert!((max).abs() < f64::EPSILON);
-        assert_eq!(above, 0);
-    }
-
-    #[test]
-    fn crap_scores_test_reachable() {
-        let funcs = vec![make_fn_complexity(5)];
-        let (max, above) = compute_crap_scores_binary(&funcs, true);
-        assert!((max - 5.0).abs() < f64::EPSILON);
-        assert_eq!(above, 0);
-    }
-
-    #[test]
-    fn crap_scores_untested_at_threshold() {
-        let funcs = vec![make_fn_complexity(5)];
-        let (max, above) = compute_crap_scores_binary(&funcs, false);
-        assert!((max - 30.0).abs() < f64::EPSILON);
-        assert_eq!(above, 1);
-    }
-
-    #[test]
-    fn crap_scores_untested_above_threshold() {
-        let funcs = vec![make_fn_complexity(6)];
-        let (max, above) = compute_crap_scores_binary(&funcs, false);
-        assert!((max - 42.0).abs() < f64::EPSILON);
-        assert_eq!(above, 1);
-    }
-
-    #[test]
-    fn crap_scores_untested_below_threshold() {
-        let funcs = vec![make_fn_complexity(4)];
-        let (max, above) = compute_crap_scores_binary(&funcs, false);
-        assert!((max - 20.0).abs() < f64::EPSILON);
-        assert_eq!(above, 0);
-    }
-
-    #[test]
-    fn crap_scores_mixed_functions_untested() {
+    fn estimated_crap_untested_aggregates_over_real_units_only() {
         let funcs = vec![
-            make_fn_complexity(2),
-            make_fn_complexity(5),
-            make_fn_complexity(8),
+            make_named_fn_complexity("below", 1, 4),
+            make_named_fn_complexity("at_threshold", 2, 5),
+            make_named_fn_complexity("above_threshold", 3, 8),
+            make_named_fn_complexity("<template>", 4, 21),
+            make_named_fn_complexity("<module>", 5, 21),
         ];
-        let (max, above) = compute_crap_scores_binary(&funcs, false);
-        assert!((max - 72.0).abs() < f64::EPSILON);
-        assert_eq!(above, 2);
+        let result = estimated_crap_default(
+            &funcs,
+            &rustc_hash::FxHashSet::default(),
+            false,
+            fallow_output::CoverageSource::Estimated,
+        );
+        assert!((result.max_crap - 72.0).abs() < f64::EPSILON, "{result:#?}");
+        assert_eq!(result.signals.above, 2);
+        assert_eq!(result.per_function.len(), 3);
     }
 
     #[test]
@@ -7846,21 +7787,5 @@ mod tests {
         let (max, above) = (result.max_crap, result.signals.above);
         assert!(max > 10.0);
         assert_eq!(above, 0);
-    }
-
-    #[test]
-    fn binary_crap_test_reachable() {
-        let funcs = vec![make_fn_complexity(10)];
-        let (max, above) = compute_crap_scores_binary(&funcs, true);
-        assert!((max - 10.0).abs() < f64::EPSILON);
-        assert_eq!(above, 0);
-    }
-
-    #[test]
-    fn binary_crap_multiple_functions() {
-        let funcs = vec![make_fn_complexity(3), make_fn_complexity(8)];
-        let (max, above) = compute_crap_scores_binary(&funcs, false);
-        assert!((max - 72.0).abs() < f64::EPSILON);
-        assert_eq!(above, 1);
     }
 }

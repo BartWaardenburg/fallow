@@ -5,33 +5,71 @@ use ls_types::{
 };
 
 use fallow_api::EditorAnalysisResults as AnalysisResults;
+use fallow_types::output_dead_code::{MutationEvidence, ReachabilityCaveat, caveat_suffix};
 
 use super::{FIRST_LINE_RANGE, doc_link_for_code};
 use crate::position::PositionMapper;
+
+/// Append the run's caveat parenthetical to a diagnostic message.
+///
+/// The editor is the surface where the caveat matters most: the user is one
+/// keystroke from the quick fix, and the workspace diagnostic that explains
+/// why the evidence is thin lives in a JSON envelope they never see. The
+/// suffix goes in the MESSAGE rather than in `relatedInformation` because a
+/// related-information entry needs a second location to point at, and the one
+/// location worth pointing at (the file the run could not read) is not part of
+/// the editor results at all. The wording is the shared `caveat_suffix`, so the
+/// editor, the human report, and the SARIF result message all read alike.
+fn with_caveats(message: String, caveats: &[ReachabilityCaveat]) -> String {
+    match caveat_suffix(caveats) {
+        Some(suffix) => format!("{message}{suffix}"),
+        None => message,
+    }
+}
 
 pub fn push_export_diagnostics(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     results: &AnalysisResults,
     mapper: &mut PositionMapper,
 ) {
-    let exports_iter = results.unused_exports.iter().map(|f| &f.export);
-    let types_iter = results.unused_types.iter().map(|f| &f.export);
+    let exports_iter = results
+        .unused_exports
+        .iter()
+        .map(|f| (&f.export, f.reachability_caveats()));
+    let types_iter = results
+        .unused_types
+        .iter()
+        .map(|f| (&f.export, f.reachability_caveats()));
     for (exports, code, msg_prefix) in [
         (
             Box::new(exports_iter)
-                as Box<dyn Iterator<Item = &fallow_api::editor_results::UnusedExport>>,
+                as Box<
+                    dyn Iterator<
+                        Item = (
+                            &fallow_api::editor_results::UnusedExport,
+                            &[ReachabilityCaveat],
+                        ),
+                    >,
+                >,
             "unused-export",
             "Export" as &str,
         ),
         (
             Box::new(types_iter)
-                as Box<dyn Iterator<Item = &fallow_api::editor_results::UnusedExport>>,
+                as Box<
+                    dyn Iterator<
+                        Item = (
+                            &fallow_api::editor_results::UnusedExport,
+                            &[ReachabilityCaveat],
+                        ),
+                    >,
+                >,
             "unused-type",
             "Type export",
         ),
     ] {
-        for export in exports {
-            push_unused_export_diagnostic(map, export, code, msg_prefix, mapper);
+        for (export, caveats) in exports {
+            push_unused_export_diagnostic(map, export, caveats, code, msg_prefix, mapper);
         }
     }
 
@@ -42,6 +80,7 @@ pub fn push_export_diagnostics(
 fn push_unused_export_diagnostic(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     export: &fallow_api::editor_results::UnusedExport,
+    caveats: &[ReachabilityCaveat],
     code: &str,
     msg_prefix: &str,
     mapper: &mut PositionMapper,
@@ -57,7 +96,10 @@ fn push_unused_export_diagnostic(
         source: Some("fallow".to_string()),
         code: Some(NumberOrString::String(code.to_string())),
         code_description: doc_link_for_code(code),
-        message: format!("{msg_prefix} '{}' is unused", export.export_name),
+        message: with_caveats(
+            format!("{msg_prefix} '{}' is unused", export.export_name),
+            caveats,
+        ),
         tags: Some(vec![DiagnosticTag::UNNECESSARY]),
         ..Default::default()
     });
@@ -104,7 +146,10 @@ pub fn push_file_diagnostics(map: &mut FxHashMap<Uri, Vec<Diagnostic>>, results:
                 source: Some("fallow".to_string()),
                 code: Some(NumberOrString::String("unused-file".to_string())),
                 code_description: doc_link_for_code("unused-file"),
-                message: "File is not reachable from any entry point".to_string(),
+                message: with_caveats(
+                    "File is not reachable from any entry point".to_string(),
+                    file.reachability_caveats(),
+                ),
                 tags: Some(vec![DiagnosticTag::UNNECESSARY]),
                 ..Default::default()
             });
@@ -520,31 +565,48 @@ pub fn push_member_diagnostics(
     results: &AnalysisResults,
     mapper: &mut PositionMapper,
 ) {
-    let enum_iter = results.unused_enum_members.iter().map(|f| &f.member);
-    let class_iter = results.unused_class_members.iter().map(|f| &f.member);
-    let store_iter = results.unused_store_members.iter().map(|f| &f.member);
+    // Both member kinds carry caveats off the same reachability-free access
+    // walk. Store members do not: they expose no fix on any surface, so there
+    // is no mutation for a caveat to withhold.
+    let enum_iter = results
+        .unused_enum_members
+        .iter()
+        .map(|f| (&f.member, f.reachability_caveats()));
+    let class_iter = results
+        .unused_class_members
+        .iter()
+        .map(|f| (&f.member, f.reachability_caveats()));
+    let store_iter = results
+        .unused_store_members
+        .iter()
+        .map(|f| (&f.member, &[][..]));
+    type MemberRows<'a> = Box<
+        dyn Iterator<
+                Item = (
+                    &'a fallow_api::editor_results::UnusedMember,
+                    &'a [ReachabilityCaveat],
+                ),
+            > + 'a,
+    >;
     for (members, code, kind_label) in [
         (
-            Box::new(enum_iter)
-                as Box<dyn Iterator<Item = &fallow_api::editor_results::UnusedMember>>,
+            Box::new(enum_iter) as MemberRows<'_>,
             "unused-enum-member",
             "Enum member" as &str,
         ),
         (
-            Box::new(class_iter)
-                as Box<dyn Iterator<Item = &fallow_api::editor_results::UnusedMember>>,
+            Box::new(class_iter) as MemberRows<'_>,
             "unused-class-member",
             "Class member",
         ),
         (
-            Box::new(store_iter)
-                as Box<dyn Iterator<Item = &fallow_api::editor_results::UnusedMember>>,
+            Box::new(store_iter) as MemberRows<'_>,
             "unused-store-member",
             "Store member",
         ),
     ] {
-        for member in members {
-            push_unused_member_diagnostic(map, member, code, kind_label, mapper);
+        for (member, caveats) in members {
+            push_unused_member_diagnostic(map, member, caveats, code, kind_label, mapper);
         }
     }
 
@@ -562,6 +624,7 @@ pub fn push_member_diagnostics(
 fn push_unused_member_diagnostic(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     member: &fallow_api::editor_results::UnusedMember,
+    caveats: &[ReachabilityCaveat],
     code: &str,
     kind_label: &str,
     mapper: &mut PositionMapper,
@@ -577,9 +640,12 @@ fn push_unused_member_diagnostic(
         source: Some("fallow".to_string()),
         code: Some(NumberOrString::String(code.to_string())),
         code_description: doc_link_for_code(code),
-        message: format!(
-            "{kind_label} '{}.{}' is unused",
-            member.parent_name, member.member_name
+        message: with_caveats(
+            format!(
+                "{kind_label} '{}.{}' is unused",
+                member.parent_name, member.member_name
+            ),
+            caveats,
         ),
         tags: Some(vec![DiagnosticTag::UNNECESSARY]),
         ..Default::default()
@@ -919,6 +985,90 @@ mod tests {
         assert_eq!(d.range.start.character, 7);
         assert_eq!(d.range.end.character, 7 + "helper".len() as u32);
         assert_eq!(d.tags, Some(vec![DiagnosticTag::UNNECESSARY]));
+    }
+
+    /// Withholding the quick fix without saying why turns a stated limit into
+    /// a missing feature, so the diagnostic has to carry the caveat. The
+    /// wording is the shared `caveat_suffix`, which is what the human report
+    /// and the SARIF result message already append.
+    #[test]
+    fn a_caveated_finding_says_so_in_its_diagnostic() {
+        use fallow_types::output_dead_code::{CaveatedFinding, ReachabilityCaveat};
+
+        let root = test_root();
+        let mut results = AnalysisResults::default();
+
+        let mut export = UnusedExportFinding::with_actions(UnusedExport {
+            path: root.join("src/utils.ts"),
+            export_name: "helper".to_string(),
+            is_type_only: false,
+            line: 5,
+            col: 7,
+            span_start: 40,
+            is_re_export: false,
+        });
+        export.set_reachability_caveats(vec![ReachabilityCaveat::IncompleteImportGraph]);
+        results.unused_exports.push(export);
+
+        let mut file = UnusedFileFinding::with_actions(UnusedFile {
+            path: root.join("src/orphan.ts"),
+        });
+        file.set_reachability_caveats(vec![ReachabilityCaveat::IncompleteFileAnalysis]);
+        results.unused_files.push(file);
+
+        let mut member = UnusedEnumMemberFinding::with_actions(UnusedMember {
+            path: root.join("src/colors.ts"),
+            parent_name: "Color".to_string(),
+            member_name: "Blue".to_string(),
+            kind: MemberKind::EnumMember,
+            line: 3,
+            col: 2,
+        });
+        member.set_reachability_caveats(vec![ReachabilityCaveat::IncompleteImportGraph]);
+        results.unused_enum_members.push(member);
+
+        let duplication = empty_duplication();
+        let diags = build_diagnostics_for_test(&results, &duplication, &root);
+
+        let message = |relative: &str| {
+            let uri = Uri::from_file_path(root.join(relative)).unwrap();
+            diags[&uri][0].message.clone()
+        };
+
+        assert_eq!(
+            message("src/utils.ts"),
+            "Export 'helper' is unused (caveat: incomplete import graph)"
+        );
+        assert_eq!(
+            message("src/orphan.ts"),
+            "File is not reachable from any entry point (caveat: incomplete file analysis)"
+        );
+        assert_eq!(
+            message("src/colors.ts"),
+            "Enum member 'Color.Blue' is unused (caveat: incomplete import graph)"
+        );
+    }
+
+    /// A clean run must render exactly as it did: the caveat is additive, and
+    /// an editor consumer diffing messages should see no change.
+    #[test]
+    fn an_uncaveated_finding_keeps_its_exact_message() {
+        let root = test_root();
+        let mut results = AnalysisResults::default();
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: root.join("src/orphan.ts"),
+            }));
+
+        let duplication = empty_duplication();
+        let diags = build_diagnostics_for_test(&results, &duplication, &root);
+        let uri = Uri::from_file_path(root.join("src/orphan.ts")).unwrap();
+
+        assert_eq!(
+            diags[&uri][0].message,
+            "File is not reachable from any entry point"
+        );
     }
 
     #[test]

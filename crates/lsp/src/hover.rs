@@ -8,9 +8,10 @@ use fallow_api::{
     EditorAnalysisResults as AnalysisResults, EditorDuplicationReport as DuplicationReport,
 };
 
+use crate::code_lens::{pluralize, react_hook_segment};
 use crate::diagnostics::security::security_label;
 use crate::markdown::format_inline_code;
-use crate::position::PositionMapper;
+use crate::position::{PositionMapper, line_range_from_byte_col};
 
 /// Typed input for building hover information from editor analysis state.
 #[derive(Clone, Copy)]
@@ -134,16 +135,6 @@ fn check_component_hover(
     check_react_component_intel(results, file_path, position, mapper)
 }
 
-fn utf16_span(
-    mapper: &mut PositionMapper,
-    path: &Path,
-    line: u32,
-    col: u32,
-    text: &str,
-) -> (u32, u32) {
-    mapper.utf16_col_span(path, line, col, text)
-}
-
 fn position_in_span(position: Position, start: u32, end: u32) -> bool {
     position.character >= start && position.character < end
 }
@@ -157,25 +148,6 @@ fn span_range(line: u32, start: u32, end: u32) -> Range {
         end: Position {
             line,
             character: end,
-        },
-    }
-}
-
-fn line_range_from_byte_col(
-    mapper: &mut PositionMapper,
-    path: &Path,
-    line: u32,
-    col: u32,
-) -> Range {
-    let start = mapper.utf16_col(path, line, col);
-    Range {
-        start: Position {
-            line,
-            character: start,
-        },
-        end: Position {
-            line,
-            character: u32::MAX,
         },
     }
 }
@@ -356,13 +328,8 @@ fn check_unused_export(
             if export_line != position.line {
                 continue;
             }
-            let (start_col, end_col) = utf16_span(
-                mapper,
-                &export.path,
-                export_line,
-                export.col,
-                &export.export_name,
-            );
+            let (start_col, end_col) =
+                mapper.utf16_col_span(&export.path, export_line, export.col, &export.export_name);
             if !position_in_span(position, start_col, end_col) {
                 continue;
             }
@@ -400,13 +367,8 @@ fn check_used_export(
         if usage_line != position.line {
             continue;
         }
-        let (start_col, end_col) = utf16_span(
-            mapper,
-            &usage.path,
-            usage_line,
-            usage.col,
-            &usage.export_name,
-        );
+        let (start_col, end_col) =
+            mapper.utf16_col_span(&usage.path, usage_line, usage.col, &usage.export_name);
         if !position_in_span(position, start_col, end_col) {
             continue;
         }
@@ -522,13 +484,8 @@ fn unused_member_hover(
     if member_line != position.line {
         return None;
     }
-    let (start_col, end_col) = utf16_span(
-        mapper,
-        &member.path,
-        member_line,
-        member.col,
-        &member.member_name,
-    );
+    let (start_col, end_col) =
+        mapper.utf16_col_span(&member.path, member_line, member.col, &member.member_name);
     if !position_in_span(position, start_col, end_col) {
         return None;
     }
@@ -564,7 +521,7 @@ fn check_unrendered_component(
             continue;
         }
         let (start_col, end_col) =
-            utf16_span(mapper, &c.path, component_line, c.col, &c.component_name);
+            mapper.utf16_col_span(&c.path, component_line, c.col, &c.component_name);
         if !position_in_span(position, start_col, end_col) {
             continue;
         }
@@ -611,7 +568,7 @@ fn check_unused_component_prop(
         if prop_line != position.line {
             continue;
         }
-        let (start_col, end_col) = utf16_span(mapper, &p.path, prop_line, p.col, &p.prop_name);
+        let (start_col, end_col) = mapper.utf16_col_span(&p.path, prop_line, p.col, &p.prop_name);
         if !position_in_span(position, start_col, end_col) {
             continue;
         }
@@ -649,7 +606,7 @@ fn check_unused_component_emit(
         if emit_line != position.line {
             continue;
         }
-        let (start_col, end_col) = utf16_span(mapper, &e.path, emit_line, e.col, &e.emit_name);
+        let (start_col, end_col) = mapper.utf16_col_span(&e.path, emit_line, e.col, &e.emit_name);
         if !position_in_span(position, start_col, end_col) {
             continue;
         }
@@ -687,7 +644,7 @@ fn check_unused_component_input(
         if input_line != position.line {
             continue;
         }
-        let (start_col, end_col) = utf16_span(mapper, &i.path, input_line, i.col, &i.input_name);
+        let (start_col, end_col) = mapper.utf16_col_span(&i.path, input_line, i.col, &i.input_name);
         if !position_in_span(position, start_col, end_col) {
             continue;
         }
@@ -725,7 +682,8 @@ fn check_unused_component_output(
         if output_line != position.line {
             continue;
         }
-        let (start_col, end_col) = utf16_span(mapper, &o.path, output_line, o.col, &o.output_name);
+        let (start_col, end_col) =
+            mapper.utf16_col_span(&o.path, output_line, o.col, &o.output_name);
         if !position_in_span(position, start_col, end_col) {
             continue;
         }
@@ -763,7 +721,7 @@ fn check_unused_svelte_event(
         if event_line != position.line {
             continue;
         }
-        let (start_col, end_col) = utf16_span(mapper, &e.path, event_line, e.col, &e.event_name);
+        let (start_col, end_col) = mapper.utf16_col_span(&e.path, event_line, e.col, &e.event_name);
         if !position_in_span(position, start_col, end_col) {
             continue;
         }
@@ -801,7 +759,8 @@ fn check_unused_server_action(
         if action_line != position.line {
             continue;
         }
-        let (start_col, end_col) = utf16_span(mapper, &a.path, action_line, a.col, &a.action_name);
+        let (start_col, end_col) =
+            mapper.utf16_col_span(&a.path, action_line, a.col, &a.action_name);
         if !position_in_span(position, start_col, end_col) {
             continue;
         }
@@ -839,7 +798,7 @@ fn check_unused_load_data_key(
         if key_line != position.line {
             continue;
         }
-        let (start_col, end_col) = utf16_span(mapper, &k.path, key_line, k.col, &k.key_name);
+        let (start_col, end_col) = mapper.utf16_col_span(&k.path, key_line, k.col, &k.key_name);
         if !position_in_span(position, start_col, end_col) {
             continue;
         }
@@ -882,7 +841,7 @@ fn check_react_prop_intel(
                 continue;
             }
             let (start_col, end_col) =
-                utf16_span(mapper, &intel.path, prop_line, prop.anchor_col, &prop.name);
+                mapper.utf16_col_span(&intel.path, prop_line, prop.anchor_col, &prop.name);
             if !position_in_span(position, start_col, end_col) {
                 continue;
             }
@@ -946,8 +905,7 @@ fn check_react_component_intel(
         if component_line != position.line {
             continue;
         }
-        let (start_col, end_col) = utf16_span(
-            mapper,
+        let (start_col, end_col) = mapper.utf16_col_span(
             &intel.path,
             component_line,
             intel.anchor_col,
@@ -977,63 +935,26 @@ fn check_react_component_intel(
 
 /// Build the component summary line for the hover, matching the code-lens
 /// title format: `rendered 12x (8 parents) · 5 props · 9 hooks (4 state, ...)`.
-/// Zero segments are omitted; singular/plural is honored.
+/// Zero segments are omitted; singular/plural is honored. The hook segment and
+/// the pluralization come from `code_lens`, so the lens title and this line
+/// cannot describe the same component differently; only the empty-state string
+/// is surface-specific.
 fn react_component_summary(intel: &fallow_api::editor_results::ReactComponentIntel) -> String {
     let mut segments: Vec<String> = Vec::new();
     if intel.render_sites > 0 {
-        let parents = intel_pluralize(intel.distinct_parents, "parent");
+        let parents = pluralize(intel.distinct_parents, "parent");
         segments.push(format!("rendered {}x ({parents})", intel.render_sites));
     }
     if intel.prop_count > 0 {
-        segments.push(intel_pluralize(u32::from(intel.prop_count), "prop"));
+        segments.push(pluralize(u32::from(intel.prop_count), "prop"));
     }
-    if let Some(hooks) = intel_hook_segment(&intel.hooks) {
+    if let Some(hooks) = react_hook_segment(&intel.hooks) {
         segments.push(hooks);
     }
     if segments.is_empty() {
         return "rendered nowhere, no props, no hooks".to_string();
     }
     segments.join(" · ")
-}
-
-/// `N hooks (a state, b effect, ...)` or `None` when the component uses no
-/// hooks (kind sub-counts omitted when zero).
-fn intel_hook_segment(hooks: &fallow_api::editor_results::ReactHookSummary) -> Option<String> {
-    let total = u32::from(hooks.state)
-        + u32::from(hooks.effect)
-        + u32::from(hooks.memo)
-        + u32::from(hooks.callback)
-        + u32::from(hooks.custom);
-    if total == 0 {
-        return None;
-    }
-    let mut breakdown: Vec<String> = Vec::new();
-    for (count, label) in [
-        (hooks.state, "state"),
-        (hooks.effect, "effect"),
-        (hooks.memo, "memo"),
-        (hooks.callback, "callback"),
-        (hooks.custom, "custom"),
-    ] {
-        if count > 0 {
-            breakdown.push(format!("{count} {label}"));
-        }
-    }
-    let head = intel_pluralize(total, "hook");
-    if breakdown.is_empty() {
-        Some(head)
-    } else {
-        Some(format!("{head} ({})", breakdown.join(", ")))
-    }
-}
-
-/// `count + " " + noun`, appending `s` when count is not 1.
-fn intel_pluralize(count: u32, noun: &str) -> String {
-    if count == 1 {
-        format!("1 {noun}")
-    } else {
-        format!("{count} {noun}s")
-    }
 }
 
 /// Check if the position is on an unresolved import.

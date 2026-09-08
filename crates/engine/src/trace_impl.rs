@@ -41,6 +41,38 @@ pub fn path_matches(module_path: &Path, root: &Path, user_path: &str) -> bool {
     module_str.ends_with(&format!("/{user_path_norm}"))
 }
 
+/// Match exact module paths before considering abbreviated suffixes.
+///
+/// A root-relative `src/a.ts` must not select `packages/x/src/a.ts` merely
+/// because discovery listed that module first. Suffix matches remain useful
+/// for abbreviated requests, but callers must preserve their ambiguity.
+pub fn matching_module_indexes(graph: &ModuleGraph, root: &Path, user_path: &str) -> Vec<usize> {
+    let normalized = user_path.replace('\\', "/");
+    let canonical_root = dunce::canonicalize(root).ok();
+    let canonical_target = dunce::canonicalize(root.join(&normalized)).ok();
+    let mut exact = Vec::new();
+    let mut suffix = Vec::new();
+    let suffix_pattern = format!("/{normalized}");
+    for (index, module) in graph.modules.iter().enumerate() {
+        let module_path = module.path.to_string_lossy().replace('\\', "/");
+        let root_relative = module
+            .path
+            .strip_prefix(root)
+            .ok()
+            .or_else(|| module.path.strip_prefix(canonical_root.as_ref()?).ok());
+        let is_exact = module_path == normalized
+            || canonical_target.as_ref() == Some(&module.path)
+            || root_relative
+                .is_some_and(|path| path.to_string_lossy().replace('\\', "/") == normalized);
+        if is_exact {
+            exact.push(index);
+        } else if module_path.ends_with(&suffix_pattern) {
+            suffix.push(index);
+        }
+    }
+    if exact.is_empty() { suffix } else { exact }
+}
+
 /// Reconcile checker-backed reference evidence with the retained graph's
 /// entry-point reachability. Evidence from unreachable files remains visible,
 /// but cannot produce a complete `references-found` assertion.
@@ -913,13 +945,17 @@ pub fn trace_impact_closure(
     })
 }
 
-/// Which endpoint of a `--path` request could not be resolved to a module.
+/// Which endpoint of a `--path` request did not resolve to exactly one module.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImportPathEndpoint {
     /// The module the walk would start from.
     From,
     /// The module the walk is looking for.
     To,
+    /// Several modules match the starting path abbreviation.
+    AmbiguousFrom,
+    /// Several modules match the destination path abbreviation.
+    AmbiguousTo,
 }
 
 impl ImportPathEndpoint {
@@ -927,37 +963,63 @@ impl ImportPathEndpoint {
     #[must_use]
     pub const fn label(self) -> &'static str {
         match self {
-            Self::From => "from",
-            Self::To => "to",
+            Self::From | Self::AmbiguousFrom => "from",
+            Self::To | Self::AmbiguousTo => "to",
         }
+    }
+
+    /// Whether the endpoint matched several modules instead of no module.
+    #[must_use]
+    pub const fn is_ambiguous(self) -> bool {
+        matches!(self, Self::AmbiguousFrom | Self::AmbiguousTo)
+    }
+}
+
+fn import_path_endpoint_index(
+    graph: &ModuleGraph,
+    root: &Path,
+    path: &str,
+    missing: ImportPathEndpoint,
+    ambiguous: ImportPathEndpoint,
+) -> Result<usize, ImportPathEndpoint> {
+    match matching_module_indexes(graph, root, path).as_slice() {
+        [index] => Ok(*index),
+        [] => Err(missing),
+        _ => Err(ambiguous),
     }
 }
 
 /// Trace the shortest import path from one module to another.
 ///
-/// Both endpoints are resolved through the same path matching the other traces
-/// use. Returns the unresolved endpoint when either side is not a module in the
-/// graph, so the caller can name which half of the request was wrong.
+/// Exact paths take priority over abbreviated suffixes. Returns the unresolved
+/// endpoint when either side names no module or an ambiguous suffix, so the
+/// caller can name which half of the request was wrong.
 ///
 /// # Errors
 ///
-/// Returns the endpoint that did not resolve to a module in the graph.
+/// Returns the endpoint that did not resolve to exactly one module in the graph.
 pub fn trace_import_path(
     graph: &ModuleGraph,
     root: &Path,
     from_path: &str,
     to_path: &str,
 ) -> Result<ImportPathTrace, ImportPathEndpoint> {
-    let from = graph
-        .modules
-        .iter()
-        .find(|m| path_matches(&m.path, root, from_path))
-        .ok_or(ImportPathEndpoint::From)?;
-    let to = graph
-        .modules
-        .iter()
-        .find(|m| path_matches(&m.path, root, to_path))
-        .ok_or(ImportPathEndpoint::To)?;
+    let from_index = import_path_endpoint_index(
+        graph,
+        root,
+        from_path,
+        ImportPathEndpoint::From,
+        ImportPathEndpoint::AmbiguousFrom,
+    )?;
+    let to_index = import_path_endpoint_index(
+        graph,
+        root,
+        to_path,
+        ImportPathEndpoint::To,
+        ImportPathEndpoint::AmbiguousTo,
+    )?;
+    let from = &graph.modules[from_index];
+    let to = &graph.modules[to_index];
 
     let from_rel = relativize(&from.path, root);
     let to_rel = relativize(&to.path, root);

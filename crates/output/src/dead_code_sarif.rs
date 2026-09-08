@@ -1141,13 +1141,16 @@ fn push_primary_dead_code_sarif_results(
         },
     );
     push_sarif_results(sarif_results, &results.unused_types, snippets, |finding| {
-        sarif_export_fields(
-            &finding.export,
-            root,
-            "fallow/unused-type",
-            severity_to_sarif_level(rules.unused_types),
-            "Type export",
-            "Type re-export",
+        with_caveats(
+            sarif_export_fields(
+                &finding.export,
+                root,
+                "fallow/unused-type",
+                severity_to_sarif_level(rules.unused_types),
+                "Type export",
+                "Type re-export",
+            ),
+            &finding.reachability_caveats,
         )
     });
     push_sarif_results(
@@ -1306,12 +1309,15 @@ fn push_member_sarif_results(
     } = *ctx;
 
     push_sarif_results(sarif_results, &results.unused_enum_members, snippets, |m| {
-        sarif_member_fields(
-            &m.member,
-            root,
-            "fallow/unused-enum-member",
-            severity_to_sarif_level(rules.unused_enum_members),
-            "Enum",
+        with_caveats(
+            sarif_member_fields(
+                &m.member,
+                root,
+                "fallow/unused-enum-member",
+                severity_to_sarif_level(rules.unused_enum_members),
+                "Enum",
+            ),
+            &m.reachability_caveats,
         )
     });
     push_sarif_results(
@@ -1319,12 +1325,15 @@ fn push_member_sarif_results(
         &results.unused_class_members,
         snippets,
         |m| {
-            sarif_member_fields(
-                &m.member,
-                root,
-                "fallow/unused-class-member",
-                severity_to_sarif_level(rules.unused_class_members),
-                "Class",
+            with_caveats(
+                sarif_member_fields(
+                    &m.member,
+                    root,
+                    "fallow/unused-class-member",
+                    severity_to_sarif_level(rules.unused_class_members),
+                    "Class",
+                ),
+                &m.reachability_caveats,
             )
         },
     );
@@ -1947,6 +1956,68 @@ mod tests {
                     .to_owned()
             ),
             "a caveated finding names it in the message: {messages:?}"
+        );
+    }
+
+    /// `partialFingerprints` is the alert identity GitHub code scanning uses to
+    /// carry a finding across runs. It is built from rule id plus location (or a
+    /// normalized snippet), never from the message, so a finding that gains the
+    /// caveat must keep its fingerprint. If the caveat ever reached the
+    /// fingerprint inputs, every open alert on a degraded repository would close
+    /// and reopen as new on the next scan.
+    #[test]
+    fn the_caveat_does_not_move_the_sarif_fingerprint() {
+        let build = |caveated: bool| {
+            let mut results = AnalysisResults::default();
+            let mut finding = UnusedFileFinding::with_actions(UnusedFile {
+                path: Path::new("/p/src/orphan.ts").to_path_buf(),
+            });
+            if caveated {
+                finding.reachability_caveats = vec![ReachabilityCaveat::IncompleteImportGraph];
+            }
+            results.unused_files.push(finding);
+            build_dead_code_sarif(
+                &results,
+                Path::new("/p"),
+                &RulesConfig::default(),
+                &test_rule_builder,
+            )
+        };
+
+        let read = |sarif: &serde_json::Value, pointer: &str| {
+            sarif
+                .pointer("/runs/0/results")
+                .and_then(serde_json::Value::as_array)
+                .expect("SARIF results")
+                .iter()
+                .map(|entry| {
+                    entry
+                        .pointer(pointer)
+                        .and_then(serde_json::Value::as_str)
+                        .expect("SARIF field")
+                        .to_owned()
+                })
+                .collect::<Vec<_>>()
+        };
+
+        let clean = build(false);
+        let caveated = build(true);
+
+        for key in [
+            "/partialFingerprints/tools.fallow.fingerprint~1v1",
+            "/partialFingerprints/primaryLocationLineHash~1v1",
+        ] {
+            assert_eq!(
+                read(&clean, key),
+                read(&caveated, key),
+                "the caveat must not move {key}"
+            );
+        }
+
+        assert_ne!(
+            read(&clean, "/message/text"),
+            read(&caveated, "/message/text"),
+            "the guard is only meaningful while the message actually changed"
         );
     }
 

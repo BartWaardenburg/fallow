@@ -4,10 +4,10 @@ expression: json_str
 ---
 {
   "event": "COMMENT",
-  "body": "### Fallow dead-code report\n\n**Quality gate failed**\n\n27 inline findings selected for GitHub review.\n\n<!-- fallow-review -->\n\n<!-- fallow-fingerprint:v2: 178550d811bfb16b -->",
+  "body": "### Fallow codebase report\n\n27 inline comments on the changed lines. Open the Files changed tab to review.\n\n<!-- fallow-review -->\n\n<!-- fallow-fingerprint:v2: bcb4807a4a01a634 -->",
   "summary": {
-    "body": "### Fallow dead-code report\n\n**Quality gate failed**\n\n27 inline findings selected for GitHub review.\n\n<!-- fallow-review -->\n\n<!-- fallow-fingerprint:v2: 178550d811bfb16b -->",
-    "fingerprint": "178550d811bfb16b"
+    "body": "### Fallow codebase report\n\n27 inline comments on the changed lines. Open the Files changed tab to review.\n\n<!-- fallow-review -->\n\n<!-- fallow-fingerprint:v2: bcb4807a4a01a634 -->",
+    "fingerprint": "bcb4807a4a01a634"
   },
   "comments": [
     {
@@ -133,7 +133,7 @@ expression: json_str
       "path": "src/dead.ts",
       "line": 1,
       "side": "RIGHT",
-      "body": "**error** `fallow/unused-file`: File is not reachable from any entry point\n\n> Fix intent: Delete the file or add a real entry-point reference.\n\n> Run `fallow fix --files` or delete this file.\n\n<!-- fallow-fingerprint:v2: e3912cb6bb9b0212 -->",
+      "body": "**error** `fallow/unused-file`: File is not reachable from any entry point\n\n> Fix intent: Delete the file or add a real entry-point reference.\n\n> No automatic fix: `fallow fix` never deletes files. Delete it by hand once you have confirmed nothing loads it at runtime, or keep it and add `// fallow-ignore-file unused-file` at the top.\n\n<!-- fallow-fingerprint:v2: e3912cb6bb9b0212 -->",
       "fingerprint": "e3912cb6bb9b0212"
     },
     {

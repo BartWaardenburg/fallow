@@ -991,6 +991,15 @@ pub const CAPABILITY_PARITY: &[CapabilityParityRow] = &[
             "Read-only project readiness is available through the CLI and Rust api. The initial contract has no napi export or dedicated MCP tool; agents can invoke `fallow doctor --format json --quiet` as a subprocess.",
         ),
     },
+    CapabilityParityRow {
+        capability: "readiness with explicit cache directory",
+        api_runner: Some("run_doctor_with_cache_dir"),
+        napi_export: None,
+        mcp_tool: None,
+        omission_note: Some(
+            "Rust api variant for hosts that supply an explicit cache directory. The CLI uses it to honor FALLOW_CACHE_DIR without adding ambient environment reads to the api. No napi export or dedicated MCP tool.",
+        ),
+    },
     // -- MCP-only tools that shell out to the CLI: no api runner, no napi
     //    export. --
     CapabilityParityRow {

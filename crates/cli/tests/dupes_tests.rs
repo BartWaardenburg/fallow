@@ -327,9 +327,22 @@ fn dupes_refuses_top_together_with_group_by() {
         message.contains("--top") && message.contains("--group-by"),
         "the message must name both flags, was: {message}"
     );
+    // The reason moved onto `help`: as one sentence the refusal was 279
+    // characters that soft-wrapped to four terminal lines and buried the
+    // actionable half at the end of the fourth.
+    let help = json["help"].as_str().unwrap();
     assert!(
-        message.contains("per-bucket stats"),
-        "the message must say why the pair cannot be served, was: {message}"
+        help.contains("per-bucket stats"),
+        "the remedy must say why the pair cannot be served, was: {help}"
+    );
+    assert!(
+        help.contains("run one flag or the other"),
+        "the remedy must name the way out, was: {help}"
+    );
+    assert!(
+        message.len() < 60,
+        "the actionable half must fit one terminal line, was {} chars: {message}",
+        message.len()
     );
     assert!(
         json.get("clone_groups").is_none(),
@@ -523,18 +536,78 @@ fn dupes_human_header_names_the_corpus_under_top() {
         capped.stdout
     );
     assert!(
-        capped
-            .stdout
-            .contains(&format!("... and {} more clone groups", corpus_groups - 1)),
+        capped.stdout.contains(&format!(
+            "... {} of {corpus_groups} clone groups withheld by a display limit",
+            corpus_groups - 1
+        )),
         "the capped report must name the groups it withheld: {}",
         capped.stdout
     );
     assert!(
-        capped
-            .stdout
-            .contains("more clone families withheld by the same display limit"),
+        capped.stdout.contains("clone families withheld by --top"),
         "the capped report must name the families it withheld: {}",
         capped.stdout
+    );
+    assert!(
+        !capped.stdout.contains("the same display limit"),
+        "the group and family axes are narrowed by different limits: {}",
+        capped.stdout
+    );
+}
+
+/// `--top 0` renders no clone group, and both human surfaces used to read that
+/// empty array as a clean project.
+///
+/// The run still measured the corpus: `stats.clone_groups` is unchanged by a
+/// display cap, so a green "no duplication found" over a non-zero count is the
+/// exact false-clean state the shown/omitted split exists to prevent. `dead-code
+/// --top 0` already kept its sections, so the two commands disagreed.
+#[test]
+fn dupes_top_zero_never_reports_a_clean_project() {
+    let full = parse_json(&run_fallow(
+        "dupes",
+        "duplicate-code",
+        &["--format", "json", "--quiet"],
+    ));
+    let corpus_groups = full["stats"]["clone_groups"].as_u64().unwrap();
+    assert!(
+        corpus_groups > 0,
+        "fixture must produce clone groups for --top 0 to withhold"
+    );
+
+    let capped = run_fallow("dupes", "duplicate-code", &["--top", "0"]);
+    let combined = format!("{}{}", capped.stdout, capped.stderr);
+    assert!(
+        !combined.contains("No code duplication found"),
+        "a fully capped listing must not read as a clean project: {combined}"
+    );
+    assert!(
+        capped
+            .stdout
+            .contains(&format!("Duplicates ({corpus_groups} clone groups)")),
+        "the header must still name the measured corpus: {}",
+        capped.stdout
+    );
+    assert!(
+        capped.stdout.contains(&format!(
+            "... {corpus_groups} of {corpus_groups} clone groups withheld by a display limit"
+        )),
+        "the footer must say every measured group was withheld: {}",
+        capped.stdout
+    );
+
+    let summary = run_fallow("dupes", "duplicate-code", &["--top", "0", "--summary"]);
+    let summary_combined = format!("{}{}", summary.stdout, summary.stderr);
+    assert!(
+        !summary_combined.contains("No duplication found"),
+        "the summary block must not read as a clean project either: {summary_combined}"
+    );
+    assert!(
+        summary
+            .stdout
+            .contains(&format!("Corpus totals: {corpus_groups} clone groups")),
+        "the summary must state the corpus it measured: {}",
+        summary.stdout
     );
 }
 

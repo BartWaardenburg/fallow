@@ -179,21 +179,45 @@ test("CI caches are scoped to the analyzed root", () => {
   const cacheKey = action.match(/^\s+key: fallow-cache-.*$/m)?.[0];
   const restoreKey = action.match(/^\s+fallow-cache-\$\{\{ runner\.os \}\}[^\n]*$/m)?.[0];
 
+  // `restore-keys` are literal string-prefix matches, so interpolating the
+  // root raw does NOT partition roots: the restore prefix for
+  // `root=packages/app` is a literal prefix of the real key for
+  // `root=packages/app-admin`, and the first job restores the second's parse
+  // cache. Only a fixed-width digest ends the root segment at a known length.
+  assert.match(
+    action,
+    /root_digest=%s\\n' "\$\{digest:0:16\}" >> "\$GITHUB_OUTPUT"/,
+    "Action must derive a fixed-width digest of inputs.root for the cache key",
+  );
   assert.match(
     cacheKey ?? "",
-    /\$\{\{ inputs\.root \}\}/,
-    "Action cache key must include the root",
+    /\$\{\{ steps\.fallow-cache-key\.outputs\.root_digest \}\}/,
+    "Action cache key must scope on the root digest",
+  );
+  assert.doesNotMatch(
+    cacheKey ?? "",
+    /\$\{\{ inputs\.root \}\}-/,
+    "the raw root must not form a key segment: its restore prefix bleeds into a longer sibling root",
   );
   assert.match(
     restoreKey ?? "",
-    /\$\{\{ inputs\.root \}\}/,
-    "Action restore-keys must include the root so a matrix over roots cannot restore a sibling cache",
+    /\$\{\{ steps\.fallow-cache-key\.outputs\.root_digest \}\}-$/,
+    "Action restore-keys must end on the fixed-width root digest so a matrix over roots cannot restore a sibling cache",
   );
 
+  // The GitLab twin needs no digest: GitLab rejects "/" inside a cache key, so
+  // the root cannot be interpolated at all, and GitLab matches cache keys
+  // exactly. Configuring `fallback_keys` would introduce prefix matching and
+  // with it the same bleed, so its absence is part of the invariant.
   const gitlabCache = indentedBlock(readWorkflow("ci/gitlab-ci.yml"), "cache", 2);
 
   assert.match(gitlabCache, /key: "fallow-\$\{CI_COMMIT_REF_SLUG\}-\$\{CI_JOB_NAME_SLUG\}"/);
   assert.match(gitlabCache, /^\s+- \$\{FALLOW_ROOT\}\/\.fallow\/$/m);
+  assert.doesNotMatch(
+    gitlabCache,
+    /fallback_keys/,
+    "GitLab cache keys are exact matches; a fallback key list would reintroduce prefix bleed",
+  );
 });
 
 test("binary-size workflow isolates incompatible release builds", () => {

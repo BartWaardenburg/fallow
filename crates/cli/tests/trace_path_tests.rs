@@ -55,6 +55,75 @@ fn write_project(root: &std::path::Path) {
 }
 
 #[test]
+fn exact_paths_win_over_suffix_matches_and_ambiguous_abbreviations_fail() {
+    let dir = tempdir().unwrap();
+    write_project(dir.path());
+    std::fs::create_dir_all(dir.path().join("packages/x/src")).unwrap();
+    std::fs::write(
+        dir.path().join("packages/x/src/feature.ts"),
+        "export const boot = () => 0;\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("src/index.ts"),
+        "import { boot } from './feature';\nimport { boot as duplicate } from '../packages/x/src/feature';\nboot(); duplicate();\n",
+    )
+    .unwrap();
+
+    for from in [
+        "src/feature.ts".to_string(),
+        dir.path()
+            .join("src/feature.ts")
+            .to_string_lossy()
+            .into_owned(),
+    ] {
+        let output = run_fallow_in_root(
+            "trace",
+            dir.path(),
+            &["--path", &from, "src/db.ts", "--format", "json"],
+        );
+        assert_eq!(output.code, 0, "{}", output.stderr);
+        let value = parse_json(&output);
+        assert_eq!(value["from"], "src/feature.ts");
+        assert_eq!(value["reachable"], true);
+    }
+
+    for (from, to) in [("feature.ts", "src/db.ts"), ("src/index.ts", "feature.ts")] {
+        let output = run_fallow_in_root(
+            "trace",
+            dir.path(),
+            &["--path", from, to, "--format", "json"],
+        );
+        assert_eq!(output.code, 2, "{}", output.stdout);
+        assert!(
+            parse_json(&output)["message"]
+                .as_str()
+                .unwrap()
+                .contains("matches multiple modules")
+        );
+    }
+
+    let trace_path = dir.path().join("stack.txt");
+    std::fs::write(
+        &trace_path,
+        "Error: broken\n    at boot (src/feature.ts:3:1)\n",
+    )
+    .unwrap();
+    let output = run_fallow_in_root(
+        "trace-error",
+        dir.path(),
+        &["stack.txt", "--format", "json"],
+    );
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    let value = parse_json(&output);
+    assert_eq!(value["frames"][0]["resolution"], "resolved");
+    assert_eq!(
+        value["frames"][0]["candidates"][0]["file"],
+        "src/feature.ts"
+    );
+}
+
+#[test]
 fn reports_the_hop_chain_with_each_hops_import_line() {
     let dir = tempdir().unwrap();
     write_project(dir.path());
@@ -196,6 +265,81 @@ fn repeated_runs_return_a_byte_identical_route() {
 
     assert_eq!(first["path"], second["path"]);
     assert_eq!(first["hops"], second["hops"]);
+}
+
+/// `hops: 0` is the answer for BOTH an unreachable pair and the same module on
+/// both sides, so the human header cannot leave `reachable` to the JSON.
+#[test]
+fn the_human_header_separates_unreachable_from_same_module() {
+    let dir = tempdir().unwrap();
+    write_project(dir.path());
+
+    let unreachable = run_fallow_in_root(
+        "trace",
+        dir.path(),
+        &["--path", "src/orphan.ts", "src/db.ts", "--quiet"],
+    );
+    assert_eq!(unreachable.code, 0, "stderr:\n{}", unreachable.stderr);
+    assert!(
+        unreachable.stdout.contains("reachable: no"),
+        "stdout was {}",
+        unreachable.stdout
+    );
+    assert!(
+        unreachable.stdout.contains("hops:      0"),
+        "stdout was {}",
+        unreachable.stdout
+    );
+
+    let same = run_fallow_in_root(
+        "trace",
+        dir.path(),
+        &["--path", "src/db.ts", "src/db.ts", "--quiet"],
+    );
+    assert_eq!(same.code, 0, "stderr:\n{}", same.stderr);
+    assert!(
+        same.stdout.contains("reachable: yes"),
+        "stdout was {}",
+        same.stdout
+    );
+    assert!(
+        same.stdout.contains("hops:      0"),
+        "stdout was {}",
+        same.stdout
+    );
+}
+
+/// A failure that names an unknown module without saying how to find a known
+/// one leaves the caller guessing at the path spelling.
+#[test]
+fn an_unknown_endpoint_carries_a_remedy() {
+    let dir = tempdir().unwrap();
+    write_project(dir.path());
+
+    let human = run_fallow_in_root("trace", dir.path(), &["--path", "src/nope.ts", "src/db.ts"]);
+    assert_eq!(human.code, 2);
+    assert!(
+        human
+            .stderr
+            .contains("hint: pass a path relative to the project root"),
+        "stderr was {}",
+        human.stderr
+    );
+
+    let json = run_fallow_in_root(
+        "trace",
+        dir.path(),
+        &["--path", "src/nope.ts", "src/db.ts", "--format", "json"],
+    );
+    assert_eq!(json.code, 2);
+    let value: serde_json::Value = serde_json::from_str(json.stdout.trim()).unwrap();
+    assert!(
+        value["help"]
+            .as_str()
+            .is_some_and(|help| help.contains("fallow list --files")),
+        "the JSON error must carry the remedy: {}",
+        json.stdout
+    );
 }
 
 #[test]

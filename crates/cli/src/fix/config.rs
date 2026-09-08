@@ -1081,27 +1081,5 @@ mod tests {
             assert_eq!(fixes.len(), 1);
             assert!(fixes[0]["proposed_diff"].is_string());
         }
-
-        #[test]
-        fn is_config_fixable_true_when_config_exists() {
-            let dir = tempfile::tempdir().unwrap();
-            std::fs::write(dir.path().join(".fallowrc.json"), "{}\n").unwrap();
-            assert!(fallow_config::is_config_fixable(dir.path(), None));
-        }
-
-        #[test]
-        fn is_config_fixable_true_when_can_create_at_root() {
-            let dir = tempfile::tempdir().unwrap();
-            assert!(fallow_config::is_config_fixable(dir.path(), None));
-        }
-
-        #[test]
-        fn is_config_fixable_false_when_monorepo_subpackage() {
-            let dir = tempfile::tempdir().unwrap();
-            std::fs::write(dir.path().join("pnpm-workspace.yaml"), "packages:\n").unwrap();
-            let sub = dir.path().join("packages/ui");
-            std::fs::create_dir_all(&sub).unwrap();
-            assert!(!fallow_config::is_config_fixable(&sub, None));
-        }
     }
 }

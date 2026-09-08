@@ -21,7 +21,9 @@
 //! `unrendered-component` detectors use, kept in the graph crate so the review
 //! brief (cli) can call it directly off the retained graph.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
+
+use super::relativize;
 
 use fallow_types::discover::FileId;
 use rustc_hash::FxHashSet;
@@ -242,13 +244,6 @@ impl ModuleGraph {
         }
         targets
     }
-}
-
-/// Strip `root` and forward-slash-normalize a module path (mirrors
-/// `impact_closure::relativize` for cross-platform key parity).
-fn relativize(path: &Path, root: &Path) -> String {
-    let rel: PathBuf = path.strip_prefix(root).unwrap_or(path).to_path_buf();
-    rel.to_string_lossy().replace('\\', "/")
 }
 
 #[cfg(test)]

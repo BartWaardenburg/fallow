@@ -31,6 +31,16 @@ use fallow_types::discover::{DiscoveredFile, EntryPoint, FileId};
 use fallow_types::extract::{ImportedName, ModuleLoadMechanism};
 use types::{ReferencePathInterner, ReferencePathNode, ReferenceRouteNodeId, ReferenceRoutes};
 
+/// Strip `root` and forward-slash-normalize a module path so report keys match
+/// across platforms. Every report surface that emits a root-relative path key
+/// goes through this, so the four surfaces cannot drift apart.
+pub(super) fn relativize(path: &Path, root: &Path) -> String {
+    path.strip_prefix(root)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .replace('\\', "/")
+}
+
 pub use ambiguity::{AmbiguityParticipants, AmbiguousStarExport};
 pub use effective_exports::{EffectiveExportBinding, EffectiveExportResolution, ExportNamespace};
 pub use effective_re_exports::EffectiveReExportRoute;

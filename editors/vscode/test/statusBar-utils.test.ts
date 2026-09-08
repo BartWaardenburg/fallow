@@ -416,6 +416,7 @@ describe("buildParamsFromCli", () => {
         total_tokens: 5000,
         duplicated_tokens: 40,
         clone_groups: 3,
+        clone_families: 1,
         clone_instances: 6,
         duplication_percentage: 0.8,
       },

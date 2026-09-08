@@ -83,8 +83,9 @@ fn markdown_relative_path(path: &Path, root: &Path) -> String {
 fn push_markdown_primary_sections(out: &mut String, results: &AnalysisResults, root: &Path) {
     markdown_section(out, &results.unused_files, "Unused files", |file| {
         vec![format!(
-            "- {}",
-            markdown_code_span(&markdown_relative_path(&file.file.path, root))
+            "- {}{}",
+            markdown_code_span(&markdown_relative_path(&file.file.path, root)),
+            markdown_caveat_suffix(&file.reachability_caveats)
         )]
     });
 
@@ -94,7 +95,7 @@ fn push_markdown_primary_sections(out: &mut String, results: &AnalysisResults, r
         "Unused exports",
         root,
         |e| e.export.path.as_path(),
-        |e: &UnusedExportFinding| format_export(&e.export),
+        |e: &UnusedExportFinding| format_export(&e.export, &e.reachability_caveats),
     );
 
     markdown_grouped_section(
@@ -103,7 +104,7 @@ fn push_markdown_primary_sections(out: &mut String, results: &AnalysisResults, r
         "Unused type exports",
         root,
         |e| e.export.path.as_path(),
-        |e: &UnusedTypeFinding| format_export(&e.export),
+        |e: &UnusedTypeFinding| format_export(&e.export, &e.reachability_caveats),
     );
 
     markdown_grouped_section(
@@ -173,6 +174,7 @@ fn push_markdown_dependency_sections(out: &mut String, results: &AnalysisResults
                 &dep.dep.path,
                 &dep.dep.used_in_workspaces,
                 root,
+                &dep.reachability_caveats,
             )
         },
     );
@@ -186,6 +188,7 @@ fn push_markdown_dependency_sections(out: &mut String, results: &AnalysisResults
                 &dep.dep.path,
                 &dep.dep.used_in_workspaces,
                 root,
+                &dep.reachability_caveats,
             )
         },
     );
@@ -199,6 +202,7 @@ fn push_markdown_dependency_sections(out: &mut String, results: &AnalysisResults
                 &dep.dep.path,
                 &dep.dep.used_in_workspaces,
                 root,
+                &dep.reachability_caveats,
             )
         },
     );
@@ -211,7 +215,7 @@ fn push_markdown_member_sections(out: &mut String, results: &AnalysisResults, ro
         "Unused enum members",
         root,
         |m| m.member.path.as_path(),
-        |m: &UnusedEnumMemberFinding| format_member(&m.member),
+        |m: &UnusedEnumMemberFinding| format_member(&m.member, &m.reachability_caveats),
     );
     markdown_grouped_section(
         out,
@@ -219,7 +223,7 @@ fn push_markdown_member_sections(out: &mut String, results: &AnalysisResults, ro
         "Unused class members",
         root,
         |m| m.member.path.as_path(),
-        |m: &UnusedClassMemberFinding| format_member(&m.member),
+        |m: &UnusedClassMemberFinding| format_member(&m.member, &m.reachability_caveats),
     );
     markdown_grouped_section(
         out,
@@ -227,7 +231,7 @@ fn push_markdown_member_sections(out: &mut String, results: &AnalysisResults, ro
         "Unused store members",
         root,
         |m| m.member.path.as_path(),
-        |m: &UnusedStoreMemberFinding| format_member(&m.member),
+        |m: &UnusedStoreMemberFinding| format_member(&m.member, &[]),
     );
 }
 
@@ -240,19 +244,19 @@ fn push_markdown_dependency_detail_sections(
         out,
         &results.type_only_dependencies,
         "Type-only dependencies (consider moving to devDependencies)",
-        |dep| format_dependency(&dep.dep.package_name, &dep.dep.path, &[], root),
+        |dep| format_dependency(&dep.dep.package_name, &dep.dep.path, &[], root, &[]),
     );
     markdown_section(
         out,
         &results.test_only_dependencies,
         "Test-only production dependencies (consider moving to devDependencies)",
-        |dep| format_dependency(&dep.dep.package_name, &dep.dep.path, &[], root),
+        |dep| format_dependency(&dep.dep.package_name, &dep.dep.path, &[], root, &[]),
     );
     markdown_section(
         out,
         &results.dev_dependencies_in_production,
         "Dev dependencies used in production (consider moving to dependencies)",
-        |dep| format_dependency(&dep.dep.package_name, &dep.dep.path, &[], root),
+        |dep| format_dependency(&dep.dep.package_name, &dep.dep.path, &[], root, &[]),
     );
 }
 
@@ -881,9 +885,24 @@ pub fn build_grouped_markdown(groups: &[ResultGroup], root: &Path) -> String {
     out
 }
 
-fn format_export(e: &UnusedExport) -> String {
+/// The italic caveat parenthetical a markdown finding line ends with, or an
+/// empty string when the run analyzed every file it discovered.
+///
+/// Markdown is the PR-comment surface, so a reader acts on this listing. The
+/// same words the human report and the SARIF message use, italicized so the
+/// hedge is visible without competing with the finding itself.
+fn markdown_caveat_suffix(caveats: &[ReachabilityCaveat]) -> String {
+    caveat_labels(caveats).map_or_else(String::new, |labels| format!(" *(caveat: {labels})*"))
+}
+
+fn format_export(e: &UnusedExport, caveats: &[ReachabilityCaveat]) -> String {
     let re = if e.is_re_export { " (re-export)" } else { "" };
-    format!(":{} {}{re}", e.line, markdown_code_span(&e.export_name))
+    format!(
+        ":{} {}{re}{}",
+        e.line,
+        markdown_code_span(&e.export_name),
+        markdown_caveat_suffix(caveats)
+    )
 }
 
 fn format_private_type_leak(
@@ -898,9 +917,14 @@ fn format_private_type_leak(
     )
 }
 
-fn format_member(m: &UnusedMember) -> String {
+fn format_member(m: &UnusedMember, caveats: &[ReachabilityCaveat]) -> String {
     let member = format!("{}.{}", m.parent_name, m.member_name);
-    format!(":{} {}", m.line, markdown_code_span(&member))
+    format!(
+        ":{} {}{}",
+        m.line,
+        markdown_code_span(&member),
+        markdown_caveat_suffix(caveats)
+    )
 }
 
 fn format_dependency(
@@ -908,7 +932,9 @@ fn format_dependency(
     pkg_path: &Path,
     used_in_workspaces: &[std::path::PathBuf],
     root: &Path,
+    caveats: &[ReachabilityCaveat],
 ) -> Vec<String> {
+    let caveat = markdown_caveat_suffix(caveats);
     let name = markdown_code_span(dep_name);
     let pkg_label = relative_path(pkg_path, root).display().to_string();
     let workspace_context = if used_in_workspaces.is_empty() {
@@ -922,14 +948,14 @@ fn format_dependency(
         format!("; imported in {workspaces}")
     };
     if pkg_label == "package.json" && workspace_context.is_empty() {
-        vec![format!("- {name}")]
+        vec![format!("- {name}{caveat}")]
     } else {
         let label = if pkg_label == "package.json" {
             workspace_context.trim_start_matches("; ").to_string()
         } else {
             format!("{}{workspace_context}", markdown_code_span(&pkg_label))
         };
-        vec![format!("- {name} ({label})")]
+        vec![format!("- {name} ({label}){caveat}")]
     }
 }
 
@@ -2703,6 +2729,91 @@ mod health_markdown_tests {
 }
 
 #[cfg(test)]
+mod caveat_markdown_tests {
+    use std::path::{Path, PathBuf};
+
+    use fallow_types::output_dead_code::{
+        ReachabilityCaveat, UnusedDependencyFinding, UnusedExportFinding, UnusedFileFinding,
+    };
+    use fallow_types::results::{
+        AnalysisResults, DependencyLocation, UnusedDependency, UnusedExport, UnusedFile,
+    };
+
+    use super::build_markdown;
+
+    fn caveated_results(root: &Path) -> AnalysisResults {
+        let caveats = vec![ReachabilityCaveat::IncompleteImportGraph];
+        let mut results = AnalysisResults::default();
+
+        let mut file = UnusedFileFinding::with_actions(UnusedFile {
+            path: root.join("src/lib.ts"),
+        });
+        file.reachability_caveats.clone_from(&caveats);
+        results.unused_files.push(file);
+
+        let mut export = UnusedExportFinding::with_actions(UnusedExport {
+            path: root.join("src/api.ts"),
+            export_name: "needed".to_owned(),
+            is_type_only: false,
+            line: 3,
+            col: 0,
+            span_start: 0,
+            is_re_export: false,
+        });
+        export.reachability_caveats.clone_from(&caveats);
+        results.unused_exports.push(export);
+
+        let mut dep = UnusedDependencyFinding::with_actions(UnusedDependency {
+            package_name: "left-pad".to_owned(),
+            location: DependencyLocation::Dependencies,
+            path: root.join("package.json"),
+            line: 5,
+            used_in_workspaces: Vec::new(),
+        });
+        dep.reachability_caveats.clone_from(&caveats);
+        results.unused_dependencies.push(dep);
+
+        results
+    }
+
+    /// The markdown document is the PR-comment surface, so a reader deletes
+    /// straight off this listing. Every caveated finding line has to hedge.
+    #[test]
+    fn caveated_findings_hedge_their_markdown_lines() {
+        let root = PathBuf::from("/project");
+
+        let out = build_markdown(&caveated_results(&root), &root);
+
+        assert!(
+            out.contains("- `src/lib.ts` *(caveat: incomplete import graph)*"),
+            "{out}"
+        );
+        assert!(
+            out.contains("- :3 `needed` *(caveat: incomplete import graph)*"),
+            "{out}"
+        );
+        assert!(
+            out.contains("- `left-pad` *(caveat: incomplete import graph)*"),
+            "{out}"
+        );
+    }
+
+    /// A run that read every file it discovered renders exactly as before.
+    #[test]
+    fn a_clean_run_renders_no_caveat() {
+        let root = PathBuf::from("/project");
+        let mut results = caveated_results(&root);
+        results.unused_files[0].reachability_caveats.clear();
+        results.unused_exports[0].reachability_caveats.clear();
+        results.unused_dependencies[0].reachability_caveats.clear();
+
+        let out = build_markdown(&results, &root);
+
+        assert!(!out.contains("caveat"), "{out}");
+    }
+}
+
+#[cfg(test)]
 mod markdown_code_span_tests {
     use std::path::{Path, PathBuf};
 
@@ -2798,7 +2909,6 @@ mod walkthrough_markdown_tests {
             graph_facts: GraphFacts {
                 exports_added: 0,
                 api_width_delta: 0,
-                reachable_from: Vec::new(),
                 boundaries_touched: Vec::new(),
             },
             partition: PartitionFacts::default(),

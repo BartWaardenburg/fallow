@@ -20,15 +20,6 @@ use super::github_annotations::{EnvelopeKind, collect_annotations};
 use super::grouping::{self, OwnershipResolver};
 use crate::explain;
 
-#[cfg(test)]
-fn configured_sarif_level(s: Severity) -> &'static str {
-    match s {
-        Severity::Error => "error",
-        Severity::Warn => "warning",
-        Severity::Off => "none",
-    }
-}
-
 /// Build a SARIF rule definition with optional `fullDescription` and `helpUri`
 /// sourced from the centralized explain module.
 fn sarif_rule(id: &str, fallback_short: &str, level: &str) -> serde_json::Value {
@@ -767,13 +758,6 @@ mod tests {
             .iter()
             .find(|rule| rule["id"] == id)
             .expect("rule id")
-    }
-
-    #[test]
-    fn configured_sarif_level_keeps_off_rules_in_rule_table() {
-        assert_eq!(configured_sarif_level(Severity::Error), "error");
-        assert_eq!(configured_sarif_level(Severity::Warn), "warning");
-        assert_eq!(configured_sarif_level(Severity::Off), "none");
     }
 
     #[test]

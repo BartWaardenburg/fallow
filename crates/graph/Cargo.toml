@@ -46,7 +46,6 @@ postcard = { workspace = true }
 # Logging
 tracing = { workspace = true }
 serde_json = { workspace = true }
-jsonc-parser = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }

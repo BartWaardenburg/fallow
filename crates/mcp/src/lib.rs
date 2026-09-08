@@ -13,6 +13,7 @@ use rmcp::ServiceExt;
 use rmcp::transport::stdio;
 use tracing_subscriber::EnvFilter;
 
+mod nearest;
 mod params;
 mod resources;
 mod server;

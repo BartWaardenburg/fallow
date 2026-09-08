@@ -359,13 +359,32 @@ runs:
         BROKER_URL: ${{ inputs.broker-url }}
       run: bash ${{ github.action_path }}/action/scripts/broker-token.sh
 
+    # `restore-keys` are literal string-prefix matches, so `inputs.root` cannot
+    # go into the key raw: the restore prefix for `root=packages/app` is
+    # `fallow-cache-<os>-packages/app-`, which is a literal prefix of the real
+    # key for `root=packages/app-admin`, and the first job silently restores the
+    # second's parse cache. A fixed-width digest ends the root segment at a
+    # known length, so no root's prefix can extend into another's.
+    - name: Fallow cache key
+      id: fallow-cache-key
+      shell: bash
+      env:
+        INPUT_ROOT: ${{ inputs.root }}
+      run: |
+        if command -v sha256sum > /dev/null 2>&1; then
+          digest=$(printf '%s' "${INPUT_ROOT:-.}" | sha256sum)
+        else
+          digest=$(printf '%s' "${INPUT_ROOT:-.}" | shasum -a 256)
+        fi
+        printf 'root_digest=%s\n' "${digest:0:16}" >> "$GITHUB_OUTPUT"
+
     - name: Cache analysis results
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
       with:
         path: ${{ inputs.root }}/.fallow
-        key: fallow-cache-${{ runner.os }}-${{ inputs.root }}-${{ hashFiles(format('{0}/**/package.json', inputs.root)) }}
+        key: fallow-cache-${{ runner.os }}-${{ steps.fallow-cache-key.outputs.root_digest }}-${{ hashFiles(format('{0}/**/package.json', inputs.root)) }}
         restore-keys: |
-          fallow-cache-${{ runner.os }}-${{ inputs.root }}-
+          fallow-cache-${{ runner.os }}-${{ steps.fallow-cache-key.outputs.root_digest }}-
 
     - name: Run analysis
       id: analyze

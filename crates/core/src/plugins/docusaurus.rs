@@ -241,7 +241,7 @@ fn parse_docusaurus_config(
     let source_type = SourceType::from_path(config_path).unwrap_or_default();
     let alloc = Allocator::default();
     let parsed = Parser::new(&alloc, source, source_type).parse();
-    let config = config_parser::find_config_object_pub(&parsed.program)?;
+    let config = config_parser::find_config_object(&parsed.program)?;
 
     let mut result = ParsedDocusaurusConfig {
         i18n_path: parse_i18n_path(config, config_path, root),

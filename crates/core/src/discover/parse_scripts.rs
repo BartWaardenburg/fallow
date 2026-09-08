@@ -222,20 +222,30 @@ mod tests {
 
         proptest! {
             /// looks_like_file_path should never panic on arbitrary strings.
+            /// The class carries the metacharacters `could_be_file_path`
+            /// branches on (`$`, `{`, `}`, `[`, `]`, `\`), so the GitHub-Actions
+            /// template guard, the backslash guard and the `[` bracket scan are
+            /// all reachable instead of only the final fall-through.
             #[test]
-            fn looks_like_file_path_no_panic(s in "[a-zA-Z0-9_./@-]{1,80}") {
+            fn looks_like_file_path_no_panic(s in r"[a-zA-Z0-9_./@$\[\]{}\\-]{1,80}") {
                 let _ = looks_like_file_path(&s);
             }
 
             /// looks_like_script_file should never panic on arbitrary strings.
+            /// Same widened class as `looks_like_file_path_no_panic`: both open
+            /// with `crate::scripts::could_be_file_path`, whose guards are all
+            /// on `$`, `{`, `}`, `\` and `[`.
             #[test]
-            fn looks_like_script_file_no_panic(s in "[a-zA-Z0-9_./@-]{1,80}") {
+            fn looks_like_script_file_no_panic(s in r"[a-zA-Z0-9_./@$\[\]{}\\-]{1,80}") {
                 let _ = looks_like_script_file(&s);
             }
 
             /// extract_script_file_refs should never panic on arbitrary input.
+            /// Keeps the whitespace and `&`/`|`/`;` segment separators and adds
+            /// the `could_be_file_path` metacharacters, so tokenisation and the
+            /// per-token guards are fuzzed together.
             #[test]
-            fn extract_script_file_refs_no_panic(s in "[a-zA-Z0-9 _./@&|;-]{1,200}") {
+            fn extract_script_file_refs_no_panic(s in r"[a-zA-Z0-9 _./@&|;$\[\]{}\\-]{1,200}") {
                 let _ = extract_script_file_refs(&s);
             }
         }
