@@ -839,7 +839,7 @@ pub(crate) fn find_dead_code_full(
     });
 
     // Last, so every finding the detectors and the post-detection passes put
-    // into the two arrays carries the caveat, including ones moved between
+    // into a caveated array carries the caveat, including ones moved between
     // arrays by reclassification.
     //
     // The diagnostics come from the process registry rather than from a

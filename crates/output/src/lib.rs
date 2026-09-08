@@ -309,7 +309,8 @@ pub use sarif::{
     GHAS_SARIF_FINGERPRINT_KEY, SARIF_FINGERPRINT_KEY, SarifDocumentInput, SarifFindingFields,
     SarifFindingInput, SarifResultInput, SarifRuleInput, SarifSourceSnippetCache,
     append_sarif_findings, build_sarif_document, build_sarif_result,
-    build_sarif_result_with_snippet, build_sarif_rule, sarif_finding_fingerprint,
+    build_sarif_result_with_snippet, build_sarif_rule, ensure_unique_result_fingerprints,
+    sarif_finding_fingerprint,
 };
 pub use saved_health::health_report_from_saved_value;
 pub use security::{

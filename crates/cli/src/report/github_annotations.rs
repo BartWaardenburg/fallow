@@ -446,9 +446,10 @@ fn collect_check_members(env: &Value, out: &mut Vec<Annotation>) {
         Anchor::line_col,
         |it| {
             format!(
-                "Class member '{}.{}' is never referenced.\n\nConsider removing it or marking it as private.",
+                "Class member '{}.{}' is never referenced.\n\nConsider removing it or marking it as private.{}",
                 s(it, "parent_name"),
                 s(it, "member_name"),
+                caveat_note(it),
             )
         },
     );
@@ -460,9 +461,10 @@ fn collect_check_members(env: &Value, out: &mut Vec<Annotation>) {
         Anchor::line_col,
         |it| {
             format!(
-                "Store member '{}.{}' is never accessed by any consumer.\n\nConsider removing the unused store state, getter, or action.",
+                "Store member '{}.{}' is never accessed by any consumer.\n\nConsider removing the unused store state, getter, or action.{}",
                 s(it, "parent_name"),
                 s(it, "member_name"),
+                caveat_note(it),
             )
         },
     );

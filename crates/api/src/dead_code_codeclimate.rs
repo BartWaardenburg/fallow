@@ -1572,12 +1572,10 @@ impl CodeClimateBuilder<'_> {
         );
         push_unused_member_issues(
             &mut self.issues,
-            // Not in the caveated set: the analysis pass does not stamp
-            // `unused_store_members[]`, so the slice is empty by construction.
             self.results
                 .unused_store_members
                 .iter()
-                .map(|m| (&m.member, [].as_slice())),
+                .map(|m| (&m.member, m.reachability_caveats.as_slice())),
             self.root,
             "fallow/unused-store-member",
             "Store",
@@ -1824,11 +1822,15 @@ mod tests {
         use std::path::{Path, PathBuf};
 
         use fallow_config::RulesConfig;
+        use fallow_types::extract::MemberKind;
         use fallow_types::output_dead_code::{
-            ReachabilityCaveat, UnusedDependencyFinding, UnusedExportFinding, UnusedFileFinding,
+            ReachabilityCaveat, UnusedClassMemberFinding, UnusedDependencyFinding,
+            UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
+            UnusedStoreMemberFinding,
         };
         use fallow_types::results::{
             AnalysisResults, DependencyLocation, UnusedDependency, UnusedExport, UnusedFile,
+            UnusedMember,
         };
 
         use crate::dead_code_codeclimate::build_codeclimate;
@@ -1869,6 +1871,39 @@ mod tests {
             });
             dep.reachability_caveats.clone_from(&caveats);
             results.unused_dependencies.push(dep);
+
+            let member = |parent: &str, name: &str, kind| UnusedMember {
+                path: root.join("src/lib.ts"),
+                parent_name: parent.to_owned(),
+                member_name: name.to_owned(),
+                kind,
+                line: 7,
+                col: 2,
+            };
+
+            let mut enum_member = UnusedEnumMemberFinding::with_actions(member(
+                "Mode",
+                "Legacy",
+                MemberKind::EnumMember,
+            ));
+            enum_member.reachability_caveats.clone_from(&caveats);
+            results.unused_enum_members.push(enum_member);
+
+            let mut class_member = UnusedClassMemberFinding::with_actions(member(
+                "Widget",
+                "render",
+                MemberKind::ClassMethod,
+            ));
+            class_member.reachability_caveats.clone_from(&caveats);
+            results.unused_class_members.push(class_member);
+
+            let mut store_member = UnusedStoreMemberFinding::with_actions(member(
+                "useCart",
+                "subtotal",
+                MemberKind::StoreMember,
+            ));
+            store_member.reachability_caveats.clone_from(&caveats);
+            results.unused_store_members.push(store_member);
 
             results
         }

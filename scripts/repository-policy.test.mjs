@@ -655,3 +655,44 @@ test("a required output field cannot be dropped at a frozen schema_version", (t)
       `and every envelope that embeds the changed contract bumps with it:\n  ${breaks.join("\n  ")}`,
   );
 });
+
+/**
+ * The compatibility entry and the changelog both count the dead-code arrays that
+ * may carry `reachability_caveats[]`. The count drifted once already: a commit
+ * added the ninth array and updated only the compatibility doc, leaving the
+ * changelog telling readers that eight carry it and that the ninth stays out.
+ */
+test("the caveat array count in the docs matches the findings that carry one", () => {
+  const findings = readFileSync("crates/types/src/output_dead_code.rs", "utf8");
+  const carriers = [...findings.matchAll(/pub reachability_caveats: Vec<ReachabilityCaveat>,/gu)]
+    .length;
+  assert.ok(carriers > 0, "output_dead_code.rs must declare caveat-carrying findings");
+
+  const numberWords = new Map([
+    ["seven", 7],
+    ["eight", 8],
+    ["nine", 9],
+    ["ten", 10],
+    ["eleven", 11],
+  ]);
+  const counted = (source, pattern, label) => {
+    const match = source.match(pattern);
+    assert.ok(match, `${label} must state how many arrays can carry the caveat`);
+    const spelled = numberWords.get(match[1].toLowerCase());
+    assert.ok(spelled, `${label} spells an unrecognized count: ${match[1]}`);
+    return spelled;
+  };
+
+  assert.equal(
+    counted(
+      readFileSync("docs/backwards-compatibility.md", "utf8"),
+      /carry `reachability_caveats\[\]`\*\*: (\w+) arrays/u,
+      "docs/backwards-compatibility.md",
+    ),
+    carriers,
+  );
+  assert.equal(
+    counted(readFileSync("CHANGELOG.md", "utf8"), /(\w+) arrays carry it:/u, "CHANGELOG.md"),
+    carriers,
+  );
+});

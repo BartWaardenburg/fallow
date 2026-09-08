@@ -106,10 +106,13 @@ pub fn normalize_sarif_snippet(snippet: &str) -> String {
 }
 
 /// Stable SARIF fingerprint for a finding with source snippet evidence.
+///
+/// `col` is the 1-based start column the finding reports, and is what separates
+/// two findings of the same rule that share a source line.
 #[must_use]
-pub fn sarif_finding_fingerprint(rule_id: &str, path: &str, snippet: &str) -> String {
+pub fn sarif_finding_fingerprint(rule_id: &str, path: &str, snippet: &str, col: u32) -> String {
     let normalized = normalize_sarif_snippet(snippet);
-    codeclimate_fingerprint_hash(&[rule_id, path, &normalized])
+    codeclimate_fingerprint_hash(&[rule_id, path, &normalized, &col.to_string()])
 }
 
 /// Lazily reads source files so SARIF result builders can attach stable line snippets.
@@ -181,9 +184,16 @@ pub fn build_sarif_result(input: SarifResultInput<'_>) -> Value {
         .snippet
         .map(normalize_sarif_snippet)
         .filter(|snippet| !snippet.is_empty());
+    // The snippet replaces the LINE, which moves under any edit above it, and
+    // not the COLUMN, which is as stable as the snippet itself: two findings on
+    // one line are two alerts, and GitHub code scanning treats one
+    // `partialFingerprints` value as one alert identity. Dropping the column
+    // here collapsed every re-export in a one-line barrel, every member of a
+    // one-line enum, and every dependency in a compact `package.json` into a
+    // single alert.
     let partial_fingerprint = normalized_snippet.as_ref().map_or_else(
         || codeclimate_fingerprint_hash(&[input.rule_id, input.uri, &line, &col]),
-        |snippet| codeclimate_fingerprint_hash(&[input.rule_id, input.uri, snippet]),
+        |snippet| codeclimate_fingerprint_hash(&[input.rule_id, input.uri, snippet, &col]),
     );
     let partial_fingerprint_ghas = partial_fingerprint.clone();
     serde_json::json!({
@@ -263,6 +273,38 @@ pub fn append_sarif_findings<T>(
     }
 }
 
+/// Give every result in one run its own `partialFingerprints` value.
+///
+/// GitHub code scanning treats that value as alert identity, so two results
+/// sharing one are one alert and the second finding is never surfaced. Rule id,
+/// URI, snippet, and column already separate findings that differ anywhere a
+/// reader can see; what is left is a file that reports the same rule twice with
+/// byte-identical evidence, such as the same declaration written twice. The
+/// first occurrence keeps the value it computed, so an alert that already exists
+/// is never disturbed, and each repeat mixes in its occurrence index.
+pub fn ensure_unique_result_fingerprints(results: &mut [Value]) {
+    let mut occurrences: FxHashMap<String, u32> = FxHashMap::default();
+    for result in results {
+        let Some(fingerprint) = result
+            .get("partialFingerprints")
+            .and_then(|prints| prints.get(SARIF_FINGERPRINT_KEY))
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+        else {
+            continue;
+        };
+        let occurrence = occurrences.entry(fingerprint.clone()).or_insert(0);
+        let index = *occurrence;
+        *occurrence += 1;
+        if index == 0 {
+            continue;
+        }
+        let unique = codeclimate_fingerprint_hash(&[&fingerprint, &index.to_string()]);
+        result["partialFingerprints"][SARIF_FINGERPRINT_KEY] = Value::from(unique.clone());
+        result["partialFingerprints"][GHAS_SARIF_FINGERPRINT_KEY] = Value::from(unique);
+    }
+}
+
 /// Build a SARIF rule object.
 #[must_use]
 pub fn build_sarif_rule(input: SarifRuleInput<'_>) -> Value {
@@ -293,8 +335,14 @@ fn issue_code_from_rule_id(rule_id: &str) -> &str {
 }
 
 /// Build a SARIF 2.1.0 document envelope.
+///
+/// Applies [`ensure_unique_result_fingerprints`], so every run this builds
+/// satisfies the one-alert-per-finding property. A caller that replaces
+/// `/runs/0/results` afterwards has to apply it again.
 #[must_use]
 pub fn build_sarif_document(input: SarifDocumentInput<'_>) -> Value {
+    let mut results = input.results.to_vec();
+    ensure_unique_result_fingerprints(&mut results);
     serde_json::json!({
         "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
         "version": "2.1.0",
@@ -307,7 +355,7 @@ pub fn build_sarif_document(input: SarifDocumentInput<'_>) -> Value {
                     "rules": input.rules
                 }
             },
-            "results": input.results
+            "results": results
         }]
     })
 }
@@ -334,6 +382,119 @@ mod tests {
         );
         assert!(result["partialFingerprints"][SARIF_FINGERPRINT_KEY].is_string());
         assert!(result["partialFingerprints"][GHAS_SARIF_FINGERPRINT_KEY].is_string());
+    }
+
+    fn fingerprint_of(result: &Value) -> &str {
+        result["partialFingerprints"][SARIF_FINGERPRINT_KEY]
+            .as_str()
+            .expect("fingerprint")
+    }
+
+    /// A one-line re-export barrel, a one-line enum, and a compact
+    /// `package.json` all put two findings of one rule on one source line, so
+    /// the snippet is identical and only the column tells them apart. GitHub
+    /// code scanning keys alert identity on this value, so a shared value is a
+    /// lost alert.
+    #[test]
+    fn two_findings_on_one_line_get_different_fingerprints() {
+        let at_column = |col: u32| {
+            build_sarif_result(SarifResultInput {
+                rule_id: "fallow/unused-export",
+                level: "warning",
+                message: "Re-export is never imported by other modules",
+                uri: "src/barrel.ts",
+                region: Some((1, col)),
+                snippet: Some("export { alpha, beta } from './m';"),
+            })
+        };
+
+        assert_ne!(
+            fingerprint_of(&at_column(10)),
+            fingerprint_of(&at_column(17))
+        );
+    }
+
+    /// The column is the only position in the fingerprint: a snippet that
+    /// survives an edit above it has to keep its identity, or every open alert
+    /// on the file below the edit closes and reopens.
+    #[test]
+    fn moving_a_finding_to_another_line_keeps_its_fingerprint() {
+        let at_line = |line: u32| {
+            build_sarif_result(SarifResultInput {
+                rule_id: "fallow/unused-export",
+                level: "warning",
+                message: "Export is never imported by other modules",
+                uri: "src/lib.ts",
+                region: Some((line, 14)),
+                snippet: Some("export const alpha = 1;"),
+            })
+        };
+
+        assert_eq!(fingerprint_of(&at_line(3)), fingerprint_of(&at_line(41)));
+    }
+
+    /// Two byte-identical declarations in one file leave the snippet and the
+    /// column identical, so position alone cannot separate them.
+    #[test]
+    fn identical_results_are_separated_by_occurrence() {
+        let result = || {
+            build_sarif_result(SarifResultInput {
+                rule_id: "fallow/duplicate-export",
+                level: "warning",
+                message: "Export 'Video' appears in multiple modules",
+                uri: "src/types.ts",
+                region: Some((309, 18)),
+                snippet: Some("export type Video = {"),
+            })
+        };
+        let mut results = vec![result(), result(), result()];
+        let first_before = fingerprint_of(&results[0]).to_owned();
+
+        ensure_unique_result_fingerprints(&mut results);
+
+        assert_eq!(
+            fingerprint_of(&results[0]),
+            first_before,
+            "the first occurrence keeps the identity an existing alert was opened under"
+        );
+        let unique: std::collections::BTreeSet<&str> = results.iter().map(fingerprint_of).collect();
+        assert_eq!(unique.len(), 3, "{results:?}");
+        for result in &results {
+            assert_eq!(
+                result["partialFingerprints"][SARIF_FINGERPRINT_KEY],
+                result["partialFingerprints"][GHAS_SARIF_FINGERPRINT_KEY],
+                "both keys name the same alert"
+            );
+        }
+    }
+
+    /// A run whose results already differ must come out byte-identical, so the
+    /// pass never churns an alert that was already unique.
+    #[test]
+    fn distinct_results_are_left_alone() {
+        let mut results = vec![
+            build_sarif_result(SarifResultInput {
+                rule_id: "fallow/unused-export",
+                level: "warning",
+                message: "Export 'alpha' is never imported by other modules",
+                uri: "src/lib.ts",
+                region: Some((1, 14)),
+                snippet: Some("export const alpha = 1;"),
+            }),
+            build_sarif_result(SarifResultInput {
+                rule_id: "fallow/unused-export",
+                level: "warning",
+                message: "Export 'beta' is never imported by other modules",
+                uri: "src/lib.ts",
+                region: Some((2, 14)),
+                snippet: Some("export const beta = 2;"),
+            }),
+        ];
+        let before = results.clone();
+
+        ensure_unique_result_fingerprints(&mut results);
+
+        assert_eq!(results, before);
     }
 
     #[test]

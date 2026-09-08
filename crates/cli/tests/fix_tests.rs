@@ -1195,9 +1195,11 @@ fn analyze_never_advertises_a_mutation_fix_would_refuse() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();
     write_skipped_enum_member_project(root);
+    // One dependency per location, so the loop below reaches all three
+    // dependency arrays rather than only the production one.
     std::fs::write(
         root.join("package.json"),
-        r#"{"name":"skipped-member","main":"src/index.ts","dependencies":{"lodash":"^4.17.21"}}"#,
+        r#"{"name":"skipped-member","main":"src/index.ts","dependencies":{"lodash":"^4.17.21"},"devDependencies":{"chalk":"^5.3.0"},"optionalDependencies":{"fsevents":"^2.3.3"}}"#,
     )
     .unwrap();
 
@@ -1208,17 +1210,23 @@ fn analyze_never_advertises_a_mutation_fix_would_refuse() {
     );
     let json = parse_json(&analyze);
 
+    let mut caveated = 0_usize;
     for array in [
         "unused_files",
         "unused_exports",
         "unused_types",
         "unused_enum_members",
+        "unused_class_members",
+        "unused_store_members",
         "unused_dependencies",
+        "unused_dev_dependencies",
+        "unused_optional_dependencies",
     ] {
         for finding in json[array].as_array().into_iter().flatten() {
             if finding["reachability_caveats"].is_null() {
                 continue;
             }
+            caveated += 1;
             for action in finding["actions"].as_array().into_iter().flatten() {
                 assert_eq!(
                     action["auto_fixable"],
@@ -1231,6 +1239,12 @@ fn analyze_never_advertises_a_mutation_fix_would_refuse() {
             }
         }
     }
+    assert!(
+        caveated >= 4,
+        "the loop is only meaningful while the run still produces caveated findings in the \
+         member array and all three dependency arrays: {}",
+        analyze.stdout
+    );
 }
 
 #[test]

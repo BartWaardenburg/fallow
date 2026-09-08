@@ -107,6 +107,48 @@ fn sarif_private_type_leak_fields(
     }
 }
 
+/// 1-based column of the `"<name>"` key inside the manifest line a dependency
+/// finding points at, falling back to 1 when the line cannot be read.
+///
+/// Every dependency declared on one line otherwise reports the same location,
+/// and a SARIF fingerprint is rule id plus location plus source snippet: a
+/// compact `package.json` collapsed all of its unused dependencies into one
+/// GitHub code scanning alert.
+fn manifest_key_column(
+    snippets: &mut SourceSnippetCache,
+    path: &Path,
+    line: u32,
+    name: &str,
+) -> u32 {
+    snippets
+        .line(path, line)
+        .and_then(|text| text.find(&format!("\"{name}\"")))
+        .and_then(|offset| u32::try_from(offset).ok())
+        .map_or(1, |offset| offset.saturating_add(1))
+}
+
+/// The manifest coordinates `manifest_key_column` needs from a dependency.
+fn dep_key(dep: &UnusedDependency) -> (&Path, u32, &str) {
+    (dep.path.as_path(), dep.line, dep.package_name.as_str())
+}
+
+/// Resolve one manifest column per finding up front, so the result closure that
+/// needs them does not have to borrow the snippet cache it reads.
+fn manifest_key_columns<'a, T: 'a>(
+    findings: &'a [T],
+    snippets: &mut SourceSnippetCache,
+    key_of: impl Fn(&'a T) -> (&'a Path, u32, &'a str),
+) -> std::vec::IntoIter<u32> {
+    findings
+        .iter()
+        .map(|finding| {
+            let (path, line, name) = key_of(finding);
+            manifest_key_column(snippets, path, line, name)
+        })
+        .collect::<Vec<_>>()
+        .into_iter()
+}
+
 /// Extract SARIF fields for an unused dependency.
 fn sarif_dep_fields(
     dep: &UnusedDependency,
@@ -114,6 +156,7 @@ fn sarif_dep_fields(
     rule_id: &'static str,
     level: &'static str,
     section: &str,
+    col: u32,
 ) -> SarifFields {
     let workspace_context = if dep.used_in_workspaces.is_empty() {
         String::new()
@@ -135,7 +178,7 @@ fn sarif_dep_fields(
         ),
         uri: relative_uri(&dep.path, root),
         region: if dep.line > 0 {
-            Some((dep.line, 1))
+            Some((dep.line, col))
         } else {
             None
         },
@@ -194,6 +237,7 @@ fn sarif_type_only_dep_fields(
     dep: &TypeOnlyDependency,
     root: &Path,
     level: &'static str,
+    col: u32,
 ) -> SarifFields {
     SarifFields {
         rule_id: "fallow/type-only-dependency",
@@ -204,7 +248,7 @@ fn sarif_type_only_dep_fields(
         ),
         uri: relative_uri(&dep.path, root),
         region: if dep.line > 0 {
-            Some((dep.line, 1))
+            Some((dep.line, col))
         } else {
             None
         },
@@ -217,6 +261,7 @@ fn sarif_test_only_dep_fields(
     dep: &TestOnlyDependency,
     root: &Path,
     level: &'static str,
+    col: u32,
 ) -> SarifFields {
     SarifFields {
         rule_id: "fallow/test-only-dependency",
@@ -227,7 +272,7 @@ fn sarif_test_only_dep_fields(
         ),
         uri: relative_uri(&dep.path, root),
         region: if dep.line > 0 {
-            Some((dep.line, 1))
+            Some((dep.line, col))
         } else {
             None
         },
@@ -240,6 +285,7 @@ fn sarif_dev_dep_in_prod_fields(
     dep: &DevDependencyInProduction,
     root: &Path,
     level: &'static str,
+    col: u32,
 ) -> SarifFields {
     SarifFields {
         rule_id: "fallow/dev-dependency-in-production",
@@ -250,7 +296,7 @@ fn sarif_dev_dep_in_prod_fields(
         ),
         uri: relative_uri(&dep.path, root),
         region: if dep.line > 0 {
-            Some((dep.line, 1))
+            Some((dep.line, col))
         } else {
             None
         },
@@ -1199,6 +1245,8 @@ fn push_unused_dependency_sarif_results(
         rules,
     } = *ctx;
 
+    let mut columns =
+        manifest_key_columns(&results.unused_dependencies, snippets, |f| dep_key(&f.dep));
     push_sarif_results(sarif_results, &results.unused_dependencies, snippets, |d| {
         with_caveats(
             sarif_dep_fields(
@@ -1207,9 +1255,13 @@ fn push_unused_dependency_sarif_results(
                 "fallow/unused-dependency",
                 severity_to_sarif_level(rules.unused_dependencies),
                 "dependencies",
+                columns.next().unwrap_or(1),
             ),
             &d.reachability_caveats,
         )
+    });
+    let mut columns = manifest_key_columns(&results.unused_dev_dependencies, snippets, |f| {
+        dep_key(&f.dep)
     });
     push_sarif_results(
         sarif_results,
@@ -1223,11 +1275,15 @@ fn push_unused_dependency_sarif_results(
                     "fallow/unused-dev-dependency",
                     severity_to_sarif_level(rules.unused_dev_dependencies),
                     "devDependencies",
+                    columns.next().unwrap_or(1),
                 ),
                 &d.reachability_caveats,
             )
         },
     );
+    let mut columns = manifest_key_columns(&results.unused_optional_dependencies, snippets, |f| {
+        dep_key(&f.dep)
+    });
     push_sarif_results(
         sarif_results,
         &results.unused_optional_dependencies,
@@ -1240,6 +1296,7 @@ fn push_unused_dependency_sarif_results(
                     "fallow/unused-optional-dependency",
                     severity_to_sarif_level(rules.unused_optional_dependencies),
                     "optionalDependencies",
+                    columns.next().unwrap_or(1),
                 ),
                 &d.reachability_caveats,
             )
@@ -1259,6 +1316,13 @@ fn push_classified_dependency_sarif_results(
         rules,
     } = *ctx;
 
+    let mut columns = manifest_key_columns(&results.type_only_dependencies, snippets, |f| {
+        (
+            f.dep.path.as_path(),
+            f.dep.line,
+            f.dep.package_name.as_str(),
+        )
+    });
     push_sarif_results(
         sarif_results,
         &results.type_only_dependencies,
@@ -1268,9 +1332,17 @@ fn push_classified_dependency_sarif_results(
                 &d.dep,
                 root,
                 severity_to_sarif_level(rules.type_only_dependencies),
+                columns.next().unwrap_or(1),
             )
         },
     );
+    let mut columns = manifest_key_columns(&results.test_only_dependencies, snippets, |f| {
+        (
+            f.dep.path.as_path(),
+            f.dep.line,
+            f.dep.package_name.as_str(),
+        )
+    });
     push_sarif_results(
         sarif_results,
         &results.test_only_dependencies,
@@ -1280,9 +1352,18 @@ fn push_classified_dependency_sarif_results(
                 &d.dep,
                 root,
                 severity_to_sarif_level(rules.test_only_dependencies),
+                columns.next().unwrap_or(1),
             )
         },
     );
+    let mut columns =
+        manifest_key_columns(&results.dev_dependencies_in_production, snippets, |f| {
+            (
+                f.dep.path.as_path(),
+                f.dep.line,
+                f.dep.package_name.as_str(),
+            )
+        });
     push_sarif_results(
         sarif_results,
         &results.dev_dependencies_in_production,
@@ -1292,6 +1373,7 @@ fn push_classified_dependency_sarif_results(
                 &d.dep,
                 root,
                 severity_to_sarif_level(rules.dev_dependencies_in_production),
+                columns.next().unwrap_or(1),
             )
         },
     );
@@ -1342,12 +1424,15 @@ fn push_member_sarif_results(
         &results.unused_store_members,
         snippets,
         |m| {
-            sarif_member_fields(
-                &m.member,
-                root,
-                "fallow/unused-store-member",
-                severity_to_sarif_level(rules.unused_store_members),
-                "Store",
+            with_caveats(
+                sarif_member_fields(
+                    &m.member,
+                    root,
+                    "fallow/unused-store-member",
+                    severity_to_sarif_level(rules.unused_store_members),
+                    "Store",
+                ),
+                &m.reachability_caveats,
             )
         },
     );
@@ -1927,6 +2012,40 @@ mod tests {
         flagged.reachability_caveats = vec![ReachabilityCaveat::IncompleteImportGraph];
         results.unused_files.push(flagged);
 
+        // Every member array carries the same caveat off the same
+        // reachability-free access walk, so all three have to reach the
+        // message. Store members were rendered bare while the array itself was
+        // stamped.
+        let member = |parent: &str, name: &str, kind| UnusedMember {
+            path: Path::new("/p/src/lib.ts").to_path_buf(),
+            parent_name: parent.to_owned(),
+            member_name: name.to_owned(),
+            kind,
+            line: 7,
+            col: 2,
+        };
+        let mut enum_member = UnusedEnumMemberFinding::with_actions(member(
+            "Mode",
+            "Legacy",
+            fallow_types::extract::MemberKind::EnumMember,
+        ));
+        enum_member.reachability_caveats = vec![ReachabilityCaveat::IncompleteImportGraph];
+        results.unused_enum_members.push(enum_member);
+        let mut class_member = UnusedClassMemberFinding::with_actions(member(
+            "Widget",
+            "render",
+            fallow_types::extract::MemberKind::ClassMethod,
+        ));
+        class_member.reachability_caveats = vec![ReachabilityCaveat::IncompleteImportGraph];
+        results.unused_class_members.push(class_member);
+        let mut store_member = UnusedStoreMemberFinding::with_actions(member(
+            "useCart",
+            "subtotal",
+            fallow_types::extract::MemberKind::StoreMember,
+        ));
+        store_member.reachability_caveats = vec![ReachabilityCaveat::IncompleteImportGraph];
+        results.unused_store_members.push(store_member);
+
         let sarif = build_dead_code_sarif(
             &results,
             Path::new("/p"),
@@ -1956,6 +2075,124 @@ mod tests {
                     .to_owned()
             ),
             "a caveated finding names it in the message: {messages:?}"
+        );
+        for expected in [
+            "Enum member 'Mode.Legacy' is never referenced (caveat: incomplete import graph)",
+            "Class member 'Widget.render' is never referenced (caveat: incomplete import graph)",
+            "Store member 'useCart.subtotal' is never referenced (caveat: incomplete import graph)",
+        ] {
+            assert!(
+                messages.contains(&expected.to_owned()),
+                "every member kind names the caveat: {messages:?}"
+            );
+        }
+    }
+
+    /// The reported defect: `npm init -y` writes a `package.json` whose
+    /// dependency block can sit on one line, and `find_dep_line_in_json` also
+    /// falls back to line 1 for a key it cannot locate. Every unused dependency
+    /// then reported the same rule id, the same URI, and the same source
+    /// snippet, which is the whole of a SARIF fingerprint, so GitHub code
+    /// scanning showed one alert for all of them. CodeClimate never had the
+    /// defect: it keys on the package name.
+    #[test]
+    fn two_dependencies_on_one_manifest_line_are_two_alerts() {
+        let dir = tempfile::tempdir().expect("temporary project");
+        let root = dir.path();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"name":"compact","dependencies":{"lodash":"^4.17.21","chalk":"^5.3.0"}}"#,
+        )
+        .expect("write manifest");
+
+        let mut results = AnalysisResults::default();
+        for name in ["lodash", "chalk"] {
+            results
+                .unused_dependencies
+                .push(UnusedDependencyFinding::with_actions(UnusedDependency {
+                    package_name: name.to_owned(),
+                    location: fallow_types::results::DependencyLocation::Dependencies,
+                    path: root.join("package.json"),
+                    line: 1,
+                    used_in_workspaces: Vec::new(),
+                }));
+        }
+
+        let sarif =
+            build_dead_code_sarif(&results, root, &RulesConfig::default(), &test_rule_builder);
+        let entries = sarif
+            .pointer("/runs/0/results")
+            .and_then(serde_json::Value::as_array)
+            .expect("SARIF results");
+
+        let fingerprints = entries
+            .iter()
+            .map(|entry| {
+                entry
+                    .pointer("/partialFingerprints/tools.fallow.fingerprint~1v1")
+                    .and_then(serde_json::Value::as_str)
+                    .expect("fingerprint")
+            })
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            fingerprints.len(),
+            entries.len(),
+            "two dependencies declared on one line are two alerts: {entries:#?}"
+        );
+
+        let columns = entries
+            .iter()
+            .map(|entry| {
+                entry
+                    .pointer("/locations/0/physicalLocation/region/startColumn")
+                    .and_then(serde_json::Value::as_u64)
+                    .expect("start column")
+            })
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            columns.len(),
+            entries.len(),
+            "each dependency points at its own key in the manifest line: {entries:#?}"
+        );
+    }
+
+    /// Why the column and not only the run-level uniqueness pass: that pass
+    /// separates repeats by occurrence index, so a dependency's identity would
+    /// depend on its siblings and fixing the first one would renumber, and
+    /// close, the alert on the second. The column is the dependency's own
+    /// position, so an unrelated dependency added above it moves neither.
+    #[test]
+    fn a_dependency_added_above_leaves_the_others_alert_alone() {
+        let dir = tempfile::tempdir().expect("temporary project");
+        let root = dir.path();
+        let manifest = root.join("package.json");
+
+        let chalk_fingerprint = |manifest_text: &str, chalk_line: u32| {
+            std::fs::write(&manifest, manifest_text).expect("write manifest");
+            let mut results = AnalysisResults::default();
+            results
+                .unused_dependencies
+                .push(UnusedDependencyFinding::with_actions(UnusedDependency {
+                    package_name: "chalk".to_owned(),
+                    location: fallow_types::results::DependencyLocation::Dependencies,
+                    path: manifest.clone(),
+                    line: chalk_line,
+                    used_in_workspaces: Vec::new(),
+                }));
+            build_dead_code_sarif(&results, root, &RulesConfig::default(), &test_rule_builder)
+                .pointer("/runs/0/results/0/partialFingerprints/tools.fallow.fingerprint~1v1")
+                .and_then(serde_json::Value::as_str)
+                .expect("chalk fingerprint")
+                .to_owned()
+        };
+
+        let before = "{\n  \"dependencies\": {\n    \"chalk\": \"^5.3.0\"\n  }\n}\n";
+        let after = "{\n  \"dependencies\": {\n    \"lodash\": \"^4.17.21\",\n    \"chalk\": \"^5.3.0\"\n  }\n}\n";
+
+        assert_eq!(
+            chalk_fingerprint(before, 3),
+            chalk_fingerprint(after, 4),
+            "a dependency declared above it must not move chalk's alert"
         );
     }
 

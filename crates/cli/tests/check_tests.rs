@@ -764,6 +764,77 @@ fn check_sarif_format_has_schema() {
     );
 }
 
+/// GitHub code scanning keys an alert on `partialFingerprints`, so two results
+/// that share one value are one alert and the second finding is never shown. A
+/// compact `package.json` puts every dependency on one line, which used to give
+/// them the same rule id, URI, and source snippet, and that is the whole of the
+/// fingerprint. CodeClimate never had it: it keys on the package name.
+#[test]
+fn check_sarif_gives_each_finding_its_own_fingerprint() {
+    let dir = tempfile::tempdir().expect("temporary project");
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("src")).expect("create src");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"compact","version":"1.0.0","main":"src/index.ts","dependencies":{"lodash":"^4.17.21","chalk":"^5.3.0"}}"#,
+    )
+    .expect("write manifest");
+    std::fs::write(
+        root.join("src/barrel.ts"),
+        "export { alpha, beta } from './m';
+",
+    )
+    .expect("write barrel");
+    std::fs::write(
+        root.join("src/m.ts"),
+        "export const alpha = 1;
+export const beta = 2;
+",
+    )
+    .expect("write module");
+    std::fs::write(
+        root.join("src/index.ts"),
+        "import './barrel';
+
+export const run = (): void => {};
+",
+    )
+    .expect("write entry module");
+
+    let output = run_fallow_in_root(
+        "check",
+        root,
+        &["--format", "sarif", "--quiet", "--no-cache"],
+    );
+    let sarif = parse_json(&output);
+    let results = sarif
+        .pointer("/runs/0/results")
+        .and_then(serde_json::Value::as_array)
+        .expect("SARIF results");
+
+    let fingerprints: Vec<&str> = results
+        .iter()
+        .map(|result| {
+            result
+                .pointer("/partialFingerprints/tools.fallow.fingerprint~1v1")
+                .and_then(serde_json::Value::as_str)
+                .expect("fingerprint")
+        })
+        .collect();
+    assert!(
+        fingerprints.len() >= 4,
+        "the fixture must still report the unused dependencies and the barrel re-exports: {}",
+        output.stdout
+    );
+    let unique: std::collections::BTreeSet<&&str> = fingerprints.iter().collect();
+    assert_eq!(
+        unique.len(),
+        fingerprints.len(),
+        "two findings sharing a fingerprint are one GitHub alert: {}",
+        output.stdout
+    );
+}
+
 #[test]
 fn check_markdown_format_has_heading() {
     let output = run_fallow(

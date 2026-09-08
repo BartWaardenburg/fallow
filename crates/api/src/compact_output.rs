@@ -330,11 +330,12 @@ impl<'a> CompactLineBuilder<'a> {
                 &member.reachability_caveats,
             ));
         }
-        // Store members stay outside the caveated set: the analysis pass does
-        // not stamp that array, because no surface offers a mutation for one.
         for member in &self.results.unused_store_members {
-            self.lines
-                .push(self.compact_member(&member.member, "unused-store-member", &[]));
+            self.lines.push(self.compact_member(
+                &member.member,
+                "unused-store-member",
+                &member.reachability_caveats,
+            ));
         }
         for import in &self.results.unresolved_imports {
             self.lines.push(format!(
@@ -1153,6 +1154,7 @@ mod tests {
     /// splits on are untouched.
     #[test]
     fn a_caveated_finding_carries_a_trailing_caveat_field() {
+        use fallow_types::extract::MemberKind;
         use fallow_types::output_dead_code::{ReachabilityCaveat, UnusedDependencyFinding};
         use fallow_types::results::{UnusedDependency, UnusedExport};
 
@@ -1191,6 +1193,38 @@ mod tests {
         dep.reachability_caveats = vec![ReachabilityCaveat::IncompleteImportGraph];
         results.unused_dependencies.push(dep);
 
+        let member = |parent: &str, name: &str, kind| fallow_types::results::UnusedMember {
+            path: root.join("src/lib.ts"),
+            parent_name: parent.to_owned(),
+            member_name: name.to_owned(),
+            kind,
+            line: 7,
+            col: 2,
+        };
+        let mut enum_member = fallow_types::output_dead_code::UnusedEnumMemberFinding::with_actions(
+            member("Mode", "Legacy", MemberKind::EnumMember),
+        );
+        enum_member.reachability_caveats = vec![ReachabilityCaveat::IncompleteImportGraph];
+        results.unused_enum_members.push(enum_member);
+
+        let mut class_member =
+            fallow_types::output_dead_code::UnusedClassMemberFinding::with_actions(member(
+                "Widget",
+                "render",
+                MemberKind::ClassMethod,
+            ));
+        class_member.reachability_caveats = vec![ReachabilityCaveat::IncompleteImportGraph];
+        results.unused_class_members.push(class_member);
+
+        let mut store_member =
+            fallow_types::output_dead_code::UnusedStoreMemberFinding::with_actions(member(
+                "useCart",
+                "subtotal",
+                MemberKind::StoreMember,
+            ));
+        store_member.reachability_caveats = vec![ReachabilityCaveat::IncompleteImportGraph];
+        results.unused_store_members.push(store_member);
+
         let lines = build_compact_lines(&results, &root);
 
         assert_eq!(
@@ -1199,6 +1233,9 @@ mod tests {
                 "unused-file:src/dead.ts,caveat=incomplete-import-graph",
                 "unused-export:src/lib.ts:3:needed,caveat=incomplete-file-analysis+incomplete-import-graph",
                 "unused-dep:left-pad,caveat=incomplete-import-graph",
+                "unused-enum-member:src/lib.ts:7:Mode.Legacy,caveat=incomplete-import-graph",
+                "unused-class-member:src/lib.ts:7:Widget.render,caveat=incomplete-import-graph",
+                "unused-store-member:src/lib.ts:7:useCart.subtotal,caveat=incomplete-import-graph",
             ]
         );
     }

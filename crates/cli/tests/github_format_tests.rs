@@ -1297,6 +1297,26 @@ fn caveated_check_envelope() -> Value {
                 "reachability_caveats": ["incomplete-import-graph"]
             }
         ],
+        "unused_class_members": [
+            {
+                "path": "src/api.ts",
+                "line": 20,
+                "col": 2,
+                "parent_name": "Widget",
+                "member_name": "render",
+                "reachability_caveats": ["incomplete-import-graph"]
+            }
+        ],
+        "unused_store_members": [
+            {
+                "path": "src/api.ts",
+                "line": 26,
+                "col": 2,
+                "parent_name": "useCart",
+                "member_name": "subtotal",
+                "reachability_caveats": ["incomplete-import-graph"]
+            }
+        ],
         "unused_dependencies": [
             {
                 "path": "package.json",
@@ -1340,6 +1360,14 @@ fn github_summary_rows_name_the_reachability_caveat() {
         rendered.contains("`Legacy` *(caveat: incomplete import graph)* |"),
         "unused-enum-member row must hedge: {rendered}"
     );
+    assert!(
+        rendered.contains("`render` *(caveat: incomplete import graph)* |"),
+        "unused-class-member row must hedge: {rendered}"
+    );
+    assert!(
+        rendered.contains("`subtotal` *(caveat: incomplete import graph)* |"),
+        "unused-store-member row must hedge: {rendered}"
+    );
 }
 
 /// An annotation is the surface that spells out the mutation ("remove the
@@ -1355,7 +1383,7 @@ fn github_annotations_name_the_reachability_caveat() {
 
     assert_eq!(
         rendered.matches("Caveat: incomplete import graph").count(),
-        5,
+        7,
         "every caveated annotation hedges: {rendered}"
     );
 }

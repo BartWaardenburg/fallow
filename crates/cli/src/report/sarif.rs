@@ -329,6 +329,7 @@ fn annotation_sarif_document(
         ordered_rules.extend(rules.into_values());
         driver["rules"] = serde_json::Value::Array(ordered_rules);
     }
+    fallow_output::ensure_unique_result_fingerprints(&mut results);
     if let Some(run_results) = sarif.pointer_mut("/runs/0/results") {
         *run_results = serde_json::Value::Array(results);
     }

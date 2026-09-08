@@ -305,11 +305,14 @@ export type AuditIntroduced = boolean
  *
  * Deliberately NOT named `confidence`: `health --targets` already emits a
  * `confidence` key holding an enum string, and a shared consumer helper that
- * met both would see the same key change type. Emitted on the four verdicts a
- * lost import edge can distort: `unused_files[]`, `unused_exports[]`, and the
- * three dependency arrays. Sorted and deduplicated, absent from the wire when
- * empty. The set is open in the same sense `workspace_diagnostics[].kind` is:
- * treat an unrecognised value as "some caveat" rather than as an error.
+ * met both would see the same key change type. Emitted on every finding type
+ * that registers it: the reachability arrays (`unused_files[]`,
+ * `unused_exports[]`, `unused_types[]`), the member arrays
+ * (`unused_enum_members[]`, `unused_class_members[]`, `unused_store_members[]`),
+ * and the three dependency arrays. Sorted and deduplicated, absent from the
+ * wire when empty. The set is open in the same sense
+ * `workspace_diagnostics[].kind` is: treat an unrecognised value as "some
+ * caveat" rather than as an error.
  */
 export type ReachabilityCaveat = ("incomplete-file-analysis" | "incomplete-import-graph")
 /**
@@ -3526,6 +3529,17 @@ actions: IssueAction[]
  * the merge-base.
  */
 introduced?: (AuditIntroduced | null)
+/**
+ * Advisory caveats on the verdict behind this finding. A store member's
+ * usage is collected by the same reachability-free member-access walk a
+ * class member's is, so it takes the member rule unchanged: any module
+ * this run analyzed incompletely can hold the access that credits it.
+ * Sorted, deduplicated, and omitted from the wire when empty. There is no
+ * mutation here to withhold, because a store member offers none on any
+ * surface; this is disclosure only, so a reader deciding by hand is told
+ * what the run did not see.
+ */
+reachability_caveats?: ReachabilityCaveat[]
 }
 /**
  * Wire-shape envelope for an [`UnresolvedImport`] finding. Mirrors

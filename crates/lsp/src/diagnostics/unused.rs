@@ -565,9 +565,10 @@ pub fn push_member_diagnostics(
     results: &AnalysisResults,
     mapper: &mut PositionMapper,
 ) {
-    // Both member kinds carry caveats off the same reachability-free access
-    // walk. Store members do not: they expose no fix on any surface, so there
-    // is no mutation for a caveat to withhold.
+    // All three member kinds carry caveats off the same reachability-free
+    // access walk, so all three render the same qualifier. A store member has
+    // no quick fix to withhold, which makes the caveat disclosure only: the
+    // reader deciding by hand still has to be told what the run did not see.
     let enum_iter = results
         .unused_enum_members
         .iter()
@@ -579,7 +580,7 @@ pub fn push_member_diagnostics(
     let store_iter = results
         .unused_store_members
         .iter()
-        .map(|f| (&f.member, &[][..]));
+        .map(|f| (&f.member, f.reachability_caveats()));
     type MemberRows<'a> = Box<
         dyn Iterator<
                 Item = (
@@ -1027,6 +1028,28 @@ mod tests {
         member.set_reachability_caveats(vec![ReachabilityCaveat::IncompleteImportGraph]);
         results.unused_enum_members.push(member);
 
+        let mut class_member = UnusedClassMemberFinding::with_actions(UnusedMember {
+            path: root.join("src/widget.ts"),
+            parent_name: "Widget".to_string(),
+            member_name: "render".to_string(),
+            kind: MemberKind::ClassMethod,
+            line: 4,
+            col: 2,
+        });
+        class_member.set_reachability_caveats(vec![ReachabilityCaveat::IncompleteImportGraph]);
+        results.unused_class_members.push(class_member);
+
+        let mut store_member = UnusedStoreMemberFinding::with_actions(UnusedMember {
+            path: root.join("src/cart.ts"),
+            parent_name: "useCart".to_string(),
+            member_name: "subtotal".to_string(),
+            kind: MemberKind::StoreMember,
+            line: 6,
+            col: 2,
+        });
+        store_member.set_reachability_caveats(vec![ReachabilityCaveat::IncompleteImportGraph]);
+        results.unused_store_members.push(store_member);
+
         let duplication = empty_duplication();
         let diags = build_diagnostics_for_test(&results, &duplication, &root);
 
@@ -1046,6 +1069,14 @@ mod tests {
         assert_eq!(
             message("src/colors.ts"),
             "Enum member 'Color.Blue' is unused (caveat: incomplete import graph)"
+        );
+        assert_eq!(
+            message("src/widget.ts"),
+            "Class member 'Widget.render' is unused (caveat: incomplete import graph)"
+        );
+        assert_eq!(
+            message("src/cart.ts"),
+            "Store member 'useCart.subtotal' is unused (caveat: incomplete import graph)"
         );
     }
 

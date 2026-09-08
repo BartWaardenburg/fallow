@@ -164,6 +164,26 @@ fn the_summary_view_states_the_caveat() {
     );
 }
 
+/// Every rendered surface that has to name the caveat, and the same list a
+/// clean project has to render without one. The two directions share one
+/// constant so they cannot drift: `sarif` sat in the clean list and not in the
+/// caveat list, so deleting the caveat from every SARIF message left the caveat
+/// test green, and `pr-comment-gitlab` and `review-gitlab` sat in the caveat
+/// list and not the clean one.
+const CAVEAT_BEARING_FORMATS: [&str; 11] = [
+    "human",
+    "compact",
+    "markdown",
+    "codeclimate",
+    "sarif",
+    "pr-comment-github",
+    "pr-comment-gitlab",
+    "review-github",
+    "review-gitlab",
+    "github-annotations",
+    "github-summary",
+];
+
 /// The machine-consumed formats. `review-github` and `review-gitlab` are the
 /// severe ones: they emit an inline review comment on the diff line, with a
 /// literal suggestion block for an export removal, and an automation acting on
@@ -172,17 +192,7 @@ fn the_summary_view_states_the_caveat() {
 fn every_machine_consumed_format_carries_the_caveat() {
     let (_dir, root) = project();
 
-    for format in [
-        "compact",
-        "markdown",
-        "codeclimate",
-        "pr-comment-github",
-        "pr-comment-gitlab",
-        "review-github",
-        "review-gitlab",
-        "github-annotations",
-        "github-summary",
-    ] {
+    for format in CAVEAT_BEARING_FORMATS {
         let rendered = run_format(&root, format);
         let names_caveat = rendered.contains("incomplete import graph")
             || rendered.contains("incomplete-import-graph");
@@ -243,17 +253,7 @@ fn a_clean_project_carries_no_caveat_on_any_surface() {
     )
     .expect("write entry module");
 
-    for format in [
-        "human",
-        "compact",
-        "markdown",
-        "codeclimate",
-        "sarif",
-        "pr-comment-github",
-        "review-github",
-        "github-annotations",
-        "github-summary",
-    ] {
+    for format in CAVEAT_BEARING_FORMATS {
         let rendered = run_format(&root, format);
         assert!(
             !rendered.to_lowercase().contains("caveat"),
@@ -386,5 +386,240 @@ fn the_fix_path_withholds_the_write_the_review_comment_hedges() {
     assert_eq!(
         envelope["fixes"][0]["skip_reason"], "low_confidence_incomplete_analysis",
         "{envelope}"
+    );
+
+    // The other half of the agreement, on the same project: the review comment
+    // still reports the finding `fix` declined to write, and hedges it.
+    let review: serde_json::Value =
+        serde_json::from_str(&run_format(&root, "review-github")).expect("review envelope");
+    let body = review["comments"][0]["body"]
+        .as_str()
+        .expect("inline comment body");
+
+    assert!(
+        body.contains("caveat: incomplete import graph"),
+        "the surface that reports what `fix` withheld must hedge it: {body}"
+    );
+    assert!(
+        !body.contains("```suggestion"),
+        "the review comment must not offer a one-click edit for the write `fix` refused: {body}"
+    );
+}
+
+/// Run any fallow invocation against `root` under the size limit that produces
+/// the caveat, without assuming the working directory is the project.
+fn run_fallow(root: &Path, cwd: &Path, fallow_root: Option<&Path>, args: &[&str]) -> String {
+    let mut command = Command::new(fallow_bin());
+    command
+        .current_dir(cwd)
+        .env("NO_COLOR", "1")
+        .env("RUST_LOG", "")
+        .env_remove("FALLOW_ROOT")
+        .env("FALLOW_MAX_FILE_SIZE", SIZE_LIMIT_MB)
+        .args(args)
+        .args(["--quiet", "--no-cache", "-r"])
+        .arg(root);
+    if let Some(fallow_root) = fallow_root {
+        command.env("FALLOW_ROOT", fallow_root);
+    }
+    let output = command.output().expect("run fallow");
+    String::from_utf8_lossy(&output.stdout).into_owned()
+}
+
+/// The combined envelope keys the caveated arrays under `check`. It has no
+/// `dead_code` block; that name belongs to the audit brief, and a consumer
+/// reading the compatibility entry has to be pointed at the right one.
+#[test]
+fn the_combined_envelope_carries_the_caveat_under_check() {
+    let (_dir, root) = project();
+
+    let envelope: serde_json::Value =
+        serde_json::from_str(&run_fallow(&root, &root, None, &["--format", "json"]))
+            .expect("combined envelope");
+
+    assert!(
+        envelope.get("dead_code").is_none(),
+        "the combined envelope names its dead-code block `check`: {}",
+        envelope
+            .as_object()
+            .map(|map| map.keys().cloned().collect::<Vec<_>>().join(", "))
+            .unwrap_or_default()
+    );
+    assert_eq!(
+        envelope["check"]["unused_files"][0]["reachability_caveats"][0], "incomplete-import-graph",
+        "{envelope}"
+    );
+}
+
+/// The annotation appends the caveat, so the message ENDS with the explanation
+/// line and the `Caveat:` sentence sits after the remediation guidance, not
+/// before it. The compatibility entry used to claim the reverse.
+#[test]
+fn the_annotation_appends_the_caveat_after_its_remediation_guidance() {
+    let (_dir, root) = project();
+
+    let rendered = run_format(&root, "github-annotations");
+    let annotation = rendered
+        .lines()
+        .find(|line| line.contains("::warning"))
+        .expect("an annotation for the caveated finding");
+
+    let caveat = annotation
+        .find("Caveat: incomplete import graph.")
+        .expect("the caveat sentence");
+    let guidance = annotation
+        .find("Consider removing it")
+        .expect("the remediation guidance");
+
+    assert!(
+        guidance < caveat,
+        "the caveat is appended after the guidance, not inserted before it: {annotation}"
+    );
+    assert!(
+        annotation.ends_with("so verify before removing."),
+        "the message ends with the explanation, not with the `Caveat:` sentence: {annotation}"
+    );
+}
+
+/// `Fix intent:` is a review-comment line. The sticky summary comment renders a
+/// table and never carries one, so the caveat there sits in the description
+/// cell with nothing to sit above.
+#[test]
+fn only_the_review_formats_carry_a_fix_intent_line() {
+    let (_dir, root) = project();
+
+    for format in ["pr-comment-github", "pr-comment-gitlab"] {
+        let rendered = run_format(&root, format);
+        assert!(
+            rendered.contains("caveat: incomplete import graph"),
+            "`--format {format}` dropped the caveat: {rendered}"
+        );
+        assert!(
+            !rendered.contains("Fix intent:"),
+            "`--format {format}` is a summary table and has no fix-intent line: {rendered}"
+        );
+    }
+
+    for format in ["review-github", "review-gitlab"] {
+        let rendered = run_format(&root, format);
+        assert!(
+            rendered.contains("Fix intent:"),
+            "`--format {format}` is the surface that carries the fix-intent line: {rendered}"
+        );
+    }
+}
+
+/// `skipped_low_confidence_exports` counts FILES, not withheld exports. Three
+/// withheld exports across two files report `2`, and the entry naming each file
+/// carries no export name and no line, so a consumer cannot recover which
+/// exports were withheld from this envelope.
+#[test]
+fn withheld_export_removals_are_counted_by_file() {
+    let dir = tempfile::tempdir().expect("temporary project");
+    let root = dir.path().join("project");
+    std::fs::create_dir_all(root.join("src")).expect("create src");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{ "name": "caveat-counts", "version": "1.0.0", "main": "src/index.ts" }"#,
+    )
+    .expect("write manifest");
+    std::fs::write(
+        root.join("src/a.ts"),
+        "export const a1 = 1;\nexport const a2 = 2;\nexport const aKeep = 3;\n",
+    )
+    .expect("write first library");
+    std::fs::write(
+        root.join("src/b.ts"),
+        "export const b1 = 1;\nexport const bKeep = 2;\n",
+    )
+    .expect("write second library");
+
+    let mut oversized = String::from(
+        "import { a1, a2 } from \"./a\";\nimport { b1 } from \"./b\";\nexport const pad = [\n",
+    );
+    while oversized.len() < 2 * 1024 * 1024 {
+        oversized.push_str("  \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\n");
+    }
+    oversized.push_str("];\n");
+    std::fs::write(root.join("src/huge.ts"), oversized).expect("write oversized importer");
+    std::fs::write(
+        root.join("src/index.ts"),
+        "import \"./huge\";\nimport { aKeep } from \"./a\";\nimport { bKeep } from \"./b\";\n\nexport const run = (): number => aKeep + bKeep;\n",
+    )
+    .expect("write entry module");
+
+    let envelope: serde_json::Value = serde_json::from_str(&run_fallow(
+        &root,
+        &root,
+        None,
+        &["fix", "--dry-run", "--format", "json"],
+    ))
+    .expect("fix envelope");
+
+    assert_eq!(
+        envelope["skipped_low_confidence_exports"], 2,
+        "three withheld exports across two files count as two files: {envelope}"
+    );
+
+    let entries = envelope["fixes"].as_array().expect("fix entries");
+    assert_eq!(entries.len(), 2, "one entry per file: {envelope}");
+    for entry in entries {
+        assert_eq!(entry["type"], "skipped", "{entry}");
+        assert_eq!(
+            entry["skip_reason"], "low_confidence_incomplete_analysis",
+            "{entry}"
+        );
+        assert!(
+            entry.get("name").is_none() && entry.get("line").is_none(),
+            "a withheld export removal names no export and no line: {entry}"
+        );
+    }
+    assert_eq!(envelope["skipped_low_confidence_dependencies"], 0);
+    assert_eq!(envelope["skipped_low_confidence_members"], 0);
+}
+
+/// The review renderers read the finding's source line through `FALLOW_ROOT`,
+/// which does not follow `--root`. Without it a `--root` run renders neither
+/// the edit block nor the note that replaces one, so the compatibility entry
+/// has to name the variable rather than promise the note unconditionally.
+#[test]
+fn the_withheld_fix_note_needs_fallow_root_under_an_external_root() {
+    let dir = tempfile::tempdir().expect("temporary project");
+    let root = dir.path().join("project");
+    write_skipped_export_importer_project(&root);
+    let elsewhere = dir.path();
+
+    let without: serde_json::Value = serde_json::from_str(&run_fallow(
+        &root,
+        elsewhere,
+        None,
+        &["check", "--format", "review-github"],
+    ))
+    .expect("review envelope");
+    let body = without["comments"][0]["body"]
+        .as_str()
+        .expect("inline comment body");
+    assert!(
+        body.contains("caveat: incomplete import graph"),
+        "the caveat text does not depend on reading the source: {body}"
+    );
+    assert!(
+        !body.contains("```suggestion") && !body.contains("No one-click fix offered"),
+        "neither the block nor its replacement renders without `FALLOW_ROOT`: {body}"
+    );
+
+    let with: serde_json::Value = serde_json::from_str(&run_fallow(
+        &root,
+        elsewhere,
+        Some(&root),
+        &["check", "--format", "review-github"],
+    ))
+    .expect("review envelope");
+    let body = with["comments"][0]["body"]
+        .as_str()
+        .expect("inline comment body");
+    assert!(
+        body.contains("No one-click fix offered") && !body.contains("```suggestion"),
+        "with `FALLOW_ROOT` the note replaces the withheld block: {body}"
     );
 }

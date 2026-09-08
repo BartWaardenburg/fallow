@@ -36,9 +36,131 @@ These interfaces are covered by semver , breaking changes only happen in major v
 - **Audit brief focus score components**: `focus.review_here[].score.security_taint` and `focus.deprioritized[].score.security_taint` are now omitted from the wire while the component is zero, the same treatment `runtime` already had. It is a permanently zero component today (no security pass is threaded onto the brief path), and publishing it as a required field made it read as a measurement that found nothing rather than as something nothing measured. It reappears with a non-zero value if and when a security pass feeds the brief. A consumer that sums the components must read an ABSENT component as zero; `total` is unchanged and still equals the sum of every component that ran. This REMOVES a wire field on every run rather than adding an optional one, so it is not covered by the additive-field exemption: the `audit-brief` envelope shared by `fallow audit --brief --format json` and `fallow review --format json`, and the brief digest embedded in the review walkthrough guide, bump `schema_version` from 9 to 10. Schema 9 already introduced the impact-closure count and sample changes documented below. Consumers pinning the exact key set of `score` should widen it to treat both `security_taint` and `runtime` as optional.
 - **Audit and combined workspace diagnostics**: three envelopes report more in `workspace_diagnostics[]`, and a shared dedupe fix widens the list and programmatic envelopes on one project shape (issue #2366). `fallow audit --format json` and the `audit-brief` envelope shared by `fallow review --format json` and `fallow audit --brief --format json` carried the config-load workspace-discovery kinds and the source-discovery kinds under `dead_code.workspace_diagnostics[]`, and now additionally carry the two analysis-stage kinds (`malformed-pnpm-workspace-yaml`, `bun-lockb-override-resolution-skipped`) and `undeclared-workspace`, which the analyze pipeline appends after the config-load stash; a consumer pinning the exact set of kinds those two envelopes can emit should widen it by three, not two. The bare combined `fallow --format json` gained a NEW top-level `workspace_diagnostics[]`, an optional field absent when the run records no diagnostics, which is additive under the rule above; only there was the array previously always absent. The two audit-family paths are the same `CheckOutput` array the standalone `dead-code` envelope already documents. All three use root-relative paths, are deduplicated on the whole `kind` (payload included) plus `path` so two overlapping workspace globs still report the same directory once per pattern, and are omitted when empty; none bumps `schema_version`. The combined envelope's `check`, `dupes`, and `health` sections never carry the array. That payload-aware dedupe is shared, so two further surfaces report one entry more on a project where two workspace globs match the same package-less directory: bare `fallow list --format json`, and every envelope built from an engine session's diagnostics snapshot (the MCP `project_info`, `find_dupes`, and `check_health` tools plus the programmatic dead-code and combined routes). Those previously collapsed the two `glob-matched-no-package-json` entries into one and now agree with `fallow list --workspaces --format json`, which always reported both. Three consequences of the payload deciding identity: the recorded `pattern` drops a no-op `./` prefix (`"./apps/**"` is reported as `apps/**`, in the JSON field and in the warning text; a glob spelled exactly `"./"`, the project root itself, keeps its spelling); the recorded `path` drops the matching no-op `.` component, so one directory has one spelling on every envelope instead of `./pkgs/aaa` on the analysis envelopes next to `pkgs/aaa` on the workspace listing; and workspace discovery deduplicates before it returns, not only the process registry. Because `package.json` `workspaces`, `pnpm-workspace.yaml` `packages`, `deno.json` `workspace`, and the root `tsconfig.json` references are additive sources, a repository declaring one glob in two of them (the conventional pnpm layout) reported every package-less directory under it once per spelling and now reports it once, on `fallow dead-code`, `check`, `dupes`, `health`, `list --workspaces`, and `workspaces --format json`, through the MCP `project_info` tool, and under `dead_code` in `fallow audit` and `fallow review --format json`; the aggregated stderr warning, built from the same list, likewise names the true directory count with each example once, as do the `N workspace discovery diagnostics` summary line every human-format command prints and the per-entry block `fallow workspaces` and `fallow list --workspaces` print. SARIF, markdown, compact, badge, CodeClimate, and the cache format carry no workspace diagnostic and are unchanged. The two shapes are independent: the `./` normalisation alone changes the recorded `pattern`, `path`, and `message` on a repository that declares each glob once through one source, so a consumer pinning snapshots should expect movement whenever a manifest spells a workspace glob with a leading `./`, whether or not that glob is declared twice. The same fold covers a second shape on the same surfaces: a malformed workspace member reached through both an npm glob and a root `tsconfig.json` `references[]` entry reported one `malformed-package-json` diagnostic per source and now reports one in total. Two overlapping globs declared in one manifest still report the same directory once per `pattern`. No kind is new on any of these envelopes and no field changes type, so no `schema_version` moves; a consumer counting entries per directory should expect one per distinct matching pattern.
 - **`hotspot_summary` carries the clock its numbers were measured against**: `hotspot_summary.clock` is an additive optional object on the `health` envelope (and on the health block the audit and combined envelopes embed) with three required members: `source` (`environment`, `head_commit`, or `wall_clock`), `epoch_secs` (the reference instant in unix seconds), and `reproducible` (false only for `wall_clock`). Churn recency weighting, hotspot ranking, and ownership `stale_days` are all measured against one instant, and whether that instant is reproducible decides whether two runs over the same commit can be compared. The human report already said so in a stderr warning, which `--quiet` removes and a machine consumer never sees; the JSON consumer who most needs the answer was the one who could not get it. `head_commit` and `environment` (set via `FALLOW_CLOCK_EPOCH`) both resolve identically on every run over one commit; `wall_clock` is the fallback when no commit timestamp is readable, which is what imported churn (`--churn-file`) on a non-git tree hits. Pass `epoch_secs` back as `FALLOW_CLOCK_EPOCH` to reproduce a run's churn-derived numbers. The object is present whenever `hotspot_summary` is, and `hotspot_summary` is emitted whenever the run measured churn, which a default `fallow health --format json` over a git repository does; `--hotspots` adds the per-file `hotspots[]` listing beside it rather than gating the summary. So a health run over a git repository gains the `clock` key, and only a run with no readable git history (where `hotspot_summary` is absent entirely) stays byte-identical. No `schema_version` moves: nothing existing is renamed, removed, or retyped, no value joins an enum-valued required field, and no required field is added to a documented finding, which are the four conditions that bump. Treat the `source` value set as closed; it is the three resolution paths the clock has.
-- **Dead-code findings can carry a `reachability_caveats[]` array**: an entry in `unused_files[]`, `unused_exports[]`, `unused_types[]`, `unused_enum_members[]`, `unused_class_members[]`, `unused_dependencies[]`, `unused_dev_dependencies[]`, or `unused_optional_dependencies[]` on the `dead-code` and `dead-code-grouped` envelopes (and in the `dead_code` block the audit and combined envelopes embed) may carry an additive optional `reachability_caveats` array of kebab-case tokens. It records that the verdict was computed over an import graph fallow already knows is incomplete, because some source file's imports never reached the run. Five workspace diagnostics report that condition and all five raise the caveat: `source-parse-degraded` (read but did not parse cleanly), `source-read-failure` (discovered but could not be read), and `skipped-large-file` / `skipped-minified-file` / `skipped-source-dotdir` (never opened at all). The size skip is the one that fires at default settings: a 6 MB file whose first line imports a module is never read, so that import credits nothing and the module it named is reported unused. The key is deliberately NOT called `confidence`: `health --targets` already emits a `confidence` key holding an enum string, and a shared consumer helper meeting both would see one key change type. Two values exist today, and both name the consequence rather than any one cause. `incomplete-file-analysis` means this finding's own file is the one that was not fully analyzed (a degraded parse or a read failure), so the export list the "is any export of this file referenced from a reachable module" test reads may be truncated; a dependency finding never carries it, because the file it names is a `package.json` rather than a parsed module. `incomplete-import-graph` means a module whose import list feeds this verdict was not analyzed, so an import that would have credited this path or package may never have been seen. Which modules feed the verdict differs by array. `unused_files[]`, `unused_exports[]`, and `unused_types[]` rest on reachability, so a DEGRADED PARSE raises the token only when a degraded module is itself observed reachable, and soundly: the first missing edge on any entry-point path leaves from a module that is observed reachable. `unused_enum_members[]` and `unused_class_members[]` do not rest on reachability at all: member usage for both is collected by one walk over the member accesses of every module the run parsed, reachable or not, so any degraded parse anywhere raises the token there, the way it does for the dependency arrays. `unused_store_members[]` is the one member array that stays out, because no surface offers a mutation for a store member. A file the run never read gets no such narrowing and must not: it has no module and no graph node, so its reachability is not observable at all, and any skipped or unreadable source therefore caveats every reachability verdict in the run. The dependency arrays rest on whether ANY module imports the package specifier, reachable or not (fallow credits an import from an unreachable module), so reachability never narrows them and any unseen import anywhere raises the caveat. Neither value claims that a specific unseen file imports this path or package: an import the run never read is recorded nowhere, so the link cannot be narrowed further without reading and parsing the source. The array never withholds, filters, reorders, downgrades, or re-severities a finding, never trims its `actions`, and never changes an exit code; gating findings on parser errors or on a size skip is still refused, because oxc reports recoverable errors for valid syntax newer than the parser and the size guard exists to keep a single generated file from exhausting memory. What it DOES gate is the MUTATION, and it is now one gate rather than one rule per surface. A caveated finding reports `auto_fixable: false` on its mutating action (`delete-file`, `remove-export`, `remove-enum-member`, `remove-class-member`, `remove-dependency`) and carries the reason in that action's `note`; the action keeps its position in the array and the suppress alternative is untouched, so a consumer reading `actions[0].type` is unaffected. That flag now agrees with every mutation surface, which is the point: `fallow fix` withholds the removal as low confidence, the MCP `fix_preview` and `fix_apply` tools inherit that because they run it, and the LSP offers no `Remove unused export` and no `Delete this unused file` quick fix while a caveat stands. Previously `analyze` advertised `auto_fixable: true` on removals `fix` refused on the same project, so an agent following the documented actions contract planned writes the binary guaranteed would not happen. The withholding is intentional and exit-code-neutral, the same family as the off-graph export skip; the finding stays reported by `fallow dead-code` for manual confirmation. The array is omitted when empty, so a run that analyzed every file it discovered is byte-identical and no `schema_version` moves under the additive-field policy. Treat the value set as OPEN in the same sense as `workspace_diagnostics[].kind`: a consumer that does not recognise a token should read it as "some caveat" rather than as an error. The remaining issue arrays do not carry the array. The rendered surfaces that repeat it are inventoried in the next entry.
-- **`fallow fix` withholds mutations an incompletely analyzed file could have distorted**: when a dead-code finding carries `reachability_caveats`, `fix` declines the write instead of applying it. The per-file entry carries `skip_reason: "low_confidence_incomplete_analysis"` alongside the caveat tokens in its own `reachability_caveats` array, so a caller gates on the marker rather than parsing the reason string. The withholding is keyed on the presence of a caveat, never on which diagnostic produced it, so a future reason a source file goes unread inherits the protection without a fix-side change. Withheld export removals join the existing `skipped_low_confidence_exports` counter; withheld `remove-dependency` writes are counted by the additive sibling `skipped_low_confidence_dependencies`, and withheld member writes (`remove-enum-member` and `remove-class-member` alike) by `skipped_low_confidence_members` (both always present, `0` on a clean run), kept separate so no counter name lies about what it counts. An enum member needed its own counter because it is neither an export nor a dependency: a member is reported unused when no module the run PARSED accesses it, so a member whose only reference lives in an unread file reads as unused exactly like an export does, and `fix --yes` used to delete it. The withheld member is reported as its own `remove_enum_member` or `remove_class_member` entry with `applied: false`, `skipped: true`, the shared `skip_reason`, and its `reachability_caveats` tokens, matching the `remove_dependency` entry shape. A class member's removal is opened only by the type-aware sidecar proving closed-world eligibility, and only the members it had already approved are reported here, so a project with no semantic pass sees no new entries. That eligibility is proved over the program the sidecar could see, which is the program this run parsed, so it is not evidence the caveat lacks: `fix` now asks both questions instead of the sidecar's alone. Like the two low-confidence skips that preceded it this is INTENTIONAL: it does not change the exit code, and the finding stays reported by `fallow dead-code`.
-- **Every surface that recommends acting on a caveated finding names the caveat**: a finding whose reachability verdict rests on a file the run never fully read is still reported everywhere, unfiltered and with its `actions` array intact (the mutating action is downgraded to `auto_fixable: false`, never removed or reordered), but no surface offers, suggests, or performs its mutation without saying the evidence is incomplete. Every surface names the same caveat labels, resolved through one shared helper, so a finding is recognisable as the same finding across surfaces; the sentence each surface wraps them in fits that surface. CARRIES IT: `--format json` and the grouped, audit, and combined envelopes that embed it, through the `reachability_caveats[]` array itself; the human report, which appends a dimmed ` (caveat: <labels>)` to the finding line, or, where the directory rollup collapses the per-file lines, one section-level note counting the collapsed findings that carry one; `fallow check --summary`, which prints category counts and no finding lines, and so states the same note once under the totals; `--format sarif`, whose result message for the matching rules ends with the parenthetical; `--format codeclimate` and its `gitlab-codequality` alias, whose `description` ends with it, which is the string GitLab renders inline on the merge-request diff; `--format pr-comment-github`, `--format pr-comment-gitlab`, `--format review-github`, and `--format review-gitlab`, which all render from that same description, so the sticky summary comment and the inline review comment both state the caveat above their `Fix intent:` line. The two review formats do one thing more: they WITHHOLD the ```` ```suggestion ```` block on a caveated finding. That block is a mutation surface rather than part of the finding, because on GitHub it is one click from a commit on the contributor's branch and on GitLab one click from an applied change, and every other mutation surface already asks the same gate. The comment, its location, its fingerprint, and its caveat text are unchanged; in place of the edit block the body says `No one-click fix offered` and names `workspace_diagnostics[]` as what restores it. A run that analyzed every file it discovered keeps its edit block exactly as before; `--format github-annotations`, whose message ends with a `Caveat: <labels>.` sentence before the suggested command; `--format github-summary`, whose per-finding table row carries an italic `*(caveat: <labels>)*` inside an existing cell, so no table changes shape; `--format markdown`, the PR-comment document, with the same italic parenthetical on the finding line; `--format compact`, with a trailing `,caveat=<tokens>` field carrying the WIRE tokens rather than the prose labels, `+`-joined when a finding has more than one, appended after the existing colon-separated fields exactly as duplication records already append `,fingerprint=` and `,group=` (a parser splitting the leading `:` fields is unaffected); LSP diagnostics, whose message ends with the same parenthetical; and `fallow fix --format json`, whose withheld entry carries both `reachability_caveats` and `skip_reason: "low_confidence_incomplete_analysis"`. DOES NOT CARRY IT, and does not need to: `--format badge`, which `fallow check` refuses outright and which has no per-finding content on `fallow health`; and the `health`, `dupes`, and `security` envelopes, which contain no reachability verdicts. Adding the text to a description does NOT move any fingerprint: SARIF `partialFingerprints` and CodeClimate `fingerprint` are both computed from rule id plus location (or a normalized source snippet), never from the message, so a finding that gains or loses a caveat keeps its identity and no resolved review-comment thread reopens. Every one of these strings is absent when a run analyzed every file it discovered, so a clean run is byte-identical on every surface and no `schema_version` moves.
+- **Dead-code findings can carry `reachability_caveats[]`**: nine arrays
+  (`unused_files[]`, `unused_exports[]`, `unused_types[]`,
+  `unused_enum_members[]`, `unused_class_members[]`, `unused_store_members[]`,
+  `unused_dependencies[]`, `unused_dev_dependencies[]`,
+  `unused_optional_dependencies[]`) may carry an additive optional array of
+  kebab-case tokens. It appears on the `dead-code` and `dead-code-grouped`
+  envelopes, under `check` on the bare combined envelope, and under `dead_code`
+  on the audit brief. It records that the verdict rests on an import graph the
+  run already knows is incomplete, because some source file's imports were never
+  read. Five `workspace_diagnostics[]` kinds raise it: `source-parse-degraded`,
+  `source-read-failure`, `skipped-large-file`, `skipped-minified-file`, and
+  `skipped-source-dotdir`. The size skip is the one that fires at default
+  settings, at 5 MB.
+
+  Two tokens exist today: `incomplete-file-analysis`, meaning this finding's own
+  file was not fully analyzed, and `incomplete-import-graph`, meaning some module
+  feeding the verdict was not. Treat the set as open, the way
+  `workspace_diagnostics[].kind` is open: a token this build does not recognise
+  means "some caveat", not an error.
+
+  Which findings carry which. `unused_files[]`, `unused_exports[]` and
+  `unused_types[]` rest on reachability, so a degraded parse raises
+  `incomplete-import-graph` on them only when the degraded module is itself
+  reachable; a file the run never read raises it on all of them, because such a
+  file has no graph node and its reachability cannot be observed. The member and
+  dependency arrays rest on no reachability filter, so any incompletely analyzed
+  file raises the token on every one of them. A dependency finding never carries
+  `incomplete-file-analysis`, because the file it names is a `package.json`. No
+  other issue array carries the field.
+
+  What you must do: a caveated finding reports `auto_fixable: false` on its
+  mutating action (`delete-file`, `remove-export`, `remove-enum-member`,
+  `remove-class-member`, `remove-dependency`), with the reason in that action's
+  `note`. Plan against `auto_fixable`, not against the presence of the action.
+  Every mutation surface agrees with that flag: `fallow fix` withholds the write,
+  the MCP `fix_preview` and `fix_apply` tools inherit that because they run it,
+  and the LSP offers no `Remove unused export` and no `Delete this unused file`
+  quick fix while a caveat stands.
+
+  What stays the same: the finding is still reported, unfiltered, at the same
+  severity, with the same number of actions in the same order (`actions[0].type`
+  is unchanged) and its suppress alternative intact. Exit codes do not move. The
+  array is omitted when empty, so a run that read every file it discovered is
+  byte-identical and no `schema_version` moves. Store members carry the caveat as
+  disclosure only: no surface offers a mutation for one, so there is nothing to
+  withhold, but every surface that reports one still names it.
+- **`fallow fix` withholds a mutation whose finding carries a caveat**: the
+  write is declined, not attempted, and the decision is keyed on the presence of
+  a caveat rather than on which diagnostic produced it.
+
+  What you must do: gate on `skip_reason: "low_confidence_incomplete_analysis"`,
+  which appears on the entry alongside its own `reachability_caveats` array. Do
+  not parse the reason prose. Entry shapes differ by kind. A withheld dependency
+  is a `remove_dependency` entry and a withheld member a `remove_enum_member` or
+  `remove_class_member` entry, each with `applied: false` and `skipped: true` and
+  each naming what it would have removed. Withheld export removals are reported
+  as one `type: "skipped"` entry per file, naming no export and no line. The
+  counters follow that split: `skipped_low_confidence_dependencies` and
+  `skipped_low_confidence_members` count withheld entries, while
+  `skipped_low_confidence_exports` counts files, so three withheld exports across
+  two files report `2`. All three counters are always present and `0` on a clean
+  run.
+
+  What stays the same: the exit code, and the finding itself, still reported by
+  `fallow dead-code` for manual confirmation. A class member's removal is opened
+  only by the type-aware sidecar, so a project with no semantic pass sees no
+  `remove_class_member` entries at all.
+- **Every surface that recommends acting on a caveated finding names it**: the
+  finding ships everywhere, unfiltered, with its `actions` array intact; only the
+  mutation is withheld. All surfaces resolve the same labels through one shared
+  helper.
+
+  Where the text appears:
+
+  - `--format json`, and the grouped, combined and audit envelopes: the
+    `reachability_caveats[]` array itself.
+  - human report: a dimmed ` (caveat: <labels>)` on the finding line, or, above
+    the directory-rollup threshold, one section-level note counting the collapsed
+    findings that carry one. `fallow check --summary` prints the same note once
+    under the totals.
+  - `--format sarif`: appended to the result message.
+  - `--format codeclimate` and its `gitlab-codequality` alias: appended to
+    `description`, which is the string GitLab renders inline on the merge-request
+    diff. `pr-comment-github`, `pr-comment-gitlab`, `review-github` and
+    `review-gitlab` all render from that description and inherit it.
+  - `--format github-annotations`: appended to the end of the message, as a
+    `Caveat: <labels>.` sentence and one line of explanation, after the
+    remediation guidance.
+  - `--format github-summary` and `--format markdown`: an italic
+    `*(caveat: <labels>)*` inside the existing cell or finding line, so no table
+    changes shape.
+  - `--format compact`: a trailing `,caveat=<tokens>` field carrying the wire
+    tokens rather than the prose labels, `+`-joined for more than one, appended
+    after the colon-separated fields as `,fingerprint=` and `,group=` already are.
+  - LSP diagnostics: the same parenthetical at the end of the message.
+  - `fallow fix --format json`: `reachability_caveats` plus `skip_reason`.
+
+  All three member arrays render it, `unused_store_members[]` included. Store
+  members reached the JSON wire first and were rendered bare everywhere else, so
+  a degraded run reported a caveated enum member next to a bare store member and
+  the bare one read as better evidenced. A store-member finding on a degraded run
+  now carries the same text as the enum and class members beside it on the human
+  report and its `--summary` note, SARIF, CodeClimate (and the four PR-comment and
+  review formats that render from its `description`), markdown, compact,
+  `github-summary`, `github-annotations`, and LSP diagnostics. Class-member
+  `github-annotations` gained it in the same pass. No envelope changes shape and
+  no `schema_version` moves; a run that read every file it discovered is
+  byte-identical.
+
+  What you must do: `review-github` and `review-gitlab` withhold the
+  ```` ```suggestion ```` block on a caveated finding wherever they would
+  otherwise have rendered one, and print `No one-click fix offered` in its place,
+  pointing at `workspace_diagnostics[]`. Automation that applies review
+  suggestions therefore has nothing to apply on such a finding. Both the block
+  and its replacement need the finding's source line, which these renderers read
+  under `FALLOW_ROOT` (default: the working directory), so a run that passes
+  `--root` without setting `FALLOW_ROOT` renders neither.
+
+  What stays the same: `--format badge` carries no per-finding content (and
+  `fallow check` refuses the format outright), and the `health`, `dupes` and
+  `security` envelopes contain no reachability verdicts. SARIF
+  `partialFingerprints` and CodeClimate `fingerprint` are computed from rule id
+  and location, never from the message, so a finding that gains or loses a caveat
+  keeps its identity and no resolved review thread reopens. Every string above is
+  absent on a run that read every file it discovered.
 - **Workspace-listing diagnostic paths**: `workspace_diagnostics[].path` on the `list-workspaces` envelope (`fallow workspaces --format json`, `fallow list --workspaces --format json`, `fallow list --format json`, and the MCP `project_info` tool) is now project-root-relative with forward slashes, matching the `workspaces[].path` field beside it. It previously emitted the absolute filesystem path, the one place in any fallow JSON envelope that did. The field's type is unchanged, so no `schema_version` moves; a consumer that treated this one path as absolute must join it onto the project root. A path outside the project root stays absolute.
 - **Document-root structure**: every object-shaped `--format json` envelope covered by the typed root schema (`FallowOutput`) carries a top-level `kind` discriminator. Consumers should branch on `kind` instead of probing for unique field presence. The authoritative set of typed root kinds lives in `docs/output-schema.json`; the factual list below is checked against that schema manifest:
   <!-- fallow-output-kind-list:start -->
@@ -59,6 +181,7 @@ These interfaces are covered by semver , breaking changes only happen in major v
 - **MCP resources gained two entries**: `fallow://schema/similar-code-snapshot` (static) and the `fallow://tools/{name}` template, which carries the per-flag detail (payload shapes, unit vocabularies, suppression placements) moved out of a tool's `tools/list` description. `fallow://tools` stays the terse one-line-per-tool catalogue. The `check_health` wire description is the first to be split this way; its content is preserved, relocated, and reachable at `fallow://tools/check_health`.
 - **MCP guide and trace refusals are distinguishable**: `fallow://tools/{name}` used to answer a misspelled name and a registered tool that simply has no guide with byte-identical bodies. A registered tool now returns `code: "no_tool_guide"` with `registered_tool: true`, and a name that is not a fallow MCP tool returns `code: "unknown_tool"` with `registered_tool: false`; both keep `nearest_matches`, `documented_tools`, and `index`. A caller that matched on `no_tool_guide` for any missing guide should widen to either code, or read `registered_tool`. Separately, the MCP `trace_error` tool stopped pre-validating an empty `trace` itself, so that refusal is the API's typed one: `code: "FALLOW_INVALID_TRACE_OPTIONS"`, a `help`, and `context: "trace_error"`, matching the oversized-trace refusal beside it. The message and `exit_code: 2` are unchanged.
 - **MCP shared parameter descriptions are one sentence**: the six parameters nearly every tool carries (`root`, `config`, `allow_remote_extends`, `workspace`, `no_cache`, `threads`) describe themselves in one sentence, worded identically on every tool that takes them, including the `symbol_impact` schema mirror that had drifted to its own phrasing. Two facts the trim removed are back, because each one bounded behavior the shortened sentence left undiscoverable: `allow_remote_extends` states again that it defaults to false and never grants process-global trust, the only statement bounding a trust-boundary flag, and `workspace` names the repo-relative path again, because patterns still match against both the package name and that path and the unmatched-pattern refusal lists only names. Only the `description` prose changed: no parameter was added, removed, renamed, retyped, or given a different default, no `schema_version` moves, and no request that was accepted before is refused now.
+- **MCP `max_output_bytes` describes the refusal it actually performs**: on the nineteen subprocess-backed tools that take it, the parameter's schema description said a response over the cap came back as `truncated` plus a preview. The behavior is and was a refusal: `isError`, `error: true`, `exit_code: 2`, and no analysis, which is what the output-limit entry above already records. An agent that lowered the cap to bound its context planned on a bounded result and got a full run that returned nothing. The description now says the call is REFUSED and names `isError` and `exit_code: 2`. The Code Mode `code_execute` parameter of the same name is a different cap on host-call output and keeps its own wording. Only the `description` prose changed: no parameter was added, removed, renamed, retyped, or given a different default, no behavior changed, no `schema_version` moves, and every request accepted before is accepted now.
 
 
 #### Cyclomatic metric populations
@@ -233,6 +356,32 @@ When a stable interface needs to change:
 ## Notable behavior changes within v3
 
 These are documented for the rare CI script that depended on the old behavior. None require a config migration.
+
+- **Every SARIF result in one run now carries its own
+  `partialFingerprints` value.** GitHub code scanning treats that value as
+  alert identity, so two results sharing one were shown as a single alert and
+  the second finding was never surfaced. The value was rule id plus URI plus a
+  normalized source snippet, which is identical for two findings of the same
+  rule on the same line: every re-export in a one-line barrel, every member of
+  a one-line enum, and every dependency in a compact `package.json` collapsed
+  into one alert. CodeClimate never had this, because it keys a dependency on
+  the package name. Two things changed. The 1-based start column now takes part
+  in the value, next to the snippet, exactly as it already did on the path with
+  no snippet; the line still does not, so a finding that an edit above it moves
+  keeps its identity and no triaged alert reopens. And a dependency result now
+  reports the column of its own key inside the manifest line instead of a
+  constant `1`, which is both what makes the fingerprints differ and a more
+  accurate location for the annotation GitHub renders. A run-level pass then
+  guarantees the property outright: where two results still compute the same
+  value, such as a file that declares the same export twice with byte-identical
+  text, the first keeps the value it computed and each repeat mixes in its
+  occurrence index. Consumers that stored fingerprints from an earlier version
+  see each affected alert close and reopen once; the format, the keys, and the
+  16-hex shape are unchanged, and no `schema_version` moves. In a `package.json`
+  written on one line a dependency's snippet is the whole file, so editing any
+  dependency there still moves the others' fingerprints; a manifest with one
+  dependency per line, which is what every package manager writes, is
+  unaffected.
 
 - **`fallow fix --format json` reports the manifest of a `remove_dependency`
   entry as a project-relative path.** The entry's `file` field carried the

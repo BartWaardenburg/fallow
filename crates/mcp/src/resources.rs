@@ -398,41 +398,25 @@ fn hex_pair(high: u8, low: u8) -> Option<u8> {
     u8::try_from(digit(high)? * 16 + digit(low)?).ok()
 }
 
-/// Explain URIs for the issue types closest to an unknown token: shared
-/// kebab-case words first, then substring overlap, then common prefix.
+/// Explain URIs for the issue types closest to an unknown token.
+///
+/// Rule ids are kebab-case word lists, so the shared word-aligned scorer in
+/// [`crate::nearest`] ranks them, exactly as it ranks the snake_case tool
+/// names above. All this adds is the namespace a caller may have typed
+/// (`fallow/unused-exports`, `security/sql-injection`) and a leading `--`
+/// copied off a CLI flag: `/` is not a word separator the scorer splits on,
+/// so a namespaced token would otherwise align its first word against
+/// `fallow/unused` and match nothing.
 fn nearest_explain_uris(token: &str) -> Vec<String> {
-    let normalized = token.trim().to_ascii_lowercase().replace('_', "-");
-    let normalized = normalized
+    let normalized = token.trim().to_ascii_lowercase();
+    let bare_token = normalized
         .strip_prefix("fallow/")
         .or_else(|| normalized.strip_prefix("security/"))
         .unwrap_or(&normalized)
         .trim_start_matches("--");
-    let words: Vec<&str> = normalized.split('-').filter(|w| !w.is_empty()).collect();
-    let mut scored: Vec<(usize, &'static RuleDef)> = all_rules()
-        .filter_map(|rule| {
-            let bare = bare_rule_id(rule);
-            let shared_words = bare.split('-').filter(|word| words.contains(word)).count();
-            let substring = usize::from(
-                !normalized.is_empty() && (bare.contains(normalized) || normalized.contains(bare)),
-            );
-            let prefix = bare
-                .bytes()
-                .zip(normalized.bytes())
-                .take_while(|(left, right)| left == right)
-                .count();
-            let score = shared_words * 8 + substring * 4 + prefix;
-            (score > 0).then_some((score, rule))
-        })
-        .collect();
-    scored.sort_by(|left, right| {
-        right
-            .0
-            .cmp(&left.0)
-            .then_with(|| bare_rule_id(left.1).cmp(bare_rule_id(right.1)))
-    });
-    scored
+    let candidates: Vec<&'static str> = all_rules().map(bare_rule_id).collect();
+    nearest_names(bare_token, candidates, MAX_NEAREST_MATCHES)
         .into_iter()
-        .take(MAX_NEAREST_MATCHES)
-        .map(|(_, rule)| explain_uri(rule))
+        .map(|bare| format!("{EXPLAIN_URI_PREFIX}{bare}"))
         .collect()
 }

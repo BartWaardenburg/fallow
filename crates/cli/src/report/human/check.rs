@@ -876,7 +876,9 @@ fn build_unused_member_sections(
         root,
         max_files: max_grouped_files,
         get_path: |m| m.member.path.as_path(),
-        format_detail: &|m: &UnusedStoreMemberFinding| format_unused_member(&m.member, &[]),
+        format_detail: &|m: &UnusedStoreMemberFinding| {
+            format_unused_member(&m.member, &m.reachability_caveats)
+        },
     });
 }
 
@@ -2257,10 +2259,15 @@ fn unused_file_display_entries(
             .next()
             .map(|c| c.as_os_str().to_string_lossy().to_string());
         if first.as_deref() == Some(dom_dir) {
-            let sub_key = components.next().map_or_else(
-                || dom_dir.to_string(),
-                |c| format!("{}/{}", dom_dir, c.as_os_str().to_string_lossy()),
-            );
+            // The next component is a subdirectory only while something follows
+            // it. On `src/orphan.ts` it is the file itself, and labelling that
+            // as a directory printed `src/orphan.ts/`; the file belongs to the
+            // dominant directory.
+            let rest: Vec<_> = components.collect();
+            let sub_key = match rest.as_slice() {
+                [sub, _, ..] => format!("{}/{}", dom_dir, sub.as_os_str().to_string_lossy()),
+                _ => dom_dir.to_string(),
+            };
             if let Some(&idx) = sub_map.get(&sub_key) {
                 sub_counts[idx].1 += 1;
             } else {
@@ -3526,6 +3533,12 @@ fn summary_caveat_rollup(results: &AnalysisResults) -> (usize, Vec<ReachabilityC
         )
         .chain(
             results
+                .unused_store_members
+                .iter()
+                .map(|m| m.reachability_caveats.as_slice()),
+        )
+        .chain(
+            results
                 .unused_dependencies
                 .iter()
                 .map(|d| d.reachability_caveats.as_slice()),
@@ -4121,6 +4134,37 @@ mod tests {
         dep.reachability_caveats = vec![ReachabilityCaveat::IncompleteImportGraph];
         results.unused_dependencies.push(dep);
 
+        // All three member arrays are stamped by the same reachability-free
+        // access walk, so all three lines have to hedge.
+        let member = |parent: &str, name: &str, kind| UnusedMember {
+            path: root.join("src/lib.ts"),
+            parent_name: parent.to_string(),
+            member_name: name.to_string(),
+            kind,
+            line: 7,
+            col: 2,
+        };
+        let mut enum_member =
+            UnusedEnumMemberFinding::with_actions(member("Mode", "Legacy", MemberKind::EnumMember));
+        enum_member.reachability_caveats = vec![ReachabilityCaveat::IncompleteImportGraph];
+        results.unused_enum_members.push(enum_member);
+
+        let mut class_member = UnusedClassMemberFinding::with_actions(member(
+            "Widget",
+            "render",
+            MemberKind::ClassMethod,
+        ));
+        class_member.reachability_caveats = vec![ReachabilityCaveat::IncompleteImportGraph];
+        results.unused_class_members.push(class_member);
+
+        let mut store_member = UnusedStoreMemberFinding::with_actions(member(
+            "useCart",
+            "subtotal",
+            MemberKind::StoreMember,
+        ));
+        store_member.reachability_caveats = vec![ReachabilityCaveat::IncompleteImportGraph];
+        results.unused_store_members.push(store_member);
+
         let rules = RulesConfig::default();
         let text = plain(&build_human_lines(&results, &root, &rules, None));
 
@@ -4136,6 +4180,16 @@ mod tests {
             text.contains("lodash (caveat: incomplete import graph)"),
             "the dependency line must name the caveat: {text}"
         );
+        for expected in [
+            "Mode.Legacy (caveat: incomplete import graph)",
+            "Widget.render (caveat: incomplete import graph)",
+            "useCart.subtotal (caveat: incomplete import graph)",
+        ] {
+            assert!(
+                text.contains(expected),
+                "every member line must name the caveat, missing {expected}: {text}"
+            );
+        }
     }
 
     /// `--summary` prints category counts with no per-finding lines, so a CI
@@ -4166,12 +4220,13 @@ mod tests {
         );
     }
 
-    /// The rollup walks seven arrays, and two of them arrived through separate
-    /// merges. Counting a caveated type or enum member once per chained
-    /// iterator made the footnote over-report: on a fixture with one caveated
-    /// entry in each of the seven arrays it claimed nine. "N of these" is only
-    /// checkable against the full report while N is the number of findings the
-    /// report prints, so this pins one count per finding across all seven.
+    /// The rollup walks every stamped array, and two of them arrived through
+    /// separate merges. Counting a caveated type or enum member once per
+    /// chained iterator made the footnote over-report: on a fixture with one
+    /// caveated entry per array it claimed more than it printed. "N of these"
+    /// is only checkable against the full report while N is the number of
+    /// findings the report prints, so this pins one count per finding, with a
+    /// caveated entry in every array the rollup walks.
     #[test]
     fn the_summary_rollup_counts_each_caveated_finding_exactly_once() {
         let root = PathBuf::from("/project");
@@ -4213,6 +4268,28 @@ mod tests {
         member.reachability_caveats.clone_from(&caveat);
         results.unused_enum_members.push(member);
 
+        let mut class_member = UnusedClassMemberFinding::with_actions(UnusedMember {
+            path: root.join("src/widget.ts"),
+            parent_name: "Widget".to_string(),
+            member_name: "render".to_string(),
+            kind: MemberKind::ClassMethod,
+            line: 4,
+            col: 2,
+        });
+        class_member.reachability_caveats.clone_from(&caveat);
+        results.unused_class_members.push(class_member);
+
+        let mut store_member = UnusedStoreMemberFinding::with_actions(UnusedMember {
+            path: root.join("src/cart.ts"),
+            parent_name: "useCart".to_string(),
+            member_name: "subtotal".to_string(),
+            kind: MemberKind::StoreMember,
+            line: 6,
+            col: 2,
+        });
+        store_member.reachability_caveats.clone_from(&caveat);
+        results.unused_store_members.push(store_member);
+
         let dependency = |name: &str, location| UnusedDependency {
             package_name: name.to_string(),
             location,
@@ -4244,7 +4321,23 @@ mod tests {
 
         assert_eq!(
             check_summary_caveat_note(&results).as_deref(),
-            Some("(7 of these carry a caveat: incomplete import graph)")
+            Some("(9 of these carry a caveat: incomplete import graph)")
+        );
+
+        // Every finding above carries exactly one caveat, which makes "one per
+        // finding" and "one per caveat token" indistinguishable. A real run
+        // produces both tokens on one finding whenever the finding's own file
+        // is the degraded one, so stamp that shape and hold the same total:
+        // the count is of findings, and a finding with two caveats is still
+        // one line in the report the reader checks it against.
+        results.unused_files[0].reachability_caveats = vec![
+            ReachabilityCaveat::IncompleteFileAnalysis,
+            ReachabilityCaveat::IncompleteImportGraph,
+        ];
+        assert_eq!(
+            check_summary_caveat_note(&results).as_deref(),
+            Some("(9 of these carry a caveat: incomplete file analysis, incomplete import graph)"),
+            "a finding carrying both caveats must still be counted once"
         );
     }
 
@@ -4322,6 +4415,41 @@ mod tests {
                 "({expected} of these carry a caveat: incomplete import graph)"
             )),
             "the rollup must still surface the caveat: {text}"
+        );
+    }
+
+    /// The rollup labels a directory entry with a trailing slash. A file that
+    /// sits directly in the dominant directory has no subdirectory to group
+    /// under, and the split read its second path component regardless, so a
+    /// file name was labelled as though it were a directory: `src/orphan.ts/`.
+    /// It belongs to the dominant directory itself.
+    #[test]
+    fn the_dominant_directory_split_never_labels_a_file_as_a_directory() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        for index in 0..DIR_ROLLUP_THRESHOLD {
+            results
+                .unused_files
+                .push(UnusedFileFinding::with_actions(UnusedFile {
+                    path: root.join(format!("src/components/dead{index}.ts")),
+                }));
+        }
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: root.join("src/orphan.ts"),
+            }));
+
+        let rules = RulesConfig::default();
+        let text = plain(&build_human_lines(&results, &root, &rules, None));
+
+        assert!(
+            !text.contains("src/orphan.ts/"),
+            "a file must never be rendered as a directory: {text}"
+        );
+        assert!(
+            text.contains("src/  1 file"),
+            "the loose file counts under the directory it lives in: {text}"
         );
     }
 
