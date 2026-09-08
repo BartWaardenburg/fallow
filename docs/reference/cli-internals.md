@@ -127,6 +127,25 @@ an exit code.
   `attribution.duplication_demoted` and a per-group `demotion_reason` field;
   human output names the deciding diff source in the demotion note.
 
+## Compact health populations
+
+Compact health output keeps the existing `vital-signs:` payload unchanged and
+appends population rows immediately after it, in `functions`, `modules`, then
+`templates` order:
+
+```text
+cyclomatic-population:functions:count=1,sum=1,max=1
+cyclomatic-population:modules:count=1,sum=31,max=31
+cyclomatic-population:templates:count=0,sum=0,max=null
+```
+
+Each row mirrors the matching `vital_signs.cyclomatic_population` JSON group.
+Counts and sums are decimal integers; `max` is a decimal integer or literal
+`null`. A measured-empty group has `count=0,sum=0,max=null`. Older reports without
+population metadata emit no population rows. Sum the group sums and counts to
+reconstruct the cyclomatic mean; module scopes remain aggregate-only and do not
+produce function findings. These rows describe metrics, not findings.
+
 ## Viz lenses and availability
 
 `fallow viz` runs one engine-owned project analysis with complexity artifacts

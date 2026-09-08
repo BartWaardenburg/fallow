@@ -738,6 +738,26 @@ fn push_vital_signs_compact(lines: &mut Vec<String>, report: &fallow_output::Hea
             parts.push(format!("unused_dep_count={v}"));
         }
         lines.push(format!("vital-signs:{}", parts.join(",")));
+        push_cyclomatic_population_compact(lines, vs);
+    }
+}
+
+fn push_cyclomatic_population_compact(lines: &mut Vec<String>, vs: &fallow_output::VitalSigns) {
+    let Some(population) = &vs.cyclomatic_population else {
+        return;
+    };
+    for (kind, group) in [
+        ("functions", &population.functions),
+        ("modules", &population.modules),
+        ("templates", &population.templates),
+    ] {
+        let max = group
+            .max
+            .map_or_else(|| "null".to_string(), |value| value.to_string());
+        lines.push(format!(
+            "cyclomatic-population:{kind}:count={},sum={},max={max}",
+            group.count, group.sum
+        ));
     }
 }
 
@@ -1285,6 +1305,77 @@ mod tests {
         assert_eq!(
             lines[1],
             "vital-signs:total_loc=120,avg_cyclomatic=3.4,p90_cyclomatic=8"
+        );
+        assert!(
+            lines
+                .iter()
+                .all(|line| !line.starts_with("cyclomatic-population:"))
+        );
+    }
+
+    #[test]
+    fn health_compact_population_rows_preserve_vital_signs_and_order() {
+        let root = PathBuf::from("/project");
+        let vitals = fallow_output::VitalSigns {
+            avg_cyclomatic: 16.0,
+            p90_cyclomatic: 31,
+            ..Default::default()
+        };
+        let legacy = build_health_compact_lines(
+            &fallow_output::HealthReport {
+                vital_signs: Some(vitals.clone()),
+                ..Default::default()
+            },
+            &root,
+        );
+        let report = fallow_output::HealthReport {
+            vital_signs: Some(fallow_output::VitalSigns {
+                cyclomatic_population: Some(fallow_output::CyclomaticPopulation {
+                    functions: fallow_output::CyclomaticUnitPopulation {
+                        count: 1,
+                        sum: 1,
+                        max: Some(1),
+                    },
+                    modules: fallow_output::CyclomaticUnitPopulation {
+                        count: 1,
+                        sum: 31,
+                        max: Some(31),
+                    },
+                    templates: fallow_output::CyclomaticUnitPopulation::default(),
+                }),
+                ..vitals
+            }),
+            ..Default::default()
+        };
+        let lines = build_health_compact_lines(&report, &root);
+        assert_eq!(lines[0], legacy[0]);
+        assert_eq!(
+            &lines[1..],
+            [
+                "cyclomatic-population:functions:count=1,sum=1,max=1",
+                "cyclomatic-population:modules:count=1,sum=31,max=31",
+                "cyclomatic-population:templates:count=0,sum=0,max=null",
+            ]
+        );
+    }
+
+    #[test]
+    fn health_compact_measured_empty_populations_keep_null_maxima() {
+        let report = fallow_output::HealthReport {
+            vital_signs: Some(fallow_output::VitalSigns {
+                cyclomatic_population: Some(fallow_output::CyclomaticPopulation::default()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let lines = build_health_compact_lines(&report, &PathBuf::from("/project"));
+        assert_eq!(
+            &lines[1..],
+            [
+                "cyclomatic-population:functions:count=0,sum=0,max=null",
+                "cyclomatic-population:modules:count=0,sum=0,max=null",
+                "cyclomatic-population:templates:count=0,sum=0,max=null",
+            ]
         );
     }
 
