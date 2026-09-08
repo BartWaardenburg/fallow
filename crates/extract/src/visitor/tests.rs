@@ -1968,6 +1968,55 @@ fn destructured_class_member_is_recorded_as_used() {
 }
 
 #[test]
+fn destructured_class_member_static_patterns_preserve_property_identity() {
+    for pattern in [
+        "{ bar: renamed }",
+        "{ bar = {} }",
+        "{ bar: renamed = {} }",
+        "{ bar: { nested } }",
+        "{ ['bar']: renamed }",
+    ] {
+        let info = parse(&format!(
+            "class Foo {{ bar = {{ nested: 0 }}; unused = 1; }}
+             const foo = new Foo(); const alias = foo;
+             const {pattern} = (alias as Foo);"
+        ));
+        assert!(
+            info.member_accesses
+                .iter()
+                .any(|access| access.object == "Foo" && access.member == "bar"),
+            "pattern {pattern} must credit the source property"
+        );
+        assert!(
+            !info.member_accesses.iter().any(|access| {
+                access.object == "Foo"
+                    && matches!(access.member.as_str(), "unused" | "nested" | "renamed")
+            }),
+            "pattern {pattern} must not attribute a binding or nested key to Foo"
+        );
+        assert!(!info.whole_object_uses.iter().any(|name| name == "Foo"));
+    }
+}
+
+#[test]
+fn destructured_class_member_opaque_patterns_credit_whole_instance() {
+    for pattern in ["{ bar, ...rest }", "{ [key]: selected }"] {
+        let info = parse(&format!(
+            "class Foo {{ bar = 0; other = 1; }}
+             const foo = new Foo(); const key = getKey();
+             const {pattern} = foo;"
+        ));
+        assert!(
+            info.whole_object_uses.iter().any(|name| name == "Foo"),
+            "pattern {pattern} may consume every member"
+        );
+        assert!(!info.member_accesses.iter().any(|access| {
+            access.object == "Foo" && matches!(access.member.as_str(), "key" | "selected" | "rest")
+        }));
+    }
+}
+
+#[test]
 fn skips_private_and_protected_members() {
     let info = parse(
         r"

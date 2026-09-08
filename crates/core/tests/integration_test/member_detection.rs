@@ -3,6 +3,24 @@ use super::common::{create_config, create_config_with_ignore_decorators, fixture
 const DIRECT_OBJECT_TARGET_CAP: usize = 4096;
 
 #[test]
+fn destructured_class_members_credit_reads_and_opaque_patterns() {
+    let config = create_config(fixture_path("destructured-class-members"));
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let mut unused: Vec<(&str, &str)> = results
+        .unused_class_members
+        .iter()
+        .map(|item| {
+            (
+                item.member.parent_name.as_str(),
+                item.member.member_name.as_str(),
+            )
+        })
+        .collect();
+    unused.sort_unstable();
+    assert_eq!(unused, [("Foo", "unused")]);
+}
+
+#[test]
 fn enum_class_members_detects_unused_members() {
     let root = fixture_path("enum-class-members");
     let config = create_config(root);

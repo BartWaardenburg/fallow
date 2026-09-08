@@ -1034,7 +1034,11 @@ use crate::MemberKind;
 /// accesses, qualified constructors, and exported object instance properties
 /// now produce additional member accesses or semantic facts. Warm 286 caches
 /// lack those facts and would retain the false unused-class-member findings.
-pub(super) const CACHE_VERSION: u32 = 287;
+///
+/// Bumped to 288 for issue #2560: destructuring a known class instance now
+/// records member reads and conservative whole-object uses. Warm 287 caches
+/// lack these facts and would retain false unused-class-member findings.
+pub(super) const CACHE_VERSION: u32 = 288;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
