@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788868431856,
+  "lastUpdate": 1788881187940,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "73b67a1083e0156bb4e635609ca8e51eca0f886f",
-          "message": "fix(ci): initialize Windows pnpm cache store",
-          "timestamp": "2026-08-24T17:35:08+02:00",
-          "tree_id": "524337a451ed4ac78c35dcd02b168f1535c17d92",
-          "url": "https://github.com/fallow-rs/fallow/commit/73b67a1083e0156bb4e635609ca8e51eca0f886f"
-        },
-        "date": 1787586063718,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.7,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/c178aafaa0545cf499c9b9cc9a2f32cdd0b33843"
         },
         "date": 1788868428174,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.5,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bartwaardenburg@gmail.com",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "1c8b422fa93c14b8d6a047f5749d2c54a5717061",
+          "message": "fix: explain cyclomatic populations in compact health output (#2589)\n\nfix: disclose populations in compact health output",
+          "timestamp": "2026-09-08T17:15:19+02:00",
+          "tree_id": "9b51140d2a25bc08a0f388cd34c2adff588d8989",
+          "url": "https://github.com/fallow-rs/fallow/commit/1c8b422fa93c14b8d6a047f5749d2c54a5717061"
+        },
+        "date": 1788881183940,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
