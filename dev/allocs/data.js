@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788884337446,
+  "lastUpdate": 1788900281417,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "cbd9cf4b5d8507f8a4d7b49e964c4b76eca2e894",
-          "message": "fix(extract): keep non-exported namespace members out of file-level exports\n\n## What was broken\n\nA namespace declared without the `export` keyword had its inner `export` declarations recorded as file-level exports. For the issue's snippet\n\n```ts\n// src/ns.ts\nnamespace Foo {\n  export const inner = 1;\n}\nexport {};\n```\n\n`fallow dead-code` reported `inner` as an unused export with an auto-fixable remove-export action. Following that advice removes `inner` from the namespace's public surface and breaks every consumer of `Foo.inner`. The same leak hit `declare namespace Foo {}`, legacy `module Foo {}`, dotted `namespace A.B.C {}`, a namespace exported from inside a local namespace, and a local namespace exported afterwards through `export { Foo }` or `export = Foo` (its members were reported unused even while a consumer used `Foo.member`).\n\n## Root cause\n\n`namespace_depth` is only raised inside `visit_export_named_declaration`, so a `TSModuleDeclaration` reached as a plain statement never entered namespace mode and its inner `export` statements fell through to the file-level export recorder. Re-using `namespace_depth` for these bodies was not an option: that path also routes inner declarations into `pending_namespace_members`, which expects an exported owner to attach them to, and a local namespace has none (TS2395 forbids merging a local namespace with an exported declaration of the same name).\n\n## The fix\n\nEarliest incorrect layer is extraction. `ModuleInfoExtractor` gains a separate `local_namespace_depth` counter (documented on the field, issue #2356). `visit_ts_module_declaration` raises it for an identifier-named namespace reached while `namespace_depth == 0` and `ambient_module_depth == 0`, which is exactly a namespace without an exported owner: `export namespace Foo` raises `namespace_depth` before its declaration is walked, and `declare module '...'` raises `ambient_module_depth`. While the counter is non-zero, `visit_export_named_declaration` walks the statement without recording an export and without queueing namespace members, so imports referenced inside the body keep their credit and nested namespaces still reach the module-declaration arm. `namespace_depth` is untouched, so the scope-binding helpers treat the inner statements exactly as before.\n\nExported namespaces keep their existing member extraction, `declare module '<specifier>'` bodies keep the #2349 behaviour, and direct `declare global { export ... }` bodies keep today's behaviour (`declare global` is its own AST node and never enters the namespace arm). A namespace nested inside `declare global` (`declare global { namespace NodeJS { export interface ProcessEnv {} } }`) reaches the arm with no exported owner and now follows the local rule; previously `ProcessEnv` was reported as an unused type in a `.ts` file.\n\n## Behavior change\n\nNarrowing only: local namespace members stop producing `unused-export` and `unused-type` findings and their remove-export actions. Existing `fallow-ignore` suppressions placed above these declarations as a workaround surface as stale-suppression findings and can be removed. Genuinely unused exports next to a local namespace and unused exported namespaces keep reporting.\n\n## Cache invalidation\n\nBoth cache layers are bumped with doc comments naming #2356:\n\n- extract `CACHE_VERSION` 273 -> 274, so warm extraction caches re-extract the export set;\n- `GRAPH_CACHE_VERSION` 35 -> 36, because unused-export verdicts are read off the persisted export set.\n\nWarm-cache proof on the fixture, two debug binaries sharing one `.fallow` directory:\n\n1. origin/main binary, cold run: reports `inner`, `value`, `viaSpecifier`, `unusedSibling`, `Exported` and writes the cache.\n2. patched binary on that warm cache: reports only `unusedSibling` and `Exported`.\n3. second warm run of the patched binary: identical.\n4. origin/main binary again on the patched cache: its version gate rejects the newer cache and it replays its own stale result, confirming the verdict is version-gated rather than accidental.\n\n## How it was tested\n\n- Extract-level tests (all failed before the fix): the issue snippet, `declare namespace` with const/interface/type/function/class/enum members, legacy `module Foo {}`, dotted `namespace A.B.C {}`, `namespace A { export namespace B { ... } }` staying entirely local, body references keeping value and type import credit, and a namespace nested inside `declare global`.\n- Pins written before the code change: `export namespace Foo { ... }` still records one export with members `x`, `Bar`, `y`; direct `declare global { export ... }` bodies still record file-level exports.\n- Integration test on fixture `issue-2356-local-namespace`: `inner`, `viaSpecifier`, and `value` are not reported; `unusedSibling` and the unused exported namespace `Exported` still report; `helper` (only referenced inside a local namespace body) keeps its credit and `helper.ts` stays reachable.\n- Mutation matrix: with the non-test source hunks stashed, the seven extract repro tests and the integration test fail; the two pins pass by design.\n- CLI run of the issue's exact snippet with the patched binary: no findings (baseline reported `inner` with an auto-fixable remove-export action).\n- Real-project smokes: `dead-code --format json` with the baseline and patched binaries on the in-repo viz-frontend and editors/vscode projects, both complete cleanly with no finding differences (neither project declares a non-exported namespace).\n- Gates: cargo fmt check, clippy workspace with warnings denied, workspace tests (`--lib --bins --tests --examples`), bench check, cargo doc with warnings denied, typos, hidden-unicode scan, and comment-quality check.\n\nFixes #2356",
-          "timestamp": "2026-08-22T10:00:23+02:00",
-          "tree_id": "42c1f9923d8ab608248d91b9c0ce9ce2a9095460",
-          "url": "https://github.com/fallow-rs/fallow/commit/cbd9cf4b5d8507f8a4d7b49e964c4b76eca2e894"
-        },
-        "date": 1787385996319,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9716299,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 49221,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1177098,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8403,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8489,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "e5e92c787465f81e6fcd8f84a33be5b7f6ee93ac",
+          "message": "fix: make the caveat reach every surface, and the gates that guard it fail\n\n* fix: disclose incomplete evidence on unused store members\n\nEight of the nine dead-code finding types tell a reader when their verdict\nrests on a file the run never fully read. Store members were the ninth, left\nout on the argument that they expose no mutation on any surface.\n\nThat argument is correct and still holds: a store member has no `Fix` action,\nno LSP code action, and `store_members_never_offer_unverified_line_deletions`\npins the absent review suggestion. There is nothing here to withhold.\n\nBut the caveat is a disclosure before it is a gate. A reader deciding by hand\nwhether to delete a store member deserves the same hint as the eight arrays\nbeside it, and a run that reports eight caveated findings and one bare one\nreads as though the bare one were better evidenced.\n\nStore members take the member rule unchanged, the same one class and enum\nmembers take: member usage is collected by one walk over the accesses of every\nmodule the run parsed, reachable or not, so any module analyzed incompletely\ncan hold the access that credits it.\n\nThe added test asserts the disclosure and the absence of a mutation together,\nso if a store-member mutation is ever introduced the gate has to be reasoned\nabout rather than inherited silently.\n\nThe field is additive-optional and absent on a clean run, so no envelope moves.\n\n* fix: make the caveat reach every surface, and the gates that guard it fail\n\nA slop audit of the output-honesty work, four reviewers on disjoint domains,\neach building their own binaries and reproducing before reporting.\n\nThe store-member caveat reached the JSON wire and almost nothing else. Eight\nrender sites hardcoded an empty caveat slice in the store-member branch, left\nfrom before store members were registered, and because the four pr-comment and\nreview formats render from the CodeClimate description, that one site cascaded\ninto all four. Nine of eleven surfaces. The eighth site was not in the reported\nlist: the human summary rollup chained eight arrays and omitted the ninth, so\n`--summary` undercounted.\n\nIt shipped green because no fixture on any of those surfaces built a member\nfinding carrying a caveat. The fixtures now do, everywhere, so the class cannot\nreturn silently.\n\nTwo gates could not fail. `every_machine_consumed_format_carries_the_caveat`\nomitted `sarif` from its list, the format GitHub code scanning ingests, so\ndeleting the caveat from every SARIF message left it green. The summary rollup\ntest gave each finding exactly one caveat, making per-token over-counting\nundetectable, though a finding whose own file is degraded really carries two.\nBoth now go red under the mutation that previously passed.\n\nThe MCP byte gate was measuring a number no commit ever had: the recorded mark\nwas arrived at by summing deltas by hand rather than running the gate, which\nleft the stale-headroom guard passing vacuously with a 602-byte dead zone. It\nis re-pinned from a real measurement, and the comment says how.\n\n`max_output_bytes` told agents that exceeding the cap returns a preview. It\nreturns a refusal. An agent lowering the cap to bound its context was planning\non a bounded result and getting a run that returns no data.\n\nNine claims in the compatibility document and changelog were falsified by\nrunning what they described, including the combined envelope having no\n`dead_code` block, a counter documented as counting removals that counts files,\nand a changelog that still said store members stay out twenty lines from its\nown sentence saying they do not. The three entries are rewritten from about\n1790 words to about 875, structured as what changed, which findings, what you\nmust do, what stays the same, with the archaeology moved out.\n\nAlso: two dependency findings in one package.json shared a SARIF fingerprint,\nso GitHub collapsed two alerts into one; the human directory rollup labelled a\nfile as a directory; and four test names promised more than their bodies\nchecked.",
+          "timestamp": "2026-09-08T22:39:13+02:00",
+          "tree_id": "57ebe14e0632c954e383a18e842ee6a390cdcf3a",
+          "url": "https://github.com/fallow-rs/fallow/commit/e5e92c787465f81e6fcd8f84a33be5b7f6ee93ac"
+        },
+        "date": 1788900277803,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 9866502,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 50723,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1202018,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8436,
             "unit": "allocations"
           }
         ]
