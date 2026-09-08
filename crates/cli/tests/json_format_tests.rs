@@ -783,3 +783,48 @@ fn telemetry_status_json_uses_the_selected_presentation_style() {
         "--pretty should indent telemetry JSON"
     );
 }
+
+/// `--top` is a human-rendering knob and must never reach the JSON envelope.
+///
+/// Dead-code JSON drives exit codes and CI baselines, so a silently truncated
+/// array would let a passing baseline hide findings the run actually made. The
+/// flag stays inert here (the help text says "human output only") and a
+/// consumer slices the arrays itself.
+#[test]
+fn dead_code_json_carries_every_finding_regardless_of_top() {
+    let full = run_fallow(
+        "dead-code",
+        "basic-project",
+        &["--format", "json", "--quiet"],
+    );
+    let limited = run_fallow(
+        "dead-code",
+        "basic-project",
+        &["--format", "json", "--quiet", "--top", "1"],
+    );
+
+    let mut full_json: serde_json::Value =
+        serde_json::from_str(&full.stdout).expect("dead-code JSON should parse");
+    let mut limited_json: serde_json::Value =
+        serde_json::from_str(&limited.stdout).expect("dead-code --top JSON should parse");
+
+    assert!(
+        full_json["unused_exports"]
+            .as_array()
+            .expect("unused_exports should be an array")
+            .len()
+            > 1,
+        "fixture must report more than one unused export for --top to be able to truncate"
+    );
+
+    normalize_volatile_fields(&mut full_json);
+    normalize_volatile_fields(&mut limited_json);
+    assert_eq!(
+        limited_json, full_json,
+        "--top must not change the dead-code JSON envelope"
+    );
+    assert_eq!(
+        limited.code, full.code,
+        "--top must not change the dead-code exit code"
+    );
+}

@@ -77,7 +77,7 @@ pub struct CheckOutput {
     ///   `malformed-tsconfig`, `tsconfig-reference-dir-missing`;
     /// - source discovery, during the file walk: `skipped-large-file`,
     ///   `skipped-minified-file`, `skipped-source-dotdir`,
-    ///   `source-read-failure`;
+    ///   `source-read-failure`, `source-parse-degraded`;
     /// - dead-code analysis, from the dependency-catalog and override
     ///   detectors: `malformed-pnpm-workspace-yaml`,
     ///   `bun-lockb-override-resolution-skipped`.
@@ -88,6 +88,16 @@ pub struct CheckOutput {
     /// forward slashes; the array is omitted when empty. The same list is
     /// repeated on each top-level command's envelope so single-command
     /// consumers see it without having to look at a separate top-level field.
+    ///
+    /// A diagnostic here is advisory and never withholds a finding. Where an
+    /// entry reports a source file this run never fully analyzed
+    /// (`source-parse-degraded`, `source-read-failure`, `skipped-large-file`,
+    /// `skipped-minified-file`, `skipped-source-dotdir`) it can distort a
+    /// verdict, so the affected `unused_files[]`, `unused_exports[]`, and
+    /// dependency entries additionally carry the caveat themselves in their own
+    /// optional `reachability_caveats[]` array, and a reader who never scrolls
+    /// back up to this list still sees it. `fallow fix` reads the same array
+    /// and withholds the removal while a caveat stands.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
     /// Read-only follow-up commands computed from this run's findings, emitted
@@ -983,7 +993,7 @@ mod tests {
     use super::*;
     use crate::{ComplexityViolation, ExceededThreshold, FindingSeverity, HealthFinding};
     use fallow_types::output_dead_code::{
-        UnusedExportFinding, UnusedFileFinding, UnusedTypeFinding,
+        ReachabilityCaveat, UnusedExportFinding, UnusedFileFinding, UnusedTypeFinding,
     };
     use fallow_types::results::{UnusedExport, UnusedFile};
     use fallow_types::workspace::WorkspaceDiagnosticKind;
@@ -1149,6 +1159,85 @@ mod tests {
 
         assert_eq!(value["kind"], "dead-code");
         assert_eq!(value["_meta"]["telemetry"]["analysis_run_id"], "run-check");
+    }
+
+    /// The degraded-parse caveat has to travel WITH the finding it can distort,
+    /// because a reader looking at a `delete-file` action never sees the
+    /// diagnostic at the other end of the envelope. It is advisory about the
+    /// FINDING and decisive only about the MUTATION: the actions array keeps
+    /// its shape and its order, the mutating action reports
+    /// `auto_fixable: false`, and a clean finding stays byte-identical.
+    #[test]
+    fn reachability_caveats_are_absent_when_clean_and_named_when_flagged() {
+        let mut results = AnalysisResults::default();
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: "/project/src/clean.ts".into(),
+            }));
+        let mut flagged = UnusedFileFinding::with_actions(UnusedFile {
+            path: "/project/src/orphan.ts".into(),
+        });
+        flagged.reachability_caveats = vec![
+            ReachabilityCaveat::IncompleteFileAnalysis,
+            ReachabilityCaveat::IncompleteImportGraph,
+        ];
+        results.unused_files.push(flagged);
+
+        let output = build_check_output(CheckOutputInput {
+            schema_version: 7,
+            version: "0.0.0".to_string(),
+            elapsed: Duration::from_millis(1),
+            results,
+            config_fixable: false,
+            meta: None,
+            workspace_diagnostics: Vec::new(),
+            next_steps: Vec::new(),
+        });
+        let value = serialize_check_json_output(output, RootEnvelopeMode::Tagged, None)
+            .expect("dead-code output should serialize");
+
+        let entries = value["unused_files"]
+            .as_array()
+            .expect("unused_files array")
+            .clone();
+        let find = |name: &str| {
+            entries
+                .iter()
+                .find(|entry| {
+                    entry["path"]
+                        .as_str()
+                        .is_some_and(|path| path.ends_with(name))
+                })
+                .cloned()
+                .expect("finding present")
+        };
+
+        assert!(
+            find("clean.ts").get("reachability_caveats").is_none(),
+            "a finding with no caveat must keep the previous wire shape exactly"
+        );
+
+        let flagged = find("orphan.ts");
+        assert_eq!(
+            flagged["reachability_caveats"],
+            serde_json::json!(["incomplete-file-analysis", "incomplete-import-graph"]),
+            "both caveats are named on the wire, in declaration order"
+        );
+        assert_eq!(
+            flagged["actions"].as_array().map(Vec::len),
+            Some(2),
+            "the caveat never trims the finding's actions"
+        );
+        assert_eq!(
+            flagged["actions"][0]["type"], "delete-file",
+            "nor reorders them, so a consumer reading actions[0].type is unaffected"
+        );
+        assert_eq!(
+            flagged["actions"][0]["auto_fixable"],
+            serde_json::json!(false),
+            "but the mutation it gates must not advertise itself as applicable"
+        );
     }
 
     #[test]

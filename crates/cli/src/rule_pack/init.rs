@@ -54,11 +54,7 @@ struct SelectedTemplate {
 fn select_template(args: &InitArgs, output: OutputFormat) -> Result<SelectedTemplate, ExitCode> {
     let Some(template) = super::templates::by_name(&args.template) else {
         return Err(emit_error(
-            &format!(
-                "unknown rule-pack template '{}'; available templates: {}",
-                args.template,
-                available_template_names()
-            ),
+            &unknown_template_message(&args.template),
             2,
             output,
         ));
@@ -290,6 +286,22 @@ fn print_snippet(rel_path: &str) {
     println!("  \"rulePacks\": [\"{rel_path}\"]");
 }
 
+/// Refusal for a rule-pack template name that is not registered.
+///
+/// The template list is in hand at the refusal point, so a near miss names the
+/// template the caller meant rather than making them re-read the list.
+fn unknown_template_message(requested: &str) -> String {
+    let names = super::templates::TEMPLATES.iter().map(|t| t.name);
+    let suggestion = fallow_config::levenshtein::closest_match(requested, names)
+        .map_or_else(String::new, |nearest| {
+            format!(" (did you mean '{nearest}'?)")
+        });
+    format!(
+        "unknown rule-pack template '{requested}'{suggestion}; available templates: {}",
+        available_template_names()
+    )
+}
+
 fn available_template_names() -> String {
     super::templates::TEMPLATES
         .iter()
@@ -319,4 +331,28 @@ fn path_to_config_string(path: &std::path::Path) -> String {
 fn root_relative(root: &std::path::Path, path: &std::path::Path) -> String {
     path.strip_prefix(root)
         .map_or_else(|_| path_to_config_string(path), path_to_config_string)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::unknown_template_message;
+
+    #[test]
+    fn near_miss_template_names_the_template_the_caller_meant() {
+        let message = unknown_template_message("starterr");
+        assert!(
+            message.contains("did you mean 'starter'?"),
+            "near-miss template should be named: {message}"
+        );
+    }
+
+    #[test]
+    fn novel_template_stays_silent_rather_than_guessing() {
+        let message = unknown_template_message("kubernetes");
+        assert!(
+            !message.contains("did you mean"),
+            "a completely novel template must not get a misleading suggestion: {message}"
+        );
+        assert!(message.contains("available templates: "), "{message}");
+    }
 }

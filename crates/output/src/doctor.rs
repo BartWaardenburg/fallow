@@ -5,7 +5,12 @@ use fallow_types::envelope::{SchemaVersion, ToolVersion};
 use serde::Serialize;
 
 /// Current schema version for `fallow doctor --format json`.
-pub const DOCTOR_SCHEMA_VERSION: u32 = 1;
+///
+/// Bumped to 2 for the `dependencies`, `cache`, and `graph-cache` checks. All
+/// three are appended after the existing five, so the previous order is
+/// unchanged, but a consumer that enumerates `checks[]` sees three new `id`
+/// values.
+pub const DOCTOR_SCHEMA_VERSION: u32 = 2;
 
 /// Schema projection for the exact doctor envelope version.
 #[cfg(feature = "schema")]
@@ -64,6 +69,17 @@ pub enum DoctorCheckId {
     Plugins,
     /// Optional type-aware companion discovery.
     TypeAware,
+    /// Installed dependency tree availability.
+    Dependencies,
+    /// Persisted extraction-cache reuse.
+    Cache,
+    /// Persisted module-graph reuse.
+    ///
+    /// Separate from [`Cache`](Self::Cache) because a warm run reuses the two
+    /// blobs independently: the extraction cache can be perfectly reusable
+    /// while the graph is discarded on every run, and the graph is the larger
+    /// of the two on a real project.
+    GraphCache,
 }
 
 /// Stable category for a doctor check.
@@ -81,6 +97,8 @@ pub enum DoctorCheckCategory {
     Plugin,
     /// Optional companion readiness.
     Companion,
+    /// Warm-run readiness of persisted analysis state.
+    Cache,
 }
 
 /// Actionable remediation attached to a doctor check.

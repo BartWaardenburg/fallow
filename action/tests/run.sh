@@ -1378,6 +1378,33 @@ OUT_ONLY_SKIP=$(jq '.fixes = [.fixes[1]] | .total_fixed = 0' "$FIXTURES/fix.json
 assert_not_contains "$OUT_ONLY_SKIP" "No fixable issues found" "low-confidence-only run is not reported as clean"
 assert_contains "$OUT_ONLY_SKIP" "kept exports in 1 file" "low-confidence-only run surfaces the skip"
 
+# Every withholding counter has to reach the headline. A run whose only outcome
+# is a withheld dependency or enum member still puts entries in `fixes`, which
+# the analyze gate counts, so a summary that reads only the export counter
+# prints "No fixable issues found" under a job reporting fixable issues.
+FIX_DEP_WITHHELD='{
+  "dry_run": false,
+  "fixes": [{"type": "remove_dependency", "package": "lodash", "file": "package.json", "location": "dependencies", "skipped": true, "skip_reason": "low_confidence_reachability_caveat"}],
+  "total_fixed": 0, "skipped": 0,
+  "skipped_content_changed": 0, "skipped_mixed_line_endings": 0,
+  "skipped_low_confidence_exports": 0,
+  "skipped_low_confidence_dependencies": 1,
+  "skipped_low_confidence_members": 0
+}'
+OUT_DEP_WITHHELD=$(printf '%s' "$FIX_DEP_WITHHELD" | jq -r -f "$JQ_DIR/summary-fix.jq" 2>&1)
+assert_not_contains "$OUT_DEP_WITHHELD" "No fixable issues found" "withheld dependency is not reported as clean"
+assert_contains "$OUT_DEP_WITHHELD" "kept 1 declared package(s)" "withheld dependency reaches the headline"
+# A withheld removal is not a removal: listing it under the count table would
+# report a write that never happened.
+assert_not_contains "$OUT_DEP_WITHHELD" "Dependency removals | 1" "withheld dependency is not counted as removed"
+assert_not_contains "$OUT_DEP_WITHHELD" "lodash" "withheld dependency is not listed as removed"
+
+OUT_MEMBER_WITHHELD=$(printf '%s' "$FIX_DEP_WITHHELD" \
+  | jq '.skipped_low_confidence_dependencies = 0 | .skipped_low_confidence_members = 1 | .fixes[0].type = "remove_enum_member"' \
+  | jq -r -f "$JQ_DIR/summary-fix.jq" 2>&1)
+assert_not_contains "$OUT_MEMBER_WITHHELD" "No fixable issues found" "withheld enum member is not reported as clean"
+assert_contains "$OUT_MEMBER_WITHHELD" "kept 1 unused enum member(s)" "withheld enum member reaches the headline"
+
 echo "  summary-dupes.jq:"
 OUT=$(jq -r -f "$JQ_DIR/summary-dupes.jq" "$FIXTURES/dupes.json" 2>&1)
 assert_valid_markdown "$OUT" "produces output"
@@ -1436,6 +1463,31 @@ assert_contains "$FIRST_RANKED_INSTANCE" "z-distant-a.ts:1-10" "families show th
 
 OUT_CLEAN=$(jq -r -f "$JQ_DIR/summary-dupes.jq" "$FIXTURES/dupes-clean.json" 2>&1)
 assert_contains "$OUT_CLEAN" "No code duplication" "clean: no duplication"
+
+# A `--top`-capped envelope carries a truncated `clone_families[]` while `stats`
+# still describes the whole corpus. The families label must report the corpus,
+# like the header two lines above it, and must name what it is not showing.
+OUT_TOP_CAPPED=$(jq '
+  .stats.clone_groups = 9 | .stats.clone_families = 7
+  | .clone_families = [.clone_families[0]]
+  | .clone_groups_shown = 1 | .clone_groups_omitted = 8
+  | .clone_families_shown = 1 | .clone_families_omitted = 6
+' "$FIXTURES/dupes.json" | jq -r -f "$JQ_DIR/summary-dupes.jq" 2>&1)
+assert_contains "$OUT_TOP_CAPPED" "Clone Families (7)" "top-capped: families label reports the corpus, not the capped array"
+assert_not_contains "$OUT_TOP_CAPPED" "Clone Families (1)" "top-capped: capped array length is not the label"
+assert_contains "$OUT_TOP_CAPPED" "6 more families" "top-capped: names the families it does not show"
+assert_contains "$OUT_TOP_CAPPED" "withheld by a display limit" "top-capped: says the withholding happened before this report"
+
+OUT_TOP_CAPPED_GROUPS=$(jq '
+  .stats.clone_groups = 9 | .clone_families = []
+  | .clone_groups = [.clone_groups[0]]
+  | .clone_groups_shown = 1 | .clone_groups_omitted = 8
+' "$FIXTURES/dupes.json" | jq -r -f "$JQ_DIR/summary-dupes.jq" 2>&1)
+assert_contains "$OUT_TOP_CAPPED_GROUPS" "8 more groups" "top-capped groups branch: names the groups it does not show"
+
+# An untruncated run stays byte-identical: no omission tail at all.
+OUT_UNTRUNCATED=$(jq -r -f "$JQ_DIR/summary-dupes.jq" "$FIXTURES/dupes.json" 2>&1)
+assert_not_contains "$OUT_UNTRUNCATED" "withheld by a display limit" "untruncated run carries no omission tail"
 
 # clone_groups bullet branch (no clone_families): line ranges per group
 OUT_GROUPS=$(jq '.clone_families = []' "$FIXTURES/dupes.json" | jq -r -f "$JQ_DIR/summary-dupes.jq" 2>&1)
@@ -1595,6 +1647,19 @@ OUT_EMPTY_DUPES=$(jq '.dupes.clone_groups = [] | .dupes.clone_families = [] | .d
 assert_contains "$OUT_EMPTY_DUPES" "Quality gate passed" "combined: empty dupes groups keep clean summary"
 assert_contains "$OUT_EMPTY_DUPES" "No duplication" "combined: empty dupes groups render no duplication"
 assert_not_contains "$OUT_EMPTY_DUPES" "2 groups" "combined: nonzero dupes stats do not render actionable groups"
+
+# The other half of that invariant: an array a presentation cap truncated is
+# NOT the corpus. `clone_groups_omitted` counts only what a cap withheld (never
+# what a filter removed), so adding it keeps issue #1250 intact while a capped
+# combined envelope, if the bare command ever grows `--top`, still reports the
+# whole measurement instead of the visible slice.
+OUT_CAPPED_DUPES=$(jq '.dupes.clone_groups_omitted = 4' "$FIXTURES/combined.json" | jq -r -f "$JQ_DIR/summary-combined.jq" 2>&1)
+assert_contains "$OUT_CAPPED_DUPES" "clone group" "combined: capped dupes still render"
+OUT_CAPPED_ISSUES=$(jq -r '((.check.total_issues // 0) + (((.dupes.clone_groups // []) | length) + (.dupes.clone_groups_omitted // 0)) + (.health.summary.functions_above_threshold // 0))' <(jq '.dupes.clone_groups_omitted = 4' "$FIXTURES/combined.json"))
+OUT_UNCAPPED_ISSUES=$(jq -r '((.check.total_issues // 0) + (((.dupes.clone_groups // []) | length) + (.dupes.clone_groups_omitted // 0)) + (.health.summary.functions_above_threshold // 0))' "$FIXTURES/combined.json")
+[ "$OUT_CAPPED_ISSUES" = "$((OUT_UNCAPPED_ISSUES + 4))" ] \
+  && pass "combined gate: withheld clone groups reach the issue count" \
+  || fail "combined gate: withheld clone groups reach the issue count" "expected $((OUT_UNCAPPED_ISSUES + 4)), got '$OUT_CAPPED_ISSUES'"
 
 # Linkified cells engage when GH_REPO + PR_HEAD_SHA are set
 OUT_LINKED=$(GH_REPO="fallow-rs/fallow" PR_HEAD_SHA="abcdef1234567890" jq -r -f "$JQ_DIR/summary-combined.jq" "$FIXTURES/combined.json" 2>&1)
@@ -1788,6 +1853,24 @@ assert_contains "$OUT_ESCAPED_PATH" "file=src/a%25%2Cb%3Ac%0D%0Ad.ts" "check ann
 
 OUT_CLEAN=$(jq -r -f "$JQ_DIR/annotations-check.jq" "$FIXTURES/check-clean.json" 2>&1)
 [ -z "$OUT_CLEAN" ] && pass "clean: no annotations" || fail "clean: no annotations" "got output"
+
+# An annotation is the surface that suggests the mutation, so a finding whose
+# reachability verdict rests on a file the run never fully read must carry the
+# caveat here too. The token set is open: an unrecognised value is still a
+# caveat and must not be dropped.
+OUT_CAVEAT=$(jq '
+  .unused_files = [{"path": "src/orphan.ts", "actions": [], "reachability_caveats": ["incomplete-file-analysis", "incomplete-import-graph"]}]
+  | .unused_exports[0].reachability_caveats = ["incomplete-import-graph"]
+  | .unused_dependencies[0].reachability_caveats = ["incomplete-import-graph"]
+  | .unused_dev_dependencies = [{"path": "package.json", "line": 30, "package_name": "vitest", "actions": [], "reachability_caveats": ["some-future-caveat"]}]
+' "$FIXTURES/check.json" | jq -r -f "$JQ_DIR/annotations-check.jq" 2>&1)
+assert_contains "$OUT_CAVEAT" "Caveat: incomplete file analysis, incomplete import graph" "caveated unused file names both caveats"
+assert_contains "$OUT_CAVEAT" "verify before removing" "caveat hedges the suggested removal"
+assert_contains "$OUT_CAVEAT" "Caveat: some future caveat" "unrecognised caveat token is rendered, not dropped"
+CAVEAT_LINES=$(printf '%s\n' "$OUT_CAVEAT" | grep -c "Caveat: ")
+[ "$CAVEAT_LINES" = "4" ] && pass "caveat reaches exactly the caveated findings" \
+  || fail "caveat reaches exactly the caveated findings" "got ${CAVEAT_LINES} annotations with a caveat"
+assert_not_contains "$OUT" "Caveat:" "uncaveated run carries no caveat text"
 
 # Issue #449: kind_known: false branch renders a typo-fix annotation rather
 # than the "no longer matches any active issue" copy used for stale-but-known.

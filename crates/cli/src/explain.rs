@@ -25,10 +25,10 @@ pub(crate) fn run_explain(
     json_style: crate::json_style::JsonStyle,
 ) -> ExitCode {
     let Some(rule) = rule_by_token(issue_type) else {
-        return crate::error::emit_error(
-            &fallow_api::unknown_explain_error(issue_type).message,
-            2,
+        return crate::error::emit_programmatic_error(
+            &fallow_api::unknown_explain_error(issue_type),
             output,
+            json_style,
         );
     };
     let guide = rule_guide(rule);
@@ -38,12 +38,7 @@ pub(crate) fn run_explain(
                 outln!("{json}");
                 ExitCode::SUCCESS
             }
-            Err(error) => crate::error::emit_error_with_style(
-                &error.message,
-                error.exit_code,
-                output,
-                json_style,
-            ),
+            Err(error) => crate::error::emit_programmatic_error(&error, output, json_style),
         },
         OutputFormat::Human => print_explain_human(rule, &guide),
         OutputFormat::Compact => print_explain_compact(rule),

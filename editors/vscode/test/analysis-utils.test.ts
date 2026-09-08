@@ -92,6 +92,7 @@ const dupesResult = (
     total_tokens: 1000,
     duplicated_tokens: duplicationPercentage > 0 ? 100 : 0,
     clone_groups: cloneGroups,
+    clone_families: cloneGroups > 0 ? 1 : 0,
     clone_instances: cloneGroups * 2,
     duplication_percentage: duplicationPercentage,
     clone_groups_below_min_occurrences: 0,

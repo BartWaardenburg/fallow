@@ -42,6 +42,7 @@ LOCAL_ONLY_TARGETS = {
 }
 REQUIRED_FAST_TARGETS = {
     ("fallow-core", "analysis"),
+    ("fallow-core", "entry_point_discovery"),
     ("fallow-engine", "dupes_detect"),
     ("fallow-benchmarks", "programmatic_stable"),
     ("fallow-benchmarks", "representative_sources"),

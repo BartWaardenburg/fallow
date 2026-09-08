@@ -78,6 +78,28 @@ The report breaks down findings into three categories:
 
 The agreement percentage is calculated as `agreed / total_unique_issues * 100`.
 
+## Adjudication Register
+
+An agreement percentage on its own says nothing about who is right. Every
+disagreement row is therefore joined against `adjudications.json`, keyed on
+`(project, issue_type, path, export_name)`. A record carries a `verdict`
+(`fallow_wrong`, `knip_wrong`, or `model_difference`), a `cause` from the
+pipeline vocabulary the `debug-false-positive` skill uses, plus the
+`knip_version`, `corpus_ref`, `reviewed_on` date, and the tracking `issue`.
+
+The aggregated summary reports `adjudicated_fallow_wrong`,
+`adjudicated_knip_wrong`, `adjudicated_model_difference`, and `unadjudicated`.
+The four buckets partition the disagreements, so `unadjudicated` is the exact
+backlog nobody has reviewed. An unknown verdict, an unknown cause, a duplicate
+key, or a record missing a declared field is a hard error.
+
+Write the verdict before the fix. The `conformance-loop` skill records this as
+its own step because a classification that stays in a session or in the ignored
+`.plans/` directory is lost the moment the session ends.
+
+The register does not gate CI. The lane stays `continue-on-error: true` while
+the unadjudicated count settles.
+
 ## Issue Type Mapping
 
 | Fallow                    | Knip            |
@@ -100,7 +122,8 @@ The agreement percentage is calculated as `agreed / total_unique_issues * 100`.
 | `run.sh` | Single-project comparison (fallow vs knip) |
 | `run-all.sh` | Multi-project orchestrator (clone, run, aggregate) |
 | `compare.py` | Normalizes and compares tool outputs for one project |
-| `aggregate.py` | Combines per-project reports into overall summary |
+| `aggregate.py` | Combines per-project reports into overall summary, joined against the adjudication register |
+| `adjudications.json` | Reviewed verdicts and causes for individual disagreements |
 
 ## Aggregated JSON Report Schema
 
@@ -112,7 +135,11 @@ The agreement percentage is calculated as `agreed / total_unique_issues * 100`.
     "agreed": 100,
     "fallow_only": 50,
     "knip_only": 20,
-    "agreement_pct": 58.8
+    "agreement_pct": 58.8,
+    "adjudicated_fallow_wrong": 4,
+    "adjudicated_knip_wrong": 6,
+    "adjudicated_model_difference": 10,
+    "unadjudicated": 50
   },
   "projects": {
     "preact": { "fallow_total": 10, "knip_total": 8, "agreed": 6, ... },

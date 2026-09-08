@@ -18,6 +18,7 @@ mod partition_order;
 mod public_exports;
 mod re_exports;
 mod reachability;
+mod shortest_import_path;
 pub mod types;
 
 use std::path::Path;
@@ -50,6 +51,7 @@ pub use impact_closure::{
 pub use partition_order::{PartitionOrder, PartitionOrderPaths, ReviewUnit, ReviewUnitPaths};
 pub use public_exports::PublicExportOrigin;
 pub use re_exports::GraphReExportCycle;
+pub use shortest_import_path::ImportPathHop;
 pub use types::{
     ExportSymbol, ModuleNode, ReExportEdge, ReferenceKind, ReferencePathId, SymbolReference,
 };

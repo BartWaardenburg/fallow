@@ -12,7 +12,7 @@ use rmcp::model::{ErrorCode, ResourceContents, Role};
 
 use crate::resources::{list_resource_templates, list_resources, read_resource};
 
-const STATIC_URIS: [&str; 7] = [
+const STATIC_URIS: [&str; 8] = [
     "fallow://tools",
     "fallow://issue-types",
     "fallow://explain",
@@ -20,6 +20,7 @@ const STATIC_URIS: [&str; 7] = [
     "fallow://schema/config",
     "fallow://schema/plugin",
     "fallow://schema/rule-pack",
+    "fallow://schema/similar-code-snapshot",
 ];
 
 fn read_text(uri: &str) -> String {
@@ -54,7 +55,10 @@ fn catalogue_order_and_uris_are_pinned() {
         .iter()
         .map(|t| t.uri_template.clone())
         .collect();
-    assert_eq!(templates, ["fallow://explain/{issue_type}"]);
+    assert_eq!(
+        templates,
+        ["fallow://tools/{name}", "fallow://explain/{issue_type}"]
+    );
 }
 
 #[test]
@@ -269,10 +273,97 @@ fn schema_resources_equal_the_cli_schema_documents_plus_version() {
             "fallow://schema/rule-pack",
             fallow_api::schemas::rule_pack_schema(),
         ),
+        (
+            "fallow://schema/similar-code-snapshot",
+            fallow_api::schemas::similar_code_snapshot_schema(),
+        ),
     ] {
         let json = read_json(uri);
         assert_eq!(json, expected, "{uri} must be the CLI schema document");
     }
+}
+
+/// The guide template carries the per-flag prose the wire description no
+/// longer does, so every section that moved must still be reachable.
+#[test]
+fn tool_guide_template_serves_the_prose_kept_out_of_tools_list() {
+    let json = read_json("fallow://tools/check_health");
+    assert_eq!(json["tool"], "check_health");
+    let sections = json["sections"].as_array().expect("sections array");
+    let topics: BTreeSet<&str> = sections
+        .iter()
+        .filter_map(|section| section["topic"].as_str())
+        .collect();
+    for topic in [
+        "css",
+        "complexity_breakdown",
+        "react_hook_profile",
+        "vital_signs.render_fan_in",
+        "threshold_overrides",
+    ] {
+        assert!(topics.contains(topic), "guide missing {topic}: {topics:?}");
+    }
+    // The guide exists because the detail did not fit on the wire beside the
+    // summary. Assert that relationship rather than a character count, which a
+    // wording pass moves without changing what the resource is for.
+    for section in sections {
+        let summary = section["summary"].as_str().expect("section summary");
+        let detail = section["detail"].as_str().expect("section detail");
+        assert!(
+            detail.len() > summary.len(),
+            "a guide section must say more than the summary it expands: {section}"
+        );
+    }
+}
+
+/// The terse `fallow://tools` catalogue and the long-form guide are different
+/// channels; reading the catalogue must not start returning guide prose.
+#[test]
+fn tool_guide_prose_stays_out_of_the_tools_catalogue() {
+    let catalogue = read_text("fallow://tools");
+    let guide = read_json("fallow://tools/check_health");
+    let detail = guide["sections"][0]["detail"]
+        .as_str()
+        .expect("first section detail");
+    assert!(
+        !catalogue.contains(detail),
+        "fallow://tools must stay the one-line-per-tool catalogue"
+    );
+}
+
+#[test]
+fn misspelled_tool_guide_suggests_the_nearest_documented_tool() {
+    let error = read_resource("fallow://tools/check_helth").expect_err("unknown tool guide");
+    let data = error.data.expect("structured error data");
+    assert_eq!(data["code"], "unknown_tool");
+    assert_eq!(data["registered_tool"], false);
+    assert_eq!(
+        data["nearest_matches"],
+        serde_json::json!(["fallow://tools/check_health"])
+    );
+}
+
+/// A typo and a real tool that simply has no guide are different problems with
+/// different fixes. They used to return byte-identical bodies, so a caller
+/// could not tell "correct the name" from "stop looking, the description is
+/// the whole contract".
+#[test]
+fn a_typo_and_an_undocumented_tool_are_distinguishable() {
+    let undocumented =
+        read_resource("fallow://tools/fix_apply").expect_err("fix_apply has no guide");
+    let typo = read_resource("fallow://tools/totally_made_up").expect_err("not a tool");
+
+    let undocumented_data = undocumented.data.expect("structured error data");
+    let typo_data = typo.data.expect("structured error data");
+
+    assert_eq!(undocumented_data["code"], "no_tool_guide");
+    assert_eq!(undocumented_data["registered_tool"], true);
+    assert_eq!(typo_data["code"], "unknown_tool");
+    assert_eq!(typo_data["registered_tool"], false);
+    assert_ne!(
+        undocumented.message, typo.message,
+        "a registered tool with no guide must not read like a hallucinated name"
+    );
 }
 
 #[test]
@@ -327,9 +418,31 @@ fn unknown_uri_is_a_structured_resource_not_found_error() {
         assert_eq!(data["known_uris"], serde_json::json!(STATIC_URIS));
         assert_eq!(
             data["templates"],
-            serde_json::json!(["fallow://explain/{issue_type}"])
+            serde_json::json!(["fallow://tools/{name}", "fallow://explain/{issue_type}"])
         );
     }
+}
+
+#[test]
+fn near_miss_uri_names_the_resource_the_caller_meant() {
+    let error = read_resource("fallow://task-matrx").expect_err("unknown uri must fail");
+    assert!(
+        error
+            .message
+            .contains("did you mean 'fallow://task-matrix'?"),
+        "near-miss uri should be named: {}",
+        error.message
+    );
+}
+
+#[test]
+fn novel_uri_stays_silent_rather_than_guessing() {
+    let error = read_resource("file:///etc/passwd").expect_err("unknown uri must fail");
+    assert!(
+        !error.message.contains("did you mean"),
+        "a completely novel uri must not get a misleading suggestion: {}",
+        error.message
+    );
 }
 
 #[test]

@@ -42,16 +42,17 @@ pub fn filter_by_workspaces(
     rebuild_duplication_derived_fields(report, root);
 }
 
+/// Keep only the `n` highest-ranked clone groups.
+///
+/// `stats` is left describing the whole measured corpus: truncation is a
+/// presentation choice and `files_with_clones` / `duplication_percentage`
+/// never followed it, so rewriting `clone_groups` / `clone_instances` here
+/// produced one object with two scopes in it. The shown/omitted split is
+/// published separately on the envelope.
 pub fn apply_top(report: &mut DuplicationReport, n: usize, root: &Path) {
     report.sort();
     report.clone_groups.truncate(n);
     fallow_engine::duplicates::refresh_clone_families(report, root);
-    report.stats.clone_groups = report.clone_groups.len();
-    report.stats.clone_instances = report
-        .clone_groups
-        .iter()
-        .map(|group| group.instances.len())
-        .sum();
     report.sort();
 }
 
@@ -99,6 +100,7 @@ mod tests {
             total_tokens: 5_000,
             duplicated_tokens: 400,
             clone_groups: 2,
+            clone_families: 0,
             clone_instances: 4,
             duplication_percentage: 40.0,
             clone_groups_below_min_occurrences: 1,
@@ -116,8 +118,13 @@ mod tests {
 
         assert_eq!(report.clone_groups.len(), 1);
         assert_eq!(report.clone_groups[0].spread(), 2);
-        assert_eq!(report.stats.clone_groups, 1);
-        assert_eq!(report.stats.clone_instances, 2);
+        assert_eq!(
+            report.stats.clone_groups, 2,
+            "stats stays on the measured corpus so all four aggregates agree"
+        );
+        assert_eq!(report.stats.clone_instances, 4);
+        assert_eq!(report.clone_groups_shown(), 1);
+        assert_eq!(report.clone_groups_omitted(), 1);
         assert_eq!(report.stats.duplicated_lines, 400);
         assert_eq!(report.stats.duplicated_tokens, 400);
         assert!((report.stats.duplication_percentage - 40.0).abs() < f64::EPSILON);

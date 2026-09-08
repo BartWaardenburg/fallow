@@ -2,7 +2,9 @@ use std::ops::Range;
 use std::path::{Path, PathBuf};
 
 use fallow_config::OutputFormat;
-use fallow_types::output_dead_code::UnusedClassMemberFinding;
+use fallow_types::output_dead_code::{
+    MutationEvidence, ReachabilityCaveat, UnusedClassMemberFinding,
+};
 use fallow_types::semantic::{
     SemanticCandidateDecision, SemanticCandidateDecisionKind, SemanticEditGuard,
 };
@@ -29,6 +31,17 @@ struct PlannedMember<'a> {
 }
 
 /// Apply only API-approved, exact-span class-member fixes.
+///
+/// Eligibility is asked in two independent parts and both must hold. The
+/// sidecar's `closed_world_eligible` says the type-aware pass found no
+/// reference in the program it could see;
+/// [`MutationEvidence::may_auto_apply_mutation`] says this run actually read
+/// that program. They are not the same question: the sidecar's world is the
+/// set of files the run parsed, so a member whose only call site sits in a
+/// file the size guard skipped is absent from the closed world for exactly the
+/// reason it is absent from the syntactic verdict. Reading only the first flag
+/// is what let a caveated removal through here while `auto_fixable` on the
+/// same finding already said `false`.
 pub(super) fn apply_class_member_fixes(input: ClassMemberFixInput<'_>) {
     let ClassMemberFixInput {
         root,
@@ -41,17 +54,22 @@ pub(super) fn apply_class_member_fixes(input: ClassMemberFixInput<'_>) {
     } = input;
     let mut by_file: FxHashMap<PathBuf, Vec<&UnusedClassMemberFinding>> = FxHashMap::default();
     for finding in findings {
-        if finding.member.kind == fallow_types::extract::MemberKind::ClassMethod
-            && finding
+        if finding.member.kind != fallow_types::extract::MemberKind::ClassMethod
+            || !finding
                 .semantic
                 .as_ref()
                 .is_some_and(|decision| decision.closed_world_eligible)
         {
-            by_file
-                .entry(finding.member.path.clone())
-                .or_default()
-                .push(finding);
+            continue;
         }
+        if !finding.may_auto_apply_mutation() {
+            push_withheld_class_member_entry(root, finding, fixes);
+            continue;
+        }
+        by_file
+            .entry(finding.member.path.clone())
+            .or_default()
+            .push(finding);
     }
 
     for (path, findings) in by_file {
@@ -66,6 +84,41 @@ pub(super) fn apply_class_member_fixes(input: ClassMemberFixInput<'_>) {
             fixes,
         });
     }
+}
+
+/// Emit the skip entry for a class member the gate withheld. Mirrors the
+/// `remove_enum_member` entry: the shared `skip_reason` a caller already
+/// branches on, plus the caveat tokens, so nothing has to parse prose.
+///
+/// Only a member the sidecar had already approved reaches this, so the stream
+/// stays quiet on the ordinary case of a class member that was never
+/// auto-fixable to begin with.
+fn push_withheld_class_member_entry(
+    root: &Path,
+    finding: &UnusedClassMemberFinding,
+    fixes: &mut Vec<serde_json::Value>,
+) {
+    let relative = finding
+        .member
+        .path
+        .strip_prefix(root)
+        .unwrap_or(&finding.member.path);
+    let tokens: Vec<&str> = finding
+        .reachability_caveats
+        .iter()
+        .map(|caveat| ReachabilityCaveat::token(*caveat))
+        .collect();
+    fixes.push(serde_json::json!({
+        "type": "remove_class_member",
+        "path": relative.to_string_lossy().replace('\\', "/"),
+        "line": finding.member.line,
+        "parent": finding.member.parent_name,
+        "name": finding.member.member_name,
+        "applied": false,
+        "skipped": true,
+        "skip_reason": SkipReason::LowConfidenceIncompleteAnalysis.as_wire_str(),
+        "reachability_caveats": tokens,
+    }));
 }
 
 struct ClassMemberFileInput<'a> {

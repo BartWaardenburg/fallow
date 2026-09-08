@@ -704,7 +704,7 @@ fn unsupported_format_failure_sets_failure_reason() {
 }
 
 #[test]
-fn code_quality_review_reports_cold_then_partial_cache_state() {
+fn code_quality_review_reports_cold_then_warm_cache_state() {
     let dir = tempfile::tempdir().expect("temp project");
     write_cache_project(dir.path());
 
@@ -734,7 +734,12 @@ fn code_quality_review_reports_cold_then_partial_cache_state() {
         second_event["workflow"].as_str(),
         Some("code_quality_review")
     );
-    assert_eq!(second_event["cache_state"].as_str(), Some("partial"));
+    // Warm, not partial: a combined run's health pass used to count every
+    // entry the dead-code pass had written without complexity as a miss,
+    // because an empty complexity vector doubled as the "not cached" sentinel.
+    // Entries now record whether complexity was extracted, so the second run
+    // has no misses at all.
+    assert_eq!(second_event["cache_state"].as_str(), Some("warm"));
 }
 
 #[test]

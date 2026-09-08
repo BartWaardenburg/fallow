@@ -76,6 +76,10 @@ name = "analysis"
 harness = false
 
 [[bench]]
+name = "entry_point_discovery"
+harness = false
+
+[[bench]]
 name = "large_analysis"
 harness = false
 

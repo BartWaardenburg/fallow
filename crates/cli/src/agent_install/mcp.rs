@@ -144,7 +144,8 @@ pub fn resolve_command_with(
     })
 }
 
-fn find_on_path(name: &str) -> Option<PathBuf> {
+/// Resolve a bare command name against `PATH`, the way the agent gate does.
+pub(super) fn find_on_path(name: &str) -> Option<PathBuf> {
     let path = std::env::var_os("PATH")?;
     let candidates: &[&str] = if cfg!(windows) {
         &["", ".exe", ".cmd"]

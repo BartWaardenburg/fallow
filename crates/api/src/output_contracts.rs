@@ -90,6 +90,8 @@ pub enum TraceOutput {
     Clone(Box<fallow_types::trace::CloneTrace>),
     /// Transitive impact closure for a changed file set.
     ImpactClosure(Box<fallow_types::trace::ImpactClosureTrace>),
+    /// Shortest import path between two modules.
+    ImportPath(Box<fallow_types::trace::ImportPathTrace>),
     /// Symbol-level call chain trace.
     SymbolChain(Box<fallow_types::trace_chain::SymbolChainTrace>),
     /// Type-aware semantic symbol trace.

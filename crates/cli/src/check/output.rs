@@ -368,13 +368,10 @@ pub fn run_cross_reference(
     }
 }
 
-/// Parse a `--trace` spec into `(file_path, export_name)`.
-///
-/// The format is `FILE:EXPORT_NAME`. Uses `rsplit_once` so that colons
-/// in Windows drive letters (e.g., `C:\src\utils.ts:foo`) are handled
-/// correctly, only the last colon is used as the separator.
+/// Parse a `--trace` or `--symbol-impact` spec into `(file_path, export_name)`,
+/// on the shared selector contract in [`crate::selector`].
 fn parse_trace_spec(spec: &str) -> Option<(&str, &str)> {
-    spec.rsplit_once(':')
+    crate::selector::parse_file_symbol_selector(spec)
 }
 
 fn parse_class_method_target(target: &str) -> Option<(&str, &str)> {
@@ -413,10 +410,14 @@ mod tests {
         assert_eq!(result, None);
     }
 
+    /// A bare colon used to parse into two empty halves and fail later with
+    /// "export or member '' not found in ''". It is now rejected up front by
+    /// the shared selector, with the same exit code and a diagnosis that names
+    /// the expected format.
     #[test]
     fn parse_trace_spec_colon_only() {
         let result = parse_trace_spec(":");
-        assert_eq!(result, Some(("", "")));
+        assert_eq!(result, None);
     }
 
     #[test]
@@ -429,6 +430,18 @@ mod tests {
     fn parse_trace_spec_nested_path_with_colons() {
         let result = parse_trace_spec("packages/core:src/index.ts:myExport");
         assert_eq!(result, Some(("packages/core:src/index.ts", "myExport")));
+    }
+
+    /// Whitespace-only halves are rejected like empty ones, and surviving halves
+    /// are returned verbatim: the trim is a guard, never a normalisation.
+    #[test]
+    fn parse_trace_spec_rejects_whitespace_only_halves() {
+        assert_eq!(parse_trace_spec(" : "), None);
+        assert_eq!(parse_trace_spec("src/utils.ts:\t"), None);
+        assert_eq!(
+            parse_trace_spec(" src/utils.ts : foo "),
+            Some((" src/utils.ts ", " foo "))
+        );
     }
 
     #[test]

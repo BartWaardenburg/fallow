@@ -62,15 +62,17 @@ pub use recommend::run_recommend;
 pub use security::{build_security_candidates_args, run_security_candidates};
 pub use semantic::{run_symbol_impact, run_symbol_trace};
 #[cfg(test)]
-pub use similar_code::{build_find_similar_code_args, build_inspect_similar_code_args};
+pub use similar_code::{
+    build_find_similar_code_args, build_inspect_similar_code_args, parse_candidate_snapshot,
+};
 pub use similar_code::{run_find_similar_code, run_inspect_similar_code};
 #[cfg(test)]
 pub use suppressions::build_list_suppressions_args;
 pub use suppressions::run_list_suppressions;
 pub use trace::{
     build_trace_clone_args, build_trace_dependency_args, build_trace_export_args,
-    build_trace_file_args, run_trace_clone_tool, run_trace_dependency_tool, run_trace_export_tool,
-    run_trace_file_tool,
+    build_trace_file_args, run_trace_clone_tool, run_trace_dependency_tool, run_trace_error_tool,
+    run_trace_export_tool, run_trace_file_tool, run_trace_import_path_tool,
 };
 
 use std::io;
@@ -197,6 +199,25 @@ pub fn validation_error_body(message: impl Into<String>) -> String {
     .to_string()
 }
 
+/// [`validation_error_body`] plus the three fields the API-backed refusals
+/// carry, so an agent can branch on a stable `code` instead of matching prose.
+pub fn typed_validation_error_body(
+    message: impl Into<String>,
+    code: &str,
+    help: &str,
+    context: &str,
+) -> String {
+    serde_json::json!({
+        "error": true,
+        "message": message.into(),
+        "exit_code": 2,
+        "code": code,
+        "help": help,
+        "context": context,
+    })
+    .to_string()
+}
+
 fn timeout_duration_from(value: Option<&str>, default_secs: u64) -> Duration {
     value
         .and_then(|value| value.parse::<u64>().ok())
@@ -242,7 +263,36 @@ pub async fn run_tool(
     tool: &'static str,
     args: &[String],
 ) -> Result<CallToolResult, McpError> {
-    run_tool_with_timeout(binary, tool, args, timeout_duration()).await
+    run_tool_with_limit(binary, tool, args, None).await
+}
+
+/// Resolve one call's response cap. A request may only lower the default:
+/// the 16 MiB ceiling is what keeps a runaway subprocess from filling the
+/// caller's context, so it is a bound, not a suggestion.
+fn output_limit(requested: Option<usize>) -> usize {
+    requested
+        .filter(|bytes| *bytes > 0)
+        .map_or(DEFAULT_MAX_OUTPUT_BYTES, |bytes| {
+            bytes.min(DEFAULT_MAX_OUTPUT_BYTES)
+        })
+}
+
+/// Execute one named MCP tool with a caller-supplied response cap.
+pub async fn run_tool_with_limit(
+    binary: &str,
+    tool: &'static str,
+    args: &[String],
+    max_output_bytes: Option<usize>,
+) -> Result<CallToolResult, McpError> {
+    spawn_fallow(
+        binary,
+        args,
+        None,
+        timeout_duration(),
+        output_limit(max_output_bytes),
+        Some(tool),
+    )
+    .await
 }
 
 /// Execute one named MCP tool with a tool-specific bounded timeout.
@@ -251,13 +301,14 @@ pub async fn run_tool_with_timeout(
     tool: &'static str,
     args: &[String],
     timeout: Duration,
+    max_output_bytes: Option<usize>,
 ) -> Result<CallToolResult, McpError> {
     spawn_fallow(
         binary,
         args,
         None,
         timeout,
-        DEFAULT_MAX_OUTPUT_BYTES,
+        output_limit(max_output_bytes),
         Some(tool),
     )
     .await
@@ -270,13 +321,14 @@ pub async fn run_tool_with_stdin_timeout(
     args: &[String],
     stdin: Vec<u8>,
     timeout: Duration,
+    max_output_bytes: Option<usize>,
 ) -> Result<CallToolResult, McpError> {
     spawn_fallow(
         binary,
         args,
         Some(stdin),
         timeout,
-        DEFAULT_MAX_OUTPUT_BYTES,
+        output_limit(max_output_bytes),
         Some(tool),
     )
     .await
@@ -532,7 +584,7 @@ fn captured_output_result(
     exit_one_is_error: bool,
 ) -> CallToolResult {
     if output.stdout.exceeded || output.stderr.exceeded {
-        return output_limit_result(max_output_bytes);
+        return output_limit_result(output, max_output_bytes);
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout.bytes);
@@ -563,6 +615,10 @@ struct CapturedOutput {
 struct CapturedPipe {
     bytes: Vec<u8>,
     exceeded: bool,
+    /// Bytes the stream produced, including the ones past the cap that were
+    /// read and dropped. Reported as `result_bytes` so a caller that hits the
+    /// limit learns how much it asked for.
+    total: usize,
 }
 
 async fn drain_pipe(
@@ -572,6 +628,7 @@ async fn drain_pipe(
     let mut bytes = Vec::with_capacity(max_output_bytes.min(PIPE_READ_CHUNK_BYTES));
     let mut buffer = [0; PIPE_READ_CHUNK_BYTES];
     let mut exceeded = false;
+    let mut total = 0;
 
     loop {
         let read = pipe.read(&mut buffer).await?;
@@ -579,12 +636,17 @@ async fn drain_pipe(
             break;
         }
 
+        total += read;
         let retained = read.min(max_output_bytes.saturating_sub(bytes.len()));
         bytes.extend_from_slice(&buffer[..retained]);
         exceeded |= retained < read;
     }
 
-    Ok(CapturedPipe { bytes, exceeded })
+    Ok(CapturedPipe {
+        bytes,
+        exceeded,
+        total,
+    })
 }
 
 fn abort_process_tasks(
@@ -784,19 +846,53 @@ fn timeout_result(timeout: Duration, cleanup_errors: &[String]) -> CallToolResul
     CallToolResult::error(vec![ContentBlock::text(error_json.to_string())])
 }
 
-fn output_limit_result(max_output_bytes: usize) -> CallToolResult {
-    let error_json = serde_json::json!({
+/// Leading bytes of an over-limit stream echoed back with the refusal, so the
+/// caller can see what it would have received. Matches Code Mode's preview.
+const OUTPUT_PREVIEW_BYTES: usize = 256;
+
+/// Report an over-limit response as a REFUSAL that still carries the
+/// measurement.
+///
+/// The caller received no analysis, so this stays `CallToolResult::error`:
+/// protocol-level `isError`, the `error: true` field every other fallow
+/// refusal carries, and `exit_code` are the three signals an agent already
+/// gates on, and a truncated 256-byte preview must never read as a completed
+/// run to any of them. What the earlier bounded-success shape was for is kept
+/// alongside them: `truncated`, `result_bytes`, `result_preview` and `stream`
+/// name how much came back and what it looked like, using the Code Mode
+/// result-refusal field names so an agent parses one shape on both surfaces.
+/// Code Mode refuses the same class of response with `isError: true` too, so
+/// the two surfaces now answer that question the same way.
+fn output_limit_result(output: &CapturedOutput, max_output_bytes: usize) -> CallToolResult {
+    let (stream, pipe) = if output.stdout.exceeded {
+        ("stdout", &output.stdout)
+    } else {
+        ("stderr", &output.stderr)
+    };
+    let captured = String::from_utf8_lossy(&pipe.bytes);
+    let body = serde_json::json!({
         "error": true,
-        "message": format!(
-            "fallow subprocess output exceeded {max_output_bytes} bytes per stream"
-        ),
+        "ok": false,
         "exit_code": 2,
-        "code": "FALLOW_MCP_SUBPROCESS_OUTPUT_LIMIT",
-        "help": "Narrow the requested analysis or reduce subprocess output.",
-        "context": "subprocess",
+        "truncated": true,
+        "result_bytes": pipe.total,
+        "result_preview": code_mode::clamp_utf8(
+            &captured,
+            OUTPUT_PREVIEW_BYTES.min(max_output_bytes),
+        ),
         "limit_bytes": max_output_bytes,
+        "stream": stream,
+        "code": "FALLOW_MCP_SUBPROCESS_OUTPUT_LIMIT",
+        "context": "subprocess",
+        "message": format!(
+            "fallow subprocess {stream} produced {} bytes, over the {max_output_bytes}-byte cap",
+            pipe.total
+        ),
+        "help": "Narrow the requested analysis (filters, a workspace scope, a smaller issue-type \
+                 set). max_output_bytes only LOWERS the 16 MiB default, so raising it for this \
+                 call cannot help.",
     });
-    CallToolResult::error(vec![ContentBlock::text(error_json.to_string())])
+    CallToolResult::error(vec![ContentBlock::text(body.to_string())])
 }
 
 /// Execute fallow and ensure successful JSON responses have a top-level
@@ -811,14 +907,15 @@ pub async fn run_fallow_with_top_level_warnings(
 }
 
 /// Tool-attributed variant of `run_fallow_with_top_level_warnings` (see
-/// `run_tool`).
+/// `run_tool`), with a caller-supplied response cap.
 pub async fn run_tool_with_top_level_warnings(
     binary: &str,
     tool: &'static str,
     args: &[String],
+    max_output_bytes: Option<usize>,
 ) -> Result<CallToolResult, McpError> {
     Ok(ensure_top_level_warnings(
-        run_tool(binary, tool, args).await?,
+        run_tool_with_limit(binary, tool, args, max_output_bytes).await?,
     ))
 }
 

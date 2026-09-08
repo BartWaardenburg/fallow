@@ -269,6 +269,9 @@ fn subset_duplication_stats(
         total_tokens: report.stats.total_tokens,
         duplicated_tokens: duplicated_tokens.min(report.stats.total_tokens),
         clone_groups: clone_groups.len(),
+        // The scoped report carries no families, so nothing is withheld from an
+        // empty array.
+        clone_families: 0,
         clone_instances,
         duplication_percentage: if total_lines > 0 {
             (duplicated_lines as f64 / total_lines as f64) * 100.0

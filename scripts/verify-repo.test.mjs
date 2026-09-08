@@ -21,6 +21,7 @@ const FAST_COMMANDS = [
   ["npm", ["run", "generate:contracts:check"]],
   ["npm", ["run", "check:crate-boundaries"]],
   ["npm", ["run", "check:emitted-versions"]],
+  ["npm", ["run", "check:conformance-fixtures"]],
 ];
 
 const FULL_ONLY_COMMANDS = [
@@ -31,6 +32,7 @@ const FULL_ONLY_COMMANDS = [
   ["cargo", ["test", "--workspace", "--lib", "--bins", "--tests", "--examples"]],
   ["npm", ["run", "check:coverage-producers"]],
   ["npm", ["run", "check:semantic-clone-conformance"]],
+  ["npm", ["run", "check:dupes-accuracy"]],
   ["cargo", ["check", "--workspace", "--benches"]],
   ["cargo", ["doc", "--workspace", "--no-deps", "--document-private-items"]],
   ["npm", ["--prefix", "crates/napi", "run", "build:debug"]],

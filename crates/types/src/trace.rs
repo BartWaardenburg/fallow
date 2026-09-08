@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 use serde::Serialize;
 
+use crate::cache_rejection::CacheRejection;
 use crate::duplicates::{CloneInstance, RefactoringSuggestion};
 use crate::semantic::SemanticNamespace;
 use crate::serde_path;
@@ -218,6 +219,38 @@ pub struct DependencyTrace {
     pub import_count: usize,
 }
 
+/// Sub-phase attribution inside the entry-point discovery stage.
+///
+/// `PipelineTimings::entry_points_ms` is a single opaque number; these are the
+/// consecutive wall-clock spans that make it up, so a slow discovery stage can
+/// be attributed instead of guessed at. The spans cover the discovery sections
+/// only, so they sum to slightly less than `entry_points_ms`: the summary and
+/// count that follow discovery are not attributed to any span.
+#[derive(Debug, Clone, Copy, Default, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct EntryPointSpans {
+    /// Root-package discovery: manual entry globs, root `package.json` fields,
+    /// and the nested `package.json` scan under the conventional monorepo
+    /// directories.
+    pub root_ms: f64,
+    /// Runtime script seed collection plus per-workspace discovery.
+    pub workspaces_ms: f64,
+    /// Plugin entry-point glob compilation and matching.
+    pub plugins_ms: f64,
+    /// The part of `plugins_ms` spent compiling plugin patterns into a glob
+    /// set. Scales with active pattern count, not with project size.
+    pub plugin_glob_build_ms: f64,
+    /// The part of `plugins_ms` spent matching the compiled set against every
+    /// discovered file. Scales with file count times pattern count.
+    pub plugin_glob_match_ms: f64,
+    /// Infrastructure config-file probing at the project root.
+    pub infrastructure_ms: f64,
+    /// Configured `dynamicallyLoaded` glob expansion. Zero when unconfigured.
+    pub dynamic_ms: f64,
+    /// Sorting and deduplicating the merged entry set.
+    pub dedup_ms: f64,
+}
+
 /// Pipeline performance timings.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -244,10 +277,20 @@ pub struct PipelineTimings {
     pub cache_hits: usize,
     /// Number of files parsed without a cache hit.
     pub cache_misses: usize,
+    /// Why the persisted parse cache was not reused, when it was not. `None`
+    /// means the cache was loaded; the hit and miss counts then describe how
+    /// much of it applied.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_rejection: Option<CacheRejection>,
+    /// Why the persisted module-graph cache was not reused, when it was not.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub graph_cache_rejection: Option<CacheRejection>,
     /// Time spent updating the parse cache.
     pub cache_update_ms: f64,
     /// Time spent categorizing entry points.
     pub entry_points_ms: f64,
+    /// Sub-phase attribution for `entry_points_ms`.
+    pub entry_point_spans: EntryPointSpans,
     /// Number of entry points considered.
     pub entry_point_count: usize,
     /// Time spent resolving imports.
@@ -273,6 +316,65 @@ pub struct ImpactClosureTrace {
     pub affected_not_shown: Vec<String>,
     /// Coordination gaps between the seed and consumers.
     pub coordination_gap: Vec<ImpactClosureGap>,
+}
+
+/// Wire-version discriminator for [`ImportPathTrace`]. Independent from the
+/// global `SchemaVersion`: the import-path payload versions on its own cadence,
+/// like the other independently-versioned envelopes. Serializes as a string
+/// `const` so JSON consumers can switch on it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub enum ImportPathTraceSchemaVersion {
+    /// First release of the `fallow trace --path` shape.
+    #[serde(rename = "1")]
+    V1,
+}
+
+/// Result of asking how one module reaches another: the shortest import path.
+///
+/// `reachable` is the only field that separates "no route exists" from "the
+/// route is empty because both ends are the same module". Both report
+/// `hops: 0`, so a consumer must read `reachable`, never the hop count.
+#[derive(Debug, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", schemars(title = "fallow trace --path"))]
+pub struct ImportPathTrace {
+    /// Wire-shape version of this payload.
+    pub schema_version: ImportPathTraceSchemaVersion,
+    /// The module the walk started from, root-relative.
+    pub from: String,
+    /// The module the walk was looking for, root-relative.
+    pub to: String,
+    /// Whether `to` is reachable from `from` by following import edges.
+    pub reachable: bool,
+    /// Number of import edges on the reported route. `0` both when the two ends
+    /// are the same module and when there is no route at all.
+    pub hops: usize,
+    /// The route, in import order. Empty whenever `hops` is `0`.
+    pub path: Vec<ImportPathHop>,
+    /// Human-readable summary of the outcome.
+    pub reason: String,
+}
+
+/// One import edge on an [`ImportPathTrace`].
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct ImportPathHop {
+    /// The importing module, root-relative.
+    pub from: String,
+    /// The imported module, root-relative.
+    pub to: String,
+    /// Whether every symbol on this edge is type-only, so the hop is erased at
+    /// build time. Type-only hops are reported, never skipped: an `import type`
+    /// chain is a real compile-time coupling.
+    pub type_only: bool,
+    /// 1-based line in `from` of the imported binding that creates this edge:
+    /// the first value-carrying symbol on the import, or the first symbol when
+    /// every symbol is type-only. On a multi-line import that is the binding's
+    /// own line, not the `import` keyword's. Absent when the edge carries no
+    /// span or the source could not be read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub import_line: Option<u32>,
 }
 
 /// One coordination-gap entry in an [`ImpactClosureTrace`].

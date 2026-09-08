@@ -3,7 +3,9 @@ use crate::params::{SemanticImpactParams, SemanticImpactSelector, SemanticSymbol
 use rmcp::ErrorData as McpError;
 use rmcp::model::CallToolResult;
 
-use super::{push_global, push_remote_extends, push_type_aware, run_tool, validation_error_body};
+use super::{
+    push_global, push_remote_extends, push_type_aware, run_tool_with_limit, validation_error_body,
+};
 
 fn require_non_empty(field: &str, value: &str) -> Result<(), String> {
     if value.trim().is_empty() {
@@ -52,7 +54,9 @@ pub async fn run_symbol_trace(
     params: SemanticSymbolParams,
 ) -> Result<CallToolResult, McpError> {
     match build_semantic_symbol_args(&params, "--trace") {
-        Ok(args) => run_tool(binary, "trace_symbol", &args).await,
+        Ok(args) => {
+            run_tool_with_limit(binary, "trace_symbol", &args, params.max_output_bytes).await
+        }
         Err(error) => Ok(CallToolResult::error(vec![
             rmcp::model::ContentBlock::text(validation_error_body(error)),
         ])),
@@ -64,7 +68,9 @@ pub async fn run_symbol_impact(
     params: SemanticImpactParams,
 ) -> Result<CallToolResult, McpError> {
     match build_symbol_impact_args(&params) {
-        Ok(args) => run_tool(binary, "symbol_impact", &args).await,
+        Ok(args) => {
+            run_tool_with_limit(binary, "symbol_impact", &args, params.max_output_bytes).await
+        }
         Err(error) => Ok(CallToolResult::error(vec![
             rmcp::model::ContentBlock::text(validation_error_body(error)),
         ])),
@@ -138,6 +144,7 @@ mod tests {
             type_aware_require: None,
             no_cache: None,
             threads: None,
+            max_output_bytes: None,
         };
         let args = build_semantic_symbol_args(&params, "--symbol-impact")
             .expect("valid semantic symbol args");
@@ -162,6 +169,7 @@ mod tests {
                 type_aware_require: None,
                 no_cache: None,
                 threads: None,
+                max_output_bytes: None,
             },
         )
         .await
@@ -194,6 +202,7 @@ mod tests {
             type_aware_require: None,
             no_cache: None,
             threads: None,
+            max_output_bytes: None,
         };
         let args = build_symbol_impact_args(&params).expect("valid class method selector");
         assert!(
@@ -216,6 +225,7 @@ mod tests {
             type_aware_require: None,
             no_cache: None,
             threads: None,
+            max_output_bytes: None,
         };
         let args = build_symbol_impact_args(&params).expect("valid export selector");
         assert!(args.iter().any(|arg| arg == "src/api.ts:load"));
@@ -236,6 +246,7 @@ mod tests {
             type_aware_require: None,
             no_cache: None,
             threads: None,
+            max_output_bytes: None,
         };
 
         assert!(build_symbol_impact_args(&params).is_err());

@@ -23,6 +23,21 @@ enum SurfaceState {
     Foreign,
 }
 
+/// Why an installed gate surface still audits nothing.
+///
+/// The gate script resolves its dependencies when Claude Code runs it, so a
+/// file that is present and fallow-managed can be a no-op. Carried out of band
+/// so the remediation can name the reason instead of parsing `detail`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum GateBlocker {
+    /// `jq` is not on PATH. The script exits 0 after one stderr line, which a
+    /// PreToolUse hook never shows.
+    JqMissing,
+    /// PATH resolves a different fallow than this build, and the gate runs
+    /// what PATH resolves.
+    PathVersion(String),
+}
+
 #[derive(Serialize)]
 struct SurfaceStatus {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -32,6 +47,69 @@ struct SurfaceStatus {
     path: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     detail: Option<String>,
+    #[serde(skip)]
+    blocker: Option<GateBlocker>,
+}
+
+/// What the installed gate script finds at run time, probed once per report.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct GateRuntime {
+    jq_missing: bool,
+    /// Version reported by the `fallow` on PATH when it is not this build.
+    path_version: Option<String>,
+}
+
+impl GateRuntime {
+    fn probe() -> Self {
+        Self {
+            jq_missing: mcp::find_on_path("jq").is_none(),
+            path_version: path_fallow_drift(),
+        }
+    }
+
+    fn blocker(&self) -> Option<GateBlocker> {
+        if self.jq_missing {
+            return Some(GateBlocker::JqMissing);
+        }
+        self.path_version.clone().map(GateBlocker::PathVersion)
+    }
+}
+
+/// Version of the `fallow` PATH resolves, when that binary is not this one and
+/// reports a version other than this build's.
+///
+/// The gate prefers PATH over every project-local fallback, so the version it
+/// runs is independent of the checkout that installed it. Returns `None` when
+/// nothing resolves, when PATH resolves this very executable, or when the
+/// probe fails: the gate has further fallbacks and an unreadable binary is not
+/// evidence of drift.
+fn path_fallow_drift() -> Option<String> {
+    let candidate = mcp::find_on_path("fallow")?;
+    let resolved = dunce::canonicalize(&candidate).unwrap_or(candidate);
+    let current = std::env::current_exe()
+        .ok()
+        .map(|exe| dunce::canonicalize(&exe).unwrap_or(exe));
+    if current.as_deref() == Some(resolved.as_path()) {
+        return None;
+    }
+    let mut command = std::process::Command::new(&resolved);
+    command
+        .arg("--version")
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    let output = fallow_process::output(&mut command).ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let reported = parse_version_output(&String::from_utf8_lossy(&output.stdout))?;
+    (reported != env!("CARGO_PKG_VERSION")).then_some(reported)
+}
+
+/// Read the version out of a `fallow --version` line (`fallow 3.23.0`).
+fn parse_version_output(stdout: &str) -> Option<String> {
+    let line = stdout.lines().next()?.trim();
+    let version = line.rsplit(' ').next().unwrap_or(line).trim();
+    (!version.is_empty()).then(|| version.to_string())
 }
 
 #[derive(Serialize)]
@@ -143,8 +221,9 @@ fn surfaces(root: &Path, home: Option<&Path>) -> Vec<SurfaceStatus> {
     ));
 
     let hooks = build_hooks_status(root);
-    rows.push(hook_row(Some(Harness::Claude), &hooks.claude));
-    rows.push(hook_row(Some(Harness::Codex), &hooks.codex));
+    let runtime = GateRuntime::probe();
+    rows.push(hook_row(Some(Harness::Claude), &hooks.claude, &runtime));
+    rows.push(hook_row(Some(Harness::Codex), &hooks.codex, &runtime));
     rows
 }
 
@@ -176,6 +255,7 @@ fn guide_row(
         state,
         path: display_path(root, home, path),
         detail,
+        blocker: None,
     }
 }
 
@@ -198,6 +278,7 @@ fn claude_import_row(root: &Path, home: Option<&Path>, path: &Path) -> SurfaceSt
         state,
         path: display_path(root, home, path),
         detail,
+        blocker: None,
     }
 }
 
@@ -237,6 +318,7 @@ fn skill_row(
         state,
         path: display_path(root, home, dir),
         detail,
+        blocker: None,
     }
 }
 
@@ -258,30 +340,64 @@ fn mcp_row(root: &Path, home: Option<&Path>, harness: Harness, path: &Path) -> S
         state,
         path: display_path(root, home, path),
         detail,
+        blocker: None,
     }
 }
 
 fn hook_row(
     harness: Option<Harness>,
     status: &crate::setup_hooks::HookSurfaceStatus,
+    runtime: &GateRuntime,
 ) -> SurfaceStatus {
+    // Only a script-backed surface executes the gate; the Codex surface is a
+    // managed prose block and carries no script version.
+    let script_version = status.script_version.as_deref();
+    let blocker = match script_version {
+        Some(_) if status.installed => runtime.blocker(),
+        _ => None,
+    };
+    let script_stale = script_version.is_some_and(|version| version != env!("CARGO_PKG_VERSION"));
     let state = if status.installed {
-        SurfaceState::Installed
+        if script_stale || blocker.is_some() {
+            SurfaceState::Stale
+        } else {
+            SurfaceState::Installed
+        }
     } else if status.user_edited {
         SurfaceState::Foreign
     } else {
         SurfaceState::Absent
     };
-    let detail = status
-        .script_version
-        .as_ref()
-        .map(|version| format!("gate script from fallow {version}"));
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(version) = script_version {
+        parts.push(if script_stale {
+            format!(
+                "gate script from fallow {version}, this build is {}",
+                env!("CARGO_PKG_VERSION")
+            )
+        } else {
+            format!("gate script from fallow {version}")
+        });
+    }
+    match &blocker {
+        Some(GateBlocker::JqMissing) => {
+            parts.push("jq is not on PATH, so the gate exits without auditing".to_string());
+        }
+        Some(GateBlocker::PathVersion(version)) => {
+            parts.push(format!(
+                "PATH resolves fallow {version}, and the gate runs that, not this build"
+            ));
+        }
+        None => {}
+    }
+    let detail = (!parts.is_empty()).then(|| parts.join("; "));
     SurfaceStatus {
         harness,
         step: Step::Hooks,
         state,
         path: status.path.clone(),
         detail,
+        blocker,
     }
 }
 
@@ -296,6 +412,33 @@ fn status_next_actions(surfaces: &[SurfaceStatus]) -> Vec<NextAction> {
             command: "fallow agent install --dry-run".to_string(),
             reason: "Shows what agent install would write for the absent or stale surfaces above; drop --dry-run to apply."
                 .to_string(),
+            mutating: false,
+        });
+    }
+    if surfaces
+        .iter()
+        .any(|row| row.blocker == Some(GateBlocker::JqMissing))
+    {
+        next.push(NextAction {
+            id: "gate-requires-jq",
+            command: "jq --version".to_string(),
+            reason:
+                "The agent gate script needs jq to read the tool input. Without it the script exits 0 after a single stderr line, which a PreToolUse hook never shows, so every commit and push passes ungated. Install jq."
+                    .to_string(),
+            mutating: false,
+        });
+    }
+    if let Some(version) = surfaces.iter().find_map(|row| match &row.blocker {
+        Some(GateBlocker::PathVersion(version)) => Some(version.clone()),
+        _ => None,
+    }) {
+        next.push(NextAction {
+            id: "gate-path-version",
+            command: "fallow --version".to_string(),
+            reason: format!(
+                "The gate runs the fallow PATH resolves, which reports {version}, not this build ({}). Upgrade the fallow on PATH so the gate audits with the version you are testing.",
+                env!("CARGO_PKG_VERSION")
+            ),
             mutating: false,
         });
     }
@@ -365,4 +508,156 @@ fn render_human(report: &StatusReport) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::setup_hooks::HookSurfaceStatus;
+
+    fn claude_gate(script_version: Option<&str>) -> HookSurfaceStatus {
+        HookSurfaceStatus {
+            installed: true,
+            managed_block_present: true,
+            user_edited: false,
+            path: ".claude/hooks/fallow-gate.sh".to_string(),
+            script_version: script_version.map(str::to_string),
+            min_version_floor: Some("2.85.0".to_string()),
+        }
+    }
+
+    #[test]
+    fn gate_script_from_an_older_fallow_is_stale() {
+        let row = hook_row(
+            Some(Harness::Claude),
+            &claude_gate(Some("1.0.0")),
+            &GateRuntime::default(),
+        );
+        assert_eq!(row.state, SurfaceState::Stale);
+        assert_eq!(
+            row.detail.as_deref(),
+            Some(
+                format!(
+                    "gate script from fallow 1.0.0, this build is {}",
+                    env!("CARGO_PKG_VERSION")
+                )
+                .as_str()
+            )
+        );
+    }
+
+    #[test]
+    fn gate_script_from_this_fallow_is_installed() {
+        let row = hook_row(
+            Some(Harness::Claude),
+            &claude_gate(Some(env!("CARGO_PKG_VERSION"))),
+            &GateRuntime::default(),
+        );
+        assert_eq!(row.state, SurfaceState::Installed);
+        assert_eq!(row.blocker, None);
+    }
+
+    #[test]
+    fn missing_jq_makes_the_gate_stale_and_names_the_reason() {
+        let runtime = GateRuntime {
+            jq_missing: true,
+            path_version: None,
+        };
+        let row = hook_row(
+            Some(Harness::Claude),
+            &claude_gate(Some(env!("CARGO_PKG_VERSION"))),
+            &runtime,
+        );
+        assert_eq!(row.state, SurfaceState::Stale);
+        assert_eq!(row.blocker, Some(GateBlocker::JqMissing));
+        assert!(
+            row.detail
+                .as_deref()
+                .is_some_and(|detail| detail.contains("jq is not on PATH")),
+            "detail was {:?}",
+            row.detail
+        );
+
+        let actions = status_next_actions(&[row]);
+        let jq = actions
+            .iter()
+            .find(|action| action.id == "gate-requires-jq")
+            .expect("missing jq remediation");
+        assert!(jq.reason.contains("exits 0"));
+        assert!(!jq.mutating);
+    }
+
+    #[test]
+    fn a_different_fallow_on_path_makes_the_gate_stale() {
+        let runtime = GateRuntime {
+            jq_missing: false,
+            path_version: Some("3.17.0".to_string()),
+        };
+        let row = hook_row(
+            Some(Harness::Claude),
+            &claude_gate(Some(env!("CARGO_PKG_VERSION"))),
+            &runtime,
+        );
+        assert_eq!(row.state, SurfaceState::Stale);
+        assert_eq!(
+            row.blocker,
+            Some(GateBlocker::PathVersion("3.17.0".to_string()))
+        );
+
+        let actions = status_next_actions(&[row]);
+        let drift = actions
+            .iter()
+            .find(|action| action.id == "gate-path-version")
+            .expect("missing PATH drift remediation");
+        assert!(drift.reason.contains("3.17.0"));
+        assert!(drift.reason.contains(env!("CARGO_PKG_VERSION")));
+    }
+
+    #[test]
+    fn an_absent_gate_does_not_report_a_runtime_blocker() {
+        let mut status = claude_gate(Some("1.0.0"));
+        status.installed = false;
+        let runtime = GateRuntime {
+            jq_missing: true,
+            path_version: Some("3.17.0".to_string()),
+        };
+        let row = hook_row(Some(Harness::Claude), &status, &runtime);
+        assert_eq!(row.state, SurfaceState::Absent);
+        assert_eq!(row.blocker, None);
+        assert!(
+            status_next_actions(&[row]).iter().all(|action| {
+                action.id != "gate-requires-jq" && action.id != "gate-path-version"
+            })
+        );
+    }
+
+    #[test]
+    fn the_codex_prose_block_is_not_probed_for_a_gate_runtime() {
+        let status = HookSurfaceStatus {
+            installed: true,
+            managed_block_present: true,
+            user_edited: false,
+            path: "AGENTS.md".to_string(),
+            script_version: None,
+            min_version_floor: None,
+        };
+        let runtime = GateRuntime {
+            jq_missing: true,
+            path_version: Some("3.17.0".to_string()),
+        };
+        let row = hook_row(Some(Harness::Codex), &status, &runtime);
+        assert_eq!(row.state, SurfaceState::Installed);
+        assert_eq!(row.blocker, None);
+        assert_eq!(row.detail, None);
+    }
+
+    #[test]
+    fn version_output_parses_the_prefixed_and_bare_forms() {
+        assert_eq!(
+            parse_version_output("fallow 3.17.0\n").as_deref(),
+            Some("3.17.0")
+        );
+        assert_eq!(parse_version_output("3.17.0").as_deref(), Some("3.17.0"));
+        assert_eq!(parse_version_output(""), None);
+    }
 }

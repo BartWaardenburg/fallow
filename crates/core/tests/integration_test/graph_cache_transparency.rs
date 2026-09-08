@@ -14,7 +14,6 @@ use std::path::Path;
 use fallow_config::{FallowConfig, OutputFormat};
 use fallow_core::graph_cache::{GraphCacheManifest, GraphCacheMode};
 use fallow_types::discover::FileId;
-use fallow_types::source_fingerprint::SourceFingerprint;
 
 use super::common::{create_config_with_cache, fixture_path};
 
@@ -90,11 +89,24 @@ fn current_manifest_with_cached_mode(
     store: &fallow_core::graph_cache::GraphCacheStore,
 ) -> GraphCacheManifest {
     let files = fallow_core::discover::discover_files(config);
-    GraphCacheManifest::from_discovered_files(&config.root, &files, store.manifest.mode, |path| {
-        std::fs::metadata(path).map_or(SourceFingerprint::new(0, 0), |m| {
-            SourceFingerprint::from_metadata(&m)
-        })
+    let hashes = content_hashes_for(&files);
+    GraphCacheManifest::from_discovered_files(&config.root, &files, store.manifest.mode, |file| {
+        hashes.get(file.id.0 as usize).copied().unwrap_or_default()
     })
+}
+
+/// Content hash per `FileId`, mirroring what the analysis path feeds the
+/// manifest. Parsing without a cache is what the production builder gets from
+/// the parse stage it runs anyway.
+fn content_hashes_for(files: &[fallow_types::discover::DiscoveredFile]) -> Vec<u64> {
+    let parsed = fallow_core::extract::parse_all_files(files, None, false);
+    let mut hashes = vec![0u64; files.len()];
+    for module in &parsed.modules {
+        if let Some(slot) = hashes.get_mut(module.file_id.0 as usize) {
+            *slot = module.content_hash;
+        }
+    }
+    hashes
 }
 
 #[test]
@@ -150,8 +162,8 @@ fn source_change_misses_cache_and_reflects_change() {
     let unused_before = before.unused_exports.len();
 
     // Mutate a source file: add a brand-new export that nothing imports. This
-    // changes the file's size, so its SourceFingerprint changes and the
-    // persisted manifest no longer matches the current inputs.
+    // changes the file's content hash, so the persisted manifest no longer
+    // matches the current inputs.
     let target = root.join("src/module-a.ts");
     let original = std::fs::read_to_string(&target).expect("read module-a");
     std::fs::write(
@@ -177,6 +189,107 @@ fn source_change_misses_cache_and_reflects_change() {
         unused_before + 1,
         "the new dead export must surface (cache must not stale-serve the old graph)"
     );
+}
+
+/// An edit that keeps the file's byte length and restores its modification
+/// time must still miss the cache.
+///
+/// `(mtime, size)` is the pair the metadata fast paths compared, and both
+/// halves of it are writer-controlled: `touch -r`, a codemod that rewrites a
+/// file and puts the timestamp back, and a `git checkout` of an equal-length
+/// revision all produce this shape. Serving the cached analysis for it is not a
+/// stale timing number, it is a wrong verdict with an auto-fixable action on it:
+/// the warm run reports the previously-unused export as still unused and offers
+/// `remove-export`, while applying that fix deletes a symbol the new source
+/// imports.
+#[test]
+fn equal_length_edit_with_restored_mtime_misses_cache_and_reflects_change() {
+    let temp = tempfile::tempdir().expect("create temp dir");
+    let root = temp.path().join("project");
+    let cache_dir = temp.path().join("cache");
+    std::fs::create_dir_all(root.join("src")).expect("create project src");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{ "name": "equal-length-edit", "version": "1.0.0", "main": "src/index.ts" }"#,
+    )
+    .expect("write manifest");
+    std::fs::write(
+        root.join("src/api.ts"),
+        "export const alpha = (): number => 1;\nexport const bravo = (): number => 2;\n",
+    )
+    .expect("write api module");
+    let entry = root.join("src/index.ts");
+    let before_source =
+        "import { alpha } from \"./api\";\n\nexport const run = (): number => alpha();\n";
+    std::fs::write(&entry, before_source).expect("write entry module");
+
+    let config = create_config_with_cache(root, cache_dir.clone());
+
+    let cold = fallow_core::analyze(&config).expect("cold analysis");
+    assert_eq!(
+        unused_export_names(&cold),
+        vec!["bravo".to_string()],
+        "the fixture must start with exactly one unused export"
+    );
+
+    // `alpha` -> `bravo` keeps the byte length identical; restoring the
+    // timestamps afterwards makes the file indistinguishable from the cached
+    // one by metadata alone.
+    let metadata = std::fs::metadata(&entry).expect("entry metadata");
+    let modified = metadata.modified().expect("entry mtime");
+    let accessed = metadata.accessed().unwrap_or(modified);
+    let after_source = before_source.replace("alpha", "bravo");
+    assert_eq!(after_source.len(), before_source.len());
+    std::fs::write(&entry, &after_source).expect("rewrite entry module");
+    let handle = std::fs::OpenOptions::new()
+        .write(true)
+        .open(&entry)
+        .expect("open entry for timestamp restore");
+    handle
+        .set_times(
+            std::fs::FileTimes::new()
+                .set_accessed(accessed)
+                .set_modified(modified),
+        )
+        .expect("restore entry timestamps");
+    let after_metadata = std::fs::metadata(&entry).expect("entry metadata after rewrite");
+    assert_eq!(
+        after_metadata.len(),
+        metadata.len(),
+        "the rewrite must keep the file size identical"
+    );
+    assert_eq!(
+        after_metadata
+            .modified()
+            .expect("entry mtime after rewrite"),
+        modified,
+        "the rewrite must restore the modification time exactly"
+    );
+
+    let store = fallow_core::graph_cache::GraphCacheStore::load(&cache_dir)
+        .expect("persisted graph cache exists after cold run");
+    let current = current_manifest_with_cached_mode(&config, &store);
+    assert!(
+        !store.manifest.matches_inputs(&current),
+        "an equal-length rewrite with a restored mtime must invalidate the manifest"
+    );
+
+    let warm = fallow_core::analyze(&config).expect("warm analysis");
+    assert_eq!(
+        unused_export_names(&warm),
+        vec!["alpha".to_string()],
+        "the warm run must report the new source's unused export, not the cached one"
+    );
+}
+
+fn unused_export_names(results: &fallow_types::results::AnalysisResults) -> Vec<String> {
+    let mut names: Vec<String> = results
+        .unused_exports
+        .iter()
+        .map(|issue| issue.export.export_name.clone())
+        .collect();
+    names.sort_unstable();
+    names
 }
 
 /// A deleted source file must MISS the cache and disappear from the next
@@ -485,7 +598,7 @@ fn assert_resolver_cache_hit_matches_cold(fixture: &str) {
     );
     assert!(
         store.manifest.matches_resolution_inputs(&current),
-        "stable file keys and fingerprints should still allow resolver reuse"
+        "stable file keys and content hashes should still allow resolver reuse"
     );
     store.save(&cache_dir);
 
@@ -577,7 +690,7 @@ fn benchmark_zod_cold_vs_warm_total_identical() {
     assert_benchmark_cold_warm_total("zod");
 }
 
-/// The manifest must hit on identical inputs and miss when a fingerprint or a
+/// The manifest must hit on identical inputs and miss when file content or a
 /// graph-affecting mode hash changes. This pins `matches_inputs` against the
 /// real `from_discovered_files` shape used by the integration path.
 #[test]
@@ -589,31 +702,67 @@ fn manifest_matches_only_on_identical_inputs() {
     let config = create_config_with_cache(root, temp.path().join("cache"));
     let files = fallow_core::discover::discover_files(&config);
 
-    let fingerprint_provider = |path: &Path| {
-        std::fs::metadata(path).map_or(SourceFingerprint::new(0, 0), |m| {
-            SourceFingerprint::from_metadata(&m)
-        })
+    let hashes = content_hashes_for(&files);
+    let content_hash_provider = |file: &fallow_types::discover::DiscoveredFile| {
+        hashes.get(file.id.0 as usize).copied().unwrap_or_default()
     };
 
     let manifest_a = GraphCacheManifest::from_discovered_files(
         &config.root,
         &files,
         GraphCacheMode::new(1, 2, 3),
-        fingerprint_provider,
+        content_hash_provider,
     );
     let manifest_same = GraphCacheManifest::from_discovered_files(
         &config.root,
         &files,
         GraphCacheMode::new(1, 2, 3),
-        fingerprint_provider,
+        content_hash_provider,
     );
     let manifest_other_mode = GraphCacheManifest::from_discovered_files(
         &config.root,
         &files,
         GraphCacheMode::new(1, 99, 3),
-        fingerprint_provider,
+        content_hash_provider,
     );
 
     assert!(manifest_a.matches_inputs(&manifest_same));
     assert!(!manifest_a.matches_inputs(&manifest_other_mode));
+}
+
+#[test]
+fn a_graph_cache_from_another_root_never_reuses_original_checkout_paths() {
+    let temp = tempfile::tempdir().expect("temp root");
+    let original = temp.path().join("original");
+    let relocated = temp.path().join("relocated");
+    let cache = temp.path().join("cache");
+    std::fs::create_dir_all(original.join("src")).unwrap();
+    std::fs::write(
+        original.join("package.json"),
+        r#"{"name":"relocation","main":"src/index.ts"}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        original.join("src/index.ts"),
+        "import { used } from './lib'; console.log(used);\n",
+    )
+    .unwrap();
+    std::fs::write(
+        original.join("src/lib.ts"),
+        "export const used = 1; export const unused = 2;\n",
+    )
+    .unwrap();
+    let original_config = create_config_with_cache(original.clone(), cache.clone());
+    fallow_core::analyze(&original_config).expect("prime original cache");
+    copy_tree(&original, &relocated);
+    let mut relocated_config = create_config_with_cache(relocated.clone(), cache);
+    let warm = fallow_core::analyze(&relocated_config).expect("relocated warm analysis");
+    relocated_config.no_cache = true;
+    let cold = fallow_core::analyze(&relocated_config).expect("relocated uncached analysis");
+    assert_eq!(format!("{warm:#?}"), format!("{cold:#?}"));
+    assert!(
+        warm.unused_exports
+            .iter()
+            .all(|finding| finding.export.path.starts_with(&relocated))
+    );
 }

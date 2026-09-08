@@ -1222,6 +1222,7 @@ mod tests {
                 total_tokens: 200,
                 duplicated_tokens: 80,
                 clone_groups: 2,
+                clone_families: 0,
                 clone_instances: 4,
                 duplication_percentage: 20.0,
                 clone_groups_below_min_occurrences: 0,

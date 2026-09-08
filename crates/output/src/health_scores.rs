@@ -1150,6 +1150,42 @@ pub struct OwnershipMetrics {
     pub drift_reason: Option<String>,
 }
 
+/// Where the run's reference epoch came from.
+///
+/// Churn recency weighting and ownership staleness are measured against one
+/// instant. `head_commit` and `environment` resolve to the same value on every
+/// run over the same commit; `wall_clock` does not.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum ClockSource {
+    /// Pinned by the `FALLOW_CLOCK_EPOCH` environment variable.
+    Environment,
+    /// HEAD's committer timestamp.
+    HeadCommit,
+    /// The system wall clock, because no commit timestamp was readable.
+    WallClock,
+}
+
+/// The instant a run measured commit ages and staleness against.
+///
+/// A consumer reading `weighted_commits`, `stale_days`, or anything derived
+/// from them needs to know whether re-running over the same commit yields the
+/// same number. The human report says so in a warning that `--quiet` removes,
+/// which left the JSON consumer, who cannot see stderr at all, with no way to
+/// find out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct ClockProvenance {
+    /// Which of the three sources supplied the epoch.
+    pub source: ClockSource,
+    /// The reference epoch itself, in unix seconds. Pass it back as
+    /// `FALLOW_CLOCK_EPOCH` to reproduce this run's churn-derived numbers.
+    pub epoch_secs: u64,
+    /// False only for `wall_clock`, where the numbers drift between runs.
+    pub reproducible: bool,
+}
+
 /// Scope metadata for the hotspot analysis.
 #[derive(Debug, Clone, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -1165,11 +1201,60 @@ pub struct HotspotSummary {
     /// True when the repository is a shallow clone, so churn counts are
     /// truncated.
     pub shallow_clone: bool,
+    /// Provenance of the instant every churn and staleness number was measured
+    /// against. Absent only when a caller assembled a summary without one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clock: Option<ClockProvenance>,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The three tokens are the wire contract a consumer branches on, so they
+    /// are pinned here rather than left to the derive.
+    #[test]
+    fn clock_source_serializes_as_snake_case_tokens() {
+        let tokens: Vec<String> = [
+            ClockSource::Environment,
+            ClockSource::HeadCommit,
+            ClockSource::WallClock,
+        ]
+        .into_iter()
+        .map(|source| serde_json::to_string(&source).expect("clock source should serialize"))
+        .collect();
+        assert_eq!(
+            tokens,
+            [r#""environment""#, r#""head_commit""#, r#""wall_clock""#]
+        );
+    }
+
+    /// A summary without a clock stays byte-identical to the shape consumers
+    /// already parse; one with a clock publishes all three members.
+    #[test]
+    fn hotspot_summary_clock_is_omitted_when_absent_and_complete_when_present() {
+        let mut summary = HotspotSummary {
+            since: "6 months".to_owned(),
+            min_commits: 3,
+            files_analyzed: 4,
+            files_excluded: 1,
+            shallow_clone: false,
+            clock: None,
+        };
+        let json = serde_json::to_string(&summary).expect("summary should serialize");
+        assert!(!json.contains("clock"), "{json}");
+
+        summary.clock = Some(ClockProvenance {
+            source: ClockSource::WallClock,
+            epoch_secs: 1_788_782_400,
+            reproducible: false,
+        });
+        let value: serde_json::Value =
+            serde_json::to_value(&summary).expect("summary should serialize");
+        assert_eq!(value["clock"]["source"], "wall_clock");
+        assert_eq!(value["clock"]["epoch_secs"], 1_788_782_400_u64);
+        assert_eq!(value["clock"]["reproducible"], false);
+    }
 
     #[test]
     fn exceeded_threshold_serializes_as_snake_case() {

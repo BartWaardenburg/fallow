@@ -4,6 +4,8 @@ use std::path::{Path, PathBuf};
 use fallow_config::OutputFormat;
 
 use super::enum_helpers::{EnumDeclarationRange, removable_exported_enum_range};
+use fallow_types::output_dead_code::ReachabilityCaveat;
+
 use super::plan::{
     CapturedHashes, FixPlan, SkipReason, read_source_with_hash_check, stage_fixed_content,
 };
@@ -54,18 +56,25 @@ fn is_off_graph_consumer_path(relative: &Path) -> bool {
 /// confidence, and why. Off-graph directory membership is checked first
 /// (more specific, names the surface for the user); a file that itself has
 /// an unresolved import is the second-tier signal (its local usage graph is
-/// incomplete). Returns `None` when the file is high confidence and the
-/// fixer should proceed normally. Issue #602.
+/// incomplete); a finding the analysis already marked with a reachability
+/// caveat is the third, and the least deniable, since the run itself recorded
+/// that the verdict rests on an import graph it knows is incomplete. Returns
+/// `None` when the file is high confidence and the fixer should proceed
+/// normally. Issue #602.
 fn low_confidence_skip_reason(
     relative: &Path,
     absolute: &Path,
     unresolved_import_files: &FxHashSet<PathBuf>,
+    caveats: &[ReachabilityCaveat],
 ) -> Option<SkipReason> {
     if is_off_graph_consumer_path(relative) {
         return Some(SkipReason::LowConfidenceOffGraph);
     }
     if unresolved_import_files.contains(absolute) {
         return Some(SkipReason::LowConfidenceUnresolvedImports);
+    }
+    if !caveats.is_empty() {
+        return Some(SkipReason::LowConfidenceIncompleteAnalysis);
     }
     None
 }
@@ -82,6 +91,9 @@ pub(super) struct ExportFixInput<'a, 'export> {
         &'a FxHashMap<PathBuf, Vec<&'export fallow_types::results::UnusedExport>>,
     pub(super) hashes: &'a CapturedHashes,
     pub(super) unresolved_import_files: &'a FxHashSet<PathBuf>,
+    /// Degraded-parse caveats per file, from the findings the analysis
+    /// annotated. A file present here has its export removals withheld.
+    pub(super) caveats_by_file: &'a FxHashMap<PathBuf, Vec<ReachabilityCaveat>>,
     pub(super) plan: &'a mut FixPlan,
     pub(super) output: OutputFormat,
     pub(super) dry_run: bool,
@@ -195,8 +207,9 @@ fn push_export_fix_json(
 /// the file as skipped instead of overwriting bytes the analysis never saw.
 ///
 /// `unresolved_import_files` is the set of absolute paths that have at
-/// least one unresolved import. A file in that set, or under an off-graph
-/// consumer directory, has its export removals withheld as low confidence
+/// least one unresolved import. A file in that set, under an off-graph
+/// consumer directory, or carrying a reachability caveat in
+/// `caveats_by_file`, has its export removals withheld as low confidence
 /// (issue #602): the rewrite would risk breaking a consumer fallow's graph
 /// cannot see. The skip is recorded on `plan` so the orchestrator surfaces
 /// it; the export stays reported by `fallow dead-code`.
@@ -205,6 +218,7 @@ pub(super) fn apply_export_fixes(input: &mut ExportFixInput<'_, '_>) {
     let exports_by_file = input.exports_by_file;
     let hashes = input.hashes;
     let unresolved_import_files = input.unresolved_import_files;
+    let caveats_by_file = input.caveats_by_file;
     let output = input.output;
     let dry_run = input.dry_run;
     let plan = &mut *input.plan;
@@ -213,8 +227,13 @@ pub(super) fn apply_export_fixes(input: &mut ExportFixInput<'_, '_>) {
     for (path, file_exports) in exports_by_file {
         let relative = path.strip_prefix(root).unwrap_or(path);
 
-        if let Some(reason) = low_confidence_skip_reason(relative, path, unresolved_import_files) {
-            plan.skip(path.clone(), reason);
+        let caveats = caveats_by_file
+            .get(path)
+            .map_or(&[][..], |caveats| caveats.as_slice());
+        if let Some(reason) =
+            low_confidence_skip_reason(relative, path, unresolved_import_files, caveats)
+        {
+            plan.skip_with_caveats(path.clone(), reason, caveats.to_vec());
             continue;
         }
 
@@ -472,6 +491,7 @@ mod tests {
             exports_by_file,
             hashes,
             unresolved_import_files,
+            caveats_by_file: &FxHashMap::default(),
             plan,
             output,
             dry_run,
@@ -1220,7 +1240,7 @@ mod tests {
         let mut unresolved = FxHashSet::default();
         unresolved.insert(abs.clone());
         assert_eq!(
-            low_confidence_skip_reason(Path::new("e2e/foo.ts"), &abs, &unresolved),
+            low_confidence_skip_reason(Path::new("e2e/foo.ts"), &abs, &unresolved, &[]),
             Some(SkipReason::LowConfidenceOffGraph)
         );
     }
@@ -1231,7 +1251,7 @@ mod tests {
         let mut unresolved = FxHashSet::default();
         unresolved.insert(abs.clone());
         assert_eq!(
-            low_confidence_skip_reason(Path::new("src/foo.ts"), &abs, &unresolved),
+            low_confidence_skip_reason(Path::new("src/foo.ts"), &abs, &unresolved, &[]),
             Some(SkipReason::LowConfidenceUnresolvedImports)
         );
     }
@@ -1240,8 +1260,151 @@ mod tests {
     fn low_confidence_reason_none_for_clean_file() {
         let abs = PathBuf::from("/proj/src/foo.ts");
         assert_eq!(
-            low_confidence_skip_reason(Path::new("src/foo.ts"), &abs, &FxHashSet::default()),
+            low_confidence_skip_reason(Path::new("src/foo.ts"), &abs, &FxHashSet::default(), &[]),
             None
+        );
+    }
+
+    /// The analysis already recorded that this verdict rests on an import
+    /// graph it knows is incomplete. Removing the export on that evidence is
+    /// how `fallow fix` breaks a build with a mutation fallow itself flagged,
+    /// so the removal is withheld the same way an off-graph export is: the
+    /// exit code does not move and `fallow dead-code` keeps reporting it.
+    #[test]
+    fn a_reachability_caveat_withholds_the_export_removal() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        let file = root.join("src/lib.ts");
+        let original = "export const needed = (): void => {};\n";
+        std::fs::write(&file, original).unwrap();
+
+        let export = make_export(&file, "needed", 1);
+        let mut map: FxHashMap<PathBuf, Vec<&UnusedExport>> = FxHashMap::default();
+        map.insert(file.clone(), vec![&export]);
+        let mut caveats_by_file: FxHashMap<PathBuf, Vec<ReachabilityCaveat>> = FxHashMap::default();
+        caveats_by_file.insert(
+            file.clone(),
+            vec![ReachabilityCaveat::IncompleteImportGraph],
+        );
+        let mut fixes = Vec::new();
+        let mut plan = FixPlan::new();
+        let hashes = capture_hashes(&[&file]);
+
+        super::apply_export_fixes(&mut ExportFixInput {
+            root,
+            exports_by_file: &map,
+            hashes: &hashes,
+            unresolved_import_files: &FxHashSet::default(),
+            caveats_by_file: &caveats_by_file,
+            plan: &mut plan,
+            output: OutputFormat::Human,
+            dry_run: false,
+            fixes: &mut fixes,
+        });
+
+        assert!(
+            fixes.is_empty(),
+            "no removal is planned for a caveated export"
+        );
+        assert_eq!(plan.skipped().len(), 1);
+        assert_eq!(
+            plan.skipped()[0].reason,
+            SkipReason::LowConfidenceIncompleteAnalysis
+        );
+        assert_eq!(
+            plan.skipped()[0].caveats,
+            vec![ReachabilityCaveat::IncompleteImportGraph],
+            "the skip carries the marker so a caller can gate on it"
+        );
+        assert!(
+            plan.skipped()[0].reason.is_intentional(),
+            "a withheld low-confidence removal must not move the exit code"
+        );
+        let _ = plan.commit();
+
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), original);
+    }
+
+    /// The withholding has to hold on the preview path too: an agent runs
+    /// `fix --dry-run` first and must not be told the removal is planned.
+    #[test]
+    fn a_reachability_caveat_withholds_the_export_removal_in_dry_run() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        let file = root.join("src/lib.ts");
+        let original = "export const needed = (): void => {};\n";
+        std::fs::write(&file, original).unwrap();
+
+        let export = make_export(&file, "needed", 1);
+        let mut map: FxHashMap<PathBuf, Vec<&UnusedExport>> = FxHashMap::default();
+        map.insert(file.clone(), vec![&export]);
+        let mut caveats_by_file: FxHashMap<PathBuf, Vec<ReachabilityCaveat>> = FxHashMap::default();
+        caveats_by_file.insert(
+            file.clone(),
+            vec![ReachabilityCaveat::IncompleteFileAnalysis],
+        );
+        let mut fixes = Vec::new();
+        let mut plan = FixPlan::new();
+        let hashes = capture_hashes(&[&file]);
+
+        super::apply_export_fixes(&mut ExportFixInput {
+            root,
+            exports_by_file: &map,
+            hashes: &hashes,
+            unresolved_import_files: &FxHashSet::default(),
+            caveats_by_file: &caveats_by_file,
+            plan: &mut plan,
+            output: OutputFormat::Json,
+            dry_run: true,
+            fixes: &mut fixes,
+        });
+
+        assert!(fixes.is_empty());
+        assert_eq!(
+            plan.skipped()[0].reason,
+            SkipReason::LowConfidenceIncompleteAnalysis
+        );
+    }
+
+    /// A clean finding still auto-fixes: the caveat gate must not become a
+    /// blanket refusal on every export in a project that has one broken file.
+    #[test]
+    fn an_uncaveated_export_is_still_removed_in_an_incomplete_run() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        let clean = root.join("src/clean.ts");
+        std::fs::write(&clean, "export const gone = (): void => {};\n").unwrap();
+        let caveated = root.join("src/caveated.ts");
+
+        let export = make_export(&clean, "gone", 1);
+        let mut map: FxHashMap<PathBuf, Vec<&UnusedExport>> = FxHashMap::default();
+        map.insert(clean.clone(), vec![&export]);
+        let mut caveats_by_file: FxHashMap<PathBuf, Vec<ReachabilityCaveat>> = FxHashMap::default();
+        caveats_by_file.insert(caveated, vec![ReachabilityCaveat::IncompleteImportGraph]);
+        let mut fixes = Vec::new();
+        let mut plan = FixPlan::new();
+        let hashes = capture_hashes(&[&clean]);
+
+        super::apply_export_fixes(&mut ExportFixInput {
+            root,
+            exports_by_file: &map,
+            hashes: &hashes,
+            unresolved_import_files: &FxHashSet::default(),
+            caveats_by_file: &caveats_by_file,
+            plan: &mut plan,
+            output: OutputFormat::Human,
+            dry_run: false,
+            fixes: &mut fixes,
+        });
+
+        assert!(plan.skipped().is_empty());
+        let _ = plan.commit();
+        assert_eq!(
+            std::fs::read_to_string(&clean).unwrap(),
+            "const gone = (): void => {};\n"
         );
     }
 

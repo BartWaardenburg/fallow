@@ -185,6 +185,55 @@ pub fn parse_json(output: &CommandOutput) -> serde_json::Value {
     })
 }
 
+/// Fields a report is allowed to change between two runs over the same commit.
+///
+/// `docs/backwards-compatibility.md` publishes this as the definition of a
+/// volatile field: everything else in a report must be byte-identical across
+/// reruns of the same analysis. Keep the two in step; a determinism gate that
+/// quietly grows its allowlist stops being a gate.
+///
+/// - `elapsed_ms`: measured duration.
+/// - `head_sha`: the base snapshot's own commit, which moves when a fixture
+///   commits during the test.
+/// - `_meta.telemetry.analysis_run_id`: a per-run identifier by construction.
+pub const VOLATILE_REPORT_FIELDS: &[&str] = &["elapsed_ms", "head_sha"];
+
+/// Strip every volatile field from a parsed report, in place and at any depth,
+/// so what remains can be compared byte for byte between runs.
+pub fn strip_volatile_fields(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Object(map) => {
+            for field in VOLATILE_REPORT_FIELDS {
+                map.remove(*field);
+            }
+            if let Some(telemetry) = map
+                .get_mut("_meta")
+                .and_then(|meta| meta.get_mut("telemetry"))
+                .and_then(|telemetry| telemetry.as_object_mut())
+            {
+                telemetry.remove("analysis_run_id");
+            }
+            for nested in map.values_mut() {
+                strip_volatile_fields(nested);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for nested in items {
+                strip_volatile_fields(nested);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Parse a report and reduce it to its comparable form: one string that two
+/// runs over the same commit must agree on exactly.
+pub fn canonical_report(output: &CommandOutput) -> String {
+    let mut value = parse_json(output);
+    strip_volatile_fields(&mut value);
+    serde_json::to_string(&value).expect("re-serialize canonical report")
+}
+
 /// Replace absolute fixture paths with `[ROOT]` and normalize separators.
 pub fn redact_paths(s: &str, root: &Path) -> String {
     let root_str = root.to_string_lossy();

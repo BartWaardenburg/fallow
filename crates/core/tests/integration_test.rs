@@ -39,6 +39,8 @@ mod duplicate_prop_shape;
 mod dynamic_import_then;
 #[path = "integration_test/dynamic_imports.rs"]
 mod dynamic_imports;
+#[path = "integration_test/entry_point_spans.rs"]
+mod entry_point_spans;
 #[path = "integration_test/external_plugins.rs"]
 mod external_plugins;
 #[path = "integration_test/extraction.rs"]
@@ -111,6 +113,8 @@ mod lit_unused_state;
 mod member_detection;
 #[path = "integration_test/nx_project_json.rs"]
 mod nx_project_json;
+#[path = "integration_test/parse_degraded_diagnostic.rs"]
+mod parse_degraded_diagnostic;
 #[path = "integration_test/redwoodsdk.rs"]
 mod redwoodsdk;
 #[path = "integration_test/rspress_theme.rs"]
@@ -123,12 +127,16 @@ mod safe_analysis;
 mod sfc_parsing;
 #[path = "integration_test/size_limit_plugin.rs"]
 mod size_limit_plugin;
+#[path = "integration_test/skipped_file_reachability_caveat.rs"]
+mod skipped_file_reachability_caveat;
 #[path = "integration_test/svelte_dead_event.rs"]
 mod svelte_dead_event;
 #[path = "integration_test/symlink_root_containment.rs"]
 mod symlink_root_containment;
 #[path = "integration_test/typed_receiver_scoping.rs"]
 mod typed_receiver_scoping;
+#[path = "integration_test/unmeasured_zero_diagnostics.rs"]
+mod unmeasured_zero_diagnostics;
 #[path = "integration_test/unreachable_exports.rs"]
 mod unreachable_exports;
 #[path = "integration_test/workspaces.rs"]

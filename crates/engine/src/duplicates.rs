@@ -59,6 +59,11 @@ pub fn refresh_clone_group_metrics(group: &mut CloneGroup) {
 ///
 /// Uses per-file line deduplication, matching the detector's stats model, so
 /// overlapping clone instances do not inflate the duplicated line count.
+///
+/// `clone_families` is read from `report.clone_families`, so a scope filter
+/// must call [`refresh_clone_families`] before this. A presentation cap such
+/// as `--top` must not call this at all: it truncates the arrays while `stats`
+/// keeps describing the corpus the run measured.
 #[must_use]
 pub fn recompute_stats(report: &DuplicationReport) -> DuplicationStats {
     let mut files_with_clones: FxHashSet<&Path> = FxHashSet::default();
@@ -88,6 +93,7 @@ pub fn recompute_stats(report: &DuplicationReport) -> DuplicationStats {
         total_tokens: report.stats.total_tokens,
         duplicated_tokens: duplicated_tokens.min(report.stats.total_tokens),
         clone_groups: report.clone_groups.len(),
+        clone_families: report.clone_families.len(),
         clone_instances,
         duplication_percentage: if report.stats.total_lines > 0 {
             (duplicated_lines as f64 / report.stats.total_lines as f64) * 100.0

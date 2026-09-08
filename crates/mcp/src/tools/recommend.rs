@@ -3,7 +3,7 @@ use crate::params::RecommendParams;
 use rmcp::ErrorData as McpError;
 use rmcp::model::CallToolResult;
 
-use super::{push_str_flag, run_tool};
+use super::{push_str_flag, run_tool_with_limit};
 
 /// Build CLI arguments for the `recommend` tool.
 ///
@@ -29,7 +29,7 @@ pub async fn run_recommend(
     params: RecommendParams,
 ) -> Result<CallToolResult, McpError> {
     let args = build_recommend_args(&params);
-    run_tool(binary, "recommend", &args).await
+    run_tool_with_limit(binary, "recommend", &args, params.max_output_bytes).await
 }
 
 #[cfg(test)]
@@ -46,6 +46,7 @@ mod tests {
     fn build_recommend_args_forwards_root() {
         let args = build_recommend_args(&RecommendParams {
             root: Some("/tmp/project".to_string()),
+            max_output_bytes: None,
         });
         assert_eq!(
             args,
@@ -64,6 +65,7 @@ mod tests {
     fn build_recommend_args_skips_empty_root() {
         let args = build_recommend_args(&RecommendParams {
             root: Some(String::new()),
+            max_output_bytes: None,
         });
         assert_eq!(args, ["recommend", "--format", "json", "--quiet"]);
     }

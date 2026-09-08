@@ -498,7 +498,13 @@ jobs:
     permissions:
       contents: read
     steps:
+      # Full history with tags: the required-field schema policy in
+      # scripts/repository-policy.test.mjs compares against the released
+      # baseline, and a shallow checkout leaves it with nothing to compare.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          filter: blob:none
       - name: Check out public documentation contract
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -601,8 +607,11 @@ jobs:
           }
           NODE
 
-      - name: Test release packaging gate
-        run: node --test .github/scripts/verify-pack-contents.test.mjs .github/scripts/update-dockerfile-pins.test.mjs
+      # Globbed rather than listed: a new .github/scripts test should run the
+      # moment it lands, instead of waiting for someone to remember this line.
+      # The `npm-package` filter already includes `.github/scripts/**`.
+      - name: Test CI helper scripts
+        run: node --test .github/scripts/*.test.mjs
 
       - name: Run npm wrapper unit tests
         run: npm --prefix npm/fallow test

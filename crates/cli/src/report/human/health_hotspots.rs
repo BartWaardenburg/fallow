@@ -413,6 +413,7 @@ mod tests {
                 files_analyzed: 10,
                 files_excluded: 1,
                 shallow_clone: false,
+                clock: None,
             }),
             ..HealthReport::default()
         };

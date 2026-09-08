@@ -84,6 +84,10 @@ pub struct DupesOptions<'a> {
     /// Standalone `fallow dupes` reads this; combined-mode invocations rely
     /// on the bare `fallow` pipeline panel and ignore this field.
     pub performance: bool,
+    /// Emit the verbatim source text on each clone instance in `--format json`
+    /// output. `false` is `--no-fragments`: the five location fields still
+    /// address the same code. Human and CI renderers ignore this.
+    pub include_fragments: bool,
 }
 
 /// Parse a `--trace` spec string into (file_path, line_number).
@@ -265,6 +269,9 @@ pub struct DupesResult {
     /// the same way on every run (issue #2366). Empty when the run reused
     /// another analysis's discovery: that analysis carries the same list.
     pub workspace_diagnostics: Vec<fallow_config::WorkspaceDiagnostic>,
+    /// Whether `--format json` carries the verbatim source text per clone
+    /// instance. Mirrors `DupesOptions::include_fragments`.
+    pub include_fragments: bool,
 }
 
 /// Run duplication analysis, filtering, and baseline handling. Returns results without printing.
@@ -331,10 +338,41 @@ fn filter_dupes_report(
         filter_by_workspaces(report, &ws_roots, &config.root);
     }
 
-    if let Some(n) = opts.top
-        && opts.group_by.is_none()
-    {
+    if let Some(n) = opts.top {
         apply_top(report, n, &config.root);
+    }
+    Ok(())
+}
+
+/// Message for the one flag pair `dupes` cannot serve at once.
+///
+/// The refusal and the reason for it are separate strings so the terminal shows
+/// the actionable half on one line. As a single sentence this soft-wrapped to
+/// four lines and buried "run one or the other" at the end of the fourth.
+const TOP_WITH_GROUP_BY_MESSAGE: &str = "--top and --group-by cannot be combined on dupes";
+
+/// The `hint:` half of [`TOP_WITH_GROUP_BY_MESSAGE`].
+const TOP_WITH_GROUP_BY_HINT: &str = "run one flag or the other; per-bucket stats cover every \
+     clone group in the bucket, so a global top-N would leave them describing groups the listing \
+     no longer holds";
+
+/// Refuse `--top` together with `--group-by` instead of dropping one of them.
+///
+/// The two were previously accepted together and `--top` was silently ignored,
+/// which is the failure mode the shown/omitted disclosure exists to prevent: the
+/// run exited 0 reporting every clone group after being asked for N. Refusing
+/// costs the caller one flag; honouring it per bucket would either recompute
+/// bucket stats over a truncated set (a second contradictory scope inside one
+/// object) or need a per-bucket shown/omitted split the grouped envelope does
+/// not carry.
+fn validate_dupes_flag_combination(opts: &DupesOptions<'_>) -> Result<(), ExitCode> {
+    if opts.top.is_some() && opts.group_by.is_some() {
+        return Err(crate::error::emit_error_with_hint(
+            TOP_WITH_GROUP_BY_MESSAGE,
+            TOP_WITH_GROUP_BY_HINT,
+            2,
+            opts.output,
+        ));
     }
     Ok(())
 }
@@ -344,6 +382,8 @@ fn execute_dupes_inner(
     pre_discovered: Option<Vec<fallow_types::discover::DiscoveredFile>>,
 ) -> Result<DupesResult, ExitCode> {
     let start = Instant::now();
+
+    validate_dupes_flag_combination(opts)?;
 
     let config = load_dupes_config_for_analysis(opts)?;
 
@@ -426,6 +466,7 @@ fn execute_dupes_inner(
         ignore_imports: dupes_config.ignore_imports,
         explain_skipped: opts.explain_skipped,
         workspace_diagnostics,
+        include_fragments: opts.include_fragments,
     })
 }
 
@@ -565,12 +606,17 @@ fn resolve_changed_since(
 }
 
 /// Keep only the `n` highest-ranked clone groups.
+///
+/// `stats` keeps describing the corpus the run measured. Truncation is a
+/// presentation choice, so rewriting `clone_groups` / `clone_instances` from
+/// the truncated vector would put two mutually contradictory scopes in one
+/// object next to the untouched `files_with_clones` and
+/// `duplication_percentage`. Consumers read the shown/omitted split from
+/// `DuplicationReport::clone_groups_shown` / `clone_groups_omitted` instead.
 fn apply_top(report: &mut DuplicationReport, n: usize, root: &std::path::Path) {
     report.sort();
     report.clone_groups.truncate(n);
     fallow_engine::duplicates::refresh_clone_families(report, root);
-    report.stats.clone_groups = report.clone_groups.len();
-    report.stats.clone_instances = report.clone_groups.iter().map(|g| g.instances.len()).sum();
     report.sort();
 }
 
@@ -765,6 +811,7 @@ fn print_dupes_result_with_grouping(input: DupesResultGroupingInput<'_>) -> Exit
         skip_score_and_trend: false,
         css_requested: false,
         json_style: input.json_style,
+        include_fragments: result.include_fragments,
     };
     print_default_ignore_note(result, input.quiet);
     print_min_occurrences_note(result, input.quiet);
@@ -963,6 +1010,7 @@ mod tests {
         total_lines: usize,
     ) -> DuplicationReport {
         let clone_instances: usize = groups.iter().map(|g| g.instances.len()).sum();
+        let group_count = groups.len();
         DuplicationReport {
             clone_groups: groups,
             clone_families: vec![],
@@ -974,7 +1022,8 @@ mod tests {
                 duplicated_lines: 0,
                 total_tokens: 0,
                 duplicated_tokens: 0,
-                clone_groups: 0,
+                clone_groups: group_count,
+                clone_families: 0,
                 clone_instances,
                 duplication_percentage: 0.0,
                 clone_groups_below_min_occurrences: 0,
@@ -1026,7 +1075,50 @@ mod tests {
             summary: false,
             group_by: None,
             performance: false,
+            include_fragments: true,
         }
+    }
+
+    #[test]
+    fn top_with_group_by_is_refused_as_invalid_input() {
+        let root = Path::new("/project");
+        let mut opts = default_opts_for_config(root, DupesMode::Mild);
+        opts.top = Some(1);
+        opts.group_by = Some(crate::GroupBy::Directory);
+
+        let code = validate_dupes_flag_combination(&opts)
+            .expect_err("--top with --group-by must be refused");
+
+        assert_eq!(code, ExitCode::from(2));
+        assert!(
+            TOP_WITH_GROUP_BY_MESSAGE.contains("--top")
+                && TOP_WITH_GROUP_BY_MESSAGE.contains("--group-by"),
+            "the refusal must name both flags"
+        );
+        assert!(
+            TOP_WITH_GROUP_BY_HINT.contains("per-bucket stats"),
+            "the hint must say why the pair cannot be served"
+        );
+        assert!(
+            TOP_WITH_GROUP_BY_MESSAGE.len() < 60,
+            "the actionable half must fit one terminal line: {} chars",
+            TOP_WITH_GROUP_BY_MESSAGE.len()
+        );
+    }
+
+    #[test]
+    fn either_flag_on_its_own_is_accepted() {
+        let root = Path::new("/project");
+        let mut top_only = default_opts_for_config(root, DupesMode::Mild);
+        top_only.top = Some(1);
+        assert!(validate_dupes_flag_combination(&top_only).is_ok());
+
+        let mut grouped_only = default_opts_for_config(root, DupesMode::Mild);
+        grouped_only.group_by = Some(crate::GroupBy::Directory);
+        assert!(validate_dupes_flag_combination(&grouped_only).is_ok());
+
+        let neither = default_opts_for_config(root, DupesMode::Mild);
+        assert!(validate_dupes_flag_combination(&neither).is_ok());
     }
 
     #[test]
@@ -1237,7 +1329,7 @@ mod tests {
     }
 
     #[test]
-    fn apply_top_recomputes_clone_groups_and_clone_instances_stats() {
+    fn apply_top_keeps_all_four_stats_on_the_measured_corpus() {
         let groups = vec![
             make_group(vec![instance("a.ts", 1, 10); 5], 50, 10),
             make_group(vec![instance("b.ts", 1, 10); 3], 50, 10),
@@ -1245,6 +1337,8 @@ mod tests {
             make_group(vec![instance("d.ts", 1, 10); 2], 50, 10),
         ];
         let mut report = make_report(groups, 4, 100);
+        report.stats.files_with_clones = 4;
+        report.stats.duplication_percentage = 4.7268;
         report.sort();
 
         apply_top(&mut report, 1, Path::new("/project"));
@@ -1256,14 +1350,93 @@ mod tests {
             "kept group is the 5-instance group"
         );
         assert_eq!(
-            report.stats.clone_groups,
-            report.clone_groups.len(),
-            "stats.clone_groups must match the truncated array length"
+            report.stats.clone_groups, 4,
+            "stats.clone_groups stays on the corpus the run measured"
         );
         assert_eq!(
-            report.stats.clone_instances, 5,
-            "stats.clone_instances must reflect the surviving instances"
+            report.stats.clone_instances, 12,
+            "stats.clone_instances stays on the corpus the run measured"
         );
+        assert_eq!(
+            report.stats.files_with_clones, 4,
+            "files_with_clones was never truncated and must stay corpus-wide"
+        );
+        assert!(
+            (report.stats.duplication_percentage - 4.7268).abs() < f64::EPSILON,
+            "duplication_percentage was never truncated and must stay corpus-wide"
+        );
+        assert_eq!(report.clone_groups_shown(), 1);
+        assert_eq!(report.clone_groups_omitted(), 3);
+    }
+
+    /// `--top` rebuilds the families from the groups that survive the cap, so
+    /// `clone_families[]` narrows exactly like `clone_groups[]`. The corpus
+    /// family count has to survive that rebuild or the drop is unrecoverable:
+    /// a consumer reading the array alone cannot tell three families from a
+    /// project with three from a project with a hundred and sixty.
+    #[test]
+    fn apply_top_keeps_the_family_count_on_the_measured_corpus() {
+        let groups = vec![
+            make_group(
+                vec![instance("a.ts", 1, 10), instance("b.ts", 1, 10)],
+                50,
+                10,
+            ),
+            make_group(
+                vec![instance("a.ts", 30, 40), instance("b.ts", 30, 40)],
+                50,
+                10,
+            ),
+            make_group(
+                vec![instance("c.ts", 1, 10), instance("d.ts", 1, 10)],
+                40,
+                8,
+            ),
+            make_group(
+                vec![instance("c.ts", 30, 40), instance("d.ts", 30, 40)],
+                40,
+                8,
+            ),
+        ];
+        let root = Path::new("/project");
+        let mut report = make_report(groups, 4, 100);
+        fallow_engine::duplicates::refresh_clone_families(&mut report, root);
+        report.stats.clone_families = report.clone_families.len();
+        assert_eq!(
+            report.clone_families.len(),
+            2,
+            "the two file pairs must build two families"
+        );
+
+        apply_top(&mut report, 1, root);
+
+        assert_eq!(
+            report.stats.clone_families, 2,
+            "stats.clone_families stays on the corpus the run measured"
+        );
+        assert_eq!(report.clone_families_shown(), report.clone_families.len());
+        assert_eq!(
+            report.clone_families_shown() + report.clone_families_omitted(),
+            report.stats.clone_families,
+            "shown plus omitted must reconstruct the corpus family count"
+        );
+        assert!(
+            report.clone_families_omitted() > 0,
+            "top 1 keeps one file pair, so it must withhold the other family"
+        );
+    }
+
+    #[test]
+    fn untruncated_report_omits_nothing() {
+        let groups = vec![
+            make_group(vec![instance("a.ts", 1, 10); 5], 50, 10),
+            make_group(vec![instance("b.ts", 1, 10); 3], 50, 10),
+        ];
+        let report = make_report(groups, 2, 100);
+
+        assert_eq!(report.clone_groups_shown(), 2);
+        assert_eq!(report.clone_groups_omitted(), 0);
+        assert_eq!(report.clone_families_omitted(), 0);
     }
 
     #[test]

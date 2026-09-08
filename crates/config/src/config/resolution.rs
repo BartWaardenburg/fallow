@@ -368,7 +368,14 @@ pub fn resolve_max_file_size_bytes(max_file_size_mb: Option<u32>) -> Option<u64>
 }
 
 /// Compute the cache-invalidation hash over extraction-affecting config fields.
-fn compute_cache_config_hash(external_plugins: &[ExternalPluginDef]) -> u64 {
+/// Hash the extraction-affecting configuration a persisted cache is keyed on.
+///
+/// Public because a run is not the only thing that needs it: `fallow doctor`
+/// inspects the cache without running an analysis, and it resolves config with
+/// caching disabled, which zeroes the stored hash. Comparing against that zero
+/// reported every healthy cache as config drift.
+#[must_use]
+pub fn cache_config_hash(external_plugins: &[ExternalPluginDef]) -> u64 {
     let mut names: Vec<&str> = external_plugins.iter().map(|p| p.name.as_str()).collect();
     names.sort_unstable();
     let mut hasher = xxhash_rust::xxh3::Xxh3::new();
@@ -670,7 +677,7 @@ fn resolve_cache_settings(
         config_hash: if no_cache {
             0
         } else {
-            compute_cache_config_hash(external_plugins)
+            cache_config_hash(external_plugins)
         },
     }
 }

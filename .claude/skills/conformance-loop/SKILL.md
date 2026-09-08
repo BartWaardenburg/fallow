@@ -10,8 +10,12 @@ description: Iteratively improve Fallow analysis accuracy by comparing it with c
 2. Run Fallow and comparison tools with documented equivalent settings.
 3. Manually verify disagreements against source.
 4. Classify true positive, false positive, false negative, or model difference.
-5. Implement one general correction with a regression fixture.
-6. Re-run the full corpus and retain only net improvements.
-7. Run `review`.
+5. Record the classification in `tests/conformance/adjudications.json` before
+   writing the fix. A verdict that lives only in a session or in `.plans/` is
+   lost, and the daily lane then re-reports the same disagreement as
+   unadjudicated forever.
+6. Implement one general correction with a regression fixture.
+7. Re-run the full corpus and retain only net improvements.
+8. Run `review`.
 
 Competitor output is a lead, not ground truth.

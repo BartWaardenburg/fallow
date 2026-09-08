@@ -97,7 +97,10 @@ pub(super) fn run_duplication_report_with_session(
     }
 
     let root = session.root();
-    let payload = DupesReportPayload::from_report(&report);
+    let payload = DupesReportPayload::from_report_with_fragments(
+        &report,
+        options.include_fragments.unwrap_or(true),
+    );
     let clone_fingerprints = payload
         .clone_groups
         .iter()
@@ -116,6 +119,10 @@ pub(super) fn run_duplication_report_with_session(
             version: env!("CARGO_PKG_VERSION").to_string(),
             elapsed: start.elapsed(),
             report: payload,
+            clone_groups_shown: report.clone_groups_shown(),
+            clone_groups_omitted: report.clone_groups_omitted(),
+            clone_families_shown: report.clone_families_shown(),
+            clone_families_omitted: report.clone_families_omitted(),
             grouped_by: None,
             total_issues: None,
             groups: None,

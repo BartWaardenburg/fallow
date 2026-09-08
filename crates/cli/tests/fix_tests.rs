@@ -726,6 +726,513 @@ fn fix_apply_keeps_off_graph_export_and_removes_high_confidence_one() {
     assert_eq!(json["skipped_low_confidence_exports"].as_u64(), Some(1));
 }
 
+/// The reproduction that made this a defect rather than a gap: a syntax error
+/// on line 1 hides the import on line 2, `needed` reads as unused, the finding
+/// correctly carries the degraded-parse caveat AND `auto_fixable: true`, and
+/// `fix` used to plan and apply the removal anyway, breaking the build with a
+/// mutation fallow itself had flagged as resting on incomplete evidence. The
+/// declared `lodash` is the same hole one array over: the only import of it
+/// sits under the same syntax error, and `remove-dependency` empties the
+/// manifest.
+fn write_degraded_parse_project(root: &std::path::Path) {
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"degraded","main":"src/index.ts","dependencies":{"lodash":"^4.17.21"}}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("src/index.ts"),
+        "import { other } from './lib';\nimport { start } from './consumer';\nother();\nstart();\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("src/consumer.ts"),
+        "const broken = = 1;\nimport { needed } from './lib';\nimport { chunk } from 'lodash';\nexport const start = (): void => { needed(); chunk([1], 1); };\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("src/lib.ts"),
+        "export const needed = (): void => {};\nexport const other = (): void => {};\n",
+    )
+    .unwrap();
+}
+
+#[test]
+fn fix_dry_run_withholds_every_removal_a_degraded_parse_distorted() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write_degraded_parse_project(root);
+
+    let output = run_fallow_in_root("fix", root, &["--dry-run", "--format", "json", "--quiet"]);
+    assert_eq!(
+        output.code, 0,
+        "a degraded-parse withholding is intentional and must not move the exit code; stderr: {}",
+        output.stderr
+    );
+    let json = parse_json(&output);
+    let fixes = json["fixes"].as_array().unwrap();
+
+    assert!(
+        !fixes
+            .iter()
+            .any(|fix| fix["type"] == "remove_export" && fix["name"] == "needed"),
+        "the export the broken file imports must not be planned for removal: {}",
+        output.stdout
+    );
+    let export_skip = fixes
+        .iter()
+        .find(|fix| {
+            fix["skip_reason"].as_str() == Some("low_confidence_incomplete_analysis")
+                && fix["type"] == "skipped"
+        })
+        .expect("an export skip record must be present");
+    assert_eq!(
+        export_skip["reachability_caveats"],
+        serde_json::json!(["incomplete-import-graph"]),
+        "the skip entry carries the marker so a caller gates on it: {}",
+        output.stdout
+    );
+    assert_eq!(json["skipped_low_confidence_exports"].as_u64(), Some(1));
+
+    let dep_entry = fixes
+        .iter()
+        .find(|fix| fix["type"] == "remove_dependency")
+        .expect("the dependency entry is still reported, as a withholding");
+    assert_eq!(dep_entry["package"], "lodash");
+    assert_eq!(
+        dep_entry["skip_reason"],
+        "low_confidence_incomplete_analysis"
+    );
+    assert_eq!(
+        dep_entry["reachability_caveats"],
+        serde_json::json!(["incomplete-import-graph"])
+    );
+    assert_eq!(
+        json["skipped_low_confidence_dependencies"].as_u64(),
+        Some(1)
+    );
+}
+
+/// A quiet plan that lists every removal it WILL make and none of the ones it
+/// REFUSED reads as complete when it is partial.
+///
+/// `--quiet` drops progress, not measurements. The `Would remove` lines are
+/// gated on output format alone, so the withheld lines beside them must be too.
+/// `Dry run complete` is progress and stays gated.
+#[test]
+fn fix_quiet_dry_run_still_reports_what_it_refused_to_remove() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write_degraded_parse_project(root);
+
+    let quiet = run_fallow_in_root("fix", root, &["--dry-run", "--quiet"]);
+    assert_eq!(quiet.code, 0, "stdout:\n{}", quiet.stdout);
+    assert!(
+        quiet.stderr.contains("Kept unused export(s) in"),
+        "the quiet plan must also name the export it refused to remove; stderr:\n{}",
+        quiet.stderr
+    );
+    assert!(
+        quiet.stderr.contains("Kept `lodash`"),
+        "the quiet plan must also name the dependency it refused to remove; stderr:\n{}",
+        quiet.stderr
+    );
+    assert!(
+        quiet.stderr.contains("Kept unused exports in"),
+        "the quiet plan must keep the trailing withheld summary; stderr:\n{}",
+        quiet.stderr
+    );
+    assert!(
+        !quiet.stderr.contains("Dry run complete"),
+        "progress stays gated on --quiet; stderr:\n{}",
+        quiet.stderr
+    );
+
+    let loud = run_fallow_in_root("fix", root, &["--dry-run"]);
+    assert!(
+        loud.stderr.contains("Dry run complete"),
+        "stderr:\n{}",
+        loud.stderr
+    );
+    for withheld in [
+        "Kept unused export(s) in",
+        "Kept `lodash`",
+        "Kept unused exports in",
+    ] {
+        assert!(
+            loud.stderr.contains(withheld),
+            "--quiet must withhold nothing the loud run reported: {withheld:?} missing from\n{}",
+            loud.stderr
+        );
+    }
+}
+
+/// The other half of the asymmetry: a removal fallow WILL make already survived
+/// `--quiet`, and must keep doing so.
+#[test]
+fn fix_quiet_dry_run_still_lists_the_removals_it_would_make() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"cleanfix","main":"src/index.ts"}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("src/index.ts"),
+        "import { kept } from './util';\nkept();\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("src/util.ts"),
+        "export const kept = (): void => {};\nexport const removable = (): void => {};\n",
+    )
+    .unwrap();
+
+    let quiet = run_fallow_in_root("fix", root, &["--dry-run", "--quiet"]);
+    assert!(
+        quiet
+            .stderr
+            .contains("Would remove export from src/util.ts:2 `removable`"),
+        "stderr:\n{}",
+        quiet.stderr
+    );
+    assert!(
+        !quiet.stderr.contains("Dry run complete"),
+        "progress stays gated on --quiet; stderr:\n{}",
+        quiet.stderr
+    );
+}
+
+/// JSON callers read the skip records off the envelope, so the human stream
+/// stays out of their way exactly as the `Would remove` lines do.
+#[test]
+fn fix_json_output_keeps_the_withheld_lines_off_stderr() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write_degraded_parse_project(root);
+
+    let output = run_fallow_in_root("fix", root, &["--dry-run", "--format", "json"]);
+    assert_eq!(output.code, 0, "stderr:\n{}", output.stderr);
+    assert!(
+        !output.stderr.contains("Kept "),
+        "the human withheld lines must not leak into a JSON run; stderr:\n{}",
+        output.stderr
+    );
+    assert!(
+        !output.stderr.contains("Would remove"),
+        "stderr:\n{}",
+        output.stderr
+    );
+}
+
+#[test]
+fn fix_apply_leaves_a_degraded_parse_project_byte_identical() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write_degraded_parse_project(root);
+    let lib_before = std::fs::read_to_string(root.join("src/lib.ts")).unwrap();
+    let manifest_before = std::fs::read_to_string(root.join("package.json")).unwrap();
+
+    let fix = run_fallow_in_root("fix", root, &["--yes", "--format", "json", "--quiet"]);
+    assert_eq!(
+        fix.code, 0,
+        "an apply whose only skips are intentional must exit 0; stderr: {}",
+        fix.stderr
+    );
+
+    assert_eq!(
+        std::fs::read_to_string(root.join("src/lib.ts")).unwrap(),
+        lib_before,
+        "the export the broken file imports must survive verbatim",
+    );
+    assert_eq!(
+        std::fs::read_to_string(root.join("package.json")).unwrap(),
+        manifest_before,
+        "the package whose only import sits under the syntax error must survive",
+    );
+}
+
+/// The second door onto the same build-breaking mutation, and the one this
+/// project's default settings leave open: no syntax error anywhere, just a file
+/// the per-file size guard skipped before reading it. `src/huge.ts` imports
+/// `needed` on its first line and is never opened, so `needed` reads as an
+/// unused export with an auto-fixable `remove-export` action, and `fix --yes`
+/// used to strip the `export` keyword while `huge.ts` still imported it.
+///
+/// The withholding is not wired to the size skip. It follows the caveat the
+/// analysis stamps on the finding, which every diagnostic kind
+/// `WorkspaceDiagnosticKind::source_never_analyzed` accepts raises.
+fn write_skipped_file_project(root: &std::path::Path) {
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"skipped","main":"src/index.ts"}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("src/lib.ts"),
+        "export const needed = 1;\nexport const alsoUsed = 2;\n",
+    )
+    .unwrap();
+    let mut oversized = String::from("import { needed } from './lib';\nexport const pad = [\n");
+    while oversized.len() < 1_200_000 {
+        oversized.push_str("  \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\n");
+    }
+    oversized.push_str("];\nexport const use = needed;\n");
+    std::fs::write(root.join("src/huge.ts"), oversized).unwrap();
+    std::fs::write(
+        root.join("src/index.ts"),
+        "import './huge';\nimport { alsoUsed } from './lib';\nexport const run = (): number => alsoUsed;\n",
+    )
+    .unwrap();
+}
+
+#[test]
+fn fix_dry_run_withholds_a_removal_a_skipped_file_distorted() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write_skipped_file_project(root);
+
+    let output = run_fallow_in_root(
+        "fix",
+        root,
+        &[
+            "--dry-run",
+            "--format",
+            "json",
+            "--quiet",
+            "--max-file-size",
+            "1",
+        ],
+    );
+    assert_eq!(
+        output.code, 0,
+        "an intentional withholding must not move the exit code; stderr: {}",
+        output.stderr
+    );
+    let json = parse_json(&output);
+    let fixes = json["fixes"].as_array().unwrap();
+
+    assert!(
+        !fixes
+            .iter()
+            .any(|fix| fix["type"] == "remove_export" && fix["name"] == "needed"),
+        "the export the skipped file imports must not be planned for removal: {}",
+        output.stdout
+    );
+    let skip = fixes
+        .iter()
+        .find(|fix| {
+            fix["skip_reason"].as_str() == Some("low_confidence_incomplete_analysis")
+                && fix["type"] == "skipped"
+        })
+        .expect("an export skip record must be present");
+    assert_eq!(
+        skip["reachability_caveats"],
+        serde_json::json!(["incomplete-import-graph"]),
+        "the skip entry names the caveat a caller gates on: {}",
+        output.stdout
+    );
+    assert_eq!(json["skipped_low_confidence_exports"].as_u64(), Some(1));
+}
+
+#[test]
+fn fix_apply_leaves_a_skipped_file_project_byte_identical() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write_skipped_file_project(root);
+    let lib_before = std::fs::read_to_string(root.join("src/lib.ts")).unwrap();
+
+    let fix = run_fallow_in_root(
+        "fix",
+        root,
+        &[
+            "--yes",
+            "--format",
+            "json",
+            "--quiet",
+            "--max-file-size",
+            "1",
+        ],
+    );
+    assert_eq!(
+        fix.code, 0,
+        "an apply whose only skips are intentional must exit 0; stderr: {}",
+        fix.stderr
+    );
+    assert_eq!(
+        parse_json(&fix)["total_fixed"].as_u64(),
+        Some(0),
+        "nothing may be rewritten while a caveat stands: {}",
+        fix.stdout
+    );
+    assert_eq!(
+        std::fs::read_to_string(root.join("src/lib.ts")).unwrap(),
+        lib_before,
+        "the export the skipped file imports must survive verbatim",
+    );
+}
+
+/// The caveat gate must not become a blanket refusal: one broken file cannot
+/// stop `fix` from removing a package no module ever imported.
+#[test]
+fn fix_still_removes_a_dependency_no_degraded_file_could_have_imported() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"clean-dep","main":"src/index.ts","dependencies":{"lodash":"^4.17.21"}}"#,
+    )
+    .unwrap();
+    std::fs::write(root.join("src/index.ts"), "export const run = 1;\n").unwrap();
+
+    let fix = run_fallow_in_root("fix", root, &["--yes", "--format", "json", "--quiet"]);
+    assert_eq!(fix.code, 0, "stderr: {}", fix.stderr);
+
+    let manifest = std::fs::read_to_string(root.join("package.json")).unwrap();
+    assert!(
+        !manifest.contains("lodash"),
+        "a clean run must still auto-fix: {manifest}"
+    );
+    let json = parse_json(&fix);
+    assert_eq!(
+        json["skipped_low_confidence_dependencies"].as_u64(),
+        Some(0)
+    );
+}
+
+/// A project whose only reference to `Color.Blue` lives in a file the size
+/// guard skips before reading it. Reproduced end to end before the fix:
+/// `fix --yes` deleted the member while `huge.ts` still referenced it, because
+/// member usage is collected by walking the member accesses of every module
+/// the run PARSED and no caveat had ever reached `unused_enum_members[]`.
+fn write_skipped_enum_member_project(root: &std::path::Path) {
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"skipped-member","main":"src/index.ts"}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("src/colors.ts"),
+        "export enum Color {\n  Red = \"red\",\n  Blue = \"blue\",\n}\n",
+    )
+    .unwrap();
+    let mut oversized = String::from("import { Color } from './colors';\nexport const pad = [\n");
+    while oversized.len() < 1_200_000 {
+        oversized.push_str("  \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\n");
+    }
+    oversized.push_str("];\nexport const pick = (): Color => Color.Blue;\n");
+    std::fs::write(root.join("src/huge.ts"), oversized).unwrap();
+    std::fs::write(
+        root.join("src/index.ts"),
+        "import './huge';\nimport { Color } from './colors';\nexport const run = (): Color => Color.Red;\n",
+    )
+    .unwrap();
+}
+
+#[test]
+fn fix_apply_does_not_delete_an_enum_member_a_skipped_file_references() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write_skipped_enum_member_project(root);
+    let colors_before = std::fs::read_to_string(root.join("src/colors.ts")).unwrap();
+
+    let fix = run_fallow_in_root(
+        "fix",
+        root,
+        &[
+            "--yes",
+            "--format",
+            "json",
+            "--quiet",
+            "--max-file-size",
+            "1",
+        ],
+    );
+    assert_eq!(
+        fix.code, 0,
+        "an intentional withholding must not move the exit code; stderr: {}",
+        fix.stderr
+    );
+
+    assert_eq!(
+        std::fs::read_to_string(root.join("src/colors.ts")).unwrap(),
+        colors_before,
+        "Color.Blue must survive: the only reference lives in a file the run never read",
+    );
+
+    let json = parse_json(&fix);
+    let withheld = json["fixes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|fix| fix["type"] == "remove_enum_member")
+        .expect("the withheld member is reported, not silently dropped");
+    assert_eq!(withheld["skipped"], serde_json::json!(true));
+    assert_eq!(
+        withheld["skip_reason"].as_str(),
+        Some("low_confidence_incomplete_analysis"),
+        "the entry carries the marker a caller gates on: {}",
+        fix.stdout
+    );
+    assert_eq!(
+        withheld["reachability_caveats"],
+        serde_json::json!(["incomplete-import-graph"])
+    );
+    assert_eq!(json["skipped_low_confidence_members"].as_u64(), Some(1));
+}
+
+/// BLOCKER: `analyze` advertised `auto_fixable: true` on the very mutations
+/// `fix` refuses, and AGENTS.md tells agents to plan against that flag. The
+/// two commands must agree on the same project.
+#[test]
+fn analyze_never_advertises_a_mutation_fix_would_refuse() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write_skipped_enum_member_project(root);
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"skipped-member","main":"src/index.ts","dependencies":{"lodash":"^4.17.21"}}"#,
+    )
+    .unwrap();
+
+    let analyze = run_fallow_in_root(
+        "dead-code",
+        root,
+        &["--format", "json", "--quiet", "--max-file-size", "1"],
+    );
+    let json = parse_json(&analyze);
+
+    for array in [
+        "unused_files",
+        "unused_exports",
+        "unused_types",
+        "unused_enum_members",
+        "unused_dependencies",
+    ] {
+        for finding in json[array].as_array().into_iter().flatten() {
+            if finding["reachability_caveats"].is_null() {
+                continue;
+            }
+            for action in finding["actions"].as_array().into_iter().flatten() {
+                assert_eq!(
+                    action["auto_fixable"],
+                    serde_json::json!(false),
+                    "{array}: a caveated finding advertises an applicable {} action that \
+                     `fallow fix` withholds: {}",
+                    action["type"],
+                    analyze.stdout
+                );
+            }
+        }
+    }
+}
+
 #[test]
 fn fix_envelope_always_carries_skipped_low_confidence_exports() {
     let output = run_fallow(

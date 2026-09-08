@@ -4,14 +4,15 @@ use rmcp::ErrorData as McpError;
 use rmcp::model::CallToolResult;
 
 use super::{
-    push_global, push_remote_extends, push_scope, push_str_flag, run_tool, validation_error_body,
+    push_global, push_remote_extends, push_scope, push_str_flag, run_tool_with_limit,
+    validation_error_body,
 };
 
 /// Run the read-only `impact` value report through the CLI-backed local store
 /// reader. It is not an analysis tool, and the store lifecycle remains CLI-owned.
 pub async fn run_impact(binary: &str, params: ImpactParams) -> Result<CallToolResult, McpError> {
     let args = build_impact_args(&params);
-    run_tool(binary, "impact", &args).await
+    run_tool_with_limit(binary, "impact", &args, params.max_output_bytes).await
 }
 
 /// Run the read-only cross-repo `impact_all` aggregate through the CLI-backed
@@ -21,7 +22,7 @@ pub async fn run_impact_all(
     params: ImpactAllParams,
 ) -> Result<CallToolResult, McpError> {
     let args = build_impact_all_args(&params);
-    run_tool(binary, "impact_all", &args).await
+    run_tool_with_limit(binary, "impact_all", &args, params.max_output_bytes).await
 }
 
 /// Run the read-only `impact_closure` evidence query through the existing
@@ -38,7 +39,7 @@ pub async fn run_impact_closure(
             ]));
         }
     };
-    run_tool(binary, "impact_closure", &args).await
+    run_tool_with_limit(binary, "impact_closure", &args, params.max_output_bytes).await
 }
 
 /// Build CLI arguments for the `impact` tool.

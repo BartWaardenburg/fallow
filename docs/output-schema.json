@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Fallow JSON Output Schemas",
-  "description": "Schemas for the JSON output of fallow commands. Object-shaped envelopes covered by the `FallowOutput` contract carry a top-level `kind` discriminator. Current kind values: `audit`, `explain`, `inspect_target`, `trace`, `review-envelope`, `review-reconcile`, `coverage-setup`, `coverage-analyze`, `list-boundaries`, `list-workspaces`, `health`, `dupes`, `dead-code-grouped`, `impact`, `impact-cross-repo`, `security`, `security-survivors`, `security-blind-spots`, `dead-code`, `combined`, `feature-flags`, `audit-brief`, `decision-surface`, `review-walkthrough-guide`, `review-walkthrough-validation`, `suppression-inventory`, `doctor`, `type-aware-status`, `similar-code`, `similar-code-inspect`, `similar-code-review`. Consumers should branch on `kind` instead of probing for unique field presence. `CodeClimateOutput` is a bare JSON array (per the Code Climate / GitLab Code Quality spec) and stays a sibling root branch discriminated by checking whether the document root is an array. `ErrorOutput` is the `--format json` failure document, emitted on stdout with a non-zero exit; it carries no `kind` and is discriminated by the `error: true` field.",
+  "description": "Schemas for the JSON output of fallow commands. Object-shaped envelopes covered by the `FallowOutput` contract carry a top-level `kind` discriminator. Current kind values: `audit`, `explain`, `inspect_target`, `trace`, `trace-error`, `review-envelope`, `review-reconcile`, `coverage-setup`, `coverage-analyze`, `list-boundaries`, `list-workspaces`, `health`, `dupes`, `dead-code-grouped`, `impact`, `impact-cross-repo`, `security`, `security-survivors`, `security-blind-spots`, `dead-code`, `combined`, `feature-flags`, `audit-brief`, `decision-surface`, `review-walkthrough-guide`, `review-walkthrough-validation`, `suppression-inventory`, `doctor`, `type-aware-status`, `similar-code`, `similar-code-inspect`, `similar-code-review`. Consumers should branch on `kind` instead of probing for unique field presence. `CodeClimateOutput` is a bare JSON array (per the Code Climate / GitLab Code Quality spec) and stays a sibling root branch discriminated by checking whether the document root is an array. `ErrorOutput` is the `--format json` failure document, emitted on stdout with a non-zero exit; it carries no `kind` and is discriminated by the `error: true` field.",
   "oneOf": [
     {
       "$ref": "#/definitions/FallowOutput"
@@ -885,7 +885,7 @@
           "items": {
             "$ref": "#/definitions/WorkspaceDiagnostic"
           },
-          "description": "Non-fatal diagnostics about the project itself, from all three stages\nthat record them (issue #473):\n\n- workspace discovery, at config load: `undeclared-workspace`,\n  `malformed-package-json`, `glob-matched-no-package-json`,\n  `malformed-tsconfig`, `tsconfig-reference-dir-missing`;\n- source discovery, during the file walk: `skipped-large-file`,\n  `skipped-minified-file`, `skipped-source-dotdir`,\n  `source-read-failure`;\n- dead-code analysis, from the dependency-catalog and override\n  detectors: `malformed-pnpm-workspace-yaml`,\n  `bun-lockb-override-resolution-skipped`.\n\nAnalysis-stage kinds therefore reach only the envelopes whose run\nincludes a dead-code analyze pass, never a standalone\n`fallow dupes --format json`. `path` is project-root-relative with\nforward slashes; the array is omitted when empty. The same list is\nrepeated on each top-level command's envelope so single-command\nconsumers see it without having to look at a separate top-level field."
+          "description": "Non-fatal diagnostics about the project itself, from all three stages\nthat record them (issue #473):\n\n- workspace discovery, at config load: `undeclared-workspace`,\n  `malformed-package-json`, `glob-matched-no-package-json`,\n  `malformed-tsconfig`, `tsconfig-reference-dir-missing`;\n- source discovery, during the file walk: `skipped-large-file`,\n  `skipped-minified-file`, `skipped-source-dotdir`,\n  `source-read-failure`, `source-parse-degraded`;\n- dead-code analysis, from the dependency-catalog and override\n  detectors: `malformed-pnpm-workspace-yaml`,\n  `bun-lockb-override-resolution-skipped`.\n\nAnalysis-stage kinds therefore reach only the envelopes whose run\nincludes a dead-code analyze pass, never a standalone\n`fallow dupes --format json`. `path` is project-root-relative with\nforward slashes; the array is omitted when empty. The same list is\nrepeated on each top-level command's envelope so single-command\nconsumers see it without having to look at a separate top-level field.\n\nA diagnostic here is advisory and never withholds a finding. Where an\nentry reports a source file this run never fully analyzed\n(`source-parse-degraded`, `source-read-failure`, `skipped-large-file`,\n`skipped-minified-file`, `skipped-source-dotdir`) it can distort a\nverdict, so the affected `unused_files[]`, `unused_exports[]`, and\ndependency entries additionally carry the caveat themselves in their own\noptional `reachability_caveats[]` array, and a reader who never scrolls\nback up to this list still sees it. `fallow fix` reads the same array\nand withholds the removal while a caveat stands."
         },
         "next_steps": {
           "type": "array",
@@ -1443,7 +1443,7 @@
               "type": "null"
             }
           ],
-          "description": "Hotspot analysis summary (only set with `--hotspots`)."
+          "description": "Hotspot analysis summary.\n\nSet whenever the run measured churn, which needs readable git history;\n`--hotspots` adds the per-file [`hotspots`](Self::hotspots) listing\nbeside it rather than gating this summary."
         },
         "runtime_coverage": {
           "anyOf": [
@@ -2581,7 +2581,7 @@
               "type": "null"
             }
           ],
-          "description": "Hotspot analysis summary (only set with `--hotspots`)."
+          "description": "Hotspot analysis summary.\n\nSet whenever the run measured churn, which needs readable git history;\n`--hotspots` adds the per-file [`hotspots`](Self::hotspots) listing\nbeside it rather than gating this summary."
         },
         "runtime_coverage": {
           "anyOf": [
@@ -2739,6 +2739,22 @@
           "description": "Aggregate duplication statistics.",
           "$ref": "#/definitions/DuplicationStats"
         },
+        "clone_groups_shown": {
+          "type": "integer",
+          "description": "Number of clone groups carried in `clone_groups[]`."
+        },
+        "clone_groups_omitted": {
+          "type": "integer",
+          "description": "Number of scoped-corpus clone groups withheld from `clone_groups[]` by\na presentation cap such as `--top`. `0` on an untruncated run, so\n`clone_groups_shown + clone_groups_omitted == stats.clone_groups`\nalways holds and `stats` keeps describing the whole measured corpus."
+        },
+        "clone_families_shown": {
+          "type": "integer",
+          "description": "Number of clone families carried in `clone_families[]`."
+        },
+        "clone_families_omitted": {
+          "type": "integer",
+          "description": "Number of scoped-corpus clone families withheld from `clone_families[]`\nby a presentation cap such as `--top`, which rebuilds the families from\nthe groups that survived the cap. `0` on an untruncated run, so\n`clone_families_shown + clone_families_omitted == stats.clone_families`\nalways holds and `stats` keeps describing the whole measured corpus."
+        },
         "grouped_by": {
           "anyOf": [
             {
@@ -2799,7 +2815,11 @@
         "elapsed_ms",
         "clone_groups",
         "clone_families",
-        "stats"
+        "stats",
+        "clone_groups_shown",
+        "clone_groups_omitted",
+        "clone_families_shown",
+        "clone_families_omitted"
       ],
       "description": "Envelope emitted by `fallow dupes --format json`.\n\n`Report` and `Group` are generic so the envelope can live in\n`fallow-output` while duplication report wrappers and grouped output\ninternals continue to migrate out of CLI/API-specific crates.",
       "title": "fallow dupes --format json"
@@ -3495,6 +3515,17 @@
         "shallow_clone": {
           "type": "boolean",
           "description": "True when the repository is a shallow clone, so churn counts are\ntruncated."
+        },
+        "clock": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ClockProvenance"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Provenance of the instant every churn and staleness number was measured\nagainst. Absent only when a caller assembled a summary without one."
         }
       },
       "required": [
@@ -4200,7 +4231,7 @@
         },
         "auto_fixable": {
           "type": "boolean",
-          "description": "Whether `fallow fix` can apply this fix automatically. Evaluated PER\nFINDING, not per action type: the same `type` may carry\n`auto_fixable: true` on one finding and `auto_fixable: false` on\nanother when per-instance guards in the applier discriminate (e.g.\n`remove-catalog-entry` flips on `hardcoded_consumers` and catalog\nsource file, the primary dependency action flips between\n`remove-dependency` / `move-dependency` on `used_in_workspaces`).\nFilter on this bool of each individual action, not on `type`. See the\n[`IssueAction`] enum-level docs for the full list of per-instance\nflips."
+          "description": "Whether `fallow fix` can apply this fix automatically. Evaluated PER\nFINDING, not per action type: the same `type` may carry\n`auto_fixable: true` on one finding and `auto_fixable: false` on\nanother when per-instance guards in the applier discriminate (e.g.\n`remove-catalog-entry` flips on `hardcoded_consumers` and catalog\nsource file, the primary dependency action flips between\n`remove-dependency` / `move-dependency` on `used_in_workspaces`).\nFilter on this bool of each individual action, not on `type`. See the\n[`IssueAction`] enum-level docs for the full list of per-instance\nflips.\n\nOne flip is RUN-level rather than finding-level: a dead-code finding\ncarrying `reachability_caveats` reports `false` here, because a file\nthis run never fully read may hold the reference that credits it. Every\nmutation surface honours the same gate, so a plan built from this flag\nnever expects a write `fallow fix`, the MCP fix tools, or the LSP quick\nfix will refuse. The action stays in the array at the same position and\nnames the reason in [`Self::note`]."
         },
         "description": {
           "type": "string",
@@ -5270,7 +5301,7 @@
         },
         "fragment": {
           "type": "string",
-          "description": "The actual source code fragment."
+          "description": "The actual source code fragment.\n\nOmitted from JSON when the caller asked for a location-only payload\n(`fallow dupes --no-fragments`, and the MCP `find_dupes` default). The\nfive location fields above address the same text, so a consumer that\nwants the source reads it from the file."
         }
       },
       "required": [
@@ -5278,8 +5309,7 @@
         "start_line",
         "end_line",
         "start_col",
-        "end_col",
-        "fragment"
+        "end_col"
       ],
       "description": "A single instance of duplicated code at a specific location."
     },
@@ -5377,11 +5407,15 @@
         },
         "clone_groups": {
           "type": "integer",
-          "description": "Number of clone groups in the reported `clone_groups[]` array after\nfiltering and optional `--top` truncation."
+          "description": "Number of clone groups the scoped corpus contains after filtering.\n`--top` does not change it; compare it with `clone_groups_shown` on the\nenvelope to see how much of the corpus the array carries."
+        },
+        "clone_families": {
+          "type": "integer",
+          "description": "Number of clone families the scoped corpus contains after filtering.\n`--top` truncates `clone_families[]` along with `clone_groups[]` but\ndoes not change this counter; compare it with `clone_families_shown` on\nthe envelope to see how much of the corpus the array carries."
         },
         "clone_instances": {
           "type": "integer",
-          "description": "Total clone instances across all reported groups after filtering and\noptional `--top` truncation."
+          "description": "Total clone instances across the scoped corpus after filtering.\n`--top` does not change it."
         },
         "duplication_percentage": {
           "type": "number",
@@ -5408,6 +5442,7 @@
         "total_tokens",
         "duplicated_tokens",
         "clone_groups",
+        "clone_families",
         "clone_instances",
         "duplication_percentage"
       ],
@@ -8776,7 +8811,7 @@
           ]
         },
         {
-          "description": "Export, member, file, dependency, clone, impact-closure, or symbol-level\ntrace, including exact TypeScript checker evidence when requested.",
+          "description": "Export, member, file, dependency, clone, impact-closure, import-path, or\nsymbol-level trace, including exact TypeScript checker evidence when\nrequested.",
           "allOf": [
             {
               "oneOf": [
@@ -8799,6 +8834,9 @@
                   "$ref": "#/definitions/ImpactClosureTrace"
                 },
                 {
+                  "$ref": "#/definitions/ImportPathTrace"
+                },
+                {
                   "$ref": "#/definitions/SymbolChainTrace"
                 },
                 {
@@ -8812,6 +8850,26 @@
                 "kind": {
                   "type": "string",
                   "const": "trace"
+                }
+              },
+              "required": [
+                "kind"
+              ]
+            }
+          ]
+        },
+        {
+          "description": "`fallow trace-error [FILE|-] --format json`. Required `schema_version`\nsingleton plus `source`, `frames`, `counts`, and `reason`.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/ErrorTrace"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "trace-error"
                 }
               },
               "required": [
@@ -9465,7 +9523,7 @@
         },
         "fragment": {
           "type": "string",
-          "description": "The actual source code fragment."
+          "description": "The actual source code fragment.\n\nOmitted from JSON when the caller asked for a location-only payload\n(`fallow dupes --no-fragments`, and the MCP `find_dupes` default). The\nfive location fields above address the same text, so a consumer that\nwants the source reads it from the file."
         },
         "owner": {
           "type": "string",
@@ -9478,7 +9536,6 @@
         "end_line",
         "start_col",
         "end_col",
-        "fragment",
         "owner"
       ],
       "description": "A clone instance plus its per-instance owner key (for inline JSON / SARIF\nrendering).\n\nEach instance carries its own `owner` field alongside the standard\n`CloneInstance` shape (file / start_line / end_line / start_col / end_col /\nfragment), so consumers can attribute instances to resolver keys without\nre-resolving paths."
@@ -9507,6 +9564,13 @@
             }
           ],
           "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base. `None` when serialized directly from Rust."
+        },
+        "reachability_caveats": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ReachabilityCaveat"
+          },
+          "description": "Advisory caveats on the reachability verdict behind this finding.\nSorted, deduplicated, and omitted from the wire when empty, so a run\nthat analyzed every discovered file is byte-identical. Never gates the\nfinding or the `delete-file` action, though `fallow fix` does withhold\nthe removal of a caveated finding as low confidence."
         }
       },
       "required": [
@@ -9574,6 +9638,13 @@
             }
           ],
           "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        },
+        "reachability_caveats": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ReachabilityCaveat"
+          },
+          "description": "Advisory caveats on the reachability verdict behind this finding.\nSorted, deduplicated, and omitted from the wire when empty. Never gates\nthe finding or the `remove-export` action, though `fallow fix` does\nwithhold the removal of a caveated export as low confidence."
         }
       },
       "required": [
@@ -9647,6 +9718,13 @@
             }
           ],
           "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        },
+        "reachability_caveats": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ReachabilityCaveat"
+          },
+          "description": "Advisory caveats on the reachability verdict behind this finding.\nA type export rests on exactly the reachability test an\n`unused_exports[]` entry does, and the LSP offers the same\nremove-the-`export`-keyword quick fix for both, so the two must render\nwith the same confidence. Sorted, deduplicated, omitted when empty."
         }
       },
       "required": [
@@ -9772,6 +9850,13 @@
             }
           ],
           "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        },
+        "reachability_caveats": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ReachabilityCaveat"
+          },
+          "description": "Advisory caveats on the verdict behind this finding. A dependency is\nreported unused when NO module in the project imports its specifier,\nso a module that parsed with errors can hide the import that would\nhave credited the package. Sorted, deduplicated, and omitted from the\nwire when empty. Never gates the finding, though `fallow fix`\nwithholds the `remove-dependency` write while a caveat stands."
         }
       },
       "required": [
@@ -9826,6 +9911,13 @@
             }
           ],
           "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        },
+        "reachability_caveats": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ReachabilityCaveat"
+          },
+          "description": "Advisory caveats on the verdict behind this finding. A dependency is\nreported unused when NO module in the project imports its specifier,\nso a module that parsed with errors can hide the import that would\nhave credited the package. Sorted, deduplicated, and omitted from the\nwire when empty. Never gates the finding, though `fallow fix`\nwithholds the `remove-dependency` write while a caveat stands."
         }
       },
       "required": [
@@ -9880,6 +9972,13 @@
             }
           ],
           "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        },
+        "reachability_caveats": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ReachabilityCaveat"
+          },
+          "description": "Advisory caveats on the verdict behind this finding. A dependency is\nreported unused when NO module in the project imports its specifier,\nso a module that parsed with errors can hide the import that would\nhave credited the package. Sorted, deduplicated, and omitted from the\nwire when empty. Never gates the finding, though `fallow fix`\nwithholds the `remove-dependency` write while a caveat stands."
         }
       },
       "required": [
@@ -9935,6 +10034,13 @@
             }
           ],
           "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        },
+        "reachability_caveats": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ReachabilityCaveat"
+          },
+          "description": "Advisory caveats on the verdict behind this finding. A member's usage\nis collected by walking the member accesses of every module the run\nparsed, so a member whose only reference lives in a file the run never\nread reads as unused exactly like an export does. Sorted,\ndeduplicated, and omitted from the wire when empty. Never gates the\nfinding; it does withhold the `remove-enum-member` mutation."
         }
       },
       "required": [
@@ -10003,6 +10109,13 @@
             }
           ],
           "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        },
+        "reachability_caveats": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ReachabilityCaveat"
+          },
+          "description": "Advisory caveats on the verdict behind this finding. A class member's\nusage is collected by the same reachability-free member-access walk an\nenum member's is, so it takes the enum-member rule unchanged: any module\nthis run analyzed incompletely can hold the access that credits it.\nSorted, deduplicated, and omitted from the wire when empty. Never gates\nthe finding; it does withhold the `remove-class-member` mutation that\nthe type-aware pass would otherwise open."
         }
       },
       "required": [
@@ -11480,6 +11593,29 @@
         {
           "type": "object",
           "properties": {
+            "error_count": {
+              "type": "integer",
+              "description": "Number of parser diagnostics reported for the file."
+            },
+            "panicked": {
+              "type": "boolean",
+              "description": "`true` when the parser abandoned the file instead of recovering, so\nthe extracted module is a fragment at best."
+            },
+            "kind": {
+              "type": "string",
+              "const": "source-parse-degraded"
+            }
+          },
+          "required": [
+            "kind",
+            "error_count",
+            "panicked"
+          ],
+          "description": "A source file was read but parsed with diagnostics, so the module\nextracted from it may be missing imports, exports, or references after\nthe first error. Analysis proceeds with the partial module, which is why\nthis is reported: an import the parser never saw credits nothing, and its\ntarget can surface as a confident `unused-file` or `unused-export`\nfinding with a `delete-file` or `remove-export` action on it.\n\nRecorded by the parse stage, alongside `source-read-failure`, and never\nused to withhold a finding. oxc reports recoverable errors for valid\nsyntax newer than the parser as well as for genuinely broken files, so\ngating findings on this would mute real results project-wide instead of\njust the affected file."
+        },
+        {
+          "type": "object",
+          "properties": {
             "kind": {
               "type": "string",
               "const": "bun-lockb-override-resolution-skipped"
@@ -11515,6 +11651,45 @@
             "kind"
           ],
           "description": "A bun manifest declares both `overrides` and a non-empty `resolutions`\nobject. Bun applies `overrides` and ignores `resolutions`, so fallow\nreports the shadowed configuration without offering removal advice."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "node-modules-missing"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "description": "The project has no `node_modules` directory and is not a Deno project\nthat legitimately runs without one. Analysis proceeds, but three things\ndegrade silently: package `exports` and conditional exports cannot be\nread, so imports into a dependency's subpaths resolve less precisely;\nframework plugins that activate on an installed package stay inactive,\nso their entry points and path aliases are missing; and a dependency's\ninstalled shape cannot be inspected, so type-only dependency\nclassification falls back to declaration-based heuristics.\n\nRecorded once per run by the source walk, anchored at the missing\n`node_modules` directory so the reported path is a real location rather\nthan the empty string a root-anchored diagnostic would render. This used\nto be a bare `tracing::warn!` duplicated in two pipelines, so it never\nreached JSON output and never reached `fallow doctor`, which reported\n`pass` on a tree that had never been installed."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "boundaries-not-configured"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "description": "`boundaries` is empty while `boundary-violation` is not `off`, so the\nboundary detector never ran. Its summary counters are therefore\nstructurally zero and say nothing about the project.\n\nThis is the UNCONFIGURED zero, not the user-chosen one: a project that\nsets `boundary-violation: off` asked for silence and can see that\nchoice in `fallow config`. A project that left `boundaries` empty\ncannot distinguish \"no violations\" from \"nothing was measured\"."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "rule-packs-not-configured"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "description": "`rulePacks` is empty while `policy-violation` is not `off`, so the\npolicy detector never ran and its summary counters are structurally\nzero. The unconfigured counterpart of\n[`Self::BoundariesNotConfigured`]."
         }
       ],
       "description": "A diagnostic about a workspace-discovery candidate.\n\nThe `message` field is a human-readable rendering derived from `kind`. It\nalways ends with a concrete next step (\"fix the JSON syntax\", \"remove from\n`workspaces`\", \"add to `ignorePatterns`\") so first-time users have a path\nforward."
@@ -12208,6 +12383,17 @@
             }
           ],
           "description": "Trend between the two most recent whole-project records. Comparable over\ntime (same whole-project denominator every run), unlike the changed-file\n`trend`. None until two full `fallow` runs exist. v1.6."
+        },
+        "gate_runs": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GateRunCounts"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Recorded gate runs grouped by source, over the same bounded window of\nrecorded runs `record_count` reports. A floor, not a lifetime total, and\nabsent when no run in that window carries a gate source. Local\nprovenance, never an adoption metric."
         },
         "containment_count": {
           "type": "integer",
@@ -17747,7 +17933,7 @@
     },
     "ReviewBriefSchemaVersion": {
       "type": "integer",
-      "const": 9,
+      "const": 10,
       "description": "Independently-versioned wire-version newtype for the brief envelope.\nSerializes as the integer `REVIEW_BRIEF_SCHEMA_VERSION`."
     },
     "RiskClass": {
@@ -18806,7 +18992,7 @@
         },
         "security_taint": {
           "type": "integer",
-          "description": "Security source -> sink taint-touch component (0 until a security pass is\nthreaded onto the brief path; the seam is built and tested)."
+          "description": "Security source -> sink taint-touch component (0 until a security pass is\nthreaded onto the brief path; the seam is built and tested).\n\nOmitted from the wire while it is zero, the same treatment `runtime`\ngets. Publishing a permanently-zero component as a required field made\nit read as a measurement that found nothing, when nothing measured it.\nA consumer that sums components must read an absent component as zero."
         },
         "risk_zone": {
           "type": "integer",
@@ -18827,7 +19013,6 @@
       },
       "required": [
         "fan_io",
-        "security_taint",
         "risk_zone",
         "change_shape",
         "total"
@@ -19460,6 +19645,13 @@
         "total_flags": {
           "type": "integer",
           "description": "Number of entries in `feature_flags`."
+        },
+        "workspace_diagnostics": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/WorkspaceDiagnostic"
+          },
+          "description": "Workspace-discovery and source-discovery diagnostics for the run. See\n`CheckOutput::workspace_diagnostics` for the full contract.\n\nA flags run walks and parses the project like every other analysis, so\nit records the same discovery kinds: a `skipped-large-file`,\n`skipped-minified-file`, or `source-read-failure` file was never\nscanned for flags, and a `source-parse-degraded` file was scanned from\na partial module. Each is a reason a flag can be missing from\n`feature_flags[]`, which is exactly what a consumer reading a\nzero-result run needs to know. The analysis-stage kinds appear here\ntoo: the scan correlates flags with dead exports, so it runs the\ndead-code analyze pass that records them.\n\nOmitted when empty, so a project with no discovery noise sees no\nchange."
         },
         "_meta": {
           "anyOf": [
@@ -20436,6 +20628,20 @@
         "exit_code": {
           "type": "integer",
           "description": "The process exit code the CLI returns alongside this document."
+        },
+        "code": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Stable machine-readable code such as `FALLOW_INVALID_COVERAGE_PATH`,\nwhen the failure has one. Present so an agent can branch on the reason\nwithout pattern-matching the human message."
+        },
+        "help": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Remediation hint for the caller, when the failure has one."
         }
       },
       "required": [
@@ -21921,6 +22127,10 @@
           "$ref": "#/definitions/ImpactClosureTrace"
         },
         {
+          "description": "Shortest import path between two modules.",
+          "$ref": "#/definitions/ImportPathTrace"
+        },
+        {
           "description": "Symbol-level call chain trace.",
           "$ref": "#/definitions/SymbolChainTrace"
         },
@@ -22891,7 +23101,7 @@
     },
     "AuditSchemaVersion": {
       "type": "integer",
-      "const": 10,
+      "const": 11,
       "description": "Schema projection for the audit envelope's exact version."
     },
     "CheckSchemaVersion": {
@@ -22901,14 +23111,14 @@
     },
     "CombinedSchemaVersion": {
       "type": "integer",
-      "const": 11,
+      "const": 12,
       "description": "Schema projection for the combined envelope's exact version."
     },
     "DupesSchemaVersion": {
       "type": "integer",
       "enum": [
-        3,
-        9
+        4,
+        10
       ],
       "description": "Schema projection for the duplication envelope's CLI and programmatic\nversion lineages."
     },
@@ -24849,7 +25059,7 @@
     },
     "DoctorSchemaVersion": {
       "type": "integer",
-      "const": 1,
+      "const": 2,
       "description": "Schema projection for the exact doctor envelope version."
     },
     "DoctorOutput": {
@@ -24964,6 +25174,11 @@
           "type": "string",
           "const": "companion",
           "description": "Optional companion readiness."
+        },
+        {
+          "type": "string",
+          "const": "cache",
+          "description": "Warm-run readiness of persisted analysis state."
         }
       ],
       "description": "Stable category for a doctor check."
@@ -24994,6 +25209,21 @@
           "type": "string",
           "const": "type-aware",
           "description": "Optional type-aware companion discovery."
+        },
+        {
+          "type": "string",
+          "const": "dependencies",
+          "description": "Installed dependency tree availability."
+        },
+        {
+          "type": "string",
+          "const": "cache",
+          "description": "Persisted extraction-cache reuse."
+        },
+        {
+          "type": "string",
+          "const": "graph-cache",
+          "description": "Persisted module-graph reuse.\n\nSeparate from [`Cache`](Self::Cache) because a warm run reuses the two\nblobs independently: the extraction cache can be perfectly reusable\nwhile the graph is discarded on every run, and the graph is the larger\nof the two on a real project."
         }
       ],
       "description": "Stable identifier for a doctor check. Declaration order is output order."
@@ -25098,6 +25328,459 @@
       "type": "string",
       "description": "Schema projection for `.` as the privacy-safe diagnosed project root.",
       "const": "."
+    },
+    "GateRunCounts": {
+      "type": "object",
+      "properties": {
+        "agent": {
+          "type": "integer",
+          "description": "Runs recorded by the agent gate (`--gate-marker agent`)."
+        },
+        "pre_commit": {
+          "type": "integer",
+          "description": "Runs recorded by the git pre-commit hook (`--gate-marker pre-commit`)."
+        },
+        "ci": {
+          "type": "integer",
+          "description": "Runs recorded by a CI gate (`--gate-marker ci`)."
+        },
+        "unknown": {
+          "type": "integer",
+          "description": "Gate runs whose marker this build does not recognise, plus every gate\nrun recorded before the store kept its source (store schema 6 and older)."
+        }
+      },
+      "required": [
+        "agent",
+        "pre_commit",
+        "ci",
+        "unknown"
+      ],
+      "description": "Recorded gate runs grouped by the gate that produced them. Local\nprovenance only: the store never leaves the machine, so this answers \"where\ndo my gate runs come from\", never \"how widely is fallow adopted\".\n\nCounted over the recorded runs the store still holds, which is the same\nwindow `record_count` reports. The store keeps a bounded number of runs and\ndrops the oldest, so on a long-lived project these are the shape of recent\ngate activity, not a lifetime total: read them as a floor. Absent when no\nrun in that window carries a gate source, which is not the same as \"no gate\never ran here\"."
+    },
+    "ImportPathTrace": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "description": "Wire-shape version of this payload.",
+          "$ref": "#/definitions/ImportPathTraceSchemaVersion"
+        },
+        "from": {
+          "type": "string",
+          "description": "The module the walk started from, root-relative."
+        },
+        "to": {
+          "type": "string",
+          "description": "The module the walk was looking for, root-relative."
+        },
+        "reachable": {
+          "type": "boolean",
+          "description": "Whether `to` is reachable from `from` by following import edges."
+        },
+        "hops": {
+          "type": "integer",
+          "description": "Number of import edges on the reported route. `0` both when the two ends\nare the same module and when there is no route at all."
+        },
+        "path": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ImportPathHop"
+          },
+          "description": "The route, in import order. Empty whenever `hops` is `0`."
+        },
+        "reason": {
+          "type": "string",
+          "description": "Human-readable summary of the outcome."
+        }
+      },
+      "required": [
+        "schema_version",
+        "from",
+        "to",
+        "reachable",
+        "hops",
+        "path",
+        "reason"
+      ],
+      "title": "fallow trace --path",
+      "description": "Result of asking how one module reaches another: the shortest import path.\n\n`reachable` is the only field that separates \"no route exists\" from \"the\nroute is empty because both ends are the same module\". Both report\n`hops: 0`, so a consumer must read `reachable`, never the hop count."
+    },
+    "ImportPathTraceSchemaVersion": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "1",
+          "description": "First release of the `fallow trace --path` shape."
+        }
+      ],
+      "description": "Wire-version discriminator for [`ImportPathTrace`]. Independent from the\nglobal `SchemaVersion`: the import-path payload versions on its own cadence,\nlike the other independently-versioned envelopes. Serializes as a string\n`const` so JSON consumers can switch on it."
+    },
+    "ImportPathHop": {
+      "type": "object",
+      "properties": {
+        "from": {
+          "type": "string",
+          "description": "The importing module, root-relative."
+        },
+        "to": {
+          "type": "string",
+          "description": "The imported module, root-relative."
+        },
+        "type_only": {
+          "type": "boolean",
+          "description": "Whether every symbol on this edge is type-only, so the hop is erased at\nbuild time. Type-only hops are reported, never skipped: an `import type`\nchain is a real compile-time coupling."
+        },
+        "import_line": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "1-based line in `from` of the imported binding that creates this edge:\nthe first value-carrying symbol on the import, or the first symbol when\nevery symbol is type-only. On a multi-line import that is the binding's\nown line, not the `import` keyword's. Absent when the edge carries no\nspan or the source could not be read."
+        }
+      },
+      "required": [
+        "from",
+        "to",
+        "type_only"
+      ],
+      "description": "One import edge on an [`ImportPathTrace`]."
+    },
+    "ErrorTrace": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "description": "Wire-shape version of this payload.",
+          "$ref": "#/definitions/ErrorTraceSchemaVersion"
+        },
+        "source": {
+          "type": "string",
+          "description": "Where the trace was read from: `stdin`, or the path as the caller wrote\nit."
+        },
+        "header": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The first non-blank input line that preceded any recognised frame,\nverbatim. Conventionally the error type and message, but it is reported\nas read and NOT parsed into parts. Absent when the input began with a\nframe or was empty."
+        },
+        "frames": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ErrorTraceFrame"
+          },
+          "description": "Every recognised frame, in input order. Nothing is filtered out: a\ndependency or runtime-internal frame stays in the array with its origin\nrecorded, so hop numbering matches the trace the caller pasted."
+        },
+        "counts": {
+          "description": "Per-outcome totals.",
+          "$ref": "#/definitions/ErrorTraceCounts"
+        },
+        "reason": {
+          "type": "string",
+          "description": "Human-readable summary of the outcome."
+        }
+      },
+      "required": [
+        "schema_version",
+        "source",
+        "frames",
+        "counts",
+        "reason"
+      ],
+      "title": "fallow trace-error",
+      "description": "Result of resolving a runtime stack trace against the project graph."
+    },
+    "ErrorTraceSchemaVersion": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "1",
+          "description": "First release of the `fallow trace-error` shape."
+        }
+      ],
+      "description": "Wire-version discriminator for [`ErrorTrace`]. Independent from the global\n`SchemaVersion` and from the other trace payloads, like\n[`crate::trace::ImportPathTraceSchemaVersion`]. Serializes as a string\n`const` so JSON consumers can switch on it."
+    },
+    "ErrorTraceFrame": {
+      "type": "object",
+      "properties": {
+        "index": {
+          "type": "integer",
+          "description": "0-based position in the input trace, so a caller can quote a frame back\neven after filtering the array."
+        },
+        "raw": {
+          "type": "string",
+          "description": "The input line this frame was read from, trimmed of surrounding\nwhitespace and otherwise verbatim."
+        },
+        "function": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The frame's function identifier as written by the runtime, with the\n`async` and `new` markers stripped and recorded separately. Absent for a\nframe the runtime emitted without one."
+        },
+        "is_constructor": {
+          "type": "boolean",
+          "description": "Whether the runtime marked this frame as a constructor call (`new X`)."
+        },
+        "is_async": {
+          "type": "boolean",
+          "description": "Whether the runtime marked this frame as an async call."
+        },
+        "file": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The frame's file as read from the trace, with any `file://` or\n`http(s)://` wrapper removed and separators forward-slashed. Reported as\nread: it is NOT rewritten to the module path it matched, so a caller can\nsee what its runtime actually said. Absent for a frame with no location."
+        },
+        "line": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "1-based line from the frame's location, when the runtime supplied one."
+        },
+        "column": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "1-based column from the frame's location, when the runtime supplied one."
+        },
+        "origin": {
+          "description": "Where the frame's file sits relative to the analysed project.",
+          "$ref": "#/definitions/FrameOrigin"
+        },
+        "resolution": {
+          "description": "What the project graph could say about this frame's identifier.",
+          "$ref": "#/definitions/FrameResolution"
+        },
+        "candidates": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ErrorTraceCandidate"
+          },
+          "description": "Every definition the identifier could name, in deterministic order.\nExactly one entry when `resolution` is `resolved`, more than one when it\nis `ambiguous`, and empty otherwise."
+        },
+        "candidates_omitted": {
+          "type": "integer",
+          "description": "How many further candidates a presentation cap withheld.\n`candidates.len() + candidates_omitted` is the true match count, so an\n`ambiguous` frame never understates how ambiguous it is."
+        },
+        "line_mismatch": {
+          "type": "boolean",
+          "description": "Set when this frame's own line disagrees with the definition its\nidentifier matched: some OTHER definition in the same file is declared\ncloser above the line the runtime reported.\n\nThe look-up matches on the identifier alone, so a `resolved` frame is\nresolved however far its line sits from the match. That is honest about\nthe question asked and silent about a question a reader would ask next,\nwhich is why the disagreement is published instead of left to be\nnoticed. The frame is NOT reclassified: the graph does know a\ndefinition under this identifier, and only the caller can say whether\nthe runtime ran that one or a same-named definition elsewhere.\n`reason` names the declaration that sits closer. Only set on a\n`resolved` frame that carried a line and matched a definition whose own\nline could be read."
+        },
+        "reason": {
+          "type": "string",
+          "description": "Human-readable statement of what happened to this frame."
+        }
+      },
+      "required": [
+        "index",
+        "raw",
+        "origin",
+        "resolution",
+        "candidates",
+        "candidates_omitted",
+        "reason"
+      ],
+      "description": "One frame read from the input stack trace."
+    },
+    "FrameOrigin": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "in_project",
+          "description": "The frame's file resolved to at least one module in the project graph.\nOnly these frames are looked up against the graph's definitions."
+        },
+        {
+          "type": "string",
+          "const": "node_modules",
+          "description": "The frame's file lives under an installed dependency tree."
+        },
+        {
+          "type": "string",
+          "const": "out_of_corpus",
+          "description": "Everything else: a runtime-internal frame, a generated bundle, a file\noutside the analysed corpus, or a frame carrying no source location."
+        }
+      ],
+      "description": "Where a frame's source location sits relative to the analysed project."
+    },
+    "FrameResolution": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "resolved",
+          "description": "Exactly one definition matched. `candidates` holds that one entry."
+        },
+        {
+          "type": "string",
+          "const": "ambiguous",
+          "description": "More than one definition matched. Every match is listed and none is\npreferred; the caller decides, or narrows the question."
+        },
+        {
+          "type": "string",
+          "const": "not_found",
+          "description": "The graph was asked and knows no definition under this identifier. A\nmodule-local function is not in the graph's definition set, so this is\nalso the answer for a frame naming one."
+        },
+        {
+          "type": "string",
+          "const": "not_attempted",
+          "description": "The graph was not asked. Either the frame does not point at project\nsource, or it points at project source but carries nothing addressable\nto ask about: no printed function name, or a placeholder such as\n`Object.<anonymous>`. `reason` names which case applies, so this is\nnever a silent shrug."
+        }
+      ],
+      "description": "What the project graph could say about a frame's identifier.\n\n`not_attempted` is not a softer `not_found`: it records that the graph was\nnever consulted, because the frame does not point at project source. Keeping\nthem apart is what lets `resolved + ambiguous + not_found + not_attempted`\nequal the frame count without any of the four lying about what it measured."
+    },
+    "ErrorTraceCandidate": {
+      "type": "object",
+      "properties": {
+        "file": {
+          "type": "string",
+          "description": "Root-relative file declaring the definition."
+        },
+        "symbol": {
+          "type": "string",
+          "description": "The exported name. For a member match this is the owning export."
+        },
+        "member": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The member name, when the frame's identifier named a member of\n`symbol` rather than `symbol` itself. Absent for a direct export match."
+        },
+        "kind": {
+          "type": "string",
+          "description": "What kind of definition this is: `export`, or the member kind\n(`class-method`, `class-property`, `enum-member`, `store-member`,\n`namespace-member`)."
+        },
+        "line": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "1-based declaration line of the definition's identifier. Absent when the\nsource file could not be read; never guessed."
+        }
+      },
+      "required": [
+        "file",
+        "symbol",
+        "kind"
+      ],
+      "description": "One definition a frame's identifier could name."
+    },
+    "ErrorTraceCounts": {
+      "type": "object",
+      "properties": {
+        "frames": {
+          "type": "integer",
+          "description": "Frames reported in `frames`."
+        },
+        "frames_omitted": {
+          "type": "integer",
+          "description": "Frames a cap withheld from `frames`. Their outcomes are NOT counted in\nthe fields below, which describe the reported frames only."
+        },
+        "in_project": {
+          "type": "integer",
+          "description": "Frames whose file resolved to project source."
+        },
+        "node_modules": {
+          "type": "integer",
+          "description": "Frames whose file lives under an installed dependency tree."
+        },
+        "out_of_corpus": {
+          "type": "integer",
+          "description": "Frames outside the analysed corpus, including frames with no location."
+        },
+        "resolved": {
+          "type": "integer",
+          "description": "Frames that matched exactly one definition."
+        },
+        "ambiguous": {
+          "type": "integer",
+          "description": "Frames that matched more than one definition."
+        },
+        "not_found": {
+          "type": "integer",
+          "description": "Frames the graph was asked about and could not name."
+        },
+        "not_attempted": {
+          "type": "integer",
+          "description": "Frames the graph was never asked about."
+        },
+        "unparsed_lines": {
+          "type": "integer",
+          "description": "Non-blank input lines that were neither recognised as a frame nor taken\nas `header`. A trace that is entirely unrecognised reports zero frames\nand a non-zero count here, rather than looking like an empty trace."
+        }
+      },
+      "required": [
+        "frames",
+        "frames_omitted",
+        "in_project",
+        "node_modules",
+        "out_of_corpus",
+        "resolved",
+        "ambiguous",
+        "not_found",
+        "not_attempted",
+        "unparsed_lines"
+      ],
+      "description": "Per-outcome totals for an [`ErrorTrace`].\n\n`resolved + ambiguous + not_found + not_attempted == frames`, and\n`in_project + node_modules + out_of_corpus == frames`. Both identities hold\non every run, so a caller can verify that nothing was dropped."
+    },
+    "ReachabilityCaveat": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "incomplete-file-analysis",
+          "description": "This finding's own file is one the run did not fully analyze, so the\nexport and import lists extracted from it may stop short of the real\nones. That reaches an `unused-file` verdict directly, because the\n\"is any export of this file referenced from a reachable module\" test\nreads exactly that truncated export list.\n\nTwo workspace diagnostics put a file in this state: it was read but did\nnot parse cleanly (`source-parse-degraded`), or it could not be read at\nall (`source-read-failure`). The token names the consequence rather than\neither cause, so a future kind that leaves a discovered file partially\nextracted carries the same value.\n\nDependency findings never carry this value: the file they name is a\n`package.json`, not a parsed source module."
+        },
+        {
+          "type": "string",
+          "const": "incomplete-import-graph",
+          "description": "A module whose import list feeds this verdict was not analyzed, so the\nimport that would have credited this finding may never have been seen.\n\nThe cause is any workspace diagnostic that leaves a source file's\nimports unseen: a degraded parse (`source-parse-degraded`), a file that\ncould not be read (`source-read-failure`), or a file discovery skipped\nbefore reading it (`skipped-large-file`, `skipped-minified-file`,\n`skipped-source-dotdir`). The token names the class rather than any one\ncause.\n\nWhich modules feed the verdict differs by array, and the caveat is\nemitted only when a degraded module is actually one of them:\n\n- `unused_files[]` and `unused_exports[]` rest on reachability, so only\n  a degraded module that is itself observed reachable can change the\n  verdict. When every degraded module is unreachable the caveat is\n  absent, and soundly: the FIRST missing edge on any entry-point path\n  leaves from a module whose every predecessor edge was observed, so\n  that module is observed reachable. A file the run never read has no\n  module and no graph node, so its reachability is not observable at\n  all and that narrowing cannot be applied: any skipped or unreadable\n  source caveats every reachability verdict in the run.\n- the dependency arrays rest on whether ANY module in the project\n  imports the package specifier, reachable or not, so any degraded\n  parse anywhere can hide the import that would have credited the\n  package. Reachability does not narrow that one.\n\nThe limit, stated because an approximation presented as exact is worse\nthan nothing: this is a RUN-level condition, not proof that a degraded\nmodule imports this path or package. An import the parser never saw\ncannot be attributed to a target, so the link cannot be narrowed\nfurther without re-reading the source. Read `workspace_diagnostics[]`\nfor which files degraded."
+        }
+      ],
+      "description": "A per-finding caveat on a dead-code verdict that a file this run never\nfully analyzed can distort.\n\nAdvisory provenance, in the same spirit as the fix path's\n`low_confidence_off_graph` / `low_confidence_unresolved_imports` skip\nreasons: a caveat NEVER withholds, reorders, downgrades, or re-severities\nthe finding, and never changes an exit code. It records that the verdict\nwas computed over an import graph fallow already knows is incomplete, so a\nreader who sees the finding also sees the caveat instead of having to\nnotice a diagnostic at the other end of the envelope.\n\nDeliberately NOT named `confidence`: `health --targets` already emits a\n`confidence` key holding an enum string, and a shared consumer helper that\nmet both would see the same key change type. Emitted on the four verdicts a\nlost import edge can distort: `unused_files[]`, `unused_exports[]`, and the\nthree dependency arrays. Sorted and deduplicated, absent from the wire when\nempty. The set is open in the same sense `workspace_diagnostics[].kind` is:\ntreat an unrecognised value as \"some caveat\" rather than as an error."
+    },
+    "ClockProvenance": {
+      "type": "object",
+      "properties": {
+        "source": {
+          "description": "Which of the three sources supplied the epoch.",
+          "$ref": "#/definitions/ClockSource"
+        },
+        "epoch_secs": {
+          "type": "integer",
+          "description": "The reference epoch itself, in unix seconds. Pass it back as\n`FALLOW_CLOCK_EPOCH` to reproduce this run's churn-derived numbers."
+        },
+        "reproducible": {
+          "type": "boolean",
+          "description": "False only for `wall_clock`, where the numbers drift between runs."
+        }
+      },
+      "required": [
+        "source",
+        "epoch_secs",
+        "reproducible"
+      ],
+      "description": "The instant a run measured commit ages and staleness against.\n\nA consumer reading `weighted_commits`, `stale_days`, or anything derived\nfrom them needs to know whether re-running over the same commit yields the\nsame number. The human report says so in a warning that `--quiet` removes,\nwhich left the JSON consumer, who cannot see stderr at all, with no way to\nfind out."
+    },
+    "ClockSource": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "environment",
+          "description": "Pinned by the `FALLOW_CLOCK_EPOCH` environment variable."
+        },
+        {
+          "type": "string",
+          "const": "head_commit",
+          "description": "HEAD's committer timestamp."
+        },
+        {
+          "type": "string",
+          "const": "wall_clock",
+          "description": "The system wall clock, because no commit timestamp was readable."
+        }
+      ],
+      "description": "Where the run's reference epoch came from.\n\nChurn recency weighting and ownership staleness are measured against one\ninstant. `head_commit` and `environment` resolve to the same value on every\nrun over the same commit; `wall_clock` does not."
     },
     "AffectedDirectory": {
       "type": "object",

@@ -2,10 +2,12 @@
 //!
 //! Surfaces malformed `package.json`, unreachable glob matches, missing
 //! tsconfig references, undeclared workspaces, and source files skipped during
-//! source discovery as typed [`WorkspaceDiagnostic`] values. Each diagnostic
-//! also emits a deduplicated `tracing::warn!` so users running fallow with
-//! default tracing filters see the cause of "fallow doesn't see my package" or
-//! "fallow ate all my memory."
+//! source discovery as typed [`WorkspaceDiagnostic`] values. A diagnostic that
+//! reports a DEGRADED run also emits a deduplicated `tracing::warn!` so users
+//! running fallow with default tracing filters see the cause of "fallow doesn't
+//! see my package" or "fallow ate all my memory."
+//! [`WorkspaceDiagnosticKind::warns_on_stderr`] decides which kinds those are;
+//! the rest reach consumers through `workspace_diagnostics[]` only.
 //!
 //! Repeated `GlobMatchedNoPackageJson` diagnostics are aggregated by glob
 //! pattern at emission time so a wide glob matching hundreds of package-less
@@ -132,6 +134,10 @@ struct WarningGroups<'a> {
 /// - `TsconfigReferenceDirMissing`: aggregated together, one summary line
 ///   instead of one per missing `references[]` entry in the root tsconfig.
 ///
+/// Kinds that [`WorkspaceDiagnosticKind::warns_on_stderr`] answers `false` for
+/// plan no warning at all: they describe a check the user never configured
+/// rather than a degraded run, and belong only in the structured array.
+///
 /// Pure: no tracing, no dedupe-set mutation. A group of exactly one keeps
 /// today's per-instance message byte-for-byte (no regression for the common
 /// single-match case); every other kind plans one per-instance warning. The
@@ -188,6 +194,9 @@ fn group_warning_diagnostics<'a>(
     let mut glob_groups: Vec<(&str, Vec<&WorkspaceDiagnostic>)> = Vec::new();
     let mut tsconfig_ref_misses: Vec<&WorkspaceDiagnostic> = Vec::new();
     for diag in diagnostics {
+        if !diag.kind.warns_on_stderr() {
+            continue;
+        }
         match &diag.kind {
             WorkspaceDiagnosticKind::GlobMatchedNoPackageJson { pattern } => {
                 match glob_groups.iter_mut().find(|(p, _)| *p == pattern.as_str()) {
@@ -483,6 +492,78 @@ pub fn record_source_read_failures(
     diagnostics
 }
 
+/// Whether `root` should have a `node_modules` directory and does not.
+///
+/// The single predicate behind [`WorkspaceDiagnosticKind::NodeModulesMissing`].
+/// A Deno project with no `package.json` legitimately runs without one, so it
+/// is not reported.
+#[must_use]
+pub fn node_modules_missing(root: &Path) -> bool {
+    !root.join("node_modules").is_dir() && !super::is_deno_without_node_modules(root)
+}
+
+/// Build the missing-`node_modules` diagnostic for `root`, or `None` once the
+/// project has been installed.
+///
+/// Replaces the previous per-pipeline `tracing::warn!`, which existed twice
+/// byte-identically and reached neither JSON output nor `fallow doctor`. The
+/// source walk folds this into its own diagnostic set, so it reaches an
+/// analysis by value like every other walk-recorded kind instead of through a
+/// second registry writer.
+#[must_use]
+pub fn missing_node_modules_diagnostic(root: &Path) -> Option<WorkspaceDiagnostic> {
+    node_modules_missing(root).then(|| {
+        WorkspaceDiagnostic::new(
+            root,
+            root.join("node_modules"),
+            WorkspaceDiagnosticKind::NodeModulesMissing,
+        )
+    })
+}
+
+/// Replace source-parse-degraded diagnostics for `root` with the degradations
+/// from the current parse while preserving every workspace and discovery
+/// diagnostic produced by other stages.
+///
+/// Mirrors [`record_source_read_failures`]: the parse stage owns this kind, so
+/// a fixed file drops out of the set on the next run instead of persisting.
+///
+/// Returns the structured diagnostics so session-owned outputs can carry the
+/// exact same values as the process registry used by direct core and CLI paths.
+#[must_use]
+pub fn record_source_parse_degradations(
+    root: &Path,
+    degradations: &[fallow_types::extract::SourceParseDegradation],
+) -> Vec<WorkspaceDiagnostic> {
+    let diagnostics: Vec<WorkspaceDiagnostic> = degradations
+        .iter()
+        .map(|degradation| {
+            WorkspaceDiagnostic::new(
+                root,
+                degradation.path.clone(),
+                WorkspaceDiagnosticKind::SourceParseDegraded {
+                    error_count: degradation.error_count,
+                    panicked: degradation.panicked,
+                },
+            )
+        })
+        .collect();
+    let canonical = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    let registry = WORKSPACE_DIAGNOSTICS.get_or_init(|| Mutex::new(FxHashMap::default()));
+    if let Ok(mut map) = registry.lock() {
+        let existing = map.entry(canonical).or_default();
+        existing.retain(|diagnostic| {
+            !matches!(
+                diagnostic.kind,
+                WorkspaceDiagnosticKind::SourceParseDegraded { .. }
+            )
+        });
+        existing.extend(diagnostics.iter().cloned());
+    }
+    emit_diagnostics(root, &diagnostics);
+    diagnostics
+}
+
 /// Replace every source-discovery diagnostic for `root` with `diagnostics` in
 /// ONE registry operation, and hand the same list back to the caller.
 ///
@@ -589,12 +670,28 @@ pub fn workspace_diagnostics_for(root: &Path) -> Vec<WorkspaceDiagnostic> {
 /// non-walk kind (workspace discovery, analysis stage) is likewise still read,
 /// which is what lets `--skip check` and `--only health` report what their
 /// analyses recorded after the section captured its list.
+///
+/// The result is ordered by `(path, kind id, message)` rather than by arrival.
+/// Analysis-stage detectors record into the registry from a rayon pool, so
+/// arrival order is a scheduling artefact: `boundaries-not-configured` and
+/// `rule-packs-not-configured` swapped places between a one-worker and an
+/// eight-worker run of the same command, on a `required` wire array. Ordering
+/// the registry leg fixes that at the single point every consumer reads it.
+/// The caller's own list keeps its meaningful discovery order; only this leg
+/// is sorted, and `merge_workspace_diagnostics` puts it after that list.
 #[must_use]
 pub fn registry_diagnostics_to_fold(root: &Path) -> Vec<WorkspaceDiagnostic> {
-    workspace_diagnostics_for(root)
+    let mut diagnostics: Vec<WorkspaceDiagnostic> = workspace_diagnostics_for(root)
         .into_iter()
         .filter(|diagnostic| !diagnostic.kind.is_source_walk_recorded())
-        .collect()
+        .collect();
+    diagnostics.sort_by(|left, right| {
+        left.path
+            .cmp(&right.path)
+            .then_with(|| left.kind.id().cmp(right.kind.id()))
+            .then_with(|| left.message.cmp(&right.message))
+    });
+    diagnostics
 }
 
 /// Directories that are conventionally NOT workspace packages even when a
@@ -1138,6 +1235,73 @@ mod tests {
             plans
                 .iter()
                 .all(|p| !p.message.contains("directories with no package.json"))
+        );
+    }
+
+    /// The unconfigured-check kinds fire in the product's DEFAULT state, on
+    /// every project that never opted into boundaries or rule packs, so a
+    /// stderr warning for them is permanent noise whose only remedy is to write
+    /// config to silence a warning about not having written config. They stay
+    /// in `workspace_diagnostics[]` for a consumer that wants them.
+    #[test]
+    fn plan_warnings_drops_the_unconfigured_check_kinds() {
+        let root = Path::new("/project");
+        let diagnostics = vec![
+            WorkspaceDiagnostic::new(
+                root,
+                root.to_path_buf(),
+                WorkspaceDiagnosticKind::BoundariesNotConfigured,
+            ),
+            WorkspaceDiagnostic::new(
+                root,
+                root.to_path_buf(),
+                WorkspaceDiagnosticKind::RulePacksNotConfigured,
+            ),
+        ];
+
+        assert!(
+            plan_warnings(root, &diagnostics).is_empty(),
+            "an unconfigured check is not a degraded run and warns nobody"
+        );
+    }
+
+    /// A missing dependency tree really does change what the analysis can see,
+    /// so it keeps its stderr line while the unconfigured-check kinds lose
+    /// theirs, even when both arrive in the same batch.
+    #[test]
+    fn plan_warnings_keeps_the_degradation_kinds_alongside_dropped_ones() {
+        let root = Path::new("/project");
+        let diagnostics = vec![
+            WorkspaceDiagnostic::new(
+                root,
+                root.to_path_buf(),
+                WorkspaceDiagnosticKind::BoundariesNotConfigured,
+            ),
+            WorkspaceDiagnostic::new(
+                root,
+                root.join("node_modules"),
+                WorkspaceDiagnosticKind::NodeModulesMissing,
+            ),
+            WorkspaceDiagnostic::new(
+                root,
+                root.to_path_buf(),
+                WorkspaceDiagnosticKind::RulePacksNotConfigured,
+            ),
+        ];
+
+        let messages: Vec<String> = plan_warnings(root, &diagnostics)
+            .into_iter()
+            .map(|plan| plan.message)
+            .collect();
+
+        assert_eq!(
+            messages.len(),
+            1,
+            "only the degradation warns: {messages:?}"
+        );
+        assert!(
+            messages[0].contains("node_modules"),
+            "the surviving line is the missing dependency tree: {messages:?}"
         );
     }
 

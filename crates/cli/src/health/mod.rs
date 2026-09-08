@@ -612,6 +612,7 @@ fn health_report_context(
         skip_score_and_trend: options.skip_score_and_trend,
         css_requested: options.css_requested,
         json_style: options.json_style,
+        include_fragments: true,
     }
 }
 

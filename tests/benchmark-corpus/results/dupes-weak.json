@@ -3,7 +3,7 @@
     {
       "instances": [
         {
-          "file": "/Users/bartwaardenburg/Sites/fallow/tests/benchmark-corpus/src/type1-exact/data-processor-a.ts",
+          "file": "src/type1-exact/data-processor-a.ts",
           "start_line": 2,
           "end_line": 144,
           "start_col": 0,
@@ -11,7 +11,7 @@
           "fragment": "import { EventEmitter } from 'events';\n\ninterface DataRecord {\n  id: string;\n  timestamp: number;\n  payload: Record<string, unknown>;\n  metadata: {\n    source: string;\n    version: number;\n    tags: string[];\n  };\n}\n\ninterface ProcessingResult {\n  processed: number;\n  failed: number;\n  skipped: number;\n  duration: number;\n}\n\nexport class DataProcessor extends EventEmitter {\n  private buffer: DataRecord[] = [];\n  private readonly maxBufferSize: number;\n  private readonly flushInterval: number;\n  private timer: ReturnType<typeof setInterval> | null = null;\n  private isProcessing = false;\n\n  constructor(maxBufferSize = 1000, flushInterval = 5000) {\n    super();\n    this.maxBufferSize = maxBufferSize;\n    this.flushInterval = flushInterval;\n  }\n\n  async start(): Promise<void> {\n    if (this.timer) {\n      throw new Error('Processor already started');\n    }\n    this.timer = setInterval(() => this.flush(), this.flushInterval);\n    this.emit('started');\n  }\n\n  async stop(): Promise<void> {\n    if (this.timer) {\n      clearInterval(this.timer);\n      this.timer = null;\n    }\n    await this.flush();\n    this.emit('stopped');\n  }\n\n  async ingest(record: DataRecord): Promise<void> {\n    if (!this.validateRecord(record)) {\n      this.emit('invalid', record);\n      return;\n    }\n\n    this.buffer.push(record);\n\n    if (this.buffer.length >= this.maxBufferSize) {\n      await this.flush();\n    }\n  }\n\n  async flush(): Promise<ProcessingResult> {\n    if (this.isProcessing || this.buffer.length === 0) {\n      return { processed: 0, failed: 0, skipped: 0, duration: 0 };\n    }\n\n    this.isProcessing = true;\n    const batch = this.buffer.splice(0);\n    const startTime = Date.now();\n\n    let processed = 0;\n    let failed = 0;\n    let skipped = 0;\n\n    for (const record of batch) {\n      try {\n        if (this.shouldSkip(record)) {\n          skipped++;\n          continue;\n        }\n\n        const transformed = this.transform(record);\n        await this.persist(transformed);\n        processed++;\n      } catch (error) {\n        failed++;\n        this.emit('error', { record, error });\n      }\n    }\n\n    const duration = Date.now() - startTime;\n    this.isProcessing = false;\n\n    const result: ProcessingResult = { processed, failed, skipped, duration };\n    this.emit('flushed', result);\n    return result;\n  }\n\n  private validateRecord(record: DataRecord): boolean {\n    if (!record.id || typeof record.id !== 'string') return false;\n    if (!record.timestamp || record.timestamp <= 0) return false;\n    if (!record.payload || typeof record.payload !== 'object') return false;\n    if (!record.metadata?.source) return false;\n    return true;\n  }\n\n  private shouldSkip(record: DataRecord): boolean {\n    const age = Date.now() - record.timestamp;\n    const maxAge = 24 * 60 * 60 * 1000; // 24 hours\n    if (age > maxAge) return true;\n    if (record.metadata.tags.includes('test')) return true;\n    return false;\n  }\n\n  private transform(record: DataRecord): DataRecord {\n    return {\n      ...record,\n      payload: {\n        ...record.payload,\n        processedAt: Date.now(),\n        processorVersion: '2.0',\n      },\n      metadata: {\n        ...record.metadata,\n        version: record.metadata.version + 1,\n      },\n    };\n  }\n\n  private async persist(record: DataRecord): Promise<void> {\n    // Simulate async persistence\n    await new Promise((resolve) => setTimeout(resolve, 1));\n    this.emit('persisted', record.id);\n  }\n\n  getBufferSize(): number {\n    return this.buffer.length;\n  }\n\n  isRunning(): boolean {\n    return this.timer !== null"
         },
         {
-          "file": "/Users/bartwaardenburg/Sites/fallow/tests/benchmark-corpus/src/type1-exact/data-processor-b.ts",
+          "file": "src/type1-exact/data-processor-b.ts",
           "start_line": 2,
           "end_line": 144,
           "start_col": 0,
@@ -25,7 +25,7 @@
     {
       "instances": [
         {
-          "file": "/Users/bartwaardenburg/Sites/fallow/tests/benchmark-corpus/src/type1-exact/cache-manager-a.ts",
+          "file": "src/type1-exact/cache-manager-a.ts",
           "start_line": 2,
           "end_line": 133,
           "start_col": 0,
@@ -33,7 +33,7 @@
           "fragment": "interface CacheEntry<T> {\n  value: T;\n  expiresAt: number;\n  createdAt: number;\n  accessCount: number;\n}\n\ninterface CacheStats {\n  hits: number;\n  misses: number;\n  evictions: number;\n  size: number;\n}\n\nexport class LRUCache<T> {\n  private cache = new Map<string, CacheEntry<T>>();\n  private readonly maxSize: number;\n  private readonly defaultTTL: number;\n  private stats: CacheStats = { hits: 0, misses: 0, evictions: 0, size: 0 };\n\n  constructor(maxSize = 500, defaultTTL = 300000) {\n    this.maxSize = maxSize;\n    this.defaultTTL = defaultTTL;\n  }\n\n  get(key: string): T | undefined {\n    const entry = this.cache.get(key);\n    if (!entry) {\n      this.stats.misses++;\n      return undefined;\n    }\n\n    if (Date.now() > entry.expiresAt) {\n      this.cache.delete(key);\n      this.stats.misses++;\n      this.stats.size--;\n      return undefined;\n    }\n\n    // Move to end (most recently used)\n    this.cache.delete(key);\n    entry.accessCount++;\n    this.cache.set(key, entry);\n    this.stats.hits++;\n    return entry.value;\n  }\n\n  set(key: string, value: T, ttl?: number): void {\n    if (this.cache.has(key)) {\n      this.cache.delete(key);\n    } else if (this.cache.size >= this.maxSize) {\n      this.evictOldest();\n    }\n\n    const entry: CacheEntry<T> = {\n      value,\n      expiresAt: Date.now() + (ttl ?? this.defaultTTL),\n      createdAt: Date.now(),\n      accessCount: 0,\n    };\n\n    this.cache.set(key, entry);\n    this.stats.size = this.cache.size;\n  }\n\n  delete(key: string): boolean {\n    const deleted = this.cache.delete(key);\n    if (deleted) {\n      this.stats.size = this.cache.size;\n    }\n    return deleted;\n  }\n\n  clear(): void {\n    this.cache.clear();\n    this.stats.size = 0;\n  }\n\n  has(key: string): boolean {\n    const entry = this.cache.get(key);\n    if (!entry) return false;\n    if (Date.now() > entry.expiresAt) {\n      this.cache.delete(key);\n      this.stats.size--;\n      return false;\n    }\n    return true;\n  }\n\n  private evictOldest(): void {\n    const firstKey = this.cache.keys().next().value;\n    if (firstKey !== undefined) {\n      this.cache.delete(firstKey);\n      this.stats.evictions++;\n      this.stats.size--;\n    }\n  }\n\n  getStats(): CacheStats {\n    return { ...this.stats };\n  }\n\n  prune(): number {\n    let pruned = 0;\n    const now = Date.now();\n    for (const [key, entry] of this.cache) {\n      if (now > entry.expiresAt) {\n        this.cache.delete(key);\n        pruned++;\n      }\n    }\n    this.stats.size = this.cache.size;\n    return pruned;\n  }\n\n  keys(): string[] {\n    return Array.from(this.cache.keys());\n  }\n\n  values(): T[] {\n    const result: T[] = [];\n    const now = Date.now();\n    for (const entry of this.cache.values()) {\n      if (now <= entry.expiresAt) {\n        result.push(entry.value);\n      }\n    }\n    return result;\n  }\n\n  get size(): number {\n    return this.cache.size"
         },
         {
-          "file": "/Users/bartwaardenburg/Sites/fallow/tests/benchmark-corpus/src/type1-exact/cache-manager-b.ts",
+          "file": "src/type1-exact/cache-manager-b.ts",
           "start_line": 2,
           "end_line": 133,
           "start_col": 0,
@@ -47,7 +47,7 @@
     {
       "instances": [
         {
-          "file": "/Users/bartwaardenburg/Sites/fallow/tests/benchmark-corpus/src/type3-near-miss/validator-a.ts",
+          "file": "src/type3-near-miss/validator-a.ts",
           "start_line": 78,
           "end_line": 109,
           "start_col": 17,
@@ -55,7 +55,7 @@
           "fragment": "{ field, rule: 'custom', message: rule.message };\n        }\n        break;\n    }\n\n    return null;\n  }\n\n  validateField(field: string, value: unknown): ValidationError[] {\n    const rules = this.rules.get(field);\n    if (!rules) return [];\n\n    const errors: ValidationError[] = [];\n    for (const rule of rules) {\n      const error = this.checkRule(field, value, rule);\n      if (error) {\n        errors.push(error);\n      }\n    }\n    return errors;\n  }\n\n  hasRules(field: string): boolean {\n    return this.rules.has(field) && (this.rules.get(field)?.length ?? 0) > 0;\n  }\n\n  getRuleCount(): number {\n    let count = 0;\n    for (const rules of this.rules.values()) {\n      count += rules.length;\n    }\n    return count"
         },
         {
-          "file": "/Users/bartwaardenburg/Sites/fallow/tests/benchmark-corpus/src/type3-near-miss/validator-b.ts",
+          "file": "src/type3-near-miss/validator-b.ts",
           "start_line": 107,
           "end_line": 138,
           "start_col": 17,
@@ -69,7 +69,7 @@
     {
       "instances": [
         {
-          "file": "/Users/bartwaardenburg/Sites/fallow/tests/benchmark-corpus/src/type3-near-miss/queue-a.ts",
+          "file": "src/type3-near-miss/queue-a.ts",
           "start_line": 77,
           "end_line": 98,
           "start_col": 2,
@@ -77,7 +77,7 @@
           "fragment": "updatePriority(id: string, newPriority: number): boolean {\n    const index = this.items.findIndex((item) => item.id === id);\n    if (index === -1) return false;\n\n    const item = this.items[index];\n    this.items.splice(index, 1);\n\n    item.priority = newPriority;\n\n    let low = 0;\n    let high = this.items.length;\n    while (low < high) {\n      const mid = (low + high) >>> 1;\n      if (this.items[mid].priority > newPriority) {\n        low = mid + 1;\n      } else {\n        high = mid;\n      }\n    }\n\n    this.items.splice(low, 0, item);\n    return true"
         },
         {
-          "file": "/Users/bartwaardenburg/Sites/fallow/tests/benchmark-corpus/src/type3-near-miss/queue-b.ts",
+          "file": "src/type3-near-miss/queue-b.ts",
           "start_line": 113,
           "end_line": 134,
           "start_col": 2,
@@ -91,7 +91,7 @@
     {
       "instances": [
         {
-          "file": "/Users/bartwaardenburg/Sites/fallow/tests/benchmark-corpus/src/type3-near-miss/queue-a.ts",
+          "file": "src/type3-near-miss/queue-a.ts",
           "start_line": 15,
           "end_line": 39,
           "start_col": 31,
@@ -99,7 +99,7 @@
           "fragment": "{\n      data,\n      priority,\n      addedAt: Date.now(),\n      id,\n    };\n\n    // Binary search for insertion point\n    let low = 0;\n    let high = this.items.length;\n    while (low < high) {\n      const mid = (low + high) >>> 1;\n      if (this.items[mid].priority > priority) {\n        low = mid + 1;\n      } else {\n        high = mid;\n      }\n    }\n\n    this.items.splice(low, 0, item);\n    return id;\n  }\n\n  dequeue(): T | undefined {\n    const item = this.items.shift()"
         },
         {
-          "file": "/Users/bartwaardenburg/Sites/fallow/tests/benchmark-corpus/src/type3-near-miss/queue-b.ts",
+          "file": "src/type3-near-miss/queue-b.ts",
           "start_line": 17,
           "end_line": 42,
           "start_col": 31,
@@ -113,7 +113,7 @@
     {
       "instances": [
         {
-          "file": "/Users/bartwaardenburg/Sites/fallow/tests/benchmark-corpus/src/type3-near-miss/queue-a.ts",
+          "file": "src/type3-near-miss/queue-a.ts",
           "start_line": 56,
           "end_line": 74,
           "start_col": 4,
@@ -121,7 +121,7 @@
           "fragment": "this.nextId = 0;\n  }\n\n  get size(): number {\n    return this.items.length;\n  }\n\n  isEmpty(): boolean {\n    return this.items.length === 0;\n  }\n\n  toArray(): T[] {\n    return this.items.map((item) => item.data);\n  }\n\n  drain(): T[] {\n    const result = this.items.map((item) => item.data);\n    this.items = [];\n    return result"
         },
         {
-          "file": "/Users/bartwaardenburg/Sites/fallow/tests/benchmark-corpus/src/type3-near-miss/queue-b.ts",
+          "file": "src/type3-near-miss/queue-b.ts",
           "start_line": 88,
           "end_line": 106,
           "start_col": 4,
@@ -135,7 +135,7 @@
     {
       "instances": [
         {
-          "file": "/Users/bartwaardenburg/Sites/fallow/tests/benchmark-corpus/src/type2-renamed/event-bus-b.ts",
+          "file": "src/type2-renamed/event-bus-b.ts",
           "start_line": 29,
           "end_line": 37,
           "start_col": 6,
@@ -143,7 +143,7 @@
           "fragment": "weight,\n    };\n\n    const current = this.registrations.get(channel) ?? [];\n    current.push(registration);\n    current.sort((a, b) => b.weight - a.weight);\n    this.registrations.set(channel, current);\n\n    return uid"
         },
         {
-          "file": "/Users/bartwaardenburg/Sites/fallow/tests/benchmark-corpus/src/type2-renamed/event-bus-b.ts",
+          "file": "src/type2-renamed/event-bus-b.ts",
           "start_line": 47,
           "end_line": 55,
           "start_col": 6,
@@ -157,7 +157,7 @@
     {
       "instances": [
         {
-          "file": "/Users/bartwaardenburg/Sites/fallow/tests/benchmark-corpus/src/type2-renamed/event-bus-a.ts",
+          "file": "src/type2-renamed/event-bus-a.ts",
           "start_line": 29,
           "end_line": 37,
           "start_col": 6,
@@ -165,7 +165,7 @@
           "fragment": "priority,\n    };\n\n    const existing = this.subscriptions.get(event) ?? [];\n    existing.push(subscription);\n    existing.sort((a, b) => b.priority - a.priority);\n    this.subscriptions.set(event, existing);\n\n    return id"
         },
         {
-          "file": "/Users/bartwaardenburg/Sites/fallow/tests/benchmark-corpus/src/type2-renamed/event-bus-a.ts",
+          "file": "src/type2-renamed/event-bus-a.ts",
           "start_line": 47,
           "end_line": 55,
           "start_col": 6,
@@ -179,7 +179,7 @@
     {
       "instances": [
         {
-          "file": "/Users/bartwaardenburg/Sites/fallow/tests/benchmark-corpus/src/type2-renamed/http-client-b.ts",
+          "file": "src/type2-renamed/http-client-b.ts",
           "start_line": 41,
           "end_line": 49,
           "start_col": 14,
@@ -187,7 +187,7 @@
           "fragment": "<T>(route: string, payload: unknown, extraHeaders?: Record<string, string>): Promise<FetchResult<T>> {\n    return this.performFetch<T>({\n      endpoint: `${this.apiRoot}${route}`,\n      verb: 'POST',\n      payload,\n      customHeaders: { ...this.baseHeaders, ...extraHeaders },\n      timeoutMs: this.timeoutDuration,\n      retryCount: this.retryLimit,\n    })"
         },
         {
-          "file": "/Users/bartwaardenburg/Sites/fallow/tests/benchmark-corpus/src/type2-renamed/http-client-b.ts",
+          "file": "src/type2-renamed/http-client-b.ts",
           "start_line": 52,
           "end_line": 60,
           "start_col": 14,
@@ -201,7 +201,7 @@
     {
       "instances": [
         {
-          "file": "/Users/bartwaardenburg/Sites/fallow/tests/benchmark-corpus/src/type2-renamed/http-client-a.ts",
+          "file": "src/type2-renamed/http-client-a.ts",
           "start_line": 41,
           "end_line": 49,
           "start_col": 12,
@@ -209,7 +209,7 @@
           "fragment": "<T>(path: string, body: unknown, headers?: Record<string, string>): Promise<ApiResponse<T>> {\n    return this.executeRequest<T>({\n      url: `${this.baseUrl}${path}`,\n      method: 'POST',\n      body,\n      headers: { ...this.defaultHeaders, ...headers },\n      timeout: this.requestTimeout,\n      retries: this.maxRetries,\n    })"
         },
         {
-          "file": "/Users/bartwaardenburg/Sites/fallow/tests/benchmark-corpus/src/type2-renamed/http-client-a.ts",
+          "file": "src/type2-renamed/http-client-a.ts",
           "start_line": 52,
           "end_line": 60,
           "start_col": 11,
@@ -223,7 +223,7 @@
     {
       "instances": [
         {
-          "file": "/Users/bartwaardenburg/Sites/fallow/tests/benchmark-corpus/src/type3-near-miss/queue-a.ts",
+          "file": "src/type3-near-miss/queue-a.ts",
           "start_line": 47,
           "end_line": 51,
           "start_col": 2,
@@ -231,7 +231,7 @@
           "fragment": "remove(id: string): boolean {\n    const index = this.items.findIndex((item) => item.id === id);\n    if (index === -1) return false;\n    this.items.splice(index, 1);\n    return true"
         },
         {
-          "file": "/Users/bartwaardenburg/Sites/fallow/tests/benchmark-corpus/src/type3-near-miss/queue-b.ts",
+          "file": "src/type3-near-miss/queue-b.ts",
           "start_line": 57,
           "end_line": 61,
           "start_col": 2,
@@ -245,7 +245,7 @@
     {
       "instances": [
         {
-          "file": "/Users/bartwaardenburg/Sites/fallow/tests/benchmark-corpus/src/type3-near-miss/validator-a.ts",
+          "file": "src/type3-near-miss/validator-a.ts",
           "start_line": 47,
           "end_line": 54,
           "start_col": 11,
@@ -253,7 +253,7 @@
           "fragment": "{ valid: errors.length === 0, errors };\n  }\n\n  private checkRule(field: string, value: unknown, rule: ValidationRule): ValidationError | null {\n    switch (rule.type) {\n      case 'required':\n        if (value === undefined || value === null || value === '') {\n          return { field, rule: 'required', message: rule.message"
         },
         {
-          "file": "/Users/bartwaardenburg/Sites/fallow/tests/benchmark-corpus/src/type3-near-miss/validator-b.ts",
+          "file": "src/type3-near-miss/validator-b.ts",
           "start_line": 60,
           "end_line": 67,
           "start_col": 11,
@@ -267,7 +267,7 @@
     {
       "instances": [
         {
-          "file": "/Users/bartwaardenburg/Sites/fallow/tests/benchmark-corpus/src/type2-renamed/http-client-b.ts",
+          "file": "src/type2-renamed/http-client-b.ts",
           "start_line": 31,
           "end_line": 38,
           "start_col": 16,
@@ -275,7 +275,7 @@
           "fragment": "<T>(route: string, extraHeaders?: Record<string, string>): Promise<FetchResult<T>> {\n    return this.performFetch<T>({\n      endpoint: `${this.apiRoot}${route}`,\n      verb: 'GET',\n      customHeaders: { ...this.baseHeaders, ...extraHeaders },\n      timeoutMs: this.timeoutDuration,\n      retryCount: this.retryLimit,\n    })"
         },
         {
-          "file": "/Users/bartwaardenburg/Sites/fallow/tests/benchmark-corpus/src/type2-renamed/http-client-b.ts",
+          "file": "src/type2-renamed/http-client-b.ts",
           "start_line": 63,
           "end_line": 70,
           "start_col": 14,
@@ -289,7 +289,7 @@
     {
       "instances": [
         {
-          "file": "/Users/bartwaardenburg/Sites/fallow/tests/benchmark-corpus/src/type2-renamed/http-client-a.ts",
+          "file": "src/type2-renamed/http-client-a.ts",
           "start_line": 31,
           "end_line": 38,
           "start_col": 11,
@@ -297,7 +297,7 @@
           "fragment": "<T>(path: string, headers?: Record<string, string>): Promise<ApiResponse<T>> {\n    return this.executeRequest<T>({\n      url: `${this.baseUrl}${path}`,\n      method: 'GET',\n      headers: { ...this.defaultHeaders, ...headers },\n      timeout: this.requestTimeout,\n      retries: this.maxRetries,\n    })"
         },
         {
-          "file": "/Users/bartwaardenburg/Sites/fallow/tests/benchmark-corpus/src/type2-renamed/http-client-a.ts",
+          "file": "src/type2-renamed/http-client-a.ts",
           "start_line": 63,
           "end_line": 70,
           "start_col": 14,
@@ -311,7 +311,7 @@
     {
       "instances": [
         {
-          "file": "/Users/bartwaardenburg/Sites/fallow/tests/benchmark-corpus/src/type3-near-miss/validator-a.ts",
+          "file": "src/type3-near-miss/validator-a.ts",
           "start_line": 34,
           "end_line": 43,
           "start_col": 10,
@@ -319,7 +319,7 @@
           "fragment": "errors: ValidationError[] = [];\n\n    for (const [field, rules] of this.rules) {\n      const value = data[field];\n\n      for (const rule of rules) {\n        const error = this.checkRule(field, value, rule);\n        if (error) {\n          errors.push(error);\n        }"
         },
         {
-          "file": "/Users/bartwaardenburg/Sites/fallow/tests/benchmark-corpus/src/type3-near-miss/validator-b.ts",
+          "file": "src/type3-near-miss/validator-b.ts",
           "start_line": 43,
           "end_line": 56,
           "start_col": 10,
@@ -333,7 +333,7 @@
     {
       "instances": [
         {
-          "file": "/Users/bartwaardenburg/Sites/fallow/tests/benchmark-corpus/src/type3-near-miss/validator-a.ts",
+          "file": "src/type3-near-miss/validator-a.ts",
           "start_line": 23,
           "end_line": 26,
           "start_col": 2,
@@ -341,7 +341,7 @@
           "fragment": "addRule(field: string, rule: ValidationRule): void {\n    const existing = this.rules.get(field) ?? [];\n    existing.push(rule);\n    this.rules.set(field, existing);"
         },
         {
-          "file": "/Users/bartwaardenburg/Sites/fallow/tests/benchmark-corpus/src/type3-near-miss/validator-b.ts",
+          "file": "src/type3-near-miss/validator-b.ts",
           "start_line": 28,
           "end_line": 31,
           "start_col": 2,
@@ -355,7 +355,7 @@
     {
       "instances": [
         {
-          "file": "/Users/bartwaardenburg/Sites/fallow/tests/benchmark-corpus/src/type3-near-miss/queue-a.ts",
+          "file": "src/type3-near-miss/queue-a.ts",
           "start_line": 77,
           "end_line": 81,
           "start_col": 49,
@@ -363,7 +363,7 @@
           "fragment": ": boolean {\n    const index = this.items.findIndex((item) => item.id === id);\n    if (index === -1) return false;\n\n    const item = this.items[index]"
         },
         {
-          "file": "/Users/bartwaardenburg/Sites/fallow/tests/benchmark-corpus/src/type3-near-miss/queue-b.ts",
+          "file": "src/type3-near-miss/queue-b.ts",
           "start_line": 64,
           "end_line": 67,
           "start_col": 21,
@@ -371,7 +371,7 @@
           "fragment": ": boolean {\n    const index = this.items.findIndex((item) => item.id === id);\n    if (index === -1) return false;\n    const item = this.items[index]"
         },
         {
-          "file": "/Users/bartwaardenburg/Sites/fallow/tests/benchmark-corpus/src/type3-near-miss/queue-b.ts",
+          "file": "src/type3-near-miss/queue-b.ts",
           "start_line": 113,
           "end_line": 117,
           "start_col": 49,
@@ -385,7 +385,7 @@
     {
       "instances": [
         {
-          "file": "/Users/bartwaardenburg/Sites/fallow/tests/benchmark-corpus/src/type2-renamed/event-bus-a.ts",
+          "file": "src/type2-renamed/event-bus-a.ts",
           "start_line": 22,
           "end_line": 28,
           "start_col": 4,
@@ -393,7 +393,7 @@
           "fragment": "<T>(event: string, handler: EventHandler<T>, priority = 0): string {\n    const id = `sub_${this.nextId++}`;\n    const subscription: Subscription = {\n      id,\n      event,\n      handler: handler as EventHandler,\n      once"
         },
         {
-          "file": "/Users/bartwaardenburg/Sites/fallow/tests/benchmark-corpus/src/type2-renamed/event-bus-a.ts",
+          "file": "src/type2-renamed/event-bus-a.ts",
           "start_line": 40,
           "end_line": 46,
           "start_col": 6,
@@ -407,7 +407,7 @@
     {
       "instances": [
         {
-          "file": "/Users/bartwaardenburg/Sites/fallow/tests/benchmark-corpus/src/type2-renamed/event-bus-b.ts",
+          "file": "src/type2-renamed/event-bus-b.ts",
           "start_line": 22,
           "end_line": 28,
           "start_col": 11,
@@ -415,7 +415,7 @@
           "fragment": "<T>(channel: string, callback: MessageCallback<T>, weight = 0): string {\n    const uid = `reg_${this.counter++}`;\n    const registration: Registration = {\n      uid,\n      channel,\n      callback: callback as MessageCallback,\n      singleUse"
         },
         {
-          "file": "/Users/bartwaardenburg/Sites/fallow/tests/benchmark-corpus/src/type2-renamed/event-bus-b.ts",
+          "file": "src/type2-renamed/event-bus-b.ts",
           "start_line": 40,
           "end_line": 46,
           "start_col": 15,
@@ -429,7 +429,7 @@
     {
       "instances": [
         {
-          "file": "/Users/bartwaardenburg/Sites/fallow/tests/benchmark-corpus/src/type3-near-miss/validator-a.ts",
+          "file": "src/type3-near-miss/validator-a.ts",
           "start_line": 37,
           "end_line": 44,
           "start_col": 30,
@@ -437,7 +437,7 @@
           "fragment": "];\n\n      for (const rule of rules) {\n        const error = this.checkRule(field, value, rule);\n        if (error) {\n          errors.push(error);\n        }\n      }"
         },
         {
-          "file": "/Users/bartwaardenburg/Sites/fallow/tests/benchmark-corpus/src/type3-near-miss/validator-a.ts",
+          "file": "src/type3-near-miss/validator-a.ts",
           "start_line": 90,
           "end_line": 96,
           "start_col": 38,
@@ -445,7 +445,7 @@
           "fragment": "[];\n    for (const rule of rules) {\n      const error = this.checkRule(field, value, rule);\n      if (error) {\n        errors.push(error);\n      }\n    }"
         },
         {
-          "file": "/Users/bartwaardenburg/Sites/fallow/tests/benchmark-corpus/src/type3-near-miss/validator-b.ts",
+          "file": "src/type3-near-miss/validator-b.ts",
           "start_line": 119,
           "end_line": 125,
           "start_col": 38,
@@ -459,7 +459,7 @@
     {
       "instances": [
         {
-          "file": "/Users/bartwaardenburg/Sites/fallow/tests/benchmark-corpus/src/type3-near-miss/queue-a.ts",
+          "file": "src/type3-near-miss/queue-a.ts",
           "start_line": 11,
           "end_line": 19,
           "start_col": 19,
@@ -467,7 +467,7 @@
           "fragment": "0;\n\n  enqueue(data: T, priority = 0): string {\n    const id = `item_${this.nextId++}`;\n    const item: QueueItem<T> = {\n      data,\n      priority,\n      addedAt: Date.now(),\n      id"
         },
         {
-          "file": "/Users/bartwaardenburg/Sites/fallow/tests/benchmark-corpus/src/type3-near-miss/queue-b.ts",
+          "file": "src/type3-near-miss/queue-b.ts",
           "start_line": 13,
           "end_line": 21,
           "start_col": 27,
@@ -481,7 +481,7 @@
     {
       "instances": [
         {
-          "file": "/Users/bartwaardenburg/Sites/fallow/tests/benchmark-corpus/src/type3-near-miss/queue-a.ts",
+          "file": "src/type3-near-miss/queue-a.ts",
           "start_line": 15,
           "end_line": 27,
           "start_col": 10,
@@ -489,7 +489,7 @@
           "fragment": "item: QueueItem<T> = {\n      data,\n      priority,\n      addedAt: Date.now(),\n      id,\n    };\n\n    // Binary search for insertion point\n    let low = 0;\n    let high = this.items.length;\n    while (low < high) {\n      const mid = (low + high) >>> 1;\n      if (this.items[mid].priority"
         },
         {
-          "file": "/Users/bartwaardenburg/Sites/fallow/tests/benchmark-corpus/src/type3-near-miss/queue-a.ts",
+          "file": "src/type3-near-miss/queue-a.ts",
           "start_line": 84,
           "end_line": 90,
           "start_col": 4,
@@ -497,7 +497,7 @@
           "fragment": "item.priority = newPriority;\n\n    let low = 0;\n    let high = this.items.length;\n    while (low < high) {\n      const mid = (low + high) >>> 1;\n      if (this.items[mid].priority"
         },
         {
-          "file": "/Users/bartwaardenburg/Sites/fallow/tests/benchmark-corpus/src/type3-near-miss/queue-b.ts",
+          "file": "src/type3-near-miss/queue-b.ts",
           "start_line": 17,
           "end_line": 30,
           "start_col": 10,
@@ -505,7 +505,7 @@
           "fragment": "item: QueueItem<T> = {\n      data,\n      priority,\n      addedAt: Date.now(),\n      id,\n      retryCount: 0,\n    };\n\n    // Binary search for insertion point\n    let low = 0;\n    let high = this.items.length;\n    while (low < high) {\n      const mid = (low + high) >>> 1;\n      if (this.items[mid].priority"
         },
         {
-          "file": "/Users/bartwaardenburg/Sites/fallow/tests/benchmark-corpus/src/type3-near-miss/queue-b.ts",
+          "file": "src/type3-near-miss/queue-b.ts",
           "start_line": 70,
           "end_line": 75,
           "start_col": 4,
@@ -513,7 +513,7 @@
           "fragment": "this.items.splice(index, 1);\n    let low = 0;\n    let high = this.items.length;\n    while (low < high) {\n      const mid = (low + high) >>> 1;\n      if (this.items[mid].priority"
         },
         {
-          "file": "/Users/bartwaardenburg/Sites/fallow/tests/benchmark-corpus/src/type3-near-miss/queue-b.ts",
+          "file": "src/type3-near-miss/queue-b.ts",
           "start_line": 120,
           "end_line": 126,
           "start_col": 4,
@@ -527,7 +527,7 @@
     {
       "instances": [
         {
-          "file": "/Users/bartwaardenburg/Sites/fallow/tests/benchmark-corpus/src/type3-near-miss/validator-a.ts",
+          "file": "src/type3-near-miss/validator-a.ts",
           "start_line": 66,
           "end_line": 72,
           "start_col": 17,
@@ -535,7 +535,7 @@
           "fragment": "{ field, rule: 'maxLength', message: rule.message };\n        }\n        break;\n\n      case 'pattern':\n        if (typeof value === 'string' && !(rule.value as RegExp).test(value)) {\n          return { field, rule: 'pattern', message: rule.message"
         },
         {
-          "file": "/Users/bartwaardenburg/Sites/fallow/tests/benchmark-corpus/src/type3-near-miss/validator-b.ts",
+          "file": "src/type3-near-miss/validator-b.ts",
           "start_line": 79,
           "end_line": 85,
           "start_col": 17,
@@ -549,7 +549,7 @@
     {
       "instances": [
         {
-          "file": "/Users/bartwaardenburg/Sites/fallow/tests/benchmark-corpus/src/type3-near-miss/queue-a.ts",
+          "file": "src/type3-near-miss/queue-a.ts",
           "start_line": 27,
           "end_line": 35,
           "start_col": 37,
@@ -557,7 +557,7 @@
           "fragment": "priority) {\n        low = mid + 1;\n      } else {\n        high = mid;\n      }\n    }\n\n    this.items.splice(low, 0, item);\n    return id;"
         },
         {
-          "file": "/Users/bartwaardenburg/Sites/fallow/tests/benchmark-corpus/src/type3-near-miss/queue-b.ts",
+          "file": "src/type3-near-miss/queue-b.ts",
           "start_line": 30,
           "end_line": 38,
           "start_col": 37,
@@ -565,7 +565,7 @@
           "fragment": "priority) {\n        low = mid + 1;\n      } else {\n        high = mid;\n      }\n    }\n\n    this.items.splice(low, 0, item);\n    return id;"
         },
         {
-          "file": "/Users/bartwaardenburg/Sites/fallow/tests/benchmark-corpus/src/type3-near-miss/queue-b.ts",
+          "file": "src/type3-near-miss/queue-b.ts",
           "start_line": 75,
           "end_line": 82,
           "start_col": 43,
@@ -579,7 +579,7 @@
     {
       "instances": [
         {
-          "file": "/Users/bartwaardenburg/Sites/fallow/tests/benchmark-corpus/src/type3-near-miss/validator-a.ts",
+          "file": "src/type3-near-miss/validator-a.ts",
           "start_line": 54,
           "end_line": 60,
           "start_col": 17,
@@ -587,7 +587,7 @@
           "fragment": "{ field, rule: 'required', message: rule.message };\n        }\n        break;\n\n      case 'minLength':\n        if (typeof value === 'string' && value.length < (rule.value as number)) {\n          return { field, rule: 'minLength', message: rule.message"
         },
         {
-          "file": "/Users/bartwaardenburg/Sites/fallow/tests/benchmark-corpus/src/type3-near-miss/validator-b.ts",
+          "file": "src/type3-near-miss/validator-b.ts",
           "start_line": 67,
           "end_line": 73,
           "start_col": 17,
@@ -601,7 +601,7 @@
     {
       "instances": [
         {
-          "file": "/Users/bartwaardenburg/Sites/fallow/tests/benchmark-corpus/src/type3-near-miss/validator-a.ts",
+          "file": "src/type3-near-miss/validator-a.ts",
           "start_line": 60,
           "end_line": 66,
           "start_col": 17,
@@ -609,7 +609,7 @@
           "fragment": "{ field, rule: 'minLength', message: rule.message };\n        }\n        break;\n\n      case 'maxLength':\n        if (typeof value === 'string' && value.length > (rule.value as number)) {\n          return { field, rule: 'maxLength', message: rule.message"
         },
         {
-          "file": "/Users/bartwaardenburg/Sites/fallow/tests/benchmark-corpus/src/type3-near-miss/validator-b.ts",
+          "file": "src/type3-near-miss/validator-b.ts",
           "start_line": 73,
           "end_line": 79,
           "start_col": 17,
@@ -623,7 +623,7 @@
     {
       "instances": [
         {
-          "file": "/Users/bartwaardenburg/Sites/fallow/tests/benchmark-corpus/src/negative/database-pool.ts",
+          "file": "src/negative/database-pool.ts",
           "start_line": 72,
           "end_line": 76,
           "start_col": 8,
@@ -631,7 +631,7 @@
           "fragment": "conn.isIdle = false;\n        conn.lastUsedAt = Date.now();\n        this.active.set(conn.id, conn);\n        return conn;\n      }"
         },
         {
-          "file": "/Users/bartwaardenburg/Sites/fallow/tests/benchmark-corpus/src/negative/database-pool.ts",
+          "file": "src/negative/database-pool.ts",
           "start_line": 84,
           "end_line": 88,
           "start_col": 6,
@@ -645,7 +645,7 @@
     {
       "instances": [
         {
-          "file": "/Users/bartwaardenburg/Sites/fallow/tests/benchmark-corpus/src/type3-near-miss/validator-a.ts",
+          "file": "src/type3-near-miss/validator-a.ts",
           "start_line": 76,
           "end_line": 78,
           "start_col": 6,
@@ -653,7 +653,7 @@
           "fragment": "case 'custom':\n        if (typeof rule.value === 'function' && !rule.value(value)) {\n          return { field, rule: 'custom', message: rule.message"
         },
         {
-          "file": "/Users/bartwaardenburg/Sites/fallow/tests/benchmark-corpus/src/type3-near-miss/validator-b.ts",
+          "file": "src/type3-near-miss/validator-b.ts",
           "start_line": 105,
           "end_line": 107,
           "start_col": 6,
@@ -667,7 +667,7 @@
     {
       "instances": [
         {
-          "file": "/Users/bartwaardenburg/Sites/fallow/tests/benchmark-corpus/src/type3-near-miss/validator-a.ts",
+          "file": "src/type3-near-miss/validator-a.ts",
           "start_line": 4,
           "end_line": 12,
           "start_col": 8,
@@ -675,7 +675,7 @@
           "fragment": "'required' | 'minLength' | 'maxLength' | 'pattern' | 'custom';\n  value?: unknown;\n  message: string;\n}\n\ninterface ValidationError {\n  field: string;\n  rule: string;\n  message: string;"
         },
         {
-          "file": "/Users/bartwaardenburg/Sites/fallow/tests/benchmark-corpus/src/type3-near-miss/validator-b.ts",
+          "file": "src/type3-near-miss/validator-b.ts",
           "start_line": 4,
           "end_line": 12,
           "start_col": 35,

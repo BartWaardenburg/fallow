@@ -59,12 +59,13 @@ fn warm_metadata_cache_reports_source_that_becomes_unreadable() {
     }];
 
     let cold = fallow_core::extract::parse_all_files(&discovered, None, false);
-    let mut cache = CacheStore::new();
+    let mut cache = CacheStore::new(std::path::Path::new(""));
     cache.insert(
         &path,
         module_to_cached(
             cold.modules.first().expect("cold parse produces module"),
             SourceFingerprint::from_metadata(&metadata),
+            false,
         ),
     );
 
@@ -86,6 +87,79 @@ fn warm_metadata_cache_reports_source_that_becomes_unreadable() {
     assert!(!warm.read_failures[0].error.is_empty());
 }
 
+/// The metadata fast path must not serve a cached module for a file that was
+/// rewritten to the same length with its modification time restored.
+///
+/// `(mtime, size)` is writer-controlled, so this shape is reachable through
+/// `touch -r`, a codemod that puts the timestamp back, and a `git checkout` of
+/// an equal-length revision. Serving the cached parse here means every
+/// downstream verdict describes the previous content.
+#[test]
+fn warm_metadata_cache_misses_an_equal_length_rewrite_with_a_restored_mtime() {
+    use fallow_core::cache::{CacheStore, module_to_cached};
+    use fallow_types::discover::{DiscoveredFile, FileId};
+    use fallow_types::source_fingerprint::SourceFingerprint;
+
+    let project = tempfile::tempdir().expect("create project");
+    let path = project.path().join("api.ts");
+    let before = "export const alpha = 1;\n";
+    let after = "export const bravo = 1;\n";
+    assert_eq!(before.len(), after.len());
+    std::fs::write(&path, before).expect("write source");
+
+    let metadata = std::fs::metadata(&path).expect("source metadata");
+    let modified = metadata.modified().expect("source mtime");
+    let accessed = metadata.accessed().unwrap_or(modified);
+    let discovered = [DiscoveredFile {
+        id: FileId(0),
+        path: path.clone(),
+        size_bytes: metadata.len(),
+    }];
+
+    let cold = fallow_core::extract::parse_all_files(&discovered, None, false);
+    let mut cache = CacheStore::new(std::path::Path::new(""));
+    cache.insert(
+        &path,
+        module_to_cached(
+            cold.modules.first().expect("cold parse produces module"),
+            SourceFingerprint::from_metadata(&metadata),
+            false,
+        ),
+    );
+
+    std::fs::write(&path, after).expect("rewrite source");
+    let handle = std::fs::OpenOptions::new()
+        .write(true)
+        .open(&path)
+        .expect("open source for timestamp restore");
+    handle
+        .set_times(
+            std::fs::FileTimes::new()
+                .set_accessed(accessed)
+                .set_modified(modified),
+        )
+        .expect("restore source timestamps");
+    let rewritten = std::fs::metadata(&path).expect("source metadata after rewrite");
+    assert_eq!(rewritten.len(), metadata.len());
+    assert_eq!(rewritten.modified().expect("mtime after rewrite"), modified);
+
+    let warm = fallow_core::extract::parse_all_files(&discovered, Some(&cache), false);
+
+    let exports: Vec<String> = warm
+        .modules
+        .first()
+        .expect("warm parse produces module")
+        .exports
+        .iter()
+        .map(|export| export.name.to_string())
+        .collect();
+    assert_eq!(
+        exports,
+        vec!["bravo".to_string()],
+        "the warm parse must describe the file on disk, not the cached one"
+    );
+}
+
 #[test]
 #[allow(
     clippy::too_many_lines,
@@ -102,12 +176,13 @@ fn cache_roundtrip() {
     let temp_dir = std::env::temp_dir().join(format!("fallow-test-cache-{unique}"));
     let _ = std::fs::remove_dir_all(&temp_dir);
 
-    let mut store = CacheStore::new();
+    let mut store = CacheStore::new(std::path::Path::new(""));
     assert!(store.is_empty());
 
     let cached = fallow_core::cache::CachedModule {
         content_hash: 12345,
         mtime_ns: 0,
+        ctime_ns: 0,
         file_size: 0,
         last_access_secs: 0,
         exports: vec![],
@@ -120,6 +195,8 @@ fn cache_roundtrip() {
         semantic_facts: None,
         whole_object_uses: Box::default(),
         dynamic_import_patterns: vec![],
+        parse_error_count: 0,
+        parse_panicked: false,
         has_cjs_exports: false,
         has_angular_component_template_url: false,
         unused_import_bindings: vec![],
@@ -129,6 +206,7 @@ fn cache_roundtrip() {
         unknown_suppression_kinds: vec![],
         line_offsets: vec![],
         complexity: vec![],
+        complexity_extracted: false,
         flag_uses: vec![],
         class_heritage: vec![],
         exported_factory_returns: None,
@@ -189,8 +267,13 @@ fn cache_roundtrip() {
     store
         .save(&temp_dir, 0, fallow_extract::cache::DEFAULT_CACHE_MAX_SIZE)
         .unwrap();
-    let loaded =
-        CacheStore::load(&temp_dir, 0, fallow_extract::cache::DEFAULT_CACHE_MAX_SIZE).unwrap();
+    let loaded = CacheStore::load(
+        &temp_dir,
+        std::path::Path::new(""),
+        0,
+        fallow_extract::cache::DEFAULT_CACHE_MAX_SIZE,
+    )
+    .unwrap();
     assert_eq!(loaded.len(), 1);
 
     assert!(loaded.get(std::path::Path::new("test.ts"), 12345).is_some());
@@ -286,7 +369,7 @@ fn incremental_with_cache_all_hits() {
     let files = fallow_core::discover::discover_files(&config);
 
     let first = fallow_core::extract::parse_all_files(&files, None, false);
-    let mut cache_store = fallow_core::cache::CacheStore::new();
+    let mut cache_store = fallow_core::cache::CacheStore::new(std::path::Path::new(""));
     for module in &first.modules {
         if let Some(file) = files.get(module.file_id.0 as usize) {
             cache_store.insert(
@@ -294,6 +377,7 @@ fn incremental_with_cache_all_hits() {
                 fallow_core::cache::module_to_cached(
                     module,
                     fallow_types::source_fingerprint::SourceFingerprint::new(0, 0),
+                    false,
                 ),
             );
         }
@@ -312,7 +396,7 @@ fn incremental_results_identical() {
     let files = fallow_core::discover::discover_files(&config);
 
     let first = fallow_core::extract::parse_all_files(&files, None, false);
-    let mut cache_store = fallow_core::cache::CacheStore::new();
+    let mut cache_store = fallow_core::cache::CacheStore::new(std::path::Path::new(""));
     for module in &first.modules {
         if let Some(file) = files.get(module.file_id.0 as usize) {
             cache_store.insert(
@@ -320,6 +404,7 @@ fn incremental_results_identical() {
                 fallow_core::cache::module_to_cached(
                     module,
                     fallow_types::source_fingerprint::SourceFingerprint::new(0, 0),
+                    false,
                 ),
             );
         }
@@ -360,11 +445,16 @@ fn incremental_full_pipeline_results_match() {
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "prune fixture enumerates every cache field"
+)]
 fn incremental_cache_prune_stale_entries() {
-    let mut store = fallow_core::cache::CacheStore::new();
+    let mut store = fallow_core::cache::CacheStore::new(std::path::Path::new(""));
     let make_module = || fallow_core::cache::CachedModule {
         content_hash: 1,
         mtime_ns: 0,
+        ctime_ns: 0,
         file_size: 0,
         last_access_secs: 0,
         exports: vec![],
@@ -377,6 +467,8 @@ fn incremental_cache_prune_stale_entries() {
         semantic_facts: None,
         whole_object_uses: Box::default(),
         dynamic_import_patterns: vec![],
+        parse_error_count: 0,
+        parse_panicked: false,
         has_cjs_exports: false,
         has_angular_component_template_url: false,
         unused_import_bindings: vec![],
@@ -386,6 +478,7 @@ fn incremental_cache_prune_stale_entries() {
         unknown_suppression_kinds: vec![],
         line_offsets: vec![],
         complexity: vec![],
+        complexity_extracted: false,
         flag_uses: vec![],
         class_heritage: vec![],
         exported_factory_returns: None,
@@ -462,4 +555,185 @@ fn incremental_cache_prune_stale_entries() {
             .get_by_path_only(std::path::Path::new("/project/deleted.ts"))
             .is_none()
     );
+}
+
+/// A second complexity-consuming run on an unchanged tree must not reparse.
+///
+/// `dead-code` parses with `need_complexity == false`, so its cache entries
+/// carry no complexity. The entry that `health` then writes has to be stored:
+/// while the write-back skipped every entry whose content hash still matched,
+/// the complexity a `health` run computed was thrown away every time, and each
+/// later `health` run paid a full cold parse forever.
+#[test]
+#[expect(
+    deprecated,
+    reason = "fallow_core is the internal surface that exposes parse-cache counters"
+)]
+fn health_after_dead_code_stops_reparsing_once_complexity_is_cached() {
+    let temp = tempfile::tempdir().expect("create temp dir");
+    let root = temp.path().join("project");
+    copy_fixture_tree(&fixture_path("basic-project"), &root);
+    let config = create_config_with_cache(root, temp.path().join("cache"));
+
+    let _ = fallow_core::analyze_retaining_modules(&config, false, true)
+        .expect("dead-code style run succeeds");
+    let first_health = fallow_core::analyze_retaining_modules(&config, true, true)
+        .expect("first complexity run succeeds");
+    let second_health = fallow_core::analyze_retaining_modules(&config, true, true)
+        .expect("second complexity run succeeds");
+
+    assert!(
+        cache_misses(&first_health) > 0,
+        "the first complexity run has no cached complexity to reuse"
+    );
+    assert_eq!(
+        cache_misses(&second_health),
+        0,
+        "the complexity the first run computed must be cached for the next one"
+    );
+}
+
+/// A metadata-only touch followed by a complexity-blind run must not strip the
+/// complexity a previous run stored.
+///
+/// The touch makes the metadata fingerprint stale, which sends the write-back
+/// down the refresh branch. That branch rewrote the whole entry from the
+/// current run's module, and on a `dead-code` run that module's complexity is
+/// empty by design, so one touch plus one `dead-code` run degraded a rich cache
+/// permanently.
+#[test]
+#[expect(
+    deprecated,
+    reason = "fallow_core is the internal surface that exposes parse-cache counters"
+)]
+fn a_complexity_blind_run_does_not_strip_cached_complexity() {
+    let temp = tempfile::tempdir().expect("create temp dir");
+    let root = temp.path().join("project");
+    copy_fixture_tree(&fixture_path("basic-project"), &root);
+    let config = create_config_with_cache(root.clone(), temp.path().join("cache"));
+
+    let _ = fallow_core::analyze_retaining_modules(&config, true, true)
+        .expect("complexity run succeeds");
+
+    touch_every_source(&root);
+    let _ = fallow_core::analyze_retaining_modules(&config, false, true)
+        .expect("dead-code style run succeeds");
+
+    let health = fallow_core::analyze_retaining_modules(&config, true, true)
+        .expect("complexity run after touch succeeds");
+    assert_eq!(
+        cache_misses(&health),
+        0,
+        "a touch plus a complexity-blind run must not force a cold complexity parse"
+    );
+}
+
+/// A cache entry for a file the current run did not discover must survive when
+/// the file is still on disk.
+///
+/// Discovery scope is per-command: `--production` drops test and story files,
+/// `--root` narrows to a subtree. Evicting whatever the current scope did not
+/// walk meant one narrow run threw away every entry outside its scope and the
+/// next full run reparsed them from cold.
+#[test]
+fn retain_paths_keeps_entries_for_files_that_still_exist() {
+    let project = tempfile::tempdir().expect("create project");
+    let discovered_path = project.path().join("discovered.ts");
+    let undiscovered_path = project.path().join("out-of-scope.ts");
+    let deleted_path = project.path().join("deleted.ts");
+    for path in [&discovered_path, &undiscovered_path, &deleted_path] {
+        std::fs::write(path, "export const value = 1;\n").expect("write source");
+    }
+    std::fs::remove_file(&deleted_path).expect("remove source after caching it");
+
+    let mut store = fallow_core::cache::CacheStore::new(std::path::Path::new(""));
+    for path in [&discovered_path, &undiscovered_path, &deleted_path] {
+        let module = fallow_extract::parse_from_content(
+            fallow_types::discover::FileId(0),
+            path,
+            "export const value = 1;\n",
+        );
+        store.insert(
+            path,
+            fallow_core::cache::module_to_cached(
+                &module,
+                fallow_types::source_fingerprint::SourceFingerprint::new(0, 0),
+                false,
+            ),
+        );
+    }
+
+    let files = vec![fallow_core::discover::DiscoveredFile {
+        id: fallow_core::discover::FileId(0),
+        path: discovered_path.clone(),
+        size_bytes: 1,
+    }];
+    store.retain_paths(&files);
+
+    assert!(
+        store.get_by_path_only(&discovered_path).is_some(),
+        "a discovered file keeps its entry"
+    );
+    assert!(
+        store.get_by_path_only(&undiscovered_path).is_some(),
+        "a file outside this run's scope is not gone, so its entry must survive"
+    );
+    assert!(
+        store.get_by_path_only(&deleted_path).is_none(),
+        "a deleted file must lose its entry"
+    );
+}
+
+fn cache_misses(output: &fallow_core::AnalysisOutput) -> usize {
+    output
+        .timings
+        .as_ref()
+        .expect("retained trace timings")
+        .cache_misses
+}
+
+/// Bump every source file's modification time without changing its content.
+fn touch_every_source(root: &std::path::Path) {
+    let now = std::time::SystemTime::now() + std::time::Duration::from_secs(1);
+    for entry in walk_files(root) {
+        let handle = std::fs::OpenOptions::new()
+            .write(true)
+            .open(&entry)
+            .expect("open source for touch");
+        handle
+            .set_times(
+                std::fs::FileTimes::new()
+                    .set_accessed(now)
+                    .set_modified(now),
+            )
+            .expect("touch source");
+    }
+}
+
+fn walk_files(dir: &std::path::Path) -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    for entry in std::fs::read_dir(dir).expect("read dir") {
+        let entry = entry.expect("dir entry");
+        let path = entry.path();
+        if entry.file_type().expect("file type").is_dir() {
+            found.extend(walk_files(&path));
+        } else {
+            found.push(path);
+        }
+    }
+    found
+}
+
+fn copy_fixture_tree(src: &std::path::Path, dst: &std::path::Path) {
+    std::fs::create_dir_all(dst).expect("create dest dir");
+    for entry in std::fs::read_dir(src).expect("read fixture dir") {
+        let entry = entry.expect("dir entry");
+        let from = entry.path();
+        let to = dst.join(entry.file_name());
+        if entry.file_type().expect("file type").is_dir() {
+            copy_fixture_tree(&from, &to);
+        } else {
+            std::fs::copy(&from, &to).expect("copy file");
+        }
+    }
 }

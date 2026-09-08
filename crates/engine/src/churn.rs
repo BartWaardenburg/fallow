@@ -6,7 +6,7 @@
 use rustc_hash::FxHashMap;
 use std::io::Read as _;
 use std::path::{Component, Path, PathBuf};
-use std::process::{Command, Output, Stdio};
+use std::process::{Command, Output};
 use std::sync::OnceLock;
 
 use serde::Deserialize;
@@ -24,16 +24,8 @@ pub type ChurnSpawnHook = fn(&mut Command) -> std::io::Result<Output>;
 
 static SPAWN_HOOK: OnceLock<ChurnSpawnHook> = OnceLock::new();
 
-#[expect(
-    clippy::disallowed_methods,
-    reason = "engine-owned git spawn wrapper clears ambient git env before churn subprocesses"
-)]
 fn git_command() -> Command {
-    let mut command = Command::new("git");
-    crate::git_env::clear_ambient_git_env(&mut command);
-    // Long-lived embedders keep protocol stdin open, which Git for Windows can inherit and hold.
-    command.stdin(Stdio::null());
-    command
+    crate::git_env::git_command()
 }
 
 /// Install a spawn-hook that wraps the `git log` subprocess. Idempotent;
@@ -82,13 +74,98 @@ const MAX_CHURN_FILE_BYTES: usize = 256 * 1024 * 1024;
 /// recency signal that distinguishes recent from old churn.
 const MAX_FUTURE_TIMESTAMP_SECS: u64 = 365 * 24 * 60 * 60;
 
-/// Parsed duration for the `--since` flag.
+/// Unit of a relative churn window.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChurnWindowUnit {
+    /// Fixed 24-hour days.
+    Days,
+    /// Fixed 7-day weeks.
+    Weeks,
+    /// Calendar months in UTC.
+    Months,
+    /// Calendar years in UTC.
+    Years,
+}
+
+impl ChurnWindowUnit {
+    /// Single-letter token used in the churn cache key.
+    const fn token(self) -> char {
+        match self {
+            Self::Days => 'd',
+            Self::Weeks => 'w',
+            Self::Months => 'm',
+            Self::Years => 'y',
+        }
+    }
+}
+
+/// The span of history churn analysis covers.
+///
+/// A relative window is stored as its duration rather than as the wall-clock
+/// string git resolves, so the same token always keys the same cache entry
+/// while the cutoff it resolves to moves with the run clock.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ChurnWindow {
+    /// A span measured back from the run clock.
+    Relative {
+        /// How many `unit`s of history to cover.
+        count: u64,
+        /// The unit `count` is measured in.
+        unit: ChurnWindowUnit,
+    },
+    /// An absolute ISO `YYYY-MM-DD` date, read as UTC midnight.
+    Date(String),
+    /// No window: imported churn covers whatever the exporter selected.
+    Imported,
+}
+
+impl ChurnWindow {
+    /// Stable cache key for this window. Absolute for a date, the duration
+    /// token (`"1y"`, `"90d"`) for a relative span.
+    #[must_use]
+    pub fn cache_token(&self) -> String {
+        match self {
+            Self::Relative { count, unit } => format!("{count}{}", unit.token()),
+            Self::Date(date) => date.clone(),
+            Self::Imported => String::new(),
+        }
+    }
+
+    /// The oldest commit timestamp this window includes, resolved against
+    /// `clock`. `None` for imported churn, which has no cutoff to apply.
+    #[must_use]
+    pub fn cutoff_secs(&self, clock: &crate::clock::AnalysisClock) -> Option<u64> {
+        match self {
+            Self::Relative { count, unit } => Some(match unit {
+                ChurnWindowUnit::Days => clock.minus_days(*count),
+                ChurnWindowUnit::Weeks => clock.minus_days(count.saturating_mul(7)),
+                ChurnWindowUnit::Months => clock.minus_months(*count),
+                ChurnWindowUnit::Years => clock.minus_years(*count),
+            }),
+            Self::Date(date) => crate::clock::utc_midnight_epoch(date),
+            Self::Imported => None,
+        }
+    }
+}
+
+/// Parsed `--since` window plus the label reports print for it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SinceDuration {
-    /// Value to pass to `git log --after` (e.g., `"6 months ago"` or `"2025-06-01"`).
-    pub git_after: String,
+    /// History span to analyze.
+    pub window: ChurnWindow,
     /// Human-readable display string (e.g., `"6 months"`).
     pub display: String,
+}
+
+impl SinceDuration {
+    /// A relative window of `count` `unit`s, labelled for report headers.
+    #[must_use]
+    pub fn relative(count: u64, unit: ChurnWindowUnit, display: impl Into<String>) -> Self {
+        Self {
+            window: ChurnWindow::Relative { count, unit },
+            display: display.into(),
+        }
+    }
 }
 
 /// Per-author commit aggregation for a single file.
@@ -137,6 +214,10 @@ pub struct ChurnResult {
     /// Author email pool. Per-file [`AuthorContribution`] entries reference
     /// authors by their index into this vector.
     pub author_pool: Vec<String>,
+    /// The instant recency weighting and staleness were measured against.
+    /// Ownership and routing reuse it so every churn-derived number in one run
+    /// agrees on "now".
+    pub clock: crate::clock::AnalysisClock,
 }
 
 /// Parse a `--since` value into a git-compatible duration.
@@ -152,7 +233,7 @@ pub struct ChurnResult {
 pub fn parse_since(input: &str) -> Result<SinceDuration, String> {
     if is_iso_date(input) {
         return Ok(SinceDuration {
-            git_after: input.to_string(),
+            window: ChurnWindow::Date(input.to_string()),
             display: input.to_string(),
         });
     }
@@ -166,48 +247,33 @@ pub fn parse_since(input: &str) -> Result<SinceDuration, String> {
         return Err("--since duration must be greater than 0".to_string());
     }
 
-    match unit {
-        "d" | "day" | "days" => {
-            let s = if num == 1 { "" } else { "s" };
-            Ok(SinceDuration {
-                git_after: format!("{num} day{s} ago"),
-                display: format!("{num} day{s}"),
-            })
+    let (unit, label) = match unit {
+        "d" | "day" | "days" => (ChurnWindowUnit::Days, "day"),
+        "w" | "week" | "weeks" => (ChurnWindowUnit::Weeks, "week"),
+        "m" | "month" | "months" => (ChurnWindowUnit::Months, "month"),
+        "y" | "year" | "years" => (ChurnWindowUnit::Years, "year"),
+        _ => {
+            return Err(format!(
+                "unknown duration unit '{unit}' in --since. Use d/w/m/y (e.g., 6m, 90d, 1y)"
+            ));
         }
-        "w" | "week" | "weeks" => {
-            let s = if num == 1 { "" } else { "s" };
-            Ok(SinceDuration {
-                git_after: format!("{num} week{s} ago"),
-                display: format!("{num} week{s}"),
-            })
-        }
-        "m" | "month" | "months" => {
-            let s = if num == 1 { "" } else { "s" };
-            Ok(SinceDuration {
-                git_after: format!("{num} month{s} ago"),
-                display: format!("{num} month{s}"),
-            })
-        }
-        "y" | "year" | "years" => {
-            let s = if num == 1 { "" } else { "s" };
-            Ok(SinceDuration {
-                git_after: format!("{num} year{s} ago"),
-                display: format!("{num} year{s}"),
-            })
-        }
-        _ => Err(format!(
-            "unknown duration unit '{unit}' in --since. Use d/w/m/y (e.g., 6m, 90d, 1y)"
-        )),
-    }
+    };
+    let plural = if num == 1 { "" } else { "s" };
+    Ok(SinceDuration::relative(
+        num,
+        unit,
+        format!("{num} {label}{plural}"),
+    ))
 }
 
 /// Analyze git churn for files in the given root directory.
 ///
 /// Returns `None` if git is not available or the directory is not a git repository.
 pub fn analyze_churn(root: &Path, since: &SinceDuration) -> Option<ChurnResult> {
+    let clock = crate::clock::AnalysisClock::for_repo(root);
     let shallow = is_shallow_clone(root);
-    let state = analyze_churn_events(root, since, None)?;
-    Some(build_churn_result(state, shallow))
+    let state = analyze_churn_events(root, since, None, &clock)?;
+    Some(build_churn_result(state, shallow, clock))
 }
 
 /// A `fallow-churn/v1` import document: a normalized, VCS-agnostic stand-in for
@@ -275,7 +341,11 @@ pub(crate) fn analyze_churn_from_file(path: &Path, root: &Path) -> Result<ChurnR
     }
 
     let state = churn_event_state_from_doc(&doc, path, root)?;
-    Ok(build_churn_result(state, false))
+    Ok(build_churn_result(
+        state,
+        false,
+        crate::clock::AnalysisClock::for_repo(root),
+    ))
 }
 
 fn read_churn_file_with_limit(path: &Path, limit: usize) -> Result<String, String> {
@@ -315,6 +385,18 @@ fn churn_event_state_from_doc(
     Ok(builder.finish())
 }
 
+/// The ceiling above which an imported event timestamp is rejected as
+/// implausible (almost always seconds-versus-milliseconds confusion).
+///
+/// This deliberately reads the wall clock rather than the run's
+/// [`crate::clock::AnalysisClock`]. The limit gates *acceptance* of an import,
+/// never a scored value, so it cannot move `weighted_commits` or `stale_days`
+/// the way a wall-clock "now" in the scoring path would. Pinning it to the run
+/// clock would instead make the gate reject real data: the run clock is HEAD's
+/// committer timestamp, so analyzing an older checkout while importing churn
+/// that covers today would drop every recent event. Wall-clock drift here is
+/// also one-directional, since a timestamp accepted today stays accepted on
+/// every later run.
 fn churn_file_future_limit() -> u64 {
     let now_secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -370,6 +452,7 @@ impl<'a> ChurnFileImportBuilder<'a> {
             .events
             .push(CachedCommitEvent {
                 timestamp: event.timestamp,
+                committed_at: event.timestamp,
                 lines_added: event.added,
                 lines_deleted: event.deleted,
                 author_idx,
@@ -467,12 +550,19 @@ const MAX_CHURN_CACHE_SIZE: usize = 64 * 1024 * 1024;
 /// Cache schema version. Bump when the on-disk shape of [`ChurnCache`]
 /// changes so older payloads are rejected on load. Version 5 stores paths in
 /// their platform-native byte representation instead of lossy UTF-8 strings.
-const CHURN_CACHE_VERSION: u8 = 5;
+/// Version 6 keys on the window token instead of a wall-clock-resolved git
+/// date string and stores each event's committer timestamp so a warm load can
+/// prune to the same cutoff `git log --after` applies on a cold run.
+const CHURN_CACHE_VERSION: u8 = 6;
 
 /// Serializable per-commit event for the disk cache.
 #[derive(Clone, bitcode::Encode, bitcode::Decode)]
 struct CachedCommitEvent {
     timestamp: u64,
+    /// Committer timestamp. `git log --after` filters on this, while recency
+    /// weighting stays on the author timestamp, so a rebased commit lands in
+    /// the same window warm and cold without its age changing.
+    committed_at: u64,
     lines_added: u32,
     lines_deleted: u32,
     author_idx: Option<u32>,
@@ -491,7 +581,8 @@ struct ChurnCache {
     /// Schema version; must equal [`CHURN_CACHE_VERSION`] to be accepted.
     version: u8,
     last_indexed_sha: String,
-    git_after: String,
+    /// [`ChurnWindow::cache_token`] of the window this entry was built for.
+    window_token: String,
     files: Vec<CachedFileChurn>,
     shallow_clone: bool,
     /// Author email pool referenced by [`CachedCommitEvent::author_idx`].
@@ -532,14 +623,14 @@ fn is_ancestor(root: &Path, ancestor: &str, descendant: &str) -> bool {
 
 /// Try to load churn data from disk cache. Returns `None` on cache miss
 /// or version mismatch.
-fn load_churn_cache(cache_dir: &Path, git_after: &str) -> Option<ChurnCache> {
+fn load_churn_cache(cache_dir: &Path, window_token: &str) -> Option<ChurnCache> {
     let cache_file = cache_dir.join("churn.bin");
     let data = std::fs::read(&cache_file).ok()?;
     if data.len() > MAX_CHURN_CACHE_SIZE {
         return None;
     }
     let cache: ChurnCache = bitcode::decode(&data).ok()?;
-    if cache.version != CHURN_CACHE_VERSION || cache.git_after != git_after {
+    if cache.version != CHURN_CACHE_VERSION || cache.window_token != window_token {
         return None;
     }
     Some(cache)
@@ -549,7 +640,7 @@ fn load_churn_cache(cache_dir: &Path, git_after: &str) -> Option<ChurnCache> {
 fn save_churn_cache(
     cache_dir: &Path,
     last_indexed_sha: &str,
-    git_after: &str,
+    window_token: &str,
     state: &ChurnEventState,
     shallow_clone: bool,
 ) {
@@ -564,7 +655,7 @@ fn save_churn_cache(
     let cache = ChurnCache {
         version: CHURN_CACHE_VERSION,
         last_indexed_sha: last_indexed_sha.to_string(),
-        git_after: git_after.to_string(),
+        window_token: window_token.to_string(),
         files,
         shallow_clone,
         author_pool: state.author_pool.clone(),
@@ -591,12 +682,16 @@ pub fn analyze_churn_cached(
     no_cache: bool,
 ) -> Option<(ChurnResult, bool)> {
     let head_sha = get_head_sha(root)?;
+    let clock = crate::clock::AnalysisClock::for_repo(root);
 
-    if !no_cache && let Some(result) = try_reuse_churn_cache(root, since, cache_dir, &head_sha) {
+    if !no_cache
+        && let Some(result) = try_reuse_churn_cache(root, since, cache_dir, &head_sha, &clock)
+    {
         return Some((result, true));
     }
 
-    analyze_fresh_churn(root, since, cache_dir, no_cache, &head_sha).map(|result| (result, false))
+    analyze_fresh_churn(root, since, cache_dir, no_cache, &head_sha, &clock)
+        .map(|result| (result, false))
 }
 
 fn try_reuse_churn_cache(
@@ -604,18 +699,24 @@ fn try_reuse_churn_cache(
     since: &SinceDuration,
     cache_dir: &Path,
     head_sha: &str,
+    clock: &crate::clock::AnalysisClock,
 ) -> Option<ChurnResult> {
-    let cache = load_churn_cache(cache_dir, &since.git_after)?;
+    let cache = load_churn_cache(cache_dir, &since.window.cache_token())?;
+    let cutoff = since.window.cutoff_secs(clock);
     if cache.last_indexed_sha == head_sha {
         let shallow_clone = cache.shallow_clone;
-        return Some(build_churn_result(cache.into_event_state(), shallow_clone));
+        return Some(build_churn_result(
+            cache.into_event_state(cutoff),
+            shallow_clone,
+            *clock,
+        ));
     }
 
     if !is_ancestor(root, &cache.last_indexed_sha, head_sha) {
         return None;
     }
 
-    extend_churn_cache(root, since, cache_dir, head_sha, cache)
+    extend_churn_cache(root, since, cache_dir, head_sha, cache, clock)
 }
 
 fn extend_churn_cache(
@@ -624,14 +725,21 @@ fn extend_churn_cache(
     cache_dir: &Path,
     head_sha: &str,
     cache: ChurnCache,
+    clock: &crate::clock::AnalysisClock,
 ) -> Option<ChurnResult> {
     let shallow_clone = is_shallow_clone(root);
     let range = format!("{}..HEAD", cache.last_indexed_sha);
-    let delta = analyze_churn_events(root, since, Some(&range))?;
-    let mut state = cache.into_event_state();
+    let delta = analyze_churn_events(root, since, Some(&range), clock)?;
+    let mut state = cache.into_event_state(since.window.cutoff_secs(clock));
     merge_churn_states(&mut state, delta);
-    save_churn_cache(cache_dir, head_sha, &since.git_after, &state, shallow_clone);
-    Some(build_churn_result(state, shallow_clone))
+    save_churn_cache(
+        cache_dir,
+        head_sha,
+        &since.window.cache_token(),
+        &state,
+        shallow_clone,
+    );
+    Some(build_churn_result(state, shallow_clone, *clock))
 }
 
 fn analyze_fresh_churn(
@@ -640,30 +748,43 @@ fn analyze_fresh_churn(
     cache_dir: &Path,
     no_cache: bool,
     head_sha: &str,
+    clock: &crate::clock::AnalysisClock,
 ) -> Option<ChurnResult> {
     let shallow_clone = is_shallow_clone(root);
-    let state = analyze_churn_events(root, since, None)?;
+    let state = analyze_churn_events(root, since, None, clock)?;
     if !no_cache {
-        save_churn_cache(cache_dir, head_sha, &since.git_after, &state, shallow_clone);
+        save_churn_cache(
+            cache_dir,
+            head_sha,
+            &since.window.cache_token(),
+            &state,
+            shallow_clone,
+        );
     }
 
-    Some(build_churn_result(state, shallow_clone))
+    Some(build_churn_result(state, shallow_clone, *clock))
 }
 
 impl ChurnCache {
-    fn into_event_state(self) -> ChurnEventState {
+    /// Rehydrate the cached events, dropping everything the current window no
+    /// longer covers.
+    ///
+    /// The cache only ever appends, so an entry minted months ago still holds
+    /// commits a cold `git log --after` would exclude today. Without this prune
+    /// a warm run reports more history than a cold run over the same commit,
+    /// which is exactly the cache-transparency invariant fallow asserts
+    /// elsewhere.
+    fn into_event_state(self, cutoff_secs: Option<u64>) -> ChurnEventState {
         let files = self
             .files
             .into_iter()
             .filter_map(|entry| {
-                path_from_cache_bytes(&entry.path).map(|path| {
-                    (
-                        path,
-                        FileEvents {
-                            events: entry.events,
-                        },
-                    )
-                })
+                let path = path_from_cache_bytes(&entry.path)?;
+                let mut events = entry.events;
+                if let Some(cutoff) = cutoff_secs {
+                    events.retain(|event| event.committed_at >= cutoff);
+                }
+                (!events.is_empty()).then_some((path, FileEvents { events }))
             })
             .collect();
         ChurnEventState {
@@ -718,10 +839,15 @@ fn path_from_cache_bytes(path: &[u8]) -> Option<PathBuf> {
 }
 
 /// Run `git log --numstat` and return event-level churn state.
+///
+/// The window is passed as an absolute `--after=@<epoch>` resolved against the
+/// run clock rather than as a phrase git re-resolves against the wall clock, so
+/// two runs over one commit see the same window boundary.
 fn analyze_churn_events(
     root: &Path,
     since: &SinceDuration,
     revision_range: Option<&str>,
+    clock: &crate::clock::AnalysisClock,
 ) -> Option<ChurnEventState> {
     let mut command = git_command();
     command.arg("log");
@@ -735,10 +861,12 @@ fn analyze_churn_events(
             "--no-renames",
             "--use-mailmap",
             "-z",
-            "--format=format:%at|%ae%x00",
-            &format!("--after={}", since.git_after),
+            "--format=format:%at|%ct|%ae%x00",
         ])
         .current_dir(root);
+    if let Some(cutoff) = since.window.cutoff_secs(clock) {
+        command.arg(format!("--after=@{cutoff}"));
+    }
 
     let output = match spawn_output(&mut command) {
         Ok(o) => o,
@@ -754,7 +882,11 @@ fn analyze_churn_events(
         return None;
     }
 
-    Some(parse_git_log_events_z(&output.stdout, root))
+    Some(parse_git_log_events_z(
+        &output.stdout,
+        root,
+        clock.epoch_secs(),
+    ))
 }
 
 /// Merge new churn events into cached event state.
@@ -790,12 +922,7 @@ fn merge_churn_states(base: &mut ChurnEventState, delta: ChurnEventState) {
 
 /// Parse `git log --numstat --format=format:%at|%ae` output into events.
 #[cfg(test)]
-fn parse_git_log_events(stdout: &str, root: &Path) -> ChurnEventState {
-    let now_secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-
+fn parse_git_log_events(stdout: &str, root: &Path, now_secs: u64) -> ChurnEventState {
     let mut parser = GitLogEventParser::new(root, now_secs);
 
     for line in stdout.lines() {
@@ -805,12 +932,10 @@ fn parse_git_log_events(stdout: &str, root: &Path) -> ChurnEventState {
     parser.finish()
 }
 
-fn parse_git_log_events_z(stdout: &[u8], root: &Path) -> ChurnEventState {
-    let now_secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-
+/// `now_secs` is the run clock's epoch, not the wall clock: it is the fallback
+/// timestamp for a numstat record that arrives before any commit header, so
+/// truncated or malformed git output still scores against the pinned instant.
+fn parse_git_log_events_z(stdout: &[u8], root: &Path, now_secs: u64) -> ChurnEventState {
     let mut parser = GitLogEventParser::new(root, now_secs);
     for record in stdout.split(|byte| *byte == 0) {
         let record = record.strip_prefix(b"\n").unwrap_or(record);
@@ -833,6 +958,7 @@ struct GitLogEventParser<'a> {
     author_pool: Vec<String>,
     author_index: FxHashMap<String, u32>,
     current_timestamp: Option<u64>,
+    current_committed_at: Option<u64>,
     current_author_idx: Option<u32>,
 }
 
@@ -845,6 +971,7 @@ impl<'a> GitLogEventParser<'a> {
             author_pool: Vec::new(),
             author_index: FxHashMap::default(),
             current_timestamp: None,
+            current_committed_at: None,
             current_author_idx: None,
         }
     }
@@ -864,15 +991,23 @@ impl<'a> GitLogEventParser<'a> {
         self.record_numstat(line);
     }
 
+    /// Parse a `%at|%ct|%ae` commit header. A two-field `%at|%ae` header is
+    /// still accepted so a fixture or an embedder pinned to the older format
+    /// keeps parsing; its committer timestamp falls back to the author one.
     fn record_commit_header(&mut self, line: &str) -> bool {
-        let Some((ts_str, email)) = line.split_once('|') else {
+        let Some((ts_str, rest)) = line.split_once('|') else {
             return false;
         };
         let Ok(ts) = ts_str.parse::<u64>() else {
             return false;
         };
+        let (committed_at, email) = match rest.split_once('|') {
+            Some((committer_str, email)) => (committer_str.parse::<u64>().unwrap_or(ts), email),
+            None => (ts, rest),
+        };
 
         self.current_timestamp = Some(ts);
+        self.current_committed_at = Some(committed_at);
         self.current_author_idx = Some(intern_author(
             email,
             &mut self.author_pool,
@@ -887,6 +1022,7 @@ impl<'a> GitLogEventParser<'a> {
         };
 
         self.current_timestamp = Some(ts);
+        self.current_committed_at = Some(ts);
         self.current_author_idx = None;
         true
     }
@@ -934,6 +1070,7 @@ impl<'a> GitLogEventParser<'a> {
             .events
             .push(CachedCommitEvent {
                 timestamp: ts,
+                committed_at: self.current_committed_at.unwrap_or(ts),
                 lines_added: added,
                 lines_deleted: deleted,
                 author_idx: self.current_author_idx,
@@ -1014,11 +1151,15 @@ fn accumulate_author(
 }
 
 /// Convert event-level churn state into the public aggregate result.
-fn build_churn_result(state: ChurnEventState, shallow_clone: bool) -> ChurnResult {
-    let now_secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
+///
+/// Recency weighting is measured against `clock`, not the system clock, so the
+/// same commit yields the same `weighted_commits` on every run.
+fn build_churn_result(
+    state: ChurnEventState,
+    shallow_clone: bool,
+    clock: crate::clock::AnalysisClock,
+) -> ChurnResult {
+    let now_secs = clock.epoch_secs();
 
     let files = state
         .files
@@ -1033,6 +1174,7 @@ fn build_churn_result(state: ChurnEventState, shallow_clone: bool) -> ChurnResul
         files,
         shallow_clone,
         author_pool: state.author_pool,
+        clock,
     }
 }
 
@@ -1042,7 +1184,15 @@ fn build_churn_result(state: ChurnEventState, shallow_clone: bool) -> ChurnResul
 /// interned indices in [`FileChurn::authors`].
 #[cfg(test)]
 fn parse_git_log(stdout: &str, root: &Path) -> (FxHashMap<PathBuf, FileChurn>, Vec<String>) {
-    let result = build_churn_result(parse_git_log_events(stdout, root), false);
+    let now_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let result = build_churn_result(
+        parse_git_log_events(stdout, root, now_secs),
+        false,
+        crate::clock::AnalysisClock::pinned(now_secs),
+    );
     (result.files, result.author_pool)
 }
 
@@ -1141,49 +1291,85 @@ mod tests {
     #[test]
     fn parse_since_months_short() {
         let d = parse_since("6m").unwrap();
-        assert_eq!(d.git_after, "6 months ago");
+        assert_eq!(
+            d.window,
+            ChurnWindow::Relative {
+                count: 6,
+                unit: ChurnWindowUnit::Months
+            }
+        );
         assert_eq!(d.display, "6 months");
     }
 
     #[test]
     fn parse_since_months_long() {
         let d = parse_since("6months").unwrap();
-        assert_eq!(d.git_after, "6 months ago");
+        assert_eq!(
+            d.window,
+            ChurnWindow::Relative {
+                count: 6,
+                unit: ChurnWindowUnit::Months
+            }
+        );
         assert_eq!(d.display, "6 months");
     }
 
     #[test]
     fn parse_since_days() {
         let d = parse_since("90d").unwrap();
-        assert_eq!(d.git_after, "90 days ago");
+        assert_eq!(
+            d.window,
+            ChurnWindow::Relative {
+                count: 90,
+                unit: ChurnWindowUnit::Days
+            }
+        );
         assert_eq!(d.display, "90 days");
     }
 
     #[test]
     fn parse_since_year_singular() {
         let d = parse_since("1y").unwrap();
-        assert_eq!(d.git_after, "1 year ago");
+        assert_eq!(
+            d.window,
+            ChurnWindow::Relative {
+                count: 1,
+                unit: ChurnWindowUnit::Years
+            }
+        );
         assert_eq!(d.display, "1 year");
     }
 
     #[test]
     fn parse_since_years_plural() {
         let d = parse_since("2years").unwrap();
-        assert_eq!(d.git_after, "2 years ago");
+        assert_eq!(
+            d.window,
+            ChurnWindow::Relative {
+                count: 2,
+                unit: ChurnWindowUnit::Years
+            }
+        );
         assert_eq!(d.display, "2 years");
     }
 
     #[test]
     fn parse_since_weeks() {
         let d = parse_since("2w").unwrap();
-        assert_eq!(d.git_after, "2 weeks ago");
+        assert_eq!(
+            d.window,
+            ChurnWindow::Relative {
+                count: 2,
+                unit: ChurnWindowUnit::Weeks
+            }
+        );
         assert_eq!(d.display, "2 weeks");
     }
 
     #[test]
     fn parse_since_iso_date() {
         let d = parse_since("2025-06-01").unwrap();
-        assert_eq!(d.git_after, "2025-06-01");
+        assert_eq!(d.window, ChurnWindow::Date("2025-06-01".to_string()));
         assert_eq!(d.display, "2025-06-01");
     }
 
@@ -1393,28 +1579,52 @@ mod tests {
     #[test]
     fn parse_since_week_singular() {
         let d = parse_since("1week").unwrap();
-        assert_eq!(d.git_after, "1 week ago");
+        assert_eq!(
+            d.window,
+            ChurnWindow::Relative {
+                count: 1,
+                unit: ChurnWindowUnit::Weeks
+            }
+        );
         assert_eq!(d.display, "1 week");
     }
 
     #[test]
     fn parse_since_weeks_long() {
         let d = parse_since("3weeks").unwrap();
-        assert_eq!(d.git_after, "3 weeks ago");
+        assert_eq!(
+            d.window,
+            ChurnWindow::Relative {
+                count: 3,
+                unit: ChurnWindowUnit::Weeks
+            }
+        );
         assert_eq!(d.display, "3 weeks");
     }
 
     #[test]
     fn parse_since_days_long() {
         let d = parse_since("30days").unwrap();
-        assert_eq!(d.git_after, "30 days ago");
+        assert_eq!(
+            d.window,
+            ChurnWindow::Relative {
+                count: 30,
+                unit: ChurnWindowUnit::Days
+            }
+        );
         assert_eq!(d.display, "30 days");
     }
 
     #[test]
     fn parse_since_year_long() {
         let d = parse_since("1year").unwrap();
-        assert_eq!(d.git_after, "1 year ago");
+        assert_eq!(
+            d.window,
+            ChurnWindow::Relative {
+                count: 1,
+                unit: ChurnWindowUnit::Years
+            }
+        );
         assert_eq!(d.display, "1 year");
     }
 
@@ -1789,6 +1999,7 @@ mod tests {
             FileEvents {
                 events: vec![CachedCommitEvent {
                     timestamp: 1,
+                    committed_at: 1,
                     lines_added: 2,
                     lines_deleted: 1,
                     author_idx: None,
@@ -1800,10 +2011,10 @@ mod tests {
             author_pool: Vec::new(),
         };
         let cache_dir = tempfile::tempdir().expect("cache directory");
-        save_churn_cache(cache_dir.path(), "abc123", "1 year ago", &state, false);
-        let warm = load_churn_cache(cache_dir.path(), "1 year ago")
+        save_churn_cache(cache_dir.path(), "abc123", "1y", &state, false);
+        let warm = load_churn_cache(cache_dir.path(), "1y")
             .expect("warm churn cache")
-            .into_event_state();
+            .into_event_state(None);
 
         assert!(warm.files.contains_key(&invalid_path));
     }
@@ -1814,7 +2025,7 @@ mod tests {
         let cache = ChurnCache {
             version: 4,
             last_indexed_sha: "abc123".to_string(),
-            git_after: "1 year ago".to_string(),
+            window_token: "1y".to_string(),
             files: vec![CachedFileChurn {
                 path: br#"/project/\"src/line\\nbreak.ts\""#.to_vec(),
                 events: Vec::new(),
@@ -1825,7 +2036,7 @@ mod tests {
         std::fs::write(cache_dir.path().join("churn.bin"), bitcode::encode(&cache))
             .expect("cache fixture");
 
-        assert!(load_churn_cache(cache_dir.path(), "1 year ago").is_none());
+        assert!(load_churn_cache(cache_dir.path(), "1y").is_none());
     }
 
     #[test]
@@ -1865,7 +2076,7 @@ mod tests {
         assert!(incremental_hit);
         assert_eq!(incremental.files[&file].commits, 2);
 
-        let cache = load_churn_cache(cache.path(), &since.git_after).unwrap();
+        let cache = load_churn_cache(cache.path(), &since.window.cache_token()).unwrap();
         assert_eq!(cache.last_indexed_sha, head);
     }
 
@@ -2151,5 +2362,51 @@ mod tests {
         let churn = &result.files[&PathBuf::from("/project/src/a.ts")];
         assert_eq!(churn.lines_added, u32::MAX);
         assert_eq!(churn.lines_deleted, u32::MAX);
+    }
+
+    /// A numstat row that arrives before any commit header (truncated or
+    /// malformed git output) must fall back to the run clock, so the recorded
+    /// timestamp, and therefore the file's weighted commits and staleness, is
+    /// the same on every run over one commit instead of moving with wall time.
+    #[test]
+    fn headerless_numstat_falls_back_to_the_run_clock() {
+        let root = Path::new("/project");
+        let pinned = 1_700_000_000;
+
+        let state = parse_git_log_events_z(b"10\t5\tsrc/a.ts", root, pinned);
+
+        let events = &state.files[&PathBuf::from("/project/src/a.ts")].events;
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].timestamp, pinned);
+        assert_eq!(events[0].committed_at, pinned);
+    }
+
+    /// The same truncated output parsed against two different run clocks must
+    /// disagree only by those clocks: nothing in the fallback path may consult
+    /// the system clock.
+    #[test]
+    fn headerless_numstat_tracks_only_the_supplied_clock() {
+        let root = Path::new("/project");
+        let record: &[u8] = b"1\t0\tsrc/a.ts";
+
+        let early = parse_git_log_events_z(record, root, 1_600_000_000);
+        let late = parse_git_log_events_z(record, root, 1_700_000_000);
+
+        let key = PathBuf::from("/project/src/a.ts");
+        assert_eq!(early.files[&key].events[0].timestamp, 1_600_000_000);
+        assert_eq!(late.files[&key].events[0].timestamp, 1_700_000_000);
+    }
+
+    /// A commit header still wins over the fallback: the clock only fills a gap.
+    #[test]
+    fn commit_header_timestamp_beats_the_run_clock_fallback() {
+        let root = Path::new("/project");
+        let record = b"1700000000|1700000500|dev@example.com\x002\t1\tsrc/a.ts";
+
+        let state = parse_git_log_events_z(record, root, 1_234_567_890);
+
+        let events = &state.files[&PathBuf::from("/project/src/a.ts")].events;
+        assert_eq!(events[0].timestamp, 1_700_000_000);
+        assert_eq!(events[0].committed_at, 1_700_000_500);
     }
 }

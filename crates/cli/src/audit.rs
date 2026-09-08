@@ -3020,6 +3020,7 @@ fn build_audit_dupes_options<'a>(
         summary: false,
         group_by: opts.group_by,
         performance: false,
+        include_fragments: true,
     }
 }
 
@@ -3228,7 +3229,7 @@ fn record_audit_impact(
         &result.summary,
         &crate::impact::AuditRunRecord {
             verdict: result.verdict,
-            gate: gate_marker.is_some(),
+            gate_source: gate_marker.map(crate::impact::GateSource::from_marker),
             git_sha: result.head_sha.as_deref(),
             version: env!("CARGO_PKG_VERSION"),
             timestamp: &crate::vital_signs::chrono_timestamp(),

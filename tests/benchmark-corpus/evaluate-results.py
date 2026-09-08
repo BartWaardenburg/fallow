@@ -6,18 +6,28 @@ Compares fallow dupes JSON output against ground-truth.json to compute:
 - Per-mode precision, recall, F1
 - Per-clone-type breakdown
 - False positive analysis
+
+Measured precision, recall, and F1 are then compared against the committed
+floor. The floor is a regression tripwire, not a published accuracy claim: the
+corpus is hand-written, so the numbers only mean "no worse than last time".
+
+Usage:
+    python3 evaluate-results.py [--results-dir DIR] [--floor PATH] [--update-floor]
 """
 
+import argparse
 import json
-import os
 import sys
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Optional
 
 SCRIPT_DIR = Path(__file__).parent
-RESULTS_DIR = SCRIPT_DIR / "results"
+DEFAULT_RESULTS_DIR = SCRIPT_DIR / "results"
+DEFAULT_FLOOR = SCRIPT_DIR / "results" / "accuracy-baseline.json"
 GROUND_TRUTH = SCRIPT_DIR / "ground-truth.json"
+FLOOR_METRICS = ("precision", "recall", "f1")
+MODES = ("strict", "mild", "weak", "semantic", "defaults")
 
 
 @dataclass
@@ -77,9 +87,9 @@ def normalize_path(path: str, root: str) -> str:
     return path
 
 
-def load_results(mode: str) -> Optional[dict]:
+def load_results(mode: str, results_dir: Path) -> Optional[dict]:
     """Load fallow dupes JSON output for a mode."""
-    path = RESULTS_DIR / f"dupes-{mode}.json"
+    path = results_dir / f"dupes-{mode}.json"
     if not path.exists():
         return None
     with open(path) as f:
@@ -115,9 +125,11 @@ def files_overlap(instances: list, file_a: str, file_b: str, root: str) -> tuple
     return False, 0, 0
 
 
-def evaluate_mode(mode: str, ground_truth: dict, root_hint: str) -> Optional[EvalMetrics]:
+def evaluate_mode(
+    mode: str, ground_truth: dict, root_hint: str, results_dir: Path
+) -> Optional[EvalMetrics]:
     """Evaluate a single mode against ground truth."""
-    data = load_results(mode)
+    data = load_results(mode, results_dir)
     if data is None:
         return None
 
@@ -227,9 +239,9 @@ def evaluate_mode(mode: str, ground_truth: dict, root_hint: str) -> Optional[Eva
     return metrics
 
 
-def detect_root(mode: str = "strict") -> str:
+def detect_root(results_dir: Path, mode: str = "strict") -> str:
     """Detect the absolute path root from the first result file."""
-    data = load_results(mode)
+    data = load_results(mode, results_dir)
     if not data or not data.get("clone_groups"):
         return ""
     first_file = data["clone_groups"][0]["instances"][0]["file"]
@@ -240,9 +252,51 @@ def detect_root(mode: str = "strict") -> str:
     return ""
 
 
-def main():
+def load_floor(path: Path) -> dict:
+    """Load the committed per-mode metric floor."""
+    if not path.exists():
+        print(f"Error: accuracy floor not found: {path}", file=sys.stderr)
+        sys.exit(2)
+    with open(path) as f:
+        return json.load(f).get("modes", {})
+
+
+def check_floor(all_metrics: list, floor: dict) -> list:
+    """Return one line per metric that fell below the committed floor."""
+    regressions = []
+    for m in all_metrics:
+        expected = floor.get(m.mode)
+        if expected is None:
+            continue
+        for name in FLOOR_METRICS:
+            measured = getattr(m, name)
+            minimum = expected.get(name)
+            if minimum is None:
+                continue
+            if round(measured, 4) < minimum:
+                regressions.append(
+                    f"{m.mode}: {name} {measured:.1%} below floor {minimum:.1%}"
+                )
+    return regressions
+
+
+def parse_args(argv):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--results-dir", type=Path, default=DEFAULT_RESULTS_DIR)
+    parser.add_argument("--floor", type=Path, default=DEFAULT_FLOOR)
+    parser.add_argument(
+        "--update-floor",
+        action="store_true",
+        help="rewrite the committed floor from this run instead of scoring against it",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv=None):
+    args = parse_args(sys.argv[1:] if argv is None else argv)
+    results_dir = args.results_dir
     ground_truth = load_ground_truth()
-    root = detect_root()
+    root = detect_root(results_dir)
 
     print("=" * 72)
     print("  FALLOW DUPLICATION ACCURACY BASELINE")
@@ -253,11 +307,10 @@ def main():
     print(f"Negative pairs: {len(ground_truth.get('negative_pairs', []))}")
     print()
 
-    modes = ["strict", "mild", "weak", "semantic", "defaults"]
     all_metrics = []
 
-    for mode in modes:
-        metrics = evaluate_mode(mode, ground_truth, root)
+    for mode in MODES:
+        metrics = evaluate_mode(mode, ground_truth, root, results_dir)
         if metrics is None:
             continue
         all_metrics.append(metrics)
@@ -314,10 +367,8 @@ def main():
                 best_mode = m.mode
         print(f"    {clone_type}: {len(pairs)} pairs, best recall={best_recall:.0%} ({best_mode})")
 
-    # Write machine-readable summary
-    summary_path = RESULTS_DIR / "accuracy-baseline.json"
     summary = {
-        "corpus": str(SCRIPT_DIR),
+        "corpus": "tests/benchmark-corpus",
         "ground_truth_pairs": len(ground_truth["clone_pairs"]),
         "negative_pairs": len(ground_truth.get("negative_pairs", [])),
         "modes": {}
@@ -343,10 +394,38 @@ def main():
                 for r in m.pair_results
             ],
         }
-    with open(summary_path, "w") as f:
-        json.dump(summary, f, indent=2)
-    print(f"\n  Machine-readable summary: {summary_path}")
+    if not all_metrics:
+        print("\n  Error: no result files found in " + str(results_dir), file=sys.stderr)
+        return 2
+
+    if args.update_floor:
+        with open(args.floor, "w") as f:
+            json.dump(summary, f, indent=2)
+            f.write("\n")
+        print(f"\n  Floor rewritten: {args.floor}")
+        return 0
+
+    summary_path = results_dir / "accuracy-baseline.json"
+    if summary_path.resolve() != args.floor.resolve():
+        with open(summary_path, "w") as f:
+            json.dump(summary, f, indent=2)
+            f.write("\n")
+        print(f"\n  Machine-readable summary: {summary_path}")
+
+    regressions = check_floor(all_metrics, load_floor(args.floor))
+    if regressions:
+        print("\n  Below the committed floor:")
+        for line in regressions:
+            print(f"    {line}")
+        print(
+            "\n  The floor is a regression tripwire. Investigate the drop, or rerun\n"
+            "  with --update-floor once the new numbers are understood."
+        )
+        return 1
+
+    print("\n  At or above the committed floor.")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

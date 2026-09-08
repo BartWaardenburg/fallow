@@ -124,6 +124,13 @@ Focused integration checks:
   guidance or a public companion contract changes.
 - `node scripts/check-audit-schema-doc-sync.mjs` when audit or dead-code JSON
   envelope versions or the public audit example change.
+- `npm run check:conformance-fixtures` for dead-code detection changes: it
+  scores the committed fixtures under `tests/conformance/fixtures/` against
+  their `expected.json`. Runs in `verify:fast`.
+- `npm run check:dupes-accuracy` for duplication changes: it re-runs the
+  hand-written corpus in `tests/benchmark-corpus/` and exits non-zero below the
+  committed floor in `results/accuracy-baseline.json`. Runs in `verify:full`.
+  The floor is a regression tripwire, not a published accuracy claim.
 
 ## Rust conventions
 

@@ -4532,6 +4532,7 @@ mod tests {
             files_analyzed: 50,
             files_excluded: 20,
             shallow_clone: false,
+            clock: None,
         });
         let lines = build_health_human_lines(&report, &root);
         let text = plain(&lines);
@@ -4563,6 +4564,7 @@ mod tests {
             files_analyzed: 10,
             files_excluded: 0,
             shallow_clone: false,
+            clock: None,
         });
         let lines = build_health_human_lines(&report, &root);
         let text = plain(&lines);
@@ -5174,6 +5176,7 @@ mod tests {
             files_analyzed: 50,
             files_excluded: 20,
             shallow_clone: false,
+            clock: None,
         });
         let lines = build_health_human_lines(&report, &root);
         let text = plain(&lines);
@@ -5207,6 +5210,7 @@ mod tests {
             files_analyzed: 50,
             files_excluded: 0,
             shallow_clone: false,
+            clock: None,
         });
         let lines = build_health_human_lines(&report, &root);
         let text = plain(&lines);

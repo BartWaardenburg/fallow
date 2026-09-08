@@ -1,3 +1,4 @@
+use crate::nearest::nearest_name;
 use crate::params::AnalyzeParams;
 
 use std::path::PathBuf;
@@ -21,7 +22,7 @@ use super::{
         regression_fallback_reason,
     },
     push_baseline, push_global, push_regression, push_remote_extends, push_scope, run_tool,
-    validation_error_body,
+    typed_validation_error_body,
 };
 
 /// Run `analyze` through the typed API when parameters map cleanly to the
@@ -212,15 +213,27 @@ fn apply_issue_type_filter(filters: &mut DeadCodeFilters, issue_type: &str) -> R
     Ok(())
 }
 
+/// Refusal for an issue-type selector the `analyze` tool does not accept.
+///
+/// The accepted vocabulary is in hand at the refusal point, so a near miss
+/// names the selector the caller meant instead of leaving them to diff their
+/// token against the full list. Two matchers answer two different misses: the
+/// edit-distance one catches a slipped keystroke, and the affinity scorer
+/// catches a caller who spelled out a name fallow abbreviates
+/// (`unused-dependencies`), which is many edits away and used to fall through
+/// to a bare dump of the whole vocabulary.
 fn unknown_issue_type_error(issue_type: &str) -> String {
-    let valid = ISSUE_TYPE_FLAGS
-        .iter()
-        .map(|&(name, _)| name)
-        .collect::<Vec<_>>()
-        .join(", ");
-    validation_error_body(format!(
-        "Unknown issue type '{issue_type}'. Valid values: {valid}"
-    ))
+    let names = ISSUE_TYPE_FLAGS.iter().map(|&(name, _)| name);
+    let suggestion = nearest_name(issue_type, names.clone())
+        .map_or_else(String::new, |nearest| format!(" Did you mean '{nearest}'?"));
+    let valid = names.collect::<Vec<_>>().join(", ");
+    typed_validation_error_body(
+        format!("Unknown issue type '{issue_type}'.{suggestion} Valid values: {valid}"),
+        "unknown_issue_type",
+        "Pass a registered issue type from `fallow://issue-types`, or omit \
+         `issue_types` to analyze every one.",
+        "analyze.issue_types",
+    )
 }
 
 /// Push the `--boundary-violations` convenience flag and validated
@@ -335,6 +348,70 @@ mod tests {
 
         let err = dead_code_options_from_params(&params).expect_err("invalid issue type");
         assert!(err.contains("Unknown issue type"));
+    }
+
+    #[test]
+    fn near_miss_issue_type_names_the_selector_the_caller_meant() {
+        let params = AnalyzeParams {
+            issue_types: Some(vec!["unused-exort".to_string()]),
+            ..AnalyzeParams::default()
+        };
+
+        let err = dead_code_options_from_params(&params).expect_err("invalid issue type");
+        assert!(
+            err.contains("Did you mean 'unused-exports'?"),
+            "near-miss selector should name the intended one: {err}"
+        );
+    }
+
+    /// `unused-dependencies` is the long form of `unused-deps`, seven edits
+    /// away, so the typo matcher cannot reach it. It is also the selector an
+    /// agent is most likely to guess, and it used to answer with a bare dump
+    /// of the whole vocabulary.
+    #[test]
+    fn long_form_issue_type_names_the_abbreviation_fallow_registers() {
+        let params = AnalyzeParams {
+            issue_types: Some(vec!["unused-dependencies".to_string()]),
+            ..AnalyzeParams::default()
+        };
+
+        let err = dead_code_options_from_params(&params).expect_err("invalid issue type");
+        assert!(
+            err.contains("Did you mean 'unused-deps'?"),
+            "the highest-traffic near miss must name the selector it meant: {err}"
+        );
+    }
+
+    /// Every other fallow refusal carries a stable `code`; matching this one
+    /// on its prose is the only thing an agent could do before.
+    #[test]
+    fn unknown_issue_type_refusal_carries_the_typed_error_fields() {
+        let params = AnalyzeParams {
+            issue_types: Some(vec!["not-real".to_string()]),
+            ..AnalyzeParams::default()
+        };
+
+        let err = dead_code_options_from_params(&params).expect_err("invalid issue type");
+        let body: serde_json::Value = serde_json::from_str(&err).expect("refusal body is JSON");
+        assert_eq!(body["error"], true);
+        assert_eq!(body["exit_code"], 2);
+        assert_eq!(body["code"], "unknown_issue_type");
+        assert_eq!(body["context"], "analyze.issue_types");
+        assert!(body["help"].as_str().is_some_and(|help| !help.is_empty()));
+    }
+
+    #[test]
+    fn novel_issue_type_stays_silent_rather_than_guessing() {
+        let params = AnalyzeParams {
+            issue_types: Some(vec!["teleport".to_string()]),
+            ..AnalyzeParams::default()
+        };
+
+        let err = dead_code_options_from_params(&params).expect_err("invalid issue type");
+        assert!(
+            !err.contains("Did you mean"),
+            "a completely novel selector must not get a misleading suggestion: {err}"
+        );
     }
 
     #[test]

@@ -1035,10 +1035,25 @@ use crate::MemberKind;
 /// now produce additional member accesses or semantic facts. Warm 286 caches
 /// lack those facts and would retain the false unused-class-member findings.
 ///
-/// Bumped to 288 for issue #2560: destructuring a known class instance now
-/// records member reads and conservative whole-object uses. Warm 287 caches
+/// Bumped to 288 for three entry-shape changes that land together. Entries now
+/// carry the inode change time beside the modification time, so the
+/// metadata-only fast path can no longer serve stale analysis for a same-size
+/// rewrite whose mtime was restored. Entries record whether complexity was
+/// actually extracted, so a run that skipped complexity no longer reads an
+/// empty vector as "not cached" and no longer downgrades a richer entry. And
+/// entries record the parse-degradation counts a file produced, so a warm load
+/// can report the degradation instead of silently inheriting a partial parse.
+/// Warm 287 entries have none of the three fields.
+///
+/// The 289 bump also re-keys `entries` on the root-relative path and adds
+/// the root to the store header. A 287 blob is keyed on absolute paths, so
+/// reading it under the new scheme would miss every lookup after paying the
+/// full decode; refusing it by version is the honest outcome.
+///
+/// Bumped to 290 for issue #2560: destructuring a known class instance now
+/// records member reads and conservative whole-object uses. Warm 289 caches
 /// lack these facts and would retain false unused-class-member findings.
-pub(super) const CACHE_VERSION: u32 = 288;
+pub(super) const CACHE_VERSION: u32 = 290;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
@@ -1073,7 +1088,12 @@ pub(super) const CACHE_VERSION: u32 = 288;
 /// Bumped to 12 for issue #2393: MDX duplicate tokenization now consumes the
 /// same source-mapped accepted statement stream as graph extraction. Warm v11
 /// entries contain compacted or truncated token streams and stale source spans.
-pub const DUPES_CACHE_VERSION: u32 = 12;
+///
+/// Bumped to 13: token entries carry the inode change time beside the
+/// modification time, so a same-size rewrite whose mtime was restored no longer
+/// serves the previous file's token stream. Warm v12 entries have no ctime and
+/// would miss on every lookup.
+pub const DUPES_CACHE_VERSION: u32 = 13;
 
 /// Default maximum cache size (256 MB). Overridable per-project via
 /// `cache.maxSizeMb` in the config file or `FALLOW_CACHE_MAX_SIZE` env var.
@@ -1112,7 +1132,7 @@ macro_rules! assert_cached_type_size {
     };
 }
 
-assert_cached_type_size!(CachedModule, 1352);
+assert_cached_type_size!(CachedModule, 1360);
 assert_cached_type_size!(CachedNamespaceObjectAlias, 72);
 assert_cached_type_size!(CachedLocalTypeDeclaration, 32);
 assert_cached_type_size!(CachedPublicSignatureTypeReference, 56);
@@ -1144,8 +1164,15 @@ pub struct CachedModule {
     /// xxh3 hash of the file content.
     pub content_hash: u64,
     /// File modification time in nanoseconds for fast cache validation.
-    /// When mtime+size match the on-disk file, we skip reading file content entirely.
+    /// When mtime+ctime+size match the on-disk file, we skip reading file
+    /// content entirely.
     pub mtime_ns: u64,
+    /// File inode change time in nanoseconds, or `0` on platforms that do not
+    /// report one. Stored beside `mtime_ns` because mtime is writer-controlled:
+    /// a same-length rewrite with a restored mtime is invisible to
+    /// `(mtime, size)` alone, and the metadata-only fast path would then hand
+    /// back analysis of the previous content.
+    pub ctime_ns: u64,
     /// File size in bytes for fast cache validation.
     pub file_size: u64,
     /// Seconds-since-epoch at the time this entry was last WRITTEN
@@ -1177,6 +1204,12 @@ pub struct CachedModule {
     pub whole_object_uses: Box<[String]>,
     /// Dynamic import patterns with partial static resolution.
     pub dynamic_import_patterns: Vec<CachedDynamicImportPattern>,
+    /// Number of parser diagnostics the parse of this file produced.
+    /// Round-trips so a warm load still reports `source-parse-degraded`
+    /// instead of silently inheriting a partial parse.
+    pub parse_error_count: u32,
+    /// Whether the parser abandoned this file instead of recovering.
+    pub parse_panicked: bool,
     /// Whether this module uses CJS exports.
     pub has_cjs_exports: bool,
     /// Whether this module declares at least one Angular `@Component({
@@ -1197,6 +1230,16 @@ pub struct CachedModule {
     pub line_offsets: Vec<u32>,
     /// Per-function complexity metrics.
     pub complexity: Vec<fallow_types::extract::FunctionComplexity>,
+    /// Whether the run that wrote this entry actually extracted complexity.
+    ///
+    /// An empty `complexity` vector is ambiguous on its own: a `dead-code` run
+    /// passes `need_complexity == false` and produces one, and so does a file
+    /// with no functions at all. Reading emptiness as "not cached" made every
+    /// later `health` run pay a full cold parse for a file that was already
+    /// analyzed. This flag is the honest answer, so a complexity consumer can
+    /// hit on a rich entry and a complexity-blind run can refuse to downgrade
+    /// one.
+    pub complexity_extracted: bool,
     /// Feature flag use sites.
     pub flag_uses: Vec<fallow_types::extract::FlagUse>,
     /// Heritage metadata for exported classes.
@@ -1365,7 +1408,11 @@ impl CachedModule {
     ///
     #[must_use]
     pub fn source_fingerprint(&self) -> fallow_types::source_fingerprint::SourceFingerprint {
-        fallow_types::source_fingerprint::SourceFingerprint::new(self.mtime_ns, self.file_size)
+        fallow_types::source_fingerprint::SourceFingerprint::with_ctime(
+            self.mtime_ns,
+            self.ctime_ns,
+            self.file_size,
+        )
     }
 }
 

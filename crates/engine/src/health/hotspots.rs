@@ -3,7 +3,7 @@
     reason = "human stderr notes (no-git, bot patterns, CODEOWNERS) preserved verbatim from the CLI health path"
 )]
 
-use fallow_output::{FileHealthScore, HotspotEntry, HotspotSummary};
+use fallow_output::{ClockProvenance, ClockSource, FileHealthScore, HotspotEntry, HotspotSummary};
 
 use super::HealthOptions;
 use super::ownership::{OwnershipContext, compile_bot_globs, compute_ownership};
@@ -233,10 +233,10 @@ pub(super) fn fetch_churn_data(
 
 /// Header label for imported churn (`--churn-file`). The imported window is
 /// whatever the wrapper exported, so reusing the `--since` duration ("since 6
-/// months") would misdescribe it. `git_after` is unused on the import path.
+/// months") would misdescribe it, and no cutoff is applied on the import path.
 fn imported_since() -> crate::churn::SinceDuration {
     crate::churn::SinceDuration {
-        git_after: String::new(),
+        window: crate::churn::ChurnWindow::Imported,
         display: "imported churn".to_string(),
     }
 }
@@ -333,6 +333,7 @@ pub(super) fn compute_hotspots(
 
     let shallow_clone = churn_result.shallow_clone;
     warn_shallow_clone(opts, shallow_clone);
+    warn_unpinned_clock(opts, churn_result.clock);
 
     let min_commits = opts.min_commits.unwrap_or(3);
     let (max_weighted, max_density) =
@@ -341,10 +342,10 @@ pub(super) fn compute_hotspots(
     let ownership_cfg = &config.health.ownership;
     let bot_globs_owned = load_ownership_bot_globs(opts, ownership_cfg);
     let codeowners_owned = load_ownership_codeowners(opts, &config.root);
-    let now_secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
+    // Staleness is measured against the run clock, not the system clock, so
+    // `stale_days` and the thresholds it feeds (owner-active, drift minimum
+    // file age) do not flip between two runs over the same commit.
+    let now_secs = churn_result.clock.epoch_secs();
     let ownership_ctx = bot_globs_owned.as_ref().map(|bot_globs| OwnershipContext {
         author_pool: &churn_result.author_pool,
         bot_globs,
@@ -378,6 +379,7 @@ pub(super) fn compute_hotspots(
         files_analyzed,
         files_excluded,
         shallow_clone,
+        clock: Some(clock_provenance(churn_result.clock)),
     };
 
     if let Some(top) = opts.top {
@@ -385,6 +387,41 @@ pub(super) fn compute_hotspots(
     }
 
     (hotspot_entries, Some(summary))
+}
+
+/// Describe the run clock on the wire, so a JSON consumer can tell a
+/// reproducible churn number from a drifting one.
+///
+/// [`warn_unpinned_clock`] says the same thing on stderr, where `--quiet`
+/// removes it and a machine consumer never sees it at all.
+fn clock_provenance(clock: crate::clock::AnalysisClock) -> ClockProvenance {
+    ClockProvenance {
+        source: match clock.source() {
+            crate::clock::AnalysisClockSource::Environment => ClockSource::Environment,
+            crate::clock::AnalysisClockSource::HeadCommit => ClockSource::HeadCommit,
+            crate::clock::AnalysisClockSource::WallClock => ClockSource::WallClock,
+        },
+        epoch_secs: clock.epoch_secs(),
+        reproducible: clock.is_reproducible(),
+    }
+}
+
+/// Warn when churn numbers were measured against the wall clock.
+///
+/// The run clock normally comes from HEAD's committer timestamp, which makes
+/// recency weighting and `stale_days` reproducible for one commit. `git log`
+/// churn cannot reach this warning: if HEAD has no readable timestamp there is
+/// no git history to analyze either. Imported churn (`--churn-file`) can, and
+/// is the point of the warning, since it exists for projects whose history
+/// lives in a non-git VCS.
+fn warn_unpinned_clock(opts: &HealthOptions<'_>, clock: crate::clock::AnalysisClock) {
+    if !clock.is_reproducible() && !opts.quiet {
+        eprintln!(
+            "Warning: no commit timestamp available, so churn recency and \
+             ownership staleness were measured against the wall clock and will \
+             drift between runs. Set FALLOW_CLOCK_EPOCH to pin them."
+        );
+    }
 }
 
 /// Emit shallow-clone warnings (and the ownership-skew note) when relevant.
@@ -530,6 +567,7 @@ mod tests {
             files,
             shallow_clone: false,
             author_pool: Vec::new(),
+            clock: crate::clock::AnalysisClock::pinned(1_788_782_400),
         }
     }
 

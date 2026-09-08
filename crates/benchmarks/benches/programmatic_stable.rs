@@ -499,13 +499,14 @@ fn create_warm_hash_workspace_project() -> ExtractCacheInput {
         root,
     } = create_workspace_project();
     let files = discovered_source_files(&root);
-    let mut cache = CacheStore::new();
+    let mut cache = CacheStore::new(&root);
 
     for file in &files {
         let module = parse_single_file(file).expect("benchmark fixture parses");
         let cached = module_to_cached(
             &module,
             fallow_types::source_fingerprint::SourceFingerprint::new(1, 1),
+            false,
         );
         cache.insert(&file.path, cached);
     }

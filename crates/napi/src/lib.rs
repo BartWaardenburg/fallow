@@ -249,11 +249,20 @@ fn map_type_aware_options(input: Option<TypeAwareOptions>) -> napi::Result<api::
     })
 }
 
+/// Refusal for a string option that is not one of a field's accepted literals.
+///
+/// The accepted set is in hand at the refusal point, so a near miss names the
+/// literal the caller meant. Novel values get no suggestion, because a guess
+/// that is not one edit away is worse than the plain list.
 fn invalid_enum_value(field: &str, value: &str, allowed: &[&str]) -> napi::Error {
+    let suggestion = api::closest_match(&normalize_enum_literal(value), allowed.iter().copied())
+        .map_or_else(String::new, |nearest| {
+            format!(" (did you mean `{nearest}`?)")
+        });
     napi::Error::new(
         Status::InvalidArg,
         format!(
-            "invalid `{field}` value `{value}`; expected one of: {}",
+            "invalid `{field}` value `{value}`{suggestion}; expected one of: {}",
             allowed.join(", ")
         ),
     )
@@ -444,6 +453,10 @@ impl TryFrom<DuplicationOptions> for api::DuplicationOptions {
             // forces import blocks to be counted. No `unwrap_or` so the
             // defer-to-config semantics survive (#1224).
             ignore_imports: value.ignore_imports,
+            // The node bindings mirror the CLI, where fragments are on by
+            // default; `None` defers to that default. Only MCP suppresses
+            // fragments, and it does so through its own params struct.
+            include_fragments: None,
             top: value.top.map(|n| n as usize),
         })
     }
@@ -1127,6 +1140,20 @@ mod tests {
         assert_eq!(
             reason,
             "invalid `effort` value `tiny`; expected one of: low, medium, high"
+        );
+    }
+
+    #[test]
+    fn near_miss_enum_value_names_the_literal_the_caller_meant() {
+        let reason = error_reason(compute_complexity(Some(ComplexityOptions {
+            sort: Some("cyclomatc".to_string()),
+            ..ComplexityOptions::default()
+        })));
+
+        assert_eq!(
+            reason,
+            "invalid `sort` value `cyclomatc` (did you mean `cyclomatic`?); \
+             expected one of: cyclomatic, cognitive, lines, severity"
         );
     }
 

@@ -931,6 +931,14 @@ pub fn serialize_explain_programmatic_json(
 /// suggestions matched to whether the token looks security-related.
 #[must_use]
 pub fn unknown_explain_error(issue_type: &str) -> crate::ProgrammaticError {
+    if let Some(nearest) = nearest_explain_token(issue_type) {
+        return crate::ProgrammaticError::new(
+            format!("unknown issue type '{issue_type}'. Did you mean '{nearest}'?"),
+            2,
+        )
+        .with_code("unknown_issue_type")
+        .with_help(format!("fallow explain {nearest}"));
+    }
     let message = if looks_security_explain_token(issue_type) {
         format!(
             "unknown issue type '{issue_type}'. Try values like tainted-sink, client-server-leak, hardcoded-secret, sql-injection, or security/sql-injection"
@@ -941,6 +949,23 @@ pub fn unknown_explain_error(issue_type: &str) -> crate::ProgrammaticError {
         )
     };
     crate::ProgrammaticError::new(message, 2).with_code("unknown_issue_type")
+}
+
+/// The registered token closest to an unrecognized one, over the same
+/// vocabulary [`rule_by_token`] accepts (bare ids and namespaced rule ids).
+/// A hardcoded example list cannot name the token that is one edit away, and
+/// that is the token the caller almost always meant.
+fn nearest_explain_token(issue_type: &str) -> Option<&'static str> {
+    let normalized = issue_type
+        .trim()
+        .strip_prefix("fallow/")
+        .unwrap_or_else(|| issue_type.trim())
+        .trim_start_matches("--")
+        .replace('_', "-");
+    let candidates: Vec<&'static str> = all_rules()
+        .flat_map(|rule| [bare_rule_id(rule), rule.id])
+        .collect();
+    fallow_config::levenshtein::closest_match(&normalized, candidates)
 }
 
 fn looks_security_explain_token(issue_type: &str) -> bool {
@@ -2257,5 +2282,29 @@ mod tests {
             .into_iter()
             .filter(|entry| seen.insert(entry.id))
             .collect()
+    }
+
+    /// A one-edit typo used to get the same hardcoded example list as a
+    /// completely novel token, so the caller never saw the token that was
+    /// actually one edit away.
+    #[test]
+    fn unknown_explain_error_names_the_token_one_edit_away() {
+        let error = unknown_explain_error("unused-exportz");
+        assert_eq!(error.code.as_deref(), Some("unknown_issue_type"));
+        assert!(error.message.contains("unused-export"), "{}", error.message);
+        assert_eq!(error.help.as_deref(), Some("fallow explain unused-export"));
+        assert!(
+            rule_by_token("unused-export").is_some(),
+            "suggestion must resolve"
+        );
+    }
+
+    /// A token that resembles nothing registered must stay silent rather than
+    /// point at an unrelated rule.
+    #[test]
+    fn unknown_explain_error_keeps_the_example_list_for_a_novel_token() {
+        let error = unknown_explain_error("banana-split-detector");
+        assert!(!error.message.contains("Did you mean"), "{}", error.message);
+        assert_eq!(error.help, None);
     }
 }

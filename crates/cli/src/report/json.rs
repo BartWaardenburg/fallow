@@ -817,11 +817,21 @@ pub(super) fn print_grouped_health_json(
     }
 }
 
+/// The two presentation switches the duplication JSON path carries, paired so
+/// they travel as one argument through the render chain.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct DuplicationJsonRender {
+    /// Attach the `_meta` explain block.
+    pub(super) explain: bool,
+    /// Serialize `instances[].fragment`. Off for a location-only payload.
+    pub(super) include_fragments: bool,
+}
+
 pub(super) fn api_duplication_json_document(
     report: &DuplicationReport,
     root: &Path,
     elapsed: Duration,
-    explain: bool,
+    render: DuplicationJsonRender,
     workspace_diagnostics: &[WorkspaceDiagnostic],
 ) -> Result<serde_json::Value, serde_json::Error> {
     let payload = DupesReportPayload::from_report(report);
@@ -835,7 +845,8 @@ pub(super) fn api_duplication_json_document(
         report,
         root,
         elapsed,
-        meta: explain.then(fallow_output::dupes_meta),
+        include_fragments: render.include_fragments,
+        meta: render.explain.then(fallow_output::dupes_meta),
         workspace_diagnostics: workspace_diagnostics.to_vec(),
         next_steps,
         envelope_mode: crate::output_runtime::current_root_envelope_mode(),
@@ -847,11 +858,11 @@ pub(super) fn print_duplication_json(
     report: &DuplicationReport,
     root: &Path,
     elapsed: Duration,
-    explain: bool,
+    render: DuplicationJsonRender,
     workspace_diagnostics: &[WorkspaceDiagnostic],
     json_style: crate::json_style::JsonStyle,
 ) -> ExitCode {
-    match api_duplication_json_document(report, root, elapsed, explain, workspace_diagnostics) {
+    match api_duplication_json_document(report, root, elapsed, render, workspace_diagnostics) {
         Ok(output) => emit_report_json(&output, "JSON", json_style),
         Err(e) => {
             eprintln!("Error: failed to serialize duplication report: {e}");
@@ -865,7 +876,7 @@ fn api_grouped_duplication_json_document(
     grouping: &DuplicationGrouping,
     root: &Path,
     elapsed: Duration,
-    explain: bool,
+    render: DuplicationJsonRender,
     workspace_diagnostics: &[WorkspaceDiagnostic],
 ) -> Result<serde_json::Value, serde_json::Error> {
     let payload = DupesReportPayload::from_report(report);
@@ -880,7 +891,8 @@ fn api_grouped_duplication_json_document(
         grouping,
         root,
         elapsed,
-        meta: explain.then(fallow_output::dupes_meta),
+        include_fragments: render.include_fragments,
+        meta: render.explain.then(fallow_output::dupes_meta),
         workspace_diagnostics: workspace_diagnostics.to_vec(),
         next_steps,
         envelope_mode: crate::output_runtime::current_root_envelope_mode(),
@@ -906,7 +918,7 @@ pub(super) fn print_grouped_duplication_json(
     grouping: &DuplicationGrouping,
     root: &Path,
     elapsed: Duration,
-    explain: bool,
+    render: DuplicationJsonRender,
     workspace_diagnostics: &[WorkspaceDiagnostic],
     json_style: crate::json_style::JsonStyle,
 ) -> ExitCode {
@@ -915,7 +927,7 @@ pub(super) fn print_grouped_duplication_json(
         grouping,
         root,
         elapsed,
-        explain,
+        render,
         workspace_diagnostics,
     ) {
         Ok(output) => emit_report_json(&output, "JSON", json_style),

@@ -934,6 +934,45 @@ fn fix_summary_single_fix_uses_singular_noun() {
     );
 }
 
+/// A withheld `remove_dependency` entry keeps its `type` so a caller can see
+/// which finding was declined. The CI summary must not read that as a write
+/// that happened: listing it under "Dependencies removed" would tell a
+/// reviewer the package left `package.json` when it is still there.
+#[test]
+fn fix_summary_does_not_report_a_withheld_dependency_as_removed() {
+    let env = json!({
+        "dry_run": false,
+        "total_fixed": 0,
+        "skipped": 0,
+        "skipped_content_changed": 0,
+        "skipped_mixed_line_endings": 0,
+        "skipped_low_confidence_exports": 0,
+        "skipped_low_confidence_dependencies": 1,
+        "fixes": [
+            {
+                "type": "remove_dependency",
+                "package": "lodash",
+                "location": "dependencies",
+                "file": "package.json",
+                "applied": false,
+                "skipped": true,
+                "skip_reason": "low_confidence_incomplete_analysis",
+                "reachability_caveats": ["incomplete-import-graph"]
+            }
+        ]
+    });
+    let rendered = fallow_cli::report::github_summary::render_fix_summary(&env);
+
+    assert!(
+        !rendered.contains("`lodash`"),
+        "a withheld package must not be listed as removed: {rendered}"
+    );
+    assert!(
+        rendered.contains("kept 1 declared package(s)"),
+        "the withholding has to be stated instead: {rendered}"
+    );
+}
+
 /// The bundled action no-ops annotations for the fix command, so the native
 /// `EnvelopeKind::Fix` annotation renderer must emit nothing.
 #[test]
@@ -1208,4 +1247,315 @@ fn annotations_cover_every_counted_dead_code_kind() {
             meta.result_key,
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// A verdict resting on a file the run never fully read must not reach a
+// machine-actionable CI surface looking confident.
+// ---------------------------------------------------------------------------
+
+/// A dead-code envelope where every caveated array carries one caveated
+/// finding, shaped exactly as `--format json` serializes it.
+fn caveated_check_envelope() -> Value {
+    json!({
+        "kind": "dead-code",
+        "schema_version": 7,
+        "total_issues": 3,
+        "elapsed_ms": 12,
+        "unused_files": [
+            { "path": "src/lib.ts", "reachability_caveats": ["incomplete-import-graph"] }
+        ],
+        "unused_exports": [
+            {
+                "path": "src/api.ts",
+                "line": 3,
+                "col": 0,
+                "export_name": "needed",
+                "is_re_export": false,
+                "is_type_only": false,
+                "reachability_caveats": ["incomplete-import-graph"]
+            }
+        ],
+        "unused_types": [
+            {
+                "path": "src/api.ts",
+                "line": 9,
+                "col": 0,
+                "export_name": "LegacyShape",
+                "is_re_export": false,
+                "is_type_only": true,
+                "reachability_caveats": ["incomplete-import-graph"]
+            }
+        ],
+        "unused_enum_members": [
+            {
+                "path": "src/api.ts",
+                "line": 14,
+                "col": 2,
+                "parent_name": "Mode",
+                "member_name": "Legacy",
+                "reachability_caveats": ["incomplete-import-graph"]
+            }
+        ],
+        "unused_dependencies": [
+            {
+                "path": "package.json",
+                "line": 12,
+                "package_name": "left-pad",
+                "used_in_workspaces": [],
+                "reachability_caveats": ["incomplete-import-graph"]
+            }
+        ]
+    })
+}
+
+/// The job summary is where a reviewer decides what to delete, so the row that
+/// names a caveated finding has to carry the qualifier. It rides inside an
+/// existing cell so no table changes shape.
+#[test]
+fn github_summary_rows_name_the_reachability_caveat() {
+    let rendered = render_summary(
+        EnvelopeKind::DeadCode,
+        &caveated_check_envelope(),
+        &LinkContext::default(),
+    );
+
+    assert!(
+        rendered.contains("| `src/lib.ts` *(caveat: incomplete import graph)* |"),
+        "unused-file row must hedge: {rendered}"
+    );
+    assert!(
+        rendered.contains("`needed` *(caveat: incomplete import graph)* |"),
+        "unused-export row must hedge: {rendered}"
+    );
+    assert!(
+        rendered.contains("| `left-pad` *(caveat: incomplete import graph)* |"),
+        "unused-dependency row must hedge: {rendered}"
+    );
+    assert!(
+        rendered.contains("`LegacyShape` *(caveat: incomplete import graph)* |"),
+        "unused-type row must hedge: {rendered}"
+    );
+    assert!(
+        rendered.contains("`Legacy` *(caveat: incomplete import graph)* |"),
+        "unused-enum-member row must hedge: {rendered}"
+    );
+}
+
+/// An annotation is the surface that spells out the mutation ("remove the
+/// export keyword", "Run: npm uninstall"), so it must not read as confident
+/// while the evidence behind it is incomplete.
+#[test]
+fn github_annotations_name_the_reachability_caveat() {
+    let rendered = render_annotations(
+        EnvelopeKind::DeadCode,
+        &caveated_check_envelope(),
+        &plain_options(),
+    );
+
+    assert_eq!(
+        rendered.matches("Caveat: incomplete import graph").count(),
+        5,
+        "every caveated annotation hedges: {rendered}"
+    );
+}
+
+/// A run that read every file it discovered must render exactly as it did
+/// before the hedge existed, so an integrator diffing reports sees no churn
+/// from a mechanism that did not fire.
+#[test]
+fn a_clean_run_adds_no_caveat_text_to_either_github_format() {
+    let summary = render_summary(
+        EnvelopeKind::DeadCode,
+        &check_envelope(),
+        &LinkContext::default(),
+    );
+    let annotations =
+        render_annotations(EnvelopeKind::DeadCode, &check_envelope(), &plain_options());
+
+    assert!(!summary.contains("caveat"), "{summary}");
+    assert!(!annotations.contains("Caveat"), "{annotations}");
+}
+
+/// The dupes summary headline counts the measured corpus, so the details block
+/// beneath it must not present its own capped listing as that corpus. `--top`
+/// withholds families before the envelope is built and the block caps again at
+/// 15, and a reader needs the total of both.
+#[test]
+fn github_summary_dupes_details_name_what_the_listing_omits() {
+    let mut env = dupes_envelope();
+    env["stats"]["clone_families"] = json!(9);
+    env["clone_families"] = json!([
+        { "files": ["src/a.ts"], "instances": 2, "line_count": 6, "token_count": 55, "similarity": 1.0 }
+    ]);
+    env["clone_families_shown"] = json!(1);
+    env["clone_families_omitted"] = json!(8);
+
+    let rendered = render_summary(EnvelopeKind::Dupes, &env, &LinkContext::default());
+
+    assert!(
+        rendered.contains("**Clone Families (9)**"),
+        "the details heading must count the corpus, not the listing: {rendered}"
+    );
+    assert!(
+        rendered.contains(
+            "*... and 8 more families, 8 of them withheld by a display limit before this report*"
+        ),
+        "the omission has to be named: {rendered}"
+    );
+}
+
+/// The same for the group listing the block falls back to when a run produced
+/// no families. The withholding is measured against what the block actually
+/// rendered, not against its cap, so a `--top` that left fewer rows than the
+/// cap is still reported in full.
+#[test]
+fn github_summary_dupes_group_listing_names_what_top_withheld() {
+    let mut env = dupes_envelope();
+    env["stats"]["clone_groups"] = json!(30);
+    env["clone_groups_shown"] = json!(2);
+    env["clone_groups_omitted"] = json!(28);
+
+    let rendered = render_summary(EnvelopeKind::Dupes, &env, &LinkContext::default());
+
+    assert!(
+        rendered.contains(
+            "*... and 28 more groups, 28 of them withheld by a display limit before this report*"
+        ),
+        "the corpus total minus the rendered rows has to be named: {rendered}"
+    );
+}
+
+/// The block's own display limit counts too, on a run `--top` never touched:
+/// 16 families in the envelope, 15 rendered, one named as withheld.
+#[test]
+fn github_summary_dupes_details_name_the_blocks_own_display_limit() {
+    let mut env = dupes_envelope();
+    let families: Vec<Value> = (0..16)
+        .map(|n| {
+            json!({
+                "files": [format!("src/a{n}.ts")],
+                "instances": 2,
+                "line_count": 6,
+                "token_count": 55,
+                "similarity": 1.0
+            })
+        })
+        .collect();
+    env["stats"]["clone_families"] = json!(16);
+    env["clone_families"] = json!(families);
+    env["clone_families_shown"] = json!(16);
+    env["clone_families_omitted"] = json!(0);
+
+    let rendered = render_summary(EnvelopeKind::Dupes, &env, &LinkContext::default());
+
+    assert!(rendered.contains("**Clone Families (16)**"), "{rendered}");
+    assert!(
+        rendered.contains("*... and 1 more families*"),
+        "the block's own cap has to be named as well: {rendered}"
+    );
+}
+
+/// An untruncated duplication run keeps the listing silent, so the default
+/// summary stays byte-identical.
+#[test]
+fn github_summary_dupes_details_stay_silent_when_nothing_was_omitted() {
+    let rendered = render_summary(
+        EnvelopeKind::Dupes,
+        &dupes_envelope(),
+        &LinkContext::default(),
+    );
+
+    assert!(!rendered.contains("... and"), "{rendered}");
+}
+
+/// The caveat token set is open, so a value this build does not recognise is
+/// still a caveat: dropping it would turn a finding whose evidence is
+/// incomplete back into a confident one. Two caveats on one finding join into
+/// a single qualifier rather than repeating the sentence.
+#[test]
+fn github_annotations_render_unrecognised_and_multiple_caveat_tokens() {
+    let mut env = check_envelope();
+    env["unused_files"][0]["reachability_caveats"] = json!(["some-future-caveat"]);
+    env["unused_dependencies"][0]["reachability_caveats"] =
+        json!(["incomplete-file-analysis", "incomplete-import-graph"]);
+
+    let rendered = render_annotations(EnvelopeKind::DeadCode, &env, &plain_options());
+
+    assert!(
+        rendered.contains("Caveat: some future caveat."),
+        "an unrecognised token is rendered, not dropped: {rendered}"
+    );
+    assert!(
+        rendered.contains("Caveat: incomplete file analysis, incomplete import graph."),
+        "both caveats join into one qualifier, in wire order: {rendered}"
+    );
+    assert_eq!(
+        rendered.matches("Caveat: ").count(),
+        2,
+        "the qualifier reaches exactly the caveated findings: {rendered}"
+    );
+}
+
+/// Every withholding counter has to reach the fix headline. A run whose only
+/// outcome is a withheld enum member still leaves entries in `fixes`, which the
+/// action's gate counts, so a summary that skips the counter reports the run as
+/// clean under a job that reports fixable issues.
+#[test]
+fn fix_summary_names_the_withheld_enum_members() {
+    let env = json!({
+        "dry_run": false,
+        "total_fixed": 0,
+        "skipped": 0,
+        "skipped_content_changed": 0,
+        "skipped_mixed_line_endings": 0,
+        "skipped_low_confidence_exports": 0,
+        "skipped_low_confidence_dependencies": 0,
+        "skipped_low_confidence_members": 1,
+        "fixes": [
+            { "type": "remove_enum_member", "path": "src/kind.ts", "line": 4, "skipped": true, "skip_reason": "low_confidence_reachability_caveat" }
+        ]
+    });
+
+    let rendered = fallow_cli::report::github_summary::render_fix_summary(&env);
+
+    assert!(
+        !rendered.contains("No fixable issues found"),
+        "a withheld member is not a clean run: {rendered}"
+    );
+    assert!(
+        rendered.contains("kept 1 unused enum member(s)"),
+        "{rendered}"
+    );
+}
+
+/// Issue #1250 in the presence of a presentation cap. A filtered combined run
+/// leaves `stats` describing the unfiltered corpus while `clone_groups[]` holds
+/// the actionable set, so an empty array still counts zero; a cap that withheld
+/// entries reports them through `clone_groups_omitted`, which does count.
+#[test]
+fn combined_summary_counts_visible_groups_plus_what_a_cap_withheld() {
+    let mut filtered = combined_envelope();
+    filtered["check"]["total_issues"] = json!(0);
+    filtered["check"]["unused_files"] = json!([]);
+    filtered["check"]["unused_exports"] = json!([]);
+    filtered["check"]["unused_dependencies"] = json!([]);
+    filtered["dupes"]["clone_groups"] = json!([]);
+    filtered["dupes"]["clone_families"] = json!([]);
+    filtered["dupes"]["stats"]["clone_groups"] = json!(2);
+    filtered["health"]["summary"]["functions_above_threshold"] = json!(0);
+
+    let rendered = render_summary(EnvelopeKind::Combined, &filtered, &LinkContext::default());
+    assert!(
+        rendered.contains("No duplication"),
+        "nonzero stats with nothing actionable to inspect must still read clean: {rendered}"
+    );
+
+    let mut capped = combined_envelope();
+    capped["dupes"]["clone_groups_omitted"] = json!(4);
+    let capped_counts = render_summary(EnvelopeKind::Combined, &capped, &LinkContext::default());
+    assert!(
+        capped_counts.contains("**5** clone groups"),
+        "one listed group plus four withheld by a cap is five: {capped_counts}"
+    );
 }

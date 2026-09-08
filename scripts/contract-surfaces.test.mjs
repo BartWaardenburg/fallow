@@ -8,6 +8,7 @@ import { checkGithubActionsPathFilter } from "./check-contract-surfaces.mjs";
 const EXPECTED_GENERATED_PATHS = [
   ".agents/skills/fallow/SKILL.md",
   ".agents/skills/fallow/references/cli-reference.md",
+  ".agents/skills/fallow/references/issue-types.md",
   ".agents/skills/fallow/references/mcp.md",
   "crates/napi/index.d.ts",
   "docs/output-schema.json",
@@ -19,6 +20,7 @@ const EXPECTED_GENERATED_PATHS = [
   "npm/fallow/issue-registry.json",
   "npm/fallow/skills/fallow/SKILL.md",
   "npm/fallow/skills/fallow/references/cli-reference.md",
+  "npm/fallow/skills/fallow/references/issue-types.md",
   "npm/fallow/skills/fallow/references/mcp.md",
   "npm/fallow/types/output-contract.d.ts",
   "plugin-schema.json",

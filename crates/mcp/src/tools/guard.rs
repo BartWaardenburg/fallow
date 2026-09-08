@@ -3,12 +3,12 @@ use crate::params::GuardParams;
 use rmcp::ErrorData as McpError;
 use rmcp::model::{CallToolResult, ContentBlock};
 
-use super::{push_remote_extends, push_str_flag, run_tool, validation_error_body};
+use super::{push_remote_extends, push_str_flag, run_tool_with_limit, validation_error_body};
 
 /// Run the read-only architecture guard report through the CLI.
 pub async fn run_guard(binary: &str, params: GuardParams) -> Result<CallToolResult, McpError> {
     match build_guard_args(&params) {
-        Ok(args) => run_tool(binary, "guard", &args).await,
+        Ok(args) => run_tool_with_limit(binary, "guard", &args, params.max_output_bytes).await,
         Err(msg) => Ok(CallToolResult::error(vec![ContentBlock::text(msg)])),
     }
 }
@@ -54,6 +54,7 @@ mod tests {
                 files: vec!["src/main.ts".to_string()],
                 root: None,
                 allow_remote_extends: value,
+                max_output_bytes: None,
             };
 
             assert_eq!(
@@ -71,6 +72,7 @@ mod tests {
             files: vec!["--allow-remote-extends".to_string()],
             root: None,
             allow_remote_extends: None,
+            max_output_bytes: None,
         };
 
         let msg = build_guard_args(&params).expect_err("flag-like entry must be rejected");
@@ -84,6 +86,7 @@ mod tests {
             files: vec!["  ".to_string()],
             root: None,
             allow_remote_extends: None,
+            max_output_bytes: None,
         };
 
         let msg = build_guard_args(&params).expect_err("empty entry must be rejected");

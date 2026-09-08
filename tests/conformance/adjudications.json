@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "reviewed_on": "2026-09-07",
+  "method": "Every record is one manually reviewed disagreement between fallow and knip on the pinned conformance corpus. A record is written only after the disagreement was traced to a pipeline layer against source, before any fix lands. Records are keyed on (project, issue_type, path, export_name), the same tuple the per-project report emits in its details rows.",
+  "knip_version": "6.32.0",
+  "corpus_refs": {
+    "preact": "10.25.4",
+    "fastify": "v5.2.1",
+    "zod": "v3.24.2",
+    "vue-core": "v3.5.30",
+    "svelte": "svelte@5.54.1",
+    "query": "v5.90.3",
+    "vite": "v8.0.1",
+    "next.js": "v16.2.1"
+  },
+  "verdicts": {
+    "fallow_wrong": "Source review shows fallow's finding (or missing finding) is incorrect.",
+    "knip_wrong": "Source review shows knip's finding (or missing finding) is incorrect.",
+    "model_difference": "Both tools are defensible; the tools answer different questions for this row."
+  },
+  "causes": {
+    "extract": "Parser dispatch or visitor never produced the symbol or reference.",
+    "resolve": "Specifier or alias resolution pointed at the wrong module.",
+    "graph": "Edge construction or re-export chaining lost the connection.",
+    "reachability": "Entry points or traversal decided the wrong reachable set.",
+    "analysis": "The analyzer applied the wrong rule to a correct graph.",
+    "suppression": "A suppression marker was honored or ignored incorrectly.",
+    "filters": "Issue filtering or production mode dropped or kept the wrong row.",
+    "report-assembly": "The finding was correct but rendered under the wrong path, name, or type."
+  },
+  "record_fields": [
+    "project",
+    "issue_type",
+    "path",
+    "export_name",
+    "verdict",
+    "cause",
+    "knip_version",
+    "corpus_ref",
+    "reviewed_on",
+    "issue"
+  ],
+  "adjudications": []
+}
