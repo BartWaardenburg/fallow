@@ -133,6 +133,21 @@ impl McpServer {
     }
 
     fn start_with(protocol: &str) -> Self {
+        let mut server = Self::spawn();
+        server.send(&format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"initialize","params":{{"protocolVersion":"{protocol}","capabilities":{{}},"clientInfo":{{"name":"resources-test","version":"0"}}}}}}"#
+        ));
+        let response = server.response(1);
+        assert!(
+            response["result"]["serverInfo"].is_object(),
+            "initialize must return server info: {response}"
+        );
+        server.initialize_result = response["result"].clone();
+        server.send(r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#);
+        server
+    }
+
+    fn spawn() -> Self {
         let mut child = Command::new(env!("CARGO_BIN_EXE_fallow-mcp"))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -151,23 +166,12 @@ impl McpServer {
             }
         });
 
-        let mut server = Self {
+        Self {
             child,
             stdin,
             lines,
             initialize_result: serde_json::Value::Null,
-        };
-        server.send(&format!(
-            r#"{{"jsonrpc":"2.0","id":1,"method":"initialize","params":{{"protocolVersion":"{protocol}","capabilities":{{}},"clientInfo":{{"name":"resources-test","version":"0"}}}}}}"#
-        ));
-        let response = server.response(1);
-        assert!(
-            response["result"]["serverInfo"].is_object(),
-            "initialize must return server info: {response}"
-        );
-        server.initialize_result = response["result"].clone();
-        server.send(r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#);
-        server
+        }
     }
 
     fn request(&mut self, id: u64, method: &str, params: &serde_json::Value) -> serde_json::Value {
@@ -222,20 +226,42 @@ impl McpServer {
     }
 }
 
-/// Peers that negotiate protocol 2026-07-28 or later receive `-32602`
-/// (invalid params) instead of `-32002` for an unknown resource; the
-/// structured `data` survives the rewrite.
+/// Initialize negotiation currently selects the legacy resource error code,
+/// even when a newer protocol is requested.
 #[test]
-fn unknown_uri_error_code_follows_the_negotiated_protocol_version() {
+fn unknown_uri_error_code_follows_initialize_negotiation() {
     let mut server = McpServer::start_with("2026-07-28");
+    assert_eq!(server.initialize_result["protocolVersion"], "2025-11-25");
     let error = server.request(
         2,
         "resources/read",
         &serde_json::json!({ "uri": "fallow://nope" }),
     );
+    assert_eq!(error["error"]["code"], -32002, "{error}");
+    assert!(
+        error["error"]["data"]["known_uris"].is_array(),
+        "structured data must survive legacy error classification: {error}"
+    );
+}
+
+#[test]
+fn modern_request_metadata_uses_invalid_params_for_unknown_uri() {
+    let mut server = McpServer::spawn();
+    let error = server.request(
+        2,
+        "resources/read",
+        &serde_json::json!({
+            "uri": "fallow://nope",
+            "_meta": {
+                "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                "io.modelcontextprotocol/clientInfo": {"name": "resources-test", "version": "0"},
+                "io.modelcontextprotocol/clientCapabilities": {}
+            }
+        }),
+    );
     assert_eq!(error["error"]["code"], -32602, "{error}");
     assert!(
         error["error"]["data"]["known_uris"].is_array(),
-        "structured data must survive the code rewrite: {error}"
+        "structured data must survive modern error classification: {error}"
     );
 }
