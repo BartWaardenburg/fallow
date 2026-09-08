@@ -72,11 +72,21 @@ fn tool_attributes_take_descriptions_from_method_docs() {
 /// for the tool it is about to call.
 const MAX_TOOL_DESCRIPTION_BYTES: usize = 2_000;
 
-/// Total wire-description bytes measured the last time this gate was re-pinned.
-/// This is the ratchet's high-water mark, not the assertion: the target is
-/// 35_000, reached by moving one tool's per-flag prose into its
+/// Total wire-description bytes across every registered tool, as printed by
+/// this gate the last time it was re-pinned. The ratchet's high-water mark,
+/// not the assertion.
+///
+/// RE-PIN IT BY RUNNING THE GATE, never by adding up a change's deltas by
+/// hand. `cargo test -p fallow-mcp total_tool_description_bytes_stay_within_budget`
+/// names the live total in its failure message, and that number is the only
+/// correct value for this constant. A hand-summed mark drifts off the live
+/// total silently, and every check below that compares the two then measures
+/// nothing: a mark BELOW live makes the re-pin check unfirable, and a mark
+/// above live hands the next description free budget.
+///
+/// The target is 35_000, reached by moving one tool's per-flag prose into its
 /// `fallow://tools/{name}` guide at a time.
-const RECORDED_TOTAL_DESCRIPTION_BYTES: usize = 54_433;
+const RECORDED_TOTAL_DESCRIPTION_BYTES: usize = 54_523;
 
 /// Deliberate headroom over [`RECORDED_TOTAL_DESCRIPTION_BYTES`].
 ///
@@ -87,18 +97,37 @@ const RECORDED_TOTAL_DESCRIPTION_BYTES: usize = 54_433;
 /// catching what the budget exists for: prose that grows by a paragraph.
 ///
 /// It is spendable, and nothing reclaims it on its own. The re-pin check below
-/// fires only when the live total drops [`TOTAL_REPIN_BYTES`] below the
+/// fires only when the live total drops [`DESCRIPTION_REPIN_BYTES`] below the
 /// recorded mark, so growth that stays inside this kilobyte is permanent until
 /// the mark is re-pinned by hand. Re-pin it in the same change that spends part
 /// of it, or the next author inherits headroom that is already gone.
 const TOTAL_DESCRIPTION_SLACK_BYTES: usize = 1_024;
 
-/// Total wire-description ceiling across every registered tool. The binding
-/// constraint. A NEW capability is the one thing that may raise the recorded
-/// mark by a whole description, and only by its own routing summary: the new
-/// tool's description carries no per-flag detail (that goes straight into its
-/// guide). Re-pinning after a change that spent slack is the other, smaller
-/// reason the mark moves up.
+/// The smallest headroom that still lets a maintainer fix a word without the
+/// total budget going red. One sentence rewritten is worth a couple of hundred
+/// bytes; anything under that and the gate is a tripwire, not a budget.
+///
+/// This bounds the SLACK CONSTANT, which is the only thing it can bound: with
+/// a single total ceiling, headroom after a correct re-pin is
+/// [`TOTAL_DESCRIPTION_SLACK_BYTES`] by construction, so asserting on the
+/// live headroom at run time would only restate the ceiling that already
+/// fired. The compile-time check below is the assertion that can actually
+/// fail, and it fails on the change that would cause the harm: shrinking the
+/// slack to a tripwire.
+const MIN_USABLE_TOTAL_HEADROOM_BYTES: usize = 256;
+
+const _: () = assert!(
+    TOTAL_DESCRIPTION_SLACK_BYTES >= MIN_USABLE_TOTAL_HEADROOM_BYTES,
+    "the total description slack must stay large enough to reword a sentence"
+);
+
+/// Total wire-description ceiling across every registered tool, and the only
+/// ceiling on that total: nothing else asserts against it, so this is the
+/// check a growing description trips. A NEW capability is the one thing that
+/// may raise the recorded mark by a whole description, and only by its own
+/// routing summary: the new tool's description carries no per-flag detail
+/// (that goes straight into its guide). Re-pinning after a change that spent
+/// slack is the other, smaller reason the mark moves up.
 const MAX_TOTAL_DESCRIPTION_BYTES: usize =
     RECORDED_TOTAL_DESCRIPTION_BYTES + TOTAL_DESCRIPTION_SLACK_BYTES;
 
@@ -107,28 +136,39 @@ const MAX_TOTAL_DESCRIPTION_BYTES: usize =
 /// and stop being a ratchet.
 const MAX_EXCEPTION_SLACK_BYTES: usize = 128;
 
-/// How far a live total may sit below its recorded mark before the gate asks
-/// for a re-pin.
+/// How far the live description total may sit below its recorded mark before
+/// the gate asks for a re-pin.
 ///
 /// This is what keeps a budget a ratchet instead of a number that drifts: a
 /// real reduction (one tool's prose moved into its guide) has to be banked, or
 /// the bytes it freed become silent budget for the next description.
 ///
-/// It is deliberately a small multiple of the per-tool ratchet
-/// [`MAX_EXCEPTION_SLACK_BYTES`], not an order of magnitude above it: at
-/// 4_096 bytes, thirty-two tools' worth of per-tool reclaim could be harvested
-/// and spent without the gate ever asking, which is exactly the silent budget
-/// the comment above claims to prevent. Four tools' worth is enough that
-/// rewording never trips it, and small enough that a genuine harvest is banked
-/// in the change that made it.
-const TOTAL_REPIN_BYTES: usize = MAX_EXCEPTION_SLACK_BYTES * 4;
+/// It is a literal, not a multiple of [`MAX_EXCEPTION_SLACK_BYTES`]. The
+/// per-tool ratchet governs one row of the exception table, whose rows hold
+/// under 200 bytes of reclaimable slack in total, so "four tools' worth of
+/// per-tool reclaim" was never a quantity this total could be harvested by.
+/// The quantity that matters here is a wording pass: a reworded sentence is
+/// worth a couple of hundred bytes at most and should not demand a re-pin,
+/// while moving a tool's per-flag prose into its guide frees thousands and
+/// must be banked in the change that freed them.
+const DESCRIPTION_REPIN_BYTES: usize = 256;
+
+/// The same ratchet for the schema total, sized independently of
+/// [`DESCRIPTION_REPIN_BYTES`] for the same reason
+/// [`TOTAL_SCHEMA_SLACK_BYTES`] is sized independently of the description
+/// slack: one shared parameter's doc comment renders into nearly every tool's
+/// schema, so a single reworded sentence moves this total by tens of tools'
+/// worth of bytes. A threshold tuned for one description would fire on every
+/// shared-parameter edit and teach the next maintainer to re-pin reflexively.
+const SCHEMA_REPIN_BYTES: usize = 1_024;
 
 /// Tools allowed past [`MAX_TOOL_DESCRIPTION_BYTES`], each with the allowance
 /// it may spend and the reason it earns one. Two kinds of entry live here.
 ///
 /// Permanent: `code_execute` and `fix_apply`. For those two the prose IS the
-/// safety boundary an agent reads before it acts, so a uniform 600- or
-/// 800-byte ceiling is not defensible. `code_execute` states the sandbox
+/// safety boundary an agent reads before it acts, so holding them to the
+/// uniform [`MAX_TOOL_DESCRIPTION_BYTES`] ceiling is not defensible.
+/// `code_execute` states the sandbox
 /// contract, the host-call allowlist, and the output and timeout bounds
 /// before an agent runs JavaScript in this process; `fix_apply` states the
 /// dry-run-first mutation contract, and it is the only tool that writes to
@@ -140,9 +180,12 @@ const TOTAL_REPIN_BYTES: usize = MAX_EXCEPTION_SLACK_BYTES * 4;
 /// clean no-op.
 ///
 /// Temporary: every other row. Those descriptions still carry per-flag detail
-/// that belongs in a `fallow://tools/{name}` guide; each is scheduled for the
-/// same split `check_health` already had, and its allowance disappears with
-/// that split.
+/// that belongs in a `fallow://tools/{name}` guide, and a row disappears when
+/// its description fits the uniform ceiling without one. `check_health` shows
+/// what that costs rather than what it finished: it has had one such split
+/// already and is STILL the longest description on the wire holding the
+/// largest allowance in this table, so a split is a step to be repeated, not
+/// a fix a row has already received.
 const DESCRIPTION_BUDGET_EXCEPTIONS: &[(&str, usize)] = &[
     ("code_execute", 4_600),
     ("fix_apply", 4_200),
@@ -200,29 +243,11 @@ fn total_tool_description_bytes_stay_within_budget() {
 fn total_tool_description_budget_keeps_no_stale_headroom() {
     let total = total_description_bytes();
     assert!(
-        RECORDED_TOTAL_DESCRIPTION_BYTES.saturating_sub(total) <= TOTAL_REPIN_BYTES,
+        RECORDED_TOTAL_DESCRIPTION_BYTES.saturating_sub(total) <= DESCRIPTION_REPIN_BYTES,
         "tools/list is down to {total} description bytes but the ratchet still records \
          {RECORDED_TOTAL_DESCRIPTION_BYTES}; bank the win by setting \
          RECORDED_TOTAL_DESCRIPTION_BYTES to {total}, so the freed bytes are not \
          spendable by the next description"
-    );
-}
-
-/// The smallest headroom that still lets a maintainer fix a word without the
-/// total budget going red. One sentence rewritten is worth a couple of hundred
-/// bytes; anything under that and the gate is a tripwire, not a budget.
-const MIN_USABLE_TOTAL_HEADROOM_BYTES: usize = 256;
-
-#[test]
-fn total_description_budget_leaves_room_for_a_wording_fix() {
-    let total = total_description_bytes();
-    let headroom = MAX_TOTAL_DESCRIPTION_BYTES.saturating_sub(total);
-    assert!(
-        headroom >= MIN_USABLE_TOTAL_HEADROOM_BYTES,
-        "the total description budget has {headroom} bytes of headroom; pinned this \
-         tightly, a one-word wording fix fails the gate and reads as a break. Keep the \
-         ceiling at RECORDED_TOTAL_DESCRIPTION_BYTES plus TOTAL_DESCRIPTION_SLACK_BYTES \
-         rather than re-pinning it to the exact live total"
     );
 }
 
@@ -271,9 +296,17 @@ fn total_schema_bytes() -> usize {
     live_tool_schema_bytes().values().sum()
 }
 
-/// Total input-schema bytes measured the last time this gate was re-pinned.
-/// The ratchet's high-water mark, not the assertion.
-const RECORDED_TOTAL_SCHEMA_BYTES: usize = 78_897;
+/// Total input-schema bytes across every registered tool, as printed by this
+/// gate the last time it was re-pinned. The ratchet's high-water mark, not the
+/// assertion.
+///
+/// Re-pin it the same way as [`RECORDED_TOTAL_DESCRIPTION_BYTES`]: run
+/// `cargo test -p fallow-mcp total_tool_schema_bytes_stay_within_budget` and
+/// copy the live total out of the failure message. Never sum a change's
+/// deltas by hand; one edited parameter doc comment renders into every tool
+/// that takes that parameter, so the arithmetic is wrong long before it looks
+/// wrong.
+const RECORDED_TOTAL_SCHEMA_BYTES: usize = 79_315;
 
 /// Deliberate headroom over [`RECORDED_TOTAL_SCHEMA_BYTES`], for the same
 /// reason [`TOTAL_DESCRIPTION_SLACK_BYTES`] exists: pinned to the exact live
@@ -303,7 +336,7 @@ fn total_tool_schema_bytes_stay_within_budget() {
 fn total_tool_schema_budget_keeps_no_stale_headroom() {
     let total = total_schema_bytes();
     assert!(
-        RECORDED_TOTAL_SCHEMA_BYTES.saturating_sub(total) <= TOTAL_REPIN_BYTES,
+        RECORDED_TOTAL_SCHEMA_BYTES.saturating_sub(total) <= SCHEMA_REPIN_BYTES,
         "tools/list is down to {total} input-schema bytes but the ratchet still records \
          {RECORDED_TOTAL_SCHEMA_BYTES}; bank the win by setting RECORDED_TOTAL_SCHEMA_BYTES \
          to {total}, so the freed bytes are not spendable by the next parameter"
@@ -330,4 +363,83 @@ fn catalogue_lines_stay_shorter_than_the_wire_description() {
             wire.len()
         );
     }
+}
+
+/// How many registered tools carry the subprocess byte cap, counted off the
+/// live `tools/list` schemas rather than off the parameter structs in
+/// `crates/mcp/src/params.rs`. Those two numbers differ: one struct is shared
+/// by several tools, so counting struct definitions undercounts the wire. The
+/// compatibility entry documents the wire, so this is the number it must
+/// spell.
+fn tools_carrying_the_subprocess_output_cap() -> Vec<String> {
+    let server = FallowMcp::new();
+    server
+        .tool_router
+        .list_all()
+        .iter()
+        .filter(|tool| {
+            serde_json::to_value(&tool.input_schema)
+                .ok()
+                .and_then(|schema| {
+                    schema
+                        .pointer("/properties/max_output_bytes/description")
+                        .and_then(|description| description.as_str())
+                        .map(|description| description.starts_with("Byte cap for this call"))
+                })
+                .unwrap_or(false)
+        })
+        .map(|tool| tool.name.to_string())
+        .collect()
+}
+
+/// The compatibility entry for `max_output_bytes` states how many tools take
+/// it. It first shipped saying fifteen, the number of parameter structs in
+/// `params.rs`, while the wire carried nineteen tools: several tools flatten
+/// one struct. A reader sizing a migration against that entry counted the
+/// wrong surface, so the doc's number is pinned to the live schemas here.
+#[test]
+fn the_compatibility_entry_counts_the_tools_that_carry_the_output_cap() {
+    let carriers = tools_carrying_the_subprocess_output_cap();
+    assert!(
+        !carriers.is_empty(),
+        "no registered tool carries the subprocess max_output_bytes description"
+    );
+
+    let doc = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../docs/backwards-compatibility.md"),
+    )
+    .expect("docs/backwards-compatibility.md is readable");
+
+    let spelled = [
+        ("thirteen", 13),
+        ("fourteen", 14),
+        ("fifteen", 15),
+        ("sixteen", 16),
+        ("seventeen", 17),
+        ("eighteen", 18),
+        ("nineteen", 19),
+        ("twenty", 20),
+        ("twenty-one", 21),
+        ("twenty-two", 22),
+    ]
+    .into_iter()
+    .find_map(|(word, count)| {
+        doc.contains(&format!(
+            "on the {word} subprocess-backed tools that take it"
+        ))
+        .then_some((word, count))
+    });
+
+    let (word, documented) = spelled.expect(
+        "docs/backwards-compatibility.md must say \"on the <count> subprocess-backed tools \
+         that take it\" in the max_output_bytes entry",
+    );
+    assert_eq!(
+        documented,
+        carriers.len(),
+        "the compatibility entry says {word} tools take max_output_bytes but {} do: {}",
+        carriers.len(),
+        carriers.join(", ")
+    );
 }

@@ -231,7 +231,7 @@ fn push_markdown_member_sections(out: &mut String, results: &AnalysisResults, ro
         "Unused store members",
         root,
         |m| m.member.path.as_path(),
-        |m: &UnusedStoreMemberFinding| format_member(&m.member, &[]),
+        |m: &UnusedStoreMemberFinding| format_member(&m.member, &m.reachability_caveats),
     );
 }
 
@@ -2745,11 +2745,14 @@ mod health_markdown_tests {
 mod caveat_markdown_tests {
     use std::path::{Path, PathBuf};
 
+    use fallow_types::extract::MemberKind;
     use fallow_types::output_dead_code::{
-        ReachabilityCaveat, UnusedDependencyFinding, UnusedExportFinding, UnusedFileFinding,
+        ReachabilityCaveat, UnusedClassMemberFinding, UnusedDependencyFinding,
+        UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding, UnusedStoreMemberFinding,
     };
     use fallow_types::results::{
         AnalysisResults, DependencyLocation, UnusedDependency, UnusedExport, UnusedFile,
+        UnusedMember,
     };
 
     use super::build_markdown;
@@ -2786,6 +2789,35 @@ mod caveat_markdown_tests {
         dep.reachability_caveats.clone_from(&caveats);
         results.unused_dependencies.push(dep);
 
+        let member = |parent: &str, name: &str, kind| UnusedMember {
+            path: root.join("src/api.ts"),
+            parent_name: parent.to_owned(),
+            member_name: name.to_owned(),
+            kind,
+            line: 7,
+            col: 2,
+        };
+        let mut enum_member =
+            UnusedEnumMemberFinding::with_actions(member("Mode", "Legacy", MemberKind::EnumMember));
+        enum_member.reachability_caveats.clone_from(&caveats);
+        results.unused_enum_members.push(enum_member);
+
+        let mut class_member = UnusedClassMemberFinding::with_actions(member(
+            "Widget",
+            "render",
+            MemberKind::ClassMethod,
+        ));
+        class_member.reachability_caveats.clone_from(&caveats);
+        results.unused_class_members.push(class_member);
+
+        let mut store_member = UnusedStoreMemberFinding::with_actions(member(
+            "useCart",
+            "subtotal",
+            MemberKind::StoreMember,
+        ));
+        store_member.reachability_caveats.clone_from(&caveats);
+        results.unused_store_members.push(store_member);
+
         results
     }
 
@@ -2809,6 +2841,13 @@ mod caveat_markdown_tests {
             out.contains("- `left-pad` *(caveat: incomplete import graph)*"),
             "{out}"
         );
+        for expected in [
+            "- :7 `Mode.Legacy` *(caveat: incomplete import graph)*",
+            "- :7 `Widget.render` *(caveat: incomplete import graph)*",
+            "- :7 `useCart.subtotal` *(caveat: incomplete import graph)*",
+        ] {
+            assert!(out.contains(expected), "missing {expected}: {out}");
+        }
     }
 
     /// A run that read every file it discovered renders exactly as before.
@@ -2819,6 +2858,9 @@ mod caveat_markdown_tests {
         results.unused_files[0].reachability_caveats.clear();
         results.unused_exports[0].reachability_caveats.clear();
         results.unused_dependencies[0].reachability_caveats.clear();
+        results.unused_enum_members[0].reachability_caveats.clear();
+        results.unused_class_members[0].reachability_caveats.clear();
+        results.unused_store_members[0].reachability_caveats.clear();
 
         let out = build_markdown(&results, &root);
 

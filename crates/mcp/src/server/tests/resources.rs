@@ -316,18 +316,95 @@ fn tool_guide_template_serves_the_prose_kept_out_of_tools_list() {
     }
 }
 
+/// The shortest run of guide words whose verbatim appearance in the terse
+/// catalogue is evidence of a paste rather than of two texts describing the
+/// same subject. Short runs collide honestly ("the fallow config file"); this
+/// many words in a row, in this order, do not.
+const GUIDE_PROSE_RUN_WORDS: usize = 8;
+
+/// Every string leaf of a resource payload, whitespace-normalized. The
+/// catalogue is JSON, so a pasted sentence lands inside a field with its
+/// quotes escaped; comparing against the decoded leaves rather than the raw
+/// document is what makes the paste visible.
+fn normalized_string_leaves(value: &serde_json::Value) -> Vec<String> {
+    let mut leaves = Vec::new();
+    let mut stack = vec![value];
+    while let Some(node) = stack.pop() {
+        match node {
+            serde_json::Value::String(text) => {
+                leaves.push(text.split_whitespace().collect::<Vec<_>>().join(" "));
+            }
+            serde_json::Value::Array(items) => stack.extend(items),
+            serde_json::Value::Object(map) => stack.extend(map.values()),
+            _ => {}
+        }
+    }
+    leaves
+}
+
+/// The first run of `GUIDE_PROSE_RUN_WORDS` consecutive words of `prose` that
+/// appears verbatim in one of `haystack`, or `None` when none does.
+fn leaked_prose_run(haystack: &[String], prose: &str) -> Option<String> {
+    let words: Vec<&str> = prose.split_whitespace().collect();
+    words
+        .windows(GUIDE_PROSE_RUN_WORDS)
+        .map(|run| run.join(" "))
+        .find(|run| haystack.iter().any(|line| line.contains(run.as_str())))
+}
+
 /// The terse `fallow://tools` catalogue and the long-form guide are different
 /// channels; reading the catalogue must not start returning guide prose.
+///
+/// Every section of every guide is checked, and by word run rather than by
+/// whole-string equality: asserting `!contains(detail)` on one section of one
+/// guide rejected exactly one byte-exact paste of exactly one paragraph, so a
+/// catalogue line could absorb most of a guide section and stay green.
 #[test]
 fn tool_guide_prose_stays_out_of_the_tools_catalogue() {
-    let catalogue = read_text("fallow://tools");
+    let catalogue = normalized_string_leaves(&read_json("fallow://tools"));
+    for guide in crate::tool_guides::TOOL_GUIDES {
+        let json = read_json(&format!("fallow://tools/{}", guide.tool));
+        for section in json["sections"].as_array().expect("sections array") {
+            let topic = section["topic"].as_str().expect("section topic");
+            for channel in ["summary", "detail"] {
+                let prose = section[channel].as_str().expect("section prose");
+                assert_eq!(
+                    leaked_prose_run(&catalogue, prose),
+                    None,
+                    "fallow://tools repeats {}'s {topic} {channel}; it must stay the \
+                     one-line-per-tool catalogue, with long prose in the guide",
+                    guide.tool
+                );
+            }
+        }
+    }
+}
+
+/// The guard above is only worth having if it fires. A catalogue line that
+/// absorbed a slice of guide prose (not the whole section, which is what the
+/// earlier whole-string check demanded) must be caught.
+#[test]
+fn a_partial_guide_paste_is_caught_in_the_catalogue() {
     let guide = read_json("fallow://tools/check_health");
     let detail = guide["sections"][0]["detail"]
         .as_str()
         .expect("first section detail");
+    let pasted: String = detail.chars().take(200).collect();
     assert!(
-        !catalogue.contains(detail),
-        "fallow://tools must stay the one-line-per-tool catalogue"
+        pasted.split_whitespace().count() > GUIDE_PROSE_RUN_WORDS,
+        "the reproduction needs more words than one run: {pasted}"
+    );
+
+    let catalogue = vec![format!("check_health. {pasted} Reports project health.")];
+
+    assert!(
+        leaked_prose_run(&catalogue, detail).is_some(),
+        "200 bytes of guide prose pasted into a catalogue line must be caught"
+    );
+    assert_eq!(
+        leaked_prose_run(&catalogue, "an unrelated one-line catalogue summary"),
+        None,
+        "prose that was never pasted must not be reported as a leak"
     );
 }
 
@@ -469,6 +546,30 @@ fn unknown_issue_type_lists_nearest_matches() {
     );
     let empty = read_resource("fallow://explain/").expect_err("empty issue type");
     assert_eq!(empty.code, ErrorCode::RESOURCE_NOT_FOUND);
+}
+
+/// The shared scorer answers an unknown issue type, and the only shaping this
+/// resource still does for it is the namespace a caller may have copied off a
+/// printed rule id or a CLI flag. `/` is not a word separator the scorer
+/// splits on, so `security/sql-injction` would otherwise align its first word
+/// against `security/sql` and match nothing; `_` and `-` it splits on itself,
+/// which is why no case folding is left here.
+#[test]
+fn an_issue_type_typo_resolves_through_any_spelling_of_the_id() {
+    for (token, expected) in [
+        ("security/sql-injction", "fallow://explain/sql-injection"),
+        ("--unused-exprt", "fallow://explain/unused-export"),
+        ("unused_exprt", "fallow://explain/unused-export"),
+    ] {
+        let error =
+            read_resource(&format!("fallow://explain/{token}")).expect_err("unknown issue type");
+        let data = error.data.expect("structured data");
+        let nearest = data["nearest_matches"].as_array().expect("nearest array");
+        assert!(
+            nearest.iter().any(|uri| uri == expected),
+            "{token} must reach {expected}: {nearest:?}"
+        );
+    }
 }
 
 #[test]

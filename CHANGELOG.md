@@ -335,9 +335,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Where a file the run did not fully analyze can distort a verdict, the
   affected entries carry the caveat themselves, in an optional
   `reachability_caveats[]` array, so a reader who never scrolls back to the
-  diagnostics list still sees it. Eight arrays carry it: `unused_files[]`,
+  diagnostics list still sees it. Nine arrays carry it: `unused_files[]`,
   `unused_exports[]`, `unused_types[]`, `unused_enum_members[]`,
-  `unused_class_members[]`, and the three dependency arrays. A caveated finding also reports `auto_fixable: false` on
+  `unused_class_members[]`, `unused_store_members[]`, and the three dependency
+  arrays. A caveated finding also reports `auto_fixable: false` on
   its mutating action, with the reason in that action's `note`, so an agent
   reading the actions contract no longer plans a write `fix` would refuse. The
   human report names the caveat as a compact suffix on the finding line, and
@@ -352,9 +353,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   module imports it, and fallow credits an import from an unreachable module,
   so any unseen import can hide it.
 
-  The array never withholds, filters, downgrades, or re-severities a finding,
-  and never changes an exit code. It is omitted when empty, so a run that
-  analyzed every file it discovered is byte-identical.
+  The array never withholds, filters, reorders, or re-severities the finding
+  itself, and never changes an exit code. What it downgrades is the mutation:
+  `auto_fixable` on the removing action, as above. It is omitted when empty, so
+  a run that analyzed every file it discovered is byte-identical.
 
 - **`fallow fix` no longer applies a mutation it flagged as resting on an
   incomplete import graph.** A syntax error on one line hid the import on the
@@ -392,8 +394,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `remove-class-member` action reports `auto_fixable: false` under a caveat, the
   finding carries its `reachability_caveats[]` on the wire, and every surface
   that names the caveat for an enum member now names it for a class member.
-  `unused_store_members[]` stays out, and can: no surface offers a mutation for
-  one.
 
   Two paths that raise `auto_fixable` back up ask the gate now as well. The
   semantic decision that grants closed-world eligibility no longer reopens a
@@ -405,6 +405,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `remove_class_member` entry with `applied: false`, `skipped: true`,
   `skip_reason: "low_confidence_incomplete_analysis"` and its caveat tokens, and
   is counted by the existing `skipped_low_confidence_members`.
+
+- **An unused store member says when the run behind it was incomplete.**
+  `unused_store_members[]` was the ninth dead-code array and the only one that
+  stayed silent, on the argument that it exposes no mutation anywhere: no `Fix`
+  action, no LSP code action, no review suggestion. That argument holds, and it
+  answers the wrong question. The caveat is a disclosure before it is a gate,
+  and a report that hedged eight findings while leaving a ninth bare read as
+  though the bare one were better evidenced, exactly when a reader was deciding
+  by hand whether to delete it. Store members take the member rule unchanged,
+  the one enum and class members already take: member usage is collected by one
+  walk over the accesses of every module the run parsed, reachable or not, so
+  any module analyzed incompletely can hold the access that credits it. There is
+  still nothing to withhold here, and the test says so alongside the disclosure,
+  so a store-member mutation added later has to reason about the gate rather
+  than inherit it silently. The field is additive and absent on a clean run, so
+  no envelope moves.
+
+- **Every surface that reports an unused store member now names its caveat.**
+  The disclosure reached the JSON wire and almost nothing else: six renderers
+  passed an empty caveat slice in the store branch specifically, left from
+  before store members were registered, while the enum and class branches beside
+  them read the finding. A degraded run therefore printed a caveated enum member
+  next to a bare store member on the human report and its `--summary` note,
+  SARIF, CodeClimate, markdown, compact, and LSP diagnostics, and the CodeClimate
+  `description` carried the omission into `pr-comment-github`,
+  `pr-comment-gitlab`, `review-github`, and `review-gitlab`. `github-annotations`
+  omitted it for class members too. All of them now render the same text the
+  eight arrays beside them do. Every fixture on these surfaces gained a caveated
+  member finding, because no fixture built one before and that is why the gap
+  shipped green. No envelope changes shape, no `schema_version` moves, and a run
+  that read every file it discovered is byte-identical.
+
+- **The unused-files directory rollup no longer labels a file as a directory.**
+  Above the rollup threshold the report splits the dominant directory one level
+  deeper, and it read the second path component as a subdirectory even when that
+  component was the file itself, printing `src/orphan.ts/  1 file`. A file
+  sitting directly in the dominant directory now counts under that directory.
 
 - **A caveated finding no longer renders a committable suggestion block.** The
   review formats used to ship the ```` ```suggestion ```` edit and rely on the

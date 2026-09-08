@@ -12,7 +12,8 @@ use crate::tools::{
     build_analyze_args, build_health_args, build_impact_closure_args, build_project_info_args,
     build_security_candidates_args, build_trace_clone_args, build_trace_dependency_args,
     build_trace_export_args, build_trace_file_args, execute_code_mode, inspect_target, run_fallow,
-    run_trace_clone_tool, run_trace_error_tool, run_trace_export_tool,
+    run_fix_apply, run_fix_preview, run_trace_clone_tool, run_trace_error_tool,
+    run_trace_export_tool,
 };
 
 /// Resolve the fallow binary from `FALLOW_BIN`, or the workspace target dir.
@@ -735,4 +736,110 @@ async fn e2e_health_returns_json() {
     let json: serde_json::Value = serde_json::from_str(text)
         .unwrap_or_else(|e| panic!("should parse as JSON: {e}\ntext: {text}"));
     assert!(json.is_object(), "health output should be a JSON object");
+}
+
+/// Write a project whose only consumer of an export failed to parse, so the
+/// run records `source-parse-degraded` and every reachability finding it
+/// produces carries a `reachability_caveats` entry.
+///
+/// `src/lib.ts` exports `needed`, which nothing the run could read still uses:
+/// the file that imports it stops at a syntax error before that import is
+/// extracted. The export is therefore reported unused, and the removal rests
+/// on a file the run did not fully analyze.
+fn write_caveated_export_project(root: &std::path::Path) {
+    std::fs::create_dir_all(root.join("src")).expect("create src");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{ "name": "mcp-caveat-withholding", "version": "1.0.0", "main": "src/index.ts" }"#,
+    )
+    .expect("write manifest");
+    std::fs::write(
+        root.join("src/lib.ts"),
+        "export const needed = 1;\nexport const alsoUsed = 2;\n",
+    )
+    .expect("write library");
+    std::fs::write(
+        root.join("src/degraded.ts"),
+        "import { needed } from \"./lib\";\n\nexport const broken = (): number => {\n  return needed(\n};\n",
+    )
+    .expect("write unparseable importer");
+    std::fs::write(
+        root.join("src/index.ts"),
+        "import \"./degraded\";\nimport { alsoUsed } from \"./lib\";\n\nexport const run = (): number => alsoUsed;\n",
+    )
+    .expect("write entry module");
+}
+
+fn fix_params(root: &std::path::Path) -> crate::params::FixParams {
+    crate::params::FixParams {
+        root: Some(root.to_string_lossy().to_string()),
+        no_cache: Some(true),
+        ..Default::default()
+    }
+}
+
+/// The caveat withholding is a CLI-side decision, and both MCP fix tools are
+/// thin wrappers over that CLI. Nothing pinned that they inherit it, so an
+/// agent could have been handed a removal the `fallow fix` command declines.
+#[tokio::test]
+async fn e2e_fix_preview_withholds_a_removal_the_run_cannot_evidence() {
+    let bin = fallow_binary();
+    let dir = tempfile::tempdir().expect("temporary project");
+    let root = dir.path().join("project");
+    write_caveated_export_project(&root);
+
+    let result = run_fix_preview(&bin, fix_params(&root))
+        .await
+        .expect("fix preview runs");
+    assert_eq!(result.is_error, Some(false));
+
+    let text = extract_text(&result);
+    let json: serde_json::Value = serde_json::from_str(text)
+        .unwrap_or_else(|e| panic!("should parse as JSON: {e}\ntext: {text}"));
+
+    assert_eq!(json["dry_run"], true, "{json}");
+    assert_eq!(
+        json["fixes"][0]["skip_reason"], "low_confidence_incomplete_analysis",
+        "{json}"
+    );
+    assert_eq!(
+        json["fixes"][0]["reachability_caveats"],
+        serde_json::json!(["incomplete-import-graph"]),
+        "{json}"
+    );
+    assert_eq!(json["skipped_low_confidence_exports"], 1, "{json}");
+    assert_eq!(json["total_fixed"], 0, "{json}");
+}
+
+/// The withholding is only worth anything on the tool that writes. `fix_apply`
+/// must report the same skip AND leave the file on disk untouched.
+#[tokio::test]
+async fn e2e_fix_apply_inherits_the_withholding_and_writes_nothing() {
+    let bin = fallow_binary();
+    let dir = tempfile::tempdir().expect("temporary project");
+    let root = dir.path().join("project");
+    write_caveated_export_project(&root);
+    let library = root.join("src/lib.ts");
+    let before = std::fs::read_to_string(&library).expect("read library");
+
+    let result = run_fix_apply(&bin, fix_params(&root))
+        .await
+        .expect("fix apply runs");
+    assert_eq!(result.is_error, Some(false));
+
+    let text = extract_text(&result);
+    let json: serde_json::Value = serde_json::from_str(text)
+        .unwrap_or_else(|e| panic!("should parse as JSON: {e}\ntext: {text}"));
+
+    assert_eq!(json["dry_run"], false, "{json}");
+    assert_eq!(
+        json["fixes"][0]["skip_reason"], "low_confidence_incomplete_analysis",
+        "{json}"
+    );
+    assert_eq!(json["total_fixed"], 0, "{json}");
+    assert_eq!(
+        std::fs::read_to_string(&library).expect("re-read library"),
+        before,
+        "a withheld removal must not reach the file"
+    );
 }

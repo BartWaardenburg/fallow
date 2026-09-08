@@ -108,11 +108,14 @@ fn suppress_line(comment: &str) -> IssueAction {
 ///
 /// Deliberately NOT named `confidence`: `health --targets` already emits a
 /// `confidence` key holding an enum string, and a shared consumer helper that
-/// met both would see the same key change type. Emitted on the four verdicts a
-/// lost import edge can distort: `unused_files[]`, `unused_exports[]`, and the
-/// three dependency arrays. Sorted and deduplicated, absent from the wire when
-/// empty. The set is open in the same sense `workspace_diagnostics[].kind` is:
-/// treat an unrecognised value as "some caveat" rather than as an error.
+/// met both would see the same key change type. Emitted on every finding type
+/// that registers it: the reachability arrays (`unused_files[]`,
+/// `unused_exports[]`, `unused_types[]`), the member arrays
+/// (`unused_enum_members[]`, `unused_class_members[]`, `unused_store_members[]`),
+/// and the three dependency arrays. Sorted and deduplicated, absent from the
+/// wire when empty. The set is open in the same sense
+/// `workspace_diagnostics[].kind` is: treat an unrecognised value as "some
+/// caveat" rather than as an error.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
@@ -145,15 +148,23 @@ pub enum ReachabilityCaveat {
     /// Which modules feed the verdict differs by array, and the caveat is
     /// emitted only when a degraded module is actually one of them:
     ///
-    /// - `unused_files[]` and `unused_exports[]` rest on reachability, so only
-    ///   a degraded module that is itself observed reachable can change the
-    ///   verdict. When every degraded module is unreachable the caveat is
-    ///   absent, and soundly: the FIRST missing edge on any entry-point path
-    ///   leaves from a module whose every predecessor edge was observed, so
-    ///   that module is observed reachable. A file the run never read has no
-    ///   module and no graph node, so its reachability is not observable at
-    ///   all and that narrowing cannot be applied: any skipped or unreadable
-    ///   source caveats every reachability verdict in the run.
+    /// - `unused_files[]`, `unused_exports[]`, and `unused_types[]` rest on
+    ///   reachability, so only a degraded module that is itself observed
+    ///   reachable can change the verdict. When every degraded module is
+    ///   unreachable the caveat is absent, and soundly: the FIRST missing edge
+    ///   on any entry-point path leaves from a module whose every predecessor
+    ///   edge was observed, so that module is observed reachable. A file the
+    ///   run never read has no module and no graph node, so its reachability
+    ///   is not observable at all and that narrowing cannot be applied: any
+    ///   skipped or unreadable source caveats every reachability verdict in
+    ///   the run.
+    /// - the member arrays (`unused_enum_members[]`, `unused_class_members[]`,
+    ///   `unused_store_members[]`) do not rest on reachability at all: member
+    ///   usage is collected by walking every module the run resolved,
+    ///   reachable or not, so this narrowing does not apply to them either.
+    ///   Same unnarrowed condition as the dependency arrays below, plus the
+    ///   per-finding value above when the member's own file is the one that
+    ///   was incompletely analyzed.
     /// - the dependency arrays rest on whether ANY module in the project
     ///   imports the package specifier, reachable or not, so any degraded
     ///   parse anywhere can hide the import that would have credited the
@@ -313,8 +324,8 @@ pub const INCOMPLETE_EVIDENCE_NOTE: &str = "Evidence is incomplete: a file this 
 ///
 /// Implemented only by the findings that can carry a caveat. A finding type
 /// that exposes an auto-fixable mutation and does NOT implement this trait is
-/// the bug this trait exists to make visible; `mutation_gate_holds_for_every_
-/// finding_type` in this module's tests pins that.
+/// the bug this trait exists to make visible; `every_auto_fixable_dead_code_
+/// mutation_is_gated` in this module's tests pins that.
 pub trait MutationEvidence {
     /// The advisory caveats recorded on the reachability verdict behind this
     /// finding. Empty when the run analyzed every file it discovered.
@@ -336,8 +347,10 @@ pub trait MutationEvidence {
 /// setter. `annotate` in the analysis layer is the single writer.
 pub trait CaveatedFinding: MutationEvidence {
     /// Store `caveats` and downgrade every mutating action the gate now
-    /// withholds. Storing the field without the downgrade is not reachable
-    /// from outside this module, which is the point.
+    /// withholds. The field itself stays `pub` (a renderer test builds an
+    /// already-caveated fixture directly, without running the annotation
+    /// pass); every non-test writer goes through this setter instead of the
+    /// field so the downgrade travels with the write.
     fn set_reachability_caveats(&mut self, caveats: Vec<ReachabilityCaveat>);
 }
 
@@ -3206,6 +3219,14 @@ mod mutation_gate {
         }
     }
 
+    fn store_member(name: &str) -> UnusedMember {
+        UnusedMember {
+            parent_name: "useCounterStore".to_string(),
+            kind: MemberKind::StoreMember,
+            ..member(name)
+        }
+    }
+
     fn dependency(name: &str) -> UnusedDependency {
         UnusedDependency {
             package_name: name.to_string(),
@@ -3250,6 +3271,10 @@ mod mutation_gate {
             pair(
                 "unused_class_members",
                 UnusedClassMemberFinding::with_actions(class_member("legacyMethod")),
+            ),
+            pair(
+                "unused_store_members",
+                UnusedStoreMemberFinding::with_actions(store_member("onlyUsedInBigFile")),
             ),
             pair(
                 "unused_dependencies",
@@ -3301,6 +3326,7 @@ mod mutation_gate {
         UnusedTypeFinding,
         UnusedEnumMemberFinding,
         UnusedClassMemberFinding,
+        UnusedStoreMemberFinding,
         UnusedDependencyFinding,
         UnusedDevDependencyFinding,
         UnusedOptionalDependencyFinding,

@@ -305,11 +305,14 @@ export type AuditIntroduced = boolean
  *
  * Deliberately NOT named `confidence`: `health --targets` already emits a
  * `confidence` key holding an enum string, and a shared consumer helper that
- * met both would see the same key change type. Emitted on the four verdicts a
- * lost import edge can distort: `unused_files[]`, `unused_exports[]`, and the
- * three dependency arrays. Sorted and deduplicated, absent from the wire when
- * empty. The set is open in the same sense `workspace_diagnostics[].kind` is:
- * treat an unrecognised value as "some caveat" rather than as an error.
+ * met both would see the same key change type. Emitted on every finding type
+ * that registers it: the reachability arrays (`unused_files[]`,
+ * `unused_exports[]`, `unused_types[]`), the member arrays
+ * (`unused_enum_members[]`, `unused_class_members[]`, `unused_store_members[]`),
+ * and the three dependency arrays. Sorted and deduplicated, absent from the
+ * wire when empty. The set is open in the same sense
+ * `workspace_diagnostics[].kind` is: treat an unrecognised value as "some
+ * caveat" rather than as an error.
  */
 export type ReachabilityCaveat = ("incomplete-file-analysis" | "incomplete-import-graph")
 /**

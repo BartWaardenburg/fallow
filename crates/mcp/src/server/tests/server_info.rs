@@ -100,6 +100,7 @@ fn read_only_tools_have_annotations() {
         "impact_closure",
         "trace_dependency",
         "trace_error",
+        "trace_import_path",
         "trace_clone",
         "check_health",
         "audit",
@@ -123,6 +124,12 @@ fn read_only_tools_have_annotations() {
         if read_only.contains(&name.as_str()) {
             let ann = tool.annotations.as_ref().expect("annotations");
             assert_eq!(ann.read_only_hint, Some(true), "{name} should be read-only");
+        } else {
+            assert_eq!(
+                name, "fix_apply",
+                "{name} is neither listed here nor the one destructive tool, so its read-only \
+                 hint is unasserted; add it to the list when it is read-only"
+            );
         }
     }
 }

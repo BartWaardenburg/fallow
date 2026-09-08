@@ -332,8 +332,8 @@ pub struct SecurityCandidatesParams {
     /// Parser thread count; defaults to CPU cores.
     pub threads: Option<usize>,
 
-    /// Byte cap for this call's response. Lowers the 16 MiB default; over it,
-    /// `truncated` plus a preview come back instead.
+    /// Byte cap for this call's response. Lowers the 16 MiB default; over it
+    /// the call is REFUSED (`isError`, `exit_code: 2`) with only a preview.
     pub max_output_bytes: Option<usize>,
 }
 
@@ -382,8 +382,8 @@ pub struct FindSimilarCodeParams {
     /// Parser thread count; defaults to CPU cores.
     pub threads: Option<usize>,
 
-    /// Byte cap for this call's response. Lowers the 16 MiB default; over it,
-    /// `truncated` plus a preview come back instead.
+    /// Byte cap for this call's response. Lowers the 16 MiB default; over it
+    /// the call is REFUSED (`isError`, `exit_code: 2`) with only a preview.
     pub max_output_bytes: Option<usize>,
 }
 
@@ -418,8 +418,8 @@ pub struct InspectSimilarCodeParams {
     /// and never grants process-global trust.
     pub allow_remote_extends: Option<bool>,
 
-    /// Byte cap for this call's response. Lowers the 16 MiB default; over it,
-    /// `truncated` plus a preview come back instead.
+    /// Byte cap for this call's response. Lowers the 16 MiB default; over it
+    /// the call is REFUSED (`isError`, `exit_code: 2`) with only a preview.
     pub max_output_bytes: Option<usize>,
 }
 
@@ -540,8 +540,8 @@ pub struct FixParams {
     /// Parser thread count; defaults to CPU cores.
     pub threads: Option<usize>,
 
-    /// Byte cap for this call's response. Lowers the 16 MiB default; over it,
-    /// `truncated` plus a preview come back instead.
+    /// Byte cap for this call's response. Lowers the 16 MiB default; over it
+    /// the call is REFUSED (`isError`, `exit_code: 2`) with only a preview.
     pub max_output_bytes: Option<usize>,
 }
 
@@ -632,8 +632,8 @@ pub struct InspectTargetParams {
     /// never a focus-map / ranking input.
     pub symbol_chain: Option<bool>,
 
-    /// Byte cap for this call's response. Lowers the 16 MiB default; over it,
-    /// `truncated` plus a preview come back instead.
+    /// Byte cap for this call's response. Lowers the 16 MiB default; over it
+    /// the call is REFUSED (`isError`, `exit_code: 2`) with only a preview.
     pub max_output_bytes: Option<usize>,
 }
 
@@ -650,8 +650,8 @@ pub struct GuardParams {
     /// and never grants process-global trust.
     pub allow_remote_extends: Option<bool>,
 
-    /// Byte cap for this call's response. Lowers the 16 MiB default; over it,
-    /// `truncated` plus a preview come back instead.
+    /// Byte cap for this call's response. Lowers the 16 MiB default; over it
+    /// the call is REFUSED (`isError`, `exit_code: 2`) with only a preview.
     pub max_output_bytes: Option<usize>,
 }
 
@@ -736,8 +736,8 @@ pub struct SemanticSymbolParams {
     /// Parser thread count; defaults to CPU cores.
     pub threads: Option<usize>,
 
-    /// Byte cap for this call's response. Lowers the 16 MiB default; over it,
-    /// `truncated` plus a preview come back instead.
+    /// Byte cap for this call's response. Lowers the 16 MiB default; over it
+    /// the call is REFUSED (`isError`, `exit_code: 2`) with only a preview.
     pub max_output_bytes: Option<usize>,
 }
 
@@ -800,8 +800,8 @@ pub struct SemanticImpactParams {
     /// Parser thread count; defaults to CPU cores.
     pub threads: Option<usize>,
 
-    /// Byte cap for this call's response. Lowers the 16 MiB default; over it,
-    /// `truncated` plus a preview come back instead.
+    /// Byte cap for this call's response. Lowers the 16 MiB default; over it
+    /// the call is REFUSED (`isError`, `exit_code: 2`) with only a preview.
     pub max_output_bytes: Option<usize>,
 }
 
@@ -997,8 +997,8 @@ pub struct ImpactClosureParams {
     /// Parser thread count; defaults to CPU cores.
     pub threads: Option<usize>,
 
-    /// Byte cap for this call's response. Lowers the 16 MiB default; over it,
-    /// `truncated` plus a preview come back instead.
+    /// Byte cap for this call's response. Lowers the 16 MiB default; over it
+    /// the call is REFUSED (`isError`, `exit_code: 2`) with only a preview.
     pub max_output_bytes: Option<usize>,
 }
 
@@ -1384,8 +1384,8 @@ pub struct CheckRuntimeCoverageParams {
     /// to each group. Passed through to the CLI's `--group-by` flag.
     pub group_by: Option<String>,
 
-    /// Byte cap for this call's response. Lowers the 16 MiB default; over it,
-    /// `truncated` plus a preview come back instead.
+    /// Byte cap for this call's response. Lowers the 16 MiB default; over it
+    /// the call is REFUSED (`isError`, `exit_code: 2`) with only a preview.
     pub max_output_bytes: Option<usize>,
 }
 
@@ -1566,8 +1566,8 @@ pub struct RecommendParams {
     /// Project root for framework, workspace, and tooling detection; defaults to the working directory.
     pub root: Option<String>,
 
-    /// Byte cap for this call's response. Lowers the 16 MiB default; over it,
-    /// `truncated` plus a preview come back instead.
+    /// Byte cap for this call's response. Lowers the 16 MiB default; over it
+    /// the call is REFUSED (`isError`, `exit_code: 2`) with only a preview.
     pub max_output_bytes: Option<usize>,
 }
 
@@ -1577,8 +1577,8 @@ pub struct ImpactParams {
     /// Project root whose local value history to read (stored outside the repo); defaults to the working directory.
     pub root: Option<String>,
 
-    /// Byte cap for this call's response. Lowers the 16 MiB default; over it,
-    /// `truncated` plus a preview come back instead.
+    /// Byte cap for this call's response. Lowers the 16 MiB default; over it
+    /// the call is REFUSED (`isError`, `exit_code: 2`) with only a preview.
     pub max_output_bytes: Option<usize>,
 }
 
@@ -1594,8 +1594,8 @@ pub struct ImpactAllParams {
     /// every tracked project, including any beyond the cap. Omit for all rows.
     pub limit: Option<usize>,
 
-    /// Byte cap for this call's response. Lowers the 16 MiB default; over it,
-    /// `truncated` plus a preview come back instead.
+    /// Byte cap for this call's response. Lowers the 16 MiB default; over it
+    /// the call is REFUSED (`isError`, `exit_code: 2`) with only a preview.
     pub max_output_bytes: Option<usize>,
 }
 
@@ -1685,8 +1685,8 @@ pub struct ListSuppressionsParams {
     /// Parser thread count; defaults to CPU cores.
     pub threads: Option<usize>,
 
-    /// Byte cap for this call's response. Lowers the 16 MiB default; over it,
-    /// `truncated` plus a preview come back instead.
+    /// Byte cap for this call's response. Lowers the 16 MiB default; over it
+    /// the call is REFUSED (`isError`, `exit_code: 2`) with only a preview.
     pub max_output_bytes: Option<usize>,
 }
 
@@ -1748,7 +1748,7 @@ pub struct GetTokenBlastRadiusParams {
     /// Parser thread count; defaults to CPU cores.
     pub threads: Option<usize>,
 
-    /// Byte cap for this call's response. Lowers the 16 MiB default; over it,
-    /// `truncated` plus a preview come back instead.
+    /// Byte cap for this call's response. Lowers the 16 MiB default; over it
+    /// the call is REFUSED (`isError`, `exit_code: 2`) with only a preview.
     pub max_output_bytes: Option<usize>,
 }
