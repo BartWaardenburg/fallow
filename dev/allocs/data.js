@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788867236317,
+  "lastUpdate": 1788868333799,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "1380b8d61a8e874f8d7368ae0b88aff15edf36cc",
-          "message": "perf(benchmarks): cover derived security outputs\n\nAdd stable CodSpeed coverage for survivors verdict joins and unresolved-callee blind-spot grouping.",
-          "timestamp": "2026-08-20T15:41:34+02:00",
-          "tree_id": "bbd2cdf817c722b6e5173159b821a190e61d61ed",
-          "url": "https://github.com/fallow-rs/fallow/commit/1380b8d61a8e874f8d7368ae0b88aff15edf36cc"
-        },
-        "date": 1787233615000,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9743771,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 49222,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1146577,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 7055,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8416,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bartwaardenburg@gmail.com",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "c178aafaa0545cf499c9b9cc9a2f32cdd0b33843",
+          "message": "fix: expose cyclomatic metric populations (#2569)\n\nfix: explain cyclomatic complexity populations",
+          "timestamp": "2026-09-08T13:47:23+02:00",
+          "tree_id": "981d36c6070bf96456e3867ca8577b10993f4ea6",
+          "url": "https://github.com/fallow-rs/fallow/commit/c178aafaa0545cf499c9b9cc9a2f32cdd0b33843"
+        },
+        "date": 1788868329162,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 9868986,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 50729,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1195540,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8443,
             "unit": "allocations"
           }
         ]
