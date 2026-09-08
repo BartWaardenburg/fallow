@@ -1049,7 +1049,11 @@ use crate::MemberKind;
 /// the root to the store header. A 287 blob is keyed on absolute paths, so
 /// reading it under the new scheme would miss every lookup after paying the
 /// full decode; refusing it by version is the honest outcome.
-pub(super) const CACHE_VERSION: u32 = 289;
+///
+/// Bumped to 290 for issue #2560: destructuring a known class instance now
+/// records member reads and conservative whole-object uses. Warm 289 caches
+/// lack these facts and would retain false unused-class-member findings.
+pub(super) const CACHE_VERSION: u32 = 290;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
