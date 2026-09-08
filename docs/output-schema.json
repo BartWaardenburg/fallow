@@ -15129,6 +15129,13 @@
             }
           ],
           "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        },
+        "reachability_caveats": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ReachabilityCaveat"
+          },
+          "description": "Advisory caveats on the verdict behind this finding. A store member's\nusage is collected by the same reachability-free member-access walk a\nclass member's is, so it takes the member rule unchanged: any module\nthis run analyzed incompletely can hold the access that credits it.\nSorted, deduplicated, and omitted from the wire when empty. There is no\nmutation here to withhold, because a store member offers none on any\nsurface; this is disclosure only, so a reader deciding by hand is told\nwhat the run did not see."
         }
       },
       "required": [

@@ -3526,6 +3526,17 @@ actions: IssueAction[]
  * the merge-base.
  */
 introduced?: (AuditIntroduced | null)
+/**
+ * Advisory caveats on the verdict behind this finding. A store member's
+ * usage is collected by the same reachability-free member-access walk a
+ * class member's is, so it takes the member rule unchanged: any module
+ * this run analyzed incompletely can hold the access that credits it.
+ * Sorted, deduplicated, and omitted from the wire when empty. There is no
+ * mutation here to withhold, because a store member offers none on any
+ * surface; this is disclosure only, so a reader deciding by hand is told
+ * what the run did not see.
+ */
+reachability_caveats?: ReachabilityCaveat[]
 }
 /**
  * Wire-shape envelope for an [`UnresolvedImport`] finding. Mirrors

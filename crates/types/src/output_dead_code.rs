@@ -2092,6 +2092,16 @@ pub struct UnusedStoreMemberFinding {
     /// the merge-base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub introduced: Option<AuditIntroduced>,
+    /// Advisory caveats on the verdict behind this finding. A store member's
+    /// usage is collected by the same reachability-free member-access walk a
+    /// class member's is, so it takes the member rule unchanged: any module
+    /// this run analyzed incompletely can hold the access that credits it.
+    /// Sorted, deduplicated, and omitted from the wire when empty. There is no
+    /// mutation here to withhold, because a store member offers none on any
+    /// surface; this is disclosure only, so a reader deciding by hand is told
+    /// what the run did not see.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reachability_caveats: Vec<ReachabilityCaveat>,
 }
 
 impl UnusedStoreMemberFinding {
@@ -2111,6 +2121,7 @@ impl UnusedStoreMemberFinding {
             member,
             actions,
             introduced: None,
+            reachability_caveats: Vec::new(),
         }
     }
 }
@@ -3023,6 +3034,7 @@ impl_caveated_finding!(
     UnusedTypeFinding,
     UnusedEnumMemberFinding,
     UnusedClassMemberFinding,
+    UnusedStoreMemberFinding,
     UnusedDependencyFinding,
     UnusedDevDependencyFinding,
     UnusedOptionalDependencyFinding,

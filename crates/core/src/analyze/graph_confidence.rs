@@ -97,8 +97,15 @@
 //! review formats never asked: they render a literal one-click ```suggestion```
 //! block for a class member on `rule_id` alone, so an unread file could ship a
 //! committable deletion with nothing on the comment saying the evidence was
-//! incomplete. `unused_store_members[]` stays out, and can: it exposes no
-//! mutation on any surface. `unused_types[]` rests
+//! incomplete. `unused_store_members[]` exposes no mutation on any surface
+//! (no `Fix` action, no LSP code action, and
+//! `store_members_never_offer_unverified_line_deletions` pins the absent
+//! review suggestion), so it has nothing to withhold. It is here anyway,
+//! because the caveat is a disclosure before it is a gate: a reader deciding
+//! by hand whether to delete a store member deserves the same hint as the
+//! eight arrays beside it, and a run that reports eight caveated findings
+//! and one bare one reads as though the bare one were better evidenced.
+//! `unused_types[]` rests
 //! on exactly the same reachability test as `unused_exports[]` and gets
 //! exactly the same caveats; a type export and a value export in the same file
 //! must not render with different confidence when the LSP offers the same
@@ -250,6 +257,10 @@ impl<'a> GraphConfidenceContext<'a> {
             let caveats = self.member_caveats_for(&finding.member.path);
             finding.set_reachability_caveats(caveats);
         }
+        for finding in &mut results.unused_store_members {
+            let caveats = self.member_caveats_for(&finding.member.path);
+            finding.set_reachability_caveats(caveats);
+        }
         for finding in &mut results.unused_dependencies {
             finding.set_reachability_caveats(DEPENDENCY_CAVEATS.to_vec());
         }
@@ -272,7 +283,7 @@ mod tests {
     use fallow_types::output::IssueAction;
     use fallow_types::output_dead_code::{
         UnusedClassMemberFinding, UnusedDependencyFinding, UnusedEnumMemberFinding,
-        UnusedExportFinding, UnusedFileFinding, UnusedTypeFinding,
+        UnusedExportFinding, UnusedFileFinding, UnusedStoreMemberFinding, UnusedTypeFinding,
     };
     use fallow_types::results::DependencyLocation;
     use fallow_types::workspace::WorkspaceDiagnosticKind;
@@ -368,6 +379,23 @@ mod tests {
                 member_name: "onlyUsedInBigFile".to_string(),
                 kind: MemberKind::ClassMethod,
                 line: 6,
+                col: 2,
+            }));
+        results
+    }
+
+    /// One `unused_store_members[]` finding, declared in the same
+    /// perfectly-parsed file as the class member above so the two can be
+    /// compared directly.
+    fn with_unused_store_member(mut results: AnalysisResults) -> AnalysisResults {
+        results
+            .unused_store_members
+            .push(UnusedStoreMemberFinding::with_actions(UnusedMember {
+                path: PathBuf::from(INDEX),
+                parent_name: "useCounterStore".to_string(),
+                member_name: "onlyUsedInBigFile".to_string(),
+                kind: MemberKind::StoreMember,
+                line: 7,
                 col: 2,
             }));
         results
@@ -763,6 +791,54 @@ mod tests {
     /// opened. Verified against a release binary: with the guard raised the
     /// finding disappears entirely.
     ///
+    /// A store member offers no mutation on any surface: no `Fix` action, no
+    /// LSP code action, and `store_members_never_offer_unverified_line_deletions`
+    /// pins the absent review suggestion. So this asserts disclosure only, and
+    /// asserts the absence of a mutation as the reason the disclosure stands
+    /// alone. If a store-member mutation is ever added, this test fails and the
+    /// gate has to be reasoned about rather than inherited.
+    #[test]
+    fn an_unread_file_caveats_a_store_member_verdict_with_no_mutation_to_withhold() {
+        let graph = graph();
+        let mut results = with_unused_store_member(unused(&[]));
+        let diagnostics = vec![diagnostic(
+            "/p/src/big.ts",
+            WorkspaceDiagnosticKind::SkippedLargeFile {
+                size_bytes: 6 * 1024 * 1024,
+            },
+        )];
+
+        GraphConfidenceContext::new(&graph, &modules([0, 0, 0]), &diagnostics)
+            .annotate(&mut results);
+
+        let member = &results.unused_store_members[0];
+        assert_eq!(
+            member.reachability_caveats,
+            vec![ReachabilityCaveat::IncompleteImportGraph],
+            "the unread file may hold the only access to this store member"
+        );
+        assert!(
+            !member.actions.iter().any(IssueAction::is_auto_fixable),
+            "a store member must not advertise an applicable mutation"
+        );
+    }
+
+    /// A clean run leaves the new array bare, so the caveat marks incomplete
+    /// evidence rather than becoming decoration on every report.
+    #[test]
+    fn a_clean_run_leaves_a_store_member_uncaveated() {
+        let graph = graph();
+        let mut results = with_unused_store_member(unused(&[]));
+
+        GraphConfidenceContext::new(&graph, &modules([0, 0, 0]), &[]).annotate(&mut results);
+
+        assert!(
+            results.unused_store_members[0]
+                .reachability_caveats
+                .is_empty()
+        );
+    }
+
     /// The caveat is what stops the review formats from rendering a one-click
     /// deletion for it, so this asserts the caveat AND that no action on the
     /// finding advertises itself as applicable.
