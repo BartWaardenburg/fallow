@@ -235,8 +235,8 @@ pub use health_targets::{
 };
 pub use health_trends::{HealthTrend, TrendCount, TrendDirection, TrendMetric, TrendPoint};
 pub use health_vital_signs::{
-    RenderFanInTopComponent, RiskProfile, SNAPSHOT_SCHEMA_VERSION, VitalSigns, VitalSignsCounts,
-    VitalSignsSnapshot,
+    CyclomaticPopulation, CyclomaticUnitPopulation, RenderFanInTopComponent, RiskProfile,
+    SNAPSHOT_SCHEMA_VERSION, VitalSigns, VitalSignsCounts, VitalSignsSnapshot,
 };
 pub use impact::{
     ContainmentEvent, CrossRepoImpactReport, CrossRepoImpactSchemaVersion, CrossRepoProjectEntry,

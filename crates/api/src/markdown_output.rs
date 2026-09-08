@@ -1675,6 +1675,19 @@ fn write_vital_signs_section(out: &mut String, report: &fallow_output::HealthRep
     }
     let _ = writeln!(out, "| Avg Cyclomatic | {:.1} |", vs.avg_cyclomatic);
     let _ = writeln!(out, "| P90 Cyclomatic | {} |", vs.p90_cyclomatic);
+    if let Some(population) = &vs.cyclomatic_population {
+        let _ = writeln!(
+            out,
+            "| Cyclomatic units | Functions: {}, module scopes: {}, templates: {} |",
+            population.functions.count, population.modules.count, population.templates.count
+        );
+        if let Some(max) = population.modules.max {
+            let _ = writeln!(
+                out,
+                "| Module-scope max cyclomatic (aggregate only) | {max} |"
+            );
+        }
+    }
     if let Some(v) = vs.dead_file_pct {
         let _ = writeln!(out, "| Dead Files | {v:.1}% |");
     }

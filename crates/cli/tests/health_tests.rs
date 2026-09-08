@@ -22,6 +22,147 @@ fn write_file(path: &Path, contents: &str) {
     std::fs::write(path, contents).expect("write file");
 }
 
+#[test]
+fn module_scope_cyclomatic_population_explains_aggregate_without_function_findings() {
+    let dir = tempdir().unwrap();
+    write_file(
+        &dir.path().join("package.json"),
+        r#"{"name":"module-population","main":"index.ts"}"#,
+    );
+    let mut source = String::from("const mode = process.env.MODE; let level = 0;\n");
+    for index in 0..30 {
+        writeln!(source, "if (mode === 'k{index}') {{ level = {index}; }}").unwrap();
+    }
+    source.push_str("export function tiny(a: number): number { return a; }\n");
+    write_file(&dir.path().join("index.ts"), &source);
+
+    for args in [
+        vec!["--format", "json", "--quiet", "--no-cache"],
+        vec!["--format", "json", "--quiet"],
+        vec!["--format", "json", "--quiet"],
+    ] {
+        let output = run_fallow_in_root("health", dir.path(), &args);
+        let json = parse_json(&output);
+        assert_eq!(json["summary"]["functions_analyzed"], 1);
+        assert_eq!(json["vital_signs"]["avg_cyclomatic"], 16.0);
+        assert_eq!(json["vital_signs"]["p90_cyclomatic"], 31);
+        assert_eq!(
+            json["vital_signs"]["cyclomatic_population"],
+            serde_json::json!({
+                "functions": {"count": 1, "sum": 1, "max": 1},
+                "modules": {"count": 1, "sum": 31, "max": 31},
+                "templates": {"count": 0, "sum": 0, "max": null}
+            })
+        );
+        assert_eq!(json["findings"], serde_json::json!([]));
+    }
+    let human = run_fallow_in_root("health", dir.path(), &["--no-cache"]);
+    assert!(
+        human
+            .stdout
+            .contains("Cyclomatic units: functions 1, module scopes 1, templates 0"),
+        "{}",
+        human.stdout
+    );
+    assert!(
+        human.stdout.contains("Module scope: max cyclomatic 31"),
+        "{}",
+        human.stdout
+    );
+
+    let markdown = run_fallow_in_root("health", dir.path(), &["--format", "markdown"]);
+    assert!(
+        markdown
+            .stdout
+            .contains("Functions: 1, module scopes: 1, templates: 0")
+    );
+    assert!(
+        markdown
+            .stdout
+            .contains("Module-scope max cyclomatic (aggregate only) | 31")
+    );
+    let explained = run_fallow_in_root("health", dir.path(), &["--format", "json", "--explain"]);
+    let explained = parse_json(&explained);
+    assert!(
+        explained["_meta"]["metrics"]["cyclomatic_population.count"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("disjoint")
+    );
+}
+
+#[test]
+fn module_only_and_grouped_cyclomatic_populations_keep_separate_denominators() {
+    let dir = tempdir().unwrap();
+    write_file(
+        &dir.path().join("package.json"),
+        r#"{"name":"module-population","main":"index.ts"}"#,
+    );
+    write_file(
+        &dir.path().join("index.ts"),
+        "if (process.env.MODE) { console.log('on'); }\n",
+    );
+    let output = run_fallow_in_root(
+        "health",
+        dir.path(),
+        &["--format", "json", "--quiet", "--no-cache"],
+    );
+    let json = parse_json(&output);
+    assert_eq!(json["summary"]["functions_analyzed"], 0);
+    assert_eq!(json["vital_signs"]["avg_cyclomatic"], 2.0);
+    assert_eq!(
+        json["vital_signs"]["cyclomatic_population"]["modules"]["count"],
+        1
+    );
+    assert_eq!(
+        json["vital_signs"]["cyclomatic_population"]["functions"]["max"],
+        serde_json::Value::Null
+    );
+
+    write_file(
+        &dir.path().join("helpers/tiny.ts"),
+        "export function tiny() { return 1; }\n",
+    );
+    let grouped = run_fallow_in_root(
+        "health",
+        dir.path(),
+        &[
+            "--format",
+            "json",
+            "--quiet",
+            "--no-cache",
+            "--group-by",
+            "directory",
+        ],
+    );
+    let grouped = parse_json(&grouped);
+    let groups = grouped["groups"].as_array().unwrap();
+    let helper = groups
+        .iter()
+        .find(|group| group["key"] == "helpers")
+        .unwrap();
+    assert_eq!(
+        helper["vital_signs"]["cyclomatic_population"]["functions"]["count"],
+        1
+    );
+    assert_eq!(
+        helper["vital_signs"]["cyclomatic_population"]["modules"]["count"],
+        0
+    );
+    let module = groups
+        .iter()
+        .find(|group| group["key"] == "index.ts")
+        .unwrap();
+    assert_eq!(
+        module["vital_signs"]["cyclomatic_population"]["functions"]["count"],
+        0
+    );
+    assert_eq!(
+        module["vital_signs"]["cyclomatic_population"]["modules"]["max"],
+        2
+    );
+}
+
 fn copy_dir_recursive(src: &Path, dst: &Path) {
     std::fs::create_dir_all(dst).expect("create destination directory");
     for entry in std::fs::read_dir(src).expect("read source directory") {

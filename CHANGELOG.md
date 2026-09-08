@@ -508,6 +508,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Health reports expose the authored-function, module-scope, and template
+  populations behind cyclomatic averages and percentiles. Each population has
+  a count, sum, and maximum, so module-scope branching can explain a high
+  aggregate even when no function exceeds its threshold (#2519).
+
 - **The rest of the human review brief holds to eighty columns too.** The
   decision surface printed its question, trade-off and expert list on single
   unbounded lines, and the focus map put an un-elided path and an unbounded
