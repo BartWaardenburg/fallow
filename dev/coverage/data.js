@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788884588811,
+  "lastUpdate": 1788900536446,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bartwaardenburg@gmail.com",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "4330a637d8a19aa094386828fa530acf1ddcde31",
-          "message": "Merge pull request #2402 from fallow-rs/feat/contract-doc-drift\n\nfix: align generated contracts and agent guidance",
-          "timestamp": "2026-08-24T19:33:32+02:00",
-          "tree_id": "7653d731cf7c44d9d58302b23b97b8adeb427e8f",
-          "url": "https://github.com/fallow-rs/fallow/commit/4330a637d8a19aa094386828fa530acf1ddcde31"
-        },
-        "date": 1787593291262,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.7,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/147004e79ecb8cbe0b8059036021c09596942fae"
         },
         "date": 1788884584741,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.5,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "e5e92c787465f81e6fcd8f84a33be5b7f6ee93ac",
+          "message": "fix: make the caveat reach every surface, and the gates that guard it fail\n\n* fix: disclose incomplete evidence on unused store members\n\nEight of the nine dead-code finding types tell a reader when their verdict\nrests on a file the run never fully read. Store members were the ninth, left\nout on the argument that they expose no mutation on any surface.\n\nThat argument is correct and still holds: a store member has no `Fix` action,\nno LSP code action, and `store_members_never_offer_unverified_line_deletions`\npins the absent review suggestion. There is nothing here to withhold.\n\nBut the caveat is a disclosure before it is a gate. A reader deciding by hand\nwhether to delete a store member deserves the same hint as the eight arrays\nbeside it, and a run that reports eight caveated findings and one bare one\nreads as though the bare one were better evidenced.\n\nStore members take the member rule unchanged, the same one class and enum\nmembers take: member usage is collected by one walk over the accesses of every\nmodule the run parsed, reachable or not, so any module analyzed incompletely\ncan hold the access that credits it.\n\nThe added test asserts the disclosure and the absence of a mutation together,\nso if a store-member mutation is ever introduced the gate has to be reasoned\nabout rather than inherited silently.\n\nThe field is additive-optional and absent on a clean run, so no envelope moves.\n\n* fix: make the caveat reach every surface, and the gates that guard it fail\n\nA slop audit of the output-honesty work, four reviewers on disjoint domains,\neach building their own binaries and reproducing before reporting.\n\nThe store-member caveat reached the JSON wire and almost nothing else. Eight\nrender sites hardcoded an empty caveat slice in the store-member branch, left\nfrom before store members were registered, and because the four pr-comment and\nreview formats render from the CodeClimate description, that one site cascaded\ninto all four. Nine of eleven surfaces. The eighth site was not in the reported\nlist: the human summary rollup chained eight arrays and omitted the ninth, so\n`--summary` undercounted.\n\nIt shipped green because no fixture on any of those surfaces built a member\nfinding carrying a caveat. The fixtures now do, everywhere, so the class cannot\nreturn silently.\n\nTwo gates could not fail. `every_machine_consumed_format_carries_the_caveat`\nomitted `sarif` from its list, the format GitHub code scanning ingests, so\ndeleting the caveat from every SARIF message left it green. The summary rollup\ntest gave each finding exactly one caveat, making per-token over-counting\nundetectable, though a finding whose own file is degraded really carries two.\nBoth now go red under the mutation that previously passed.\n\nThe MCP byte gate was measuring a number no commit ever had: the recorded mark\nwas arrived at by summing deltas by hand rather than running the gate, which\nleft the stale-headroom guard passing vacuously with a 602-byte dead zone. It\nis re-pinned from a real measurement, and the comment says how.\n\n`max_output_bytes` told agents that exceeding the cap returns a preview. It\nreturns a refusal. An agent lowering the cap to bound its context was planning\non a bounded result and getting a run that returns no data.\n\nNine claims in the compatibility document and changelog were falsified by\nrunning what they described, including the combined envelope having no\n`dead_code` block, a counter documented as counting removals that counts files,\nand a changelog that still said store members stay out twenty lines from its\nown sentence saying they do not. The three entries are rewritten from about\n1790 words to about 875, structured as what changed, which findings, what you\nmust do, what stays the same, with the archaeology moved out.\n\nAlso: two dependency findings in one package.json shared a SARIF fingerprint,\nso GitHub collapsed two alerts into one; the human directory rollup labelled a\nfile as a directory; and four test names promised more than their bodies\nchecked.",
+          "timestamp": "2026-09-08T22:39:13+02:00",
+          "tree_id": "57ebe14e0632c954e383a18e842ee6a390cdcf3a",
+          "url": "https://github.com/fallow-rs/fallow/commit/e5e92c787465f81e6fcd8f84a33be5b7f6ee93ac"
+        },
+        "date": 1788900532376,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
