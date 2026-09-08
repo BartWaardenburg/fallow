@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788868333799,
+  "lastUpdate": 1788881017273,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "69dc2c13221ee32b578617d659352c5218191888",
-          "message": "perf(benchmarks): cover Istanbul health CRAP matching\n\nAdd stable CodSpeed coverage for Istanbul ingestion, declaration-alias matching, CRAP scoring, and health report assembly.",
-          "timestamp": "2026-08-20T16:38:05+02:00",
-          "tree_id": "0469723ab0df950cb17a1ebf35b5cc0a04eef186",
-          "url": "https://github.com/fallow-rs/fallow/commit/69dc2c13221ee32b578617d659352c5218191888"
-        },
-        "date": 1787236989998,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9750723,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 49224,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1191487,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8444,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8443,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bartwaardenburg@gmail.com",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "1c8b422fa93c14b8d6a047f5749d2c54a5717061",
+          "message": "fix: explain cyclomatic populations in compact health output (#2589)\n\nfix: disclose populations in compact health output",
+          "timestamp": "2026-09-08T17:15:19+02:00",
+          "tree_id": "9b51140d2a25bc08a0f388cd34c2adff588d8989",
+          "url": "https://github.com/fallow-rs/fallow/commit/1c8b422fa93c14b8d6a047f5749d2c54a5717061"
+        },
+        "date": 1788881013693,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 9893558,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 50758,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1185333,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8409,
             "unit": "allocations"
           }
         ]
