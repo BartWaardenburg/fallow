@@ -70,6 +70,20 @@ fn module_scope_cyclomatic_population_explains_aggregate_without_function_findin
         human.stdout
     );
 
+    let compact = run_fallow_in_root("health", dir.path(), &["--format", "compact", "--no-cache"]);
+    assert_eq!(
+        compact
+            .stdout
+            .lines()
+            .filter(|line| line.starts_with("cyclomatic-population:"))
+            .collect::<Vec<_>>(),
+        [
+            "cyclomatic-population:functions:count=1,sum=1,max=1",
+            "cyclomatic-population:modules:count=1,sum=31,max=31",
+            "cyclomatic-population:templates:count=0,sum=0,max=null",
+        ]
+    );
+
     let markdown = run_fallow_in_root("health", dir.path(), &["--format", "markdown"]);
     assert!(
         markdown
