@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788865608509,
+  "lastUpdate": 1788867236317,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "7472746b01cba1e7e3436fc1837b4c130334be4c",
-          "message": "perf(benchmarks): cover trace family outputs\n\nAdd stable CodSpeed coverage for graph trace output and clone tracing by location and fingerprint.",
-          "timestamp": "2026-08-20T15:07:08+02:00",
-          "tree_id": "0fbf54f488d8ba7b6390fe7dfb00fafb89619834",
-          "url": "https://github.com/fallow-rs/fallow/commit/7472746b01cba1e7e3436fc1837b4c130334be4c"
-        },
-        "date": 1787231491001,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9711611,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 49213,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1190501,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8415,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8434,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bartwaardenburg@gmail.com",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "16667610c8543f862d6b0900fd3ed762bfca027a",
+          "message": "fix: recognize destructured class-member usage (#2567)\n\nfix(extract): preserve class-member usage through destructuring",
+          "timestamp": "2026-09-08T13:28:25+02:00",
+          "tree_id": "764c005b828dc7eec58483ce9c82c93f7a178b17",
+          "url": "https://github.com/fallow-rs/fallow/commit/16667610c8543f862d6b0900fd3ed762bfca027a"
+        },
+        "date": 1788867232560,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 9867870,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 50725,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1186394,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8416,
             "unit": "allocations"
           }
         ]
