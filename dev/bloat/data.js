@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788868761668,
+  "lastUpdate": 1788881842724,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Binary Size": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "fecc8c221bd0c75346720209d8e6ec18d78f8495",
-          "message": "perf(benchmarks): cover hotspot ownership churn",
-          "timestamp": "2026-08-19T21:24:21+02:00",
-          "tree_id": "949f3bf700e92734ca6877fb6549b0ee69f2adfa",
-          "url": "https://github.com/fallow-rs/fallow/commit/fecc8c221bd0c75346720209d8e6ec18d78f8495"
-        },
-        "date": 1787168778747,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Binary Size (fallow)",
-            "value": 513736432,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-lsp)",
-            "value": 20204896,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-mcp)",
-            "value": 25602120,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-multicall)",
-            "value": 38884552,
-            "unit": "bytes"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Binary Size (fallow-multicall)",
             "value": 43131560,
+            "unit": "bytes"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bartwaardenburg@gmail.com",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "1c8b422fa93c14b8d6a047f5749d2c54a5717061",
+          "message": "fix: explain cyclomatic populations in compact health output (#2589)\n\nfix: disclose populations in compact health output",
+          "timestamp": "2026-09-08T17:15:19+02:00",
+          "tree_id": "9b51140d2a25bc08a0f388cd34c2adff588d8989",
+          "url": "https://github.com/fallow-rs/fallow/commit/1c8b422fa93c14b8d6a047f5749d2c54a5717061"
+        },
+        "date": 1788881837832,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Binary Size (fallow)",
+            "value": 569327360,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-lsp)",
+            "value": 21569592,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-mcp)",
+            "value": 28486824,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-multicall)",
+            "value": 43172840,
             "unit": "bytes"
           }
         ]
