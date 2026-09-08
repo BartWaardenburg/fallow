@@ -5907,13 +5907,11 @@ export interface HealthSummary {
  */
 files_analyzed: number
 /**
- * Real functions scored across the analyzed files. This counts functions
- * only, so it is smaller than the sum of `file_scores[].function_count`,
- * which also counts the synthetic per-file units (`<module>` for
- * module-scope branching, `<template>` and `<snippet:NAME>` for component
- * templates). The complexity aggregates below, including
- * `average_cyclomatic` and `p90_cyclomatic`, are computed over that larger
- * population rather than over this count.
+ * Functions and template units checked for threshold findings across the
+ * analyzed files. Synthetic module-scope units are excluded. Cyclomatic
+ * aggregates include module units too; `vital_signs.cyclomatic_population`
+ * reports the disjoint authored-function, module, and template populations
+ * behind those aggregates.
  */
 functions_analyzed: number
 /**
@@ -6148,18 +6146,24 @@ dead_file_pct?: (number | null)
  */
 dead_export_pct?: (number | null)
 /**
- * Average cyclomatic complexity across all functions.
+ * Average cyclomatic complexity across authored functions, module-scope
+ * units, and template units. See `cyclomatic_population` for the denominator.
  */
 avg_cyclomatic: number
 /**
- * Percentage of functions at or above the critical cyclomatic threshold.
+ * Percentage of complexity units at or above the critical cyclomatic threshold.
  * Used by the scale-invariant health score.
  */
 critical_complexity_pct?: (number | null)
 /**
- * 90th percentile cyclomatic complexity.
+ * 90th percentile cyclomatic complexity across the same unit population.
  */
 p90_cyclomatic: number
+/**
+ * Population behind the cyclomatic mean, percentile, and critical share.
+ * Present on current analyses; absent on older saved snapshots.
+ */
+cyclomatic_population?: (CyclomaticPopulation | null)
 /**
  * Code duplication percentage (None if duplication pipeline was not run).
  */
@@ -6272,6 +6276,33 @@ top_render_fan_in?: RenderFanInTopComponent[]
  * Total lines of code across all parsed modules.
  */
 total_loc?: number
+}
+/**
+ * Disjoint populations feeding the cyclomatic distribution. Counts and sums
+ * across all three groups reconstruct its weighted mean. Module-scope units
+ * contribute to aggregates only and do not produce function findings.
+ */
+export interface CyclomaticPopulation {
+functions: CyclomaticUnitPopulation
+modules: CyclomaticUnitPopulation
+templates: CyclomaticUnitPopulation
+}
+/**
+ * Cyclomatic measurements for one kind of complexity unit.
+ */
+export interface CyclomaticUnitPopulation {
+/**
+ * Number of units measured, including those below finding thresholds.
+ */
+count: number
+/**
+ * Sum of cyclomatic complexity, before rounding or threshold filtering.
+ */
+sum: number
+/**
+ * Highest cyclomatic complexity, or null when this population is empty.
+ */
+max?: (number | null)
 }
 /**
  * Raw counts backing the vital signs percentages.
@@ -6489,15 +6520,15 @@ complexity_density: number
  */
 maintainability_index: number
 /**
- * Summed cyclomatic complexity over the file's functions.
+ * Summed cyclomatic complexity over all units, including module and template scope.
  */
 total_cyclomatic: number
 /**
- * Summed cognitive complexity over the file's functions.
+ * Summed cognitive complexity over all units, including module and template scope.
  */
 total_cognitive: number
 /**
- * Functions in the file.
+ * Complexity units in the file, including synthetic module and template units.
  */
 function_count: number
 /**

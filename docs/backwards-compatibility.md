@@ -61,6 +61,18 @@ These interfaces are covered by semver , breaking changes only happen in major v
 - **MCP shared parameter descriptions are one sentence**: the six parameters nearly every tool carries (`root`, `config`, `allow_remote_extends`, `workspace`, `no_cache`, `threads`) describe themselves in one sentence, worded identically on every tool that takes them, including the `symbol_impact` schema mirror that had drifted to its own phrasing. Two facts the trim removed are back, because each one bounded behavior the shortened sentence left undiscoverable: `allow_remote_extends` states again that it defaults to false and never grants process-global trust, the only statement bounding a trust-boundary flag, and `workspace` names the repo-relative path again, because patterns still match against both the package name and that path and the unmatched-pattern refusal lists only names. Only the `description` prose changed: no parameter was added, removed, renamed, retyped, or given a different default, no `schema_version` moves, and no request that was accepted before is refused now.
 
 
+#### Cyclomatic metric populations
+
+Health vital signs include optional `cyclomatic_population` metadata alongside
+`avg_cyclomatic`, `p90_cyclomatic`, and `critical_complexity_pct`. Its `functions`,
+`modules`, and `templates` groups each carry a unit `count`, cyclomatic `sum`, and
+nullable `max`. Sum the groups' sums and divide by their counts to reconstruct
+the mean before rounding. The percentile and critical share use that same
+population. Module-scope units contribute to aggregates without creating
+function findings. Existing threshold, suppression, and baseline behavior is
+unchanged. Older snapshots omit the metadata, indicating unknown population
+rather than zero units. No metric formula or envelope version changes.
+
 #### Report ordering and colliding duplication handles
 
 Health complexity findings retain the requested descending metric priority.

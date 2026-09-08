@@ -1061,6 +1061,12 @@ fn health_explain_for_header(line: &str) -> Option<String> {
                 .to_string(),
         );
     }
+    if line.contains("Cyclomatic units:") {
+        return Some(
+            "Cyclomatic averages and percentiles include authored functions, module scopes, and templates. JSON population counts and sums reconstruct the mean. Module scopes contribute to metrics without function findings."
+                .to_string(),
+        );
+    }
     if line.contains("Metrics:") {
         return Some(
             "Vital signs summarize the analyzed project before truncation: dead-code percentages, maintainability index, hotspot count, circular dependencies, unused dependencies, and duplication where available."
@@ -1383,12 +1389,14 @@ fn push_trend_metric_rows(lines: &mut Vec<String>, trend: &fallow_output::Health
 }
 
 fn render_vital_signs(lines: &mut Vec<String>, report: &fallow_output::HealthReport) {
-    if report.health_trend.is_some() {
-        return;
-    }
     let Some(ref vs) = report.vital_signs else {
         return;
     };
+
+    if report.health_trend.is_some() {
+        render_cyclomatic_population(lines, vs);
+        return;
+    }
 
     let mut parts = Vec::new();
     push_vital_core_parts(&mut parts, vs);
@@ -1399,7 +1407,23 @@ fn render_vital_signs(lines: &mut Vec<String>, report: &fallow_output::HealthRep
         "Metrics:".dimmed(),
         parts.join(" \u{00b7} ").dimmed()
     ));
+    render_cyclomatic_population(lines, vs);
     lines.push(String::new());
+}
+
+fn render_cyclomatic_population(lines: &mut Vec<String>, vs: &fallow_output::VitalSigns) {
+    let Some(population) = &vs.cyclomatic_population else {
+        return;
+    };
+    lines.push(format!(
+        "  Cyclomatic units: functions {}, module scopes {}, templates {}",
+        population.functions.count, population.modules.count, population.templates.count
+    ));
+    if let Some(max) = population.modules.max {
+        lines.push(format!(
+            "  Module scope: max cyclomatic {max}; included in metrics, not function findings"
+        ));
+    }
 }
 
 /// Appends the LOC, dead-code, cyclomatic, and maintainability vital-sign parts.

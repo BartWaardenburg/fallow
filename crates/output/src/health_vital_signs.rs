@@ -31,14 +31,19 @@ pub struct VitalSigns {
     /// Percentage of exports never imported by other modules.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dead_export_pct: Option<f64>,
-    /// Average cyclomatic complexity across all functions.
+    /// Average cyclomatic complexity across authored functions, module-scope
+    /// units, and template units. See `cyclomatic_population` for the denominator.
     pub avg_cyclomatic: f64,
-    /// Percentage of functions at or above the critical cyclomatic threshold.
+    /// Percentage of complexity units at or above the critical cyclomatic threshold.
     /// Used by the scale-invariant health score.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub critical_complexity_pct: Option<f64>,
-    /// 90th percentile cyclomatic complexity.
+    /// 90th percentile cyclomatic complexity across the same unit population.
     pub p90_cyclomatic: u32,
+    /// Population behind the cyclomatic mean, percentile, and critical share.
+    /// Present on current analyses; absent on older saved snapshots.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cyclomatic_population: Option<CyclomaticPopulation>,
     /// Code duplication percentage (None if duplication pipeline was not run).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duplication_pct: Option<f64>,
@@ -129,6 +134,32 @@ pub struct VitalSigns {
     /// Total lines of code across all parsed modules.
     #[serde(default)]
     pub total_loc: u64,
+}
+
+/// Disjoint populations feeding the cyclomatic distribution. Counts and sums
+/// across all three groups reconstruct its weighted mean. Module-scope units
+/// contribute to aggregates only and do not produce function findings.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct CyclomaticPopulation {
+    /// Authored functions, excluding synthetic module and template units.
+    pub functions: CyclomaticUnitPopulation,
+    /// Synthetic module-scope units, emitted only when top-level code branches.
+    pub modules: CyclomaticUnitPopulation,
+    /// Synthetic template and snippet units.
+    pub templates: CyclomaticUnitPopulation,
+}
+
+/// Cyclomatic measurements for one kind of complexity unit.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct CyclomaticUnitPopulation {
+    /// Number of units measured, including those below finding thresholds.
+    pub count: usize,
+    /// Sum of cyclomatic complexity, before rounding or threshold filtering.
+    pub sum: u64,
+    /// Highest cyclomatic complexity, or null when this population is empty.
+    pub max: Option<u16>,
 }
 
 /// One located high-fan-in React/Preact component for the descriptive
@@ -256,6 +287,19 @@ pub struct VitalSignsSnapshot {
 )]
 mod tests {
     use super::*;
+
+    #[test]
+    fn legacy_vital_signs_preserve_unknown_cyclomatic_population() {
+        let legacy: VitalSigns =
+            serde_json::from_str(r#"{"avg_cyclomatic":16.0,"p90_cyclomatic":31}"#).unwrap();
+        assert!(legacy.cyclomatic_population.is_none());
+        assert!(
+            serde_json::to_value(legacy)
+                .unwrap()
+                .get("cyclomatic_population")
+                .is_none()
+        );
+    }
 
     #[test]
     fn vital_signs_optional_fields_are_omitted() {

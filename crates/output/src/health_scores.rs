@@ -895,13 +895,11 @@ pub struct HealthBaselineStaleness {
 pub struct HealthSummary {
     /// Files included in the health analysis.
     pub files_analyzed: usize,
-    /// Real functions scored across the analyzed files. This counts functions
-    /// only, so it is smaller than the sum of `file_scores[].function_count`,
-    /// which also counts the synthetic per-file units (`<module>` for
-    /// module-scope branching, `<template>` and `<snippet:NAME>` for component
-    /// templates). The complexity aggregates below, including
-    /// `average_cyclomatic` and `p90_cyclomatic`, are computed over that larger
-    /// population rather than over this count.
+    /// Functions and template units checked for threshold findings across the
+    /// analyzed files. Synthetic module-scope units are excluded. Cyclomatic
+    /// aggregates include module units too; `vital_signs.cyclomatic_population`
+    /// reports the disjoint authored-function, module, and template populations
+    /// behind those aggregates.
     pub functions_analyzed: usize,
     /// Functions exceeding at least one complexity or CRAP threshold.
     pub functions_above_threshold: usize,
@@ -998,11 +996,11 @@ pub struct FileHealthScore {
     pub complexity_density: f64,
     /// Maintainability index (0-100); higher is healthier.
     pub maintainability_index: f64,
-    /// Summed cyclomatic complexity over the file's functions.
+    /// Summed cyclomatic complexity over all units, including module and template scope.
     pub total_cyclomatic: u32,
-    /// Summed cognitive complexity over the file's functions.
+    /// Summed cognitive complexity over all units, including module and template scope.
     pub total_cognitive: u32,
-    /// Functions in the file.
+    /// Complexity units in the file, including synthetic module and template units.
     pub function_count: usize,
     /// Lines of code in the file.
     pub lines: u32,

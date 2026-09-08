@@ -365,11 +365,59 @@ fn security_field_definitions() -> BTreeMap<String, String> {
 fn health_metrics() -> BTreeMap<String, MetaMetric> {
     let mut metrics = BTreeMap::new();
     metrics.extend(health_complexity_metrics());
+    metrics.extend(health_population_metrics());
     metrics.extend(health_churn_and_target_metrics());
     metrics.extend(health_ownership_metrics());
     metrics.extend(health_runtime_metrics());
     metrics.extend(health_styling_metrics());
     metrics
+}
+
+fn health_population_metrics() -> [(String, MetaMetric); 6] {
+    [
+        health_metric(
+            "avg_cyclomatic",
+            "Average Cyclomatic Complexity",
+            "Mean over authored function, module-scope, and template units before finding filters. Divide the sum of cyclomatic_population group sums by the sum of their counts, rounded to one decimal.",
+            Some("[0, infinity)"),
+            "zero for an empty population; lower is better",
+        ),
+        health_metric(
+            "p90_cyclomatic",
+            "P90 Cyclomatic Complexity",
+            "Nearest-rank 90th percentile over the same units as avg_cyclomatic, including module scopes and templates.",
+            Some("[0, infinity)"),
+            "zero for an empty population; lower is better",
+        ),
+        health_metric(
+            "critical_complexity_pct",
+            "Critical Cyclomatic Share",
+            "Percentage of the cyclomatic unit population at or above the critical threshold, including module scopes and templates.",
+            Some("[0, 100]"),
+            "absent for an empty population; lower is better",
+        ),
+        health_metric(
+            "cyclomatic_population.count",
+            "Cyclomatic Population Count",
+            "Unit count in each disjoint functions, modules, or templates group. Modules contribute to aggregate metrics without producing function findings.",
+            Some("[0, infinity)"),
+            "sum the three counts to obtain the distribution denominator",
+        ),
+        health_metric(
+            "cyclomatic_population.sum",
+            "Cyclomatic Population Sum",
+            "Sum of cyclomatic values in each functions, modules, or templates group before rounding and threshold filtering.",
+            Some("[0, infinity)"),
+            "sum the three groups to obtain the mean numerator",
+        ),
+        health_metric(
+            "cyclomatic_population.max",
+            "Cyclomatic Population Maximum",
+            "Highest cyclomatic value within each functions, modules, or templates group; null when that group has no units.",
+            Some("[1, infinity) or null"),
+            "identifies which kind of unit drives the tail; module units remain aggregate-only",
+        ),
+    ]
 }
 
 fn health_complexity_metrics() -> [(String, MetaMetric); 11] {

@@ -147,12 +147,14 @@ struct SelectedModuleMetrics {
     total_loc: u64,
     line_counts: Vec<u32>,
     param_counts: Vec<u8>,
+    cyclomatic_population: fallow_output::CyclomaticPopulation,
 }
 
 fn selected_module_metrics(input: &VitalSignsInput<'_>) -> SelectedModuleMetrics {
     let mut total_loc = 0;
     let mut line_counts = Vec::new();
     let mut param_counts = Vec::new();
+    let mut cyclomatic_population = fallow_output::CyclomaticPopulation::default();
 
     for module in input.selected_modules() {
         total_loc += module.line_offsets.len() as u64;
@@ -160,11 +162,21 @@ fn selected_module_metrics(input: &VitalSignsInput<'_>) -> SelectedModuleMetrics
         // It has no parameter list, and its size is the distance between its
         // first and last decision point rather than a body anyone can shorten,
         // so it is not a refactoring signal in the unit-size profile.
-        let units = module
-            .complexity
-            .iter()
-            .filter(|c| !fallow_types::extract::is_synthetic_module_unit(&c.name));
-        for unit in units {
+        for unit in &module.complexity {
+            let is_module = fallow_types::extract::is_synthetic_module_unit(&unit.name);
+            let population = if is_module {
+                &mut cyclomatic_population.modules
+            } else if fallow_types::extract::is_synthetic_template_unit(&unit.name) {
+                &mut cyclomatic_population.templates
+            } else {
+                &mut cyclomatic_population.functions
+            };
+            population.count += 1;
+            population.sum += u64::from(unit.cyclomatic);
+            population.max = Some(population.max.unwrap_or_default().max(unit.cyclomatic));
+            if is_module {
+                continue;
+            }
             line_counts.push(unit.line_count);
             param_counts.push(unit.param_count);
         }
@@ -174,6 +186,7 @@ fn selected_module_metrics(input: &VitalSignsInput<'_>) -> SelectedModuleMetrics
         total_loc,
         line_counts,
         param_counts,
+        cyclomatic_population,
     }
 }
 
@@ -228,6 +241,7 @@ pub(crate) fn compute_vital_signs(input: &VitalSignsInput<'_>) -> VitalSigns {
         avg_cyclomatic,
         critical_complexity_pct,
         p90_cyclomatic,
+        cyclomatic_population: Some(module_metrics.cyclomatic_population),
         duplication_pct: None, // Lazy: only set if duplication pipeline was run
         hotspot_count,
         hotspot_top_pct_count,
@@ -1200,6 +1214,38 @@ mod tests {
     }
 
     #[test]
+    fn cyclomatic_population_partitions_units_and_respects_module_filter() {
+        let mut mixed = make_module(0, 1);
+        let mut module_unit = mixed.complexity[0].clone();
+        module_unit.name = "<module>".into();
+        module_unit.cyclomatic = 31;
+        let mut template_unit = module_unit.clone();
+        template_unit.name = "<template>".into();
+        template_unit.cyclomatic = 4;
+        mixed.complexity.extend([module_unit, template_unit]);
+        let modules = [mixed, make_module(1, 100)];
+        let filter = rustc_hash::FxHashSet::from_iter([crate::discover::FileId(0)]);
+        let input = VitalSignsInput {
+            modules: &modules,
+            module_filter: Some(&filter),
+            file_scores: None,
+            hotspots: None,
+            total_files: 1,
+            analysis_counts: None,
+        };
+        let vs = compute_vital_signs(&input);
+        let population = vs.cyclomatic_population.unwrap();
+        assert_eq!(population.functions.count, 1);
+        assert_eq!(population.modules.count, 1);
+        assert_eq!(population.templates.count, 1);
+        assert_eq!(population.functions.sum, 1);
+        assert_eq!(population.modules.sum, 31);
+        assert_eq!(population.templates.sum, 4);
+        assert_close(vs.avg_cyclomatic, 12.0);
+        assert_eq!(vs.p90_cyclomatic, 31);
+    }
+
+    #[test]
     fn compute_with_analysis_counts() {
         let modules = make_modules();
         let input = VitalSignsInput {
@@ -1279,6 +1325,31 @@ mod tests {
         let vs = compute_vital_signs(&input);
         assert_eq!(vs.hotspot_count, Some(2)); // 80.0 and 50.0 meet threshold
         assert_eq!(vs.hotspot_top_pct_count, Some(1)); // top 1% bucket rounds up to one file
+    }
+
+    #[test]
+    fn empty_cyclomatic_population_is_measured_not_unknown() {
+        let vs = compute_vital_signs(&VitalSignsInput {
+            modules: &[],
+            module_filter: None,
+            file_scores: None,
+            hotspots: None,
+            total_files: 0,
+            analysis_counts: None,
+        });
+        let population = vs.cyclomatic_population.unwrap();
+        for group in [
+            population.functions,
+            population.modules,
+            population.templates,
+        ] {
+            assert_eq!(group.count, 0);
+            assert_eq!(group.sum, 0);
+            assert_eq!(group.max, None);
+        }
+        assert_close(vs.avg_cyclomatic, 0.0);
+        assert_eq!(vs.p90_cyclomatic, 0);
+        assert_eq!(vs.critical_complexity_pct, None);
     }
 
     #[test]
@@ -1546,6 +1617,7 @@ mod tests {
     #[test]
     fn health_score_duplication_penalty() {
         let vs = VitalSigns {
+            cyclomatic_population: None,
             dead_file_pct: None,
             dead_export_pct: None,
             avg_cyclomatic: 1.0,

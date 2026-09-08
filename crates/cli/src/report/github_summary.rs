@@ -2960,6 +2960,24 @@ fn combined_vitals(env: &Value) -> String {
             pct(avg_cyclomatic),
         );
     }
+    if let Some(population) = vitals
+        .get("cyclomatic_population")
+        .filter(|value| value.is_object())
+    {
+        let _ = writeln!(
+            out,
+            "| Cyclomatic units | Functions: {}, module scopes: {}, templates: {} |",
+            num(&population["functions"], "count"),
+            num(&population["modules"], "count"),
+            num(&population["templates"], "count")
+        );
+        if let Some(max) = population["modules"]["max"].as_u64() {
+            let _ = writeln!(
+                out,
+                "| Module-scope max cyclomatic (aggregate only) | {max} |"
+            );
+        }
+    }
     out.push('\n');
     out
 }
