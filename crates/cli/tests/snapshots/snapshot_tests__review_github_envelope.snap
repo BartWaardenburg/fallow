@@ -133,7 +133,7 @@ expression: json_str
       "path": "src/dead.ts",
       "line": 1,
       "side": "RIGHT",
-      "body": "**error** `fallow/unused-file`: File is not reachable from any entry point\n\n> Fix intent: Delete the file or add a real entry-point reference.\n\n> Run `fallow fix --files` or delete this file.\n\n<!-- fallow-fingerprint:v2: e3912cb6bb9b0212 -->",
+      "body": "**error** `fallow/unused-file`: File is not reachable from any entry point\n\n> Fix intent: Delete the file or add a real entry-point reference.\n\n> No automatic fix: `fallow fix` never deletes files. Delete it by hand once you have confirmed nothing loads it at runtime, or keep it and add `// fallow-ignore-file unused-file` at the top.\n\n<!-- fallow-fingerprint:v2: e3912cb6bb9b0212 -->",
       "fingerprint": "e3912cb6bb9b0212"
     },
     {

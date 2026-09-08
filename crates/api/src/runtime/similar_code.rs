@@ -64,7 +64,7 @@ const MAX_INSPECT_SOURCE_BYTES: u64 = fallow_config::DEFAULT_MAX_FILE_SIZE_BYTES
 const MAX_INSPECT_GRAPH_REFERENCES: usize = 50;
 const MAX_INSPECT_RELATED_TESTS: usize = 50;
 const MODULE_REFERENCE_NAME: &str = "<module>";
-const INSPECT_CHURN_WINDOW: &str = "6 months ago";
+const INSPECT_CHURN_WINDOW_MONTHS: u64 = 6;
 
 #[derive(Clone, Copy)]
 struct PhaseCompleteness {
@@ -1275,10 +1275,11 @@ fn enrich_churn(
         ));
         return;
     }
-    let since = fallow_engine::churn::SinceDuration {
-        git_after: INSPECT_CHURN_WINDOW.to_owned(),
-        display: "6 months".to_owned(),
-    };
+    let since = fallow_engine::churn::SinceDuration::relative(
+        INSPECT_CHURN_WINDOW_MONTHS,
+        fallow_engine::churn::ChurnWindowUnit::Months,
+        "6 months",
+    );
     let Some((churn, _cache_hit)) = fallow_engine::churn::analyze_churn_cached(
         session.root(),
         &since,
@@ -2605,6 +2606,7 @@ mod tests {
             files,
             shallow_clone: false,
             author_pool: Vec::new(),
+            clock: fallow_engine::clock::AnalysisClock::pinned(1_788_782_400),
         };
 
         assert_eq!(churn_commits_for(&churn, Path::new(r"C:\repo\src\a.ts")), 7);

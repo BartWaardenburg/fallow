@@ -1565,10 +1565,17 @@ fn engine_owns_churn_without_core_adapter() {
             "engine churn must not route through legacy backend path {forbidden}"
         );
     }
-    assert!(
-        churn.contains("crate::git_env::clear_ambient_git_env"),
-        "engine churn git subprocesses must clear ambient git environment"
-    );
+    // Every engine-owned git spawn goes through the `git_env` wrapper, which
+    // clears the ambient repository-state variables and closes stdin. The run
+    // clock reads HEAD's committer timestamp through the same wrapper, so it is
+    // held to the same rule as the churn log itself.
+    for source in ["crates/engine/src/churn.rs", "crates/engine/src/clock.rs"] {
+        let text = read_source_without_line_comments(source).expect("read engine git source");
+        assert!(
+            text.contains("crate::git_env::git_command()"),
+            "{source} git subprocesses must go through the git_env wrapper"
+        );
+    }
 }
 
 #[test]
@@ -2017,6 +2024,7 @@ fn analysis_stage_diagnostics_are_recorded_only_from_the_dead_code_analyze_pass(
         "crates/cli/src/architecture_boundaries.rs",
     ];
     let expected = [
+        "crates/core/src/analyze/mod.rs",
         "crates/core/src/analyze/unused_catalog/mod.rs",
         "crates/core/src/analyze/unused_overrides.rs",
     ];

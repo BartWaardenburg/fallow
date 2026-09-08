@@ -139,6 +139,10 @@ pub(crate) struct ReportContext<'a> {
     pub(crate) css_requested: bool,
     /// Presentation style for report JSON. Non-JSON renderers ignore it.
     pub(crate) json_style: crate::json_style::JsonStyle,
+    /// Duplication JSON only: whether each clone instance carries its verbatim
+    /// source text. `false` is `fallow dupes --no-fragments`. Every other
+    /// renderer and analysis ignores it.
+    pub(crate) include_fragments: bool,
 }
 
 /// Strip the project root prefix from a path for display, falling back to the full path.
@@ -566,7 +570,10 @@ pub(crate) fn print_duplication_report(
             report,
             ctx.root,
             ctx.elapsed,
-            ctx.explain,
+            json::DuplicationJsonRender {
+                explain: ctx.explain,
+                include_fragments: ctx.include_fragments,
+            },
             ctx.workspace_diagnostics,
             ctx.json_style,
         ),
@@ -601,7 +608,10 @@ fn print_dupes_github_format(
         report,
         ctx.root,
         ctx.elapsed,
-        ctx.explain,
+        json::DuplicationJsonRender {
+            explain: ctx.explain,
+            include_fragments: ctx.include_fragments,
+        },
         ctx.workspace_diagnostics,
     ) {
         Ok(envelope) => print_github_format(
@@ -656,7 +666,10 @@ fn print_grouped_duplication_report(
             grouping,
             ctx.root,
             ctx.elapsed,
-            ctx.explain,
+            json::DuplicationJsonRender {
+                explain: ctx.explain,
+                include_fragments: ctx.include_fragments,
+            },
             ctx.workspace_diagnostics,
             ctx.json_style,
         ),
@@ -1203,6 +1216,7 @@ mod tests {
             skip_score_and_trend: false,
             css_requested: false,
             json_style: crate::json_style::JsonStyle::Compact,
+            include_fragments: true,
         }
     }
 

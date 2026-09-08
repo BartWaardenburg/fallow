@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use fallow_config::{DuplicatesConfig, ResolvedConfig, WorkspaceInfo};
+use fallow_types::cache_rejection::CacheRejection;
 use fallow_types::discover::DiscoveredFile;
 use fallow_types::extract::ModuleInfo;
 #[cfg(test)]
@@ -825,6 +826,7 @@ impl AnalysisSession {
                     cache_hits: 0,
                     cache_misses: 0,
                     parse_cpu_ms: 0.0,
+                    cache_rejection: None,
                 },
             };
         }
@@ -891,19 +893,31 @@ fn parse_files_with_config(
 ) -> ParsedModules {
     let parse_start = Instant::now();
     let cache_max_size_bytes = crate::project_config::resolve_cache_max_size_bytes(config);
+    let mut cache_rejection = None;
     let mut cache = if config.no_cache {
         None
     } else {
-        fallow_extract::cache::CacheStore::load(
+        match fallow_extract::cache::CacheStore::load(
             &config.cache_dir,
+            &config.root,
             config.cache_config_hash,
             cache_max_size_bytes,
-        )
+        ) {
+            Ok(store) => Some(store),
+            Err(rejection) => {
+                cache_rejection = Some(rejection);
+                None
+            }
+        }
     };
     let parse_result =
         crate::source::parse_all_files(files, cache.as_ref(), need_complexity, cancellation);
-    let source_diagnostics =
+    let mut source_diagnostics =
         fallow_config::record_source_read_failures(&config.root, &parse_result.read_failures);
+    source_diagnostics.extend(fallow_config::record_source_parse_degradations(
+        &config.root,
+        &parse_result.parse_degradations,
+    ));
     let mut modules = parse_result.modules;
     for module in &mut modules {
         module.prepare_analysis_facts();
@@ -912,7 +926,7 @@ fn parse_files_with_config(
     let cache_ms = if token_is_set(cancellation) {
         0.0
     } else {
-        update_parse_cache_if_enabled(config, &mut cache, &modules, files)
+        update_parse_cache_if_enabled(config, &mut cache, &modules, files, need_complexity)
     };
     let metrics = core_backend::ParseMetrics {
         parse_ms,
@@ -920,6 +934,7 @@ fn parse_files_with_config(
         cache_hits: parse_result.cache_hits,
         cache_misses: parse_result.cache_misses,
         parse_cpu_ms: parse_result.parse_cpu_ms,
+        cache_rejection,
     };
     ParsedModules {
         modules,
@@ -935,6 +950,7 @@ fn reused_parse_metrics() -> core_backend::ParseMetrics {
         cache_hits: 0,
         cache_misses: 0,
         parse_cpu_ms: 0.0,
+        cache_rejection: None,
     }
 }
 
@@ -955,6 +971,7 @@ fn update_parse_cache_if_enabled(
     cache: &mut Option<fallow_extract::cache::CacheStore>,
     modules: &[ModuleInfo],
     files: &[DiscoveredFile],
+    need_complexity: bool,
 ) -> f64 {
     let start = Instant::now();
     if config.no_cache {
@@ -962,8 +979,8 @@ fn update_parse_cache_if_enabled(
     }
 
     let cache_max_size_bytes = crate::project_config::resolve_cache_max_size_bytes(config);
-    let store = cache.get_or_insert_with(fallow_extract::cache::CacheStore::new);
-    if update_parse_cache(store, modules, files)
+    let store = cache.get_or_insert_with(|| fallow_extract::cache::CacheStore::new(&config.root));
+    if update_parse_cache(store, modules, files, need_complexity)
         && let Err(error) = store.save(
             &config.cache_dir,
             config.cache_config_hash,
@@ -975,10 +992,15 @@ fn update_parse_cache_if_enabled(
     start.elapsed().as_secs_f64() * 1000.0
 }
 
+/// Mirror of `fallow_core`'s `update_cache` for session-owned parsing: rewrite
+/// an unchanged entry only when its metadata moved or when this run can add
+/// complexity the entry lacks, and never let a complexity-blind run strip the
+/// complexity a `health` run stored.
 fn update_parse_cache(
     store: &mut fallow_extract::cache::CacheStore,
     modules: &[ModuleInfo],
     files: &[DiscoveredFile],
+    need_complexity: bool,
 ) -> bool {
     let mut dirty = false;
     for module in modules {
@@ -987,11 +1009,22 @@ fn update_parse_cache(
             if let Some(cached) = store.get_by_path_only(&file.path)
                 && cached.content_hash == module.content_hash
             {
-                if cached.source_fingerprint() != fingerprint {
+                let stale_metadata = cached.source_fingerprint() != fingerprint;
+                let adds_complexity = need_complexity && !cached.complexity_extracted;
+                if stale_metadata || adds_complexity {
                     let preserved_last_access = cached.last_access_secs;
-                    let mut refreshed =
-                        fallow_extract::cache::module_to_cached(module, fingerprint);
+                    let preserved_complexity = (!need_complexity && cached.complexity_extracted)
+                        .then(|| cached.complexity.clone());
+                    let mut refreshed = fallow_extract::cache::module_to_cached(
+                        module,
+                        fingerprint,
+                        need_complexity,
+                    );
                     refreshed.last_access_secs = preserved_last_access;
+                    if let Some(complexity) = preserved_complexity {
+                        refreshed.complexity = complexity;
+                        refreshed.complexity_extracted = true;
+                    }
                     store.insert(&file.path, refreshed);
                     dirty = true;
                 }
@@ -999,7 +1032,7 @@ fn update_parse_cache(
             }
             store.insert(
                 &file.path,
-                fallow_extract::cache::module_to_cached(module, fingerprint),
+                fallow_extract::cache::module_to_cached(module, fingerprint, need_complexity),
             );
             dirty = true;
         }
@@ -1052,7 +1085,8 @@ fn run_engine_owned_dead_code_pipeline(
     stopped("dead-code entry-point discovery")?;
     let entry_points = core_backend::discover_dead_code_entry_points(&prelude);
     stopped("import resolution and graph construction")?;
-    let (resolved, graph) = resolve_or_build_dead_code_graph(&prelude, &entry_points, &modules);
+    let (resolved, graph, graph_cache_rejection) =
+        resolve_or_build_dead_code_graph(&prelude, &entry_points, &modules);
     stopped("the dead-code detectors")?;
 
     let mut detector = core_backend::run_dead_code_detectors(
@@ -1082,6 +1116,7 @@ fn run_engine_owned_dead_code_pipeline(
             detector: &detector,
             file_count: discovery.files().len(),
             workspace_count: discovery.workspaces().len(),
+            graph_cache_rejection,
         });
     let script_used_packages = prelude.script_used_packages();
     prelude.finish();
@@ -1098,6 +1133,13 @@ fn run_engine_owned_dead_code_pipeline(
     })
 }
 
+/// Reuse the persisted module graph, or rebuild it and carry the reason the
+/// persisted one was refused.
+///
+/// The reason is the third element rather than a discarded `Option`: a warm run
+/// that paid for a multi-megabyte decode and reused none of it is the case the
+/// perf table exists to explain, and every engine-backed command reaches the
+/// pipeline through here.
 fn resolve_or_build_dead_code_graph(
     prelude: &core_backend::DeadCodeBackendPrelude,
     entry_points: &core_backend::DeadCodeEntryPoints,
@@ -1105,17 +1147,18 @@ fn resolve_or_build_dead_code_graph(
 ) -> (
     core_backend::DeadCodeResolvedModules,
     core_backend::DeadCodeGraphRun,
+    Option<CacheRejection>,
 ) {
-    if let Some((resolved, graph)) =
-        core_backend::try_load_dead_code_graph_cache(prelude, entry_points, modules)
-    {
-        return (resolved, graph);
-    }
+    let rejection =
+        match core_backend::try_load_dead_code_graph_cache(prelude, entry_points, modules) {
+            Ok((resolved, graph)) => return (resolved, graph, None),
+            Err(rejection) => rejection,
+        };
 
     let resolved = core_backend::resolve_dead_code_imports(prelude, modules);
     let graph =
         core_backend::build_dead_code_graph(prelude, &resolved.project, entry_points, modules);
-    (resolved, graph)
+    (resolved, graph, rejection)
 }
 
 fn collect_file_hashes(
@@ -1197,6 +1240,47 @@ mod tests {
             .expect_err("a cancelled session must not return results");
         assert!(error.is_cancelled(), "unexpected error: {error}");
         assert!(error.message().contains("cancelled"));
+    }
+
+    /// The engine pipeline is what every CLI command runs, and it reported no
+    /// graph-cache reason at all: the loader produced one, the boundary threw
+    /// it away, and the profile hardcoded `None`. A warm run that decoded a
+    /// multi-megabyte graph and then rebuilt from scratch looked exactly like a
+    /// first run, so the row that explains it could never print.
+    #[test]
+    fn a_refused_graph_cache_names_its_reason_in_the_engine_timings() {
+        let project = tempfile::tempdir().expect("project");
+        let root = project.path();
+        std::fs::create_dir(root.join("src")).expect("create source directory");
+        std::fs::write(root.join("src/index.ts"), "export const entry = 1;\n").expect("entry");
+
+        let cold = AnalysisSession::load_default(root)
+            .analyze_dead_code_with_artifacts(false, true)
+            .expect("cold run analyzes");
+        assert_eq!(
+            cold.timings
+                .expect("cold timings retained")
+                .graph_cache_rejection,
+            Some(CacheRejection::Absent),
+            "a first run has no persisted graph to refuse"
+        );
+
+        std::fs::write(
+            root.join("src/index.ts"),
+            "export const entry = 1;\nexport const added = 2;\n",
+        )
+        .expect("edit the entry");
+
+        let warm = AnalysisSession::load_default(root)
+            .analyze_dead_code_with_artifacts(false, true)
+            .expect("warm run analyzes");
+        assert_eq!(
+            warm.timings
+                .expect("warm timings retained")
+                .graph_cache_rejection,
+            Some(CacheRejection::FingerprintChanged),
+            "the decoded graph was refused because a file changed, and the run must say so"
+        );
     }
 
     /// A session that is not given a token can never be cancelled, so every
@@ -1665,7 +1749,7 @@ wrapper();
             cold.graph.as_ref().expect("cold graph retained"),
         );
         assert!(
-            fallow_graph::cache::GraphCacheStore::load(&cold_session.config().cache_dir).is_some(),
+            fallow_graph::cache::GraphCacheStore::load(&cold_session.config().cache_dir).is_ok(),
             "cold analysis must persist the graph cache"
         );
 

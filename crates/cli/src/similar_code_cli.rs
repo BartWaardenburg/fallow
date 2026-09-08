@@ -135,12 +135,7 @@ pub fn run(input: SimilarCodeCliInput<'_>) -> ExitCode {
             ) {
                 Ok(snapshot) => snapshot,
                 Err(error) => {
-                    return failure(
-                        &error.message,
-                        error.exit_code,
-                        input.output,
-                        input.json_style,
-                    );
+                    return programmatic_failure(&error, input.output, input.json_style);
                 }
             };
             let options = SimilarCodeInspectOptions {
@@ -149,12 +144,7 @@ pub fn run(input: SimilarCodeCliInput<'_>) -> ExitCode {
             };
             match inspect_similar_code(&options) {
                 Ok(output) => emit_inspect(output, input.output, input.json_style),
-                Err(error) => failure(
-                    &error.message,
-                    error.exit_code,
-                    input.output,
-                    input.json_style,
-                ),
+                Err(error) => programmatic_failure(&error, input.output, input.json_style),
             }
         }
         Some(SimilarCodeSubcommand::Review {
@@ -192,12 +182,7 @@ pub fn run(input: SimilarCodeCliInput<'_>) -> ExitCode {
             }
             match run_similar_code(&similar_code_options) {
                 Ok(output) => emit_discovery(output, input.output, input.json_style),
-                Err(error) => failure(
-                    &error.message,
-                    error.exit_code,
-                    input.output,
-                    input.json_style,
-                ),
+                Err(error) => programmatic_failure(&error, input.output, input.json_style),
             }
         }
     }
@@ -841,6 +826,16 @@ fn emit_json(value: &serde_json::Value, style: JsonStyle) -> ExitCode {
 
 fn failure(message: &str, code: u8, output: OutputFormat, style: JsonStyle) -> ExitCode {
     emit_error_with_style(message, code, output, style)
+}
+
+/// Emit a similar-code API failure with its stable code and remediation hint
+/// intact, instead of collapsing the three fields into one message string.
+fn programmatic_failure(
+    error: &fallow_api::ProgrammaticError,
+    output: OutputFormat,
+    style: JsonStyle,
+) -> ExitCode {
+    crate::error::emit_programmatic_error(error, output, style)
 }
 
 #[cfg(test)]

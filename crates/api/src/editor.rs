@@ -625,6 +625,7 @@ impl EditorAnalysisOutput {
             .mirrored_directories
             .extend(source.mirrored_directories);
         self.duplication.stats.clone_groups += source.stats.clone_groups;
+        self.duplication.stats.clone_families += source.stats.clone_families;
         self.duplication.stats.clone_instances += source.stats.clone_instances;
         self.duplication.stats.total_files += source.stats.total_files;
         self.duplication.stats.files_with_clones += source.stats.files_with_clones;
@@ -682,7 +683,7 @@ impl EditorAnalysisOutput {
 mod tests {
     use super::*;
 
-    use fallow_types::duplicates::{CloneGroup, CloneInstance, DuplicationStats};
+    use fallow_types::duplicates::{CloneFamily, CloneGroup, CloneInstance, DuplicationStats};
 
     #[test]
     fn merges_duplication_stats_and_recomputes_percentage() {
@@ -705,6 +706,7 @@ mod tests {
                 mirrored_directories: Vec::new(),
                 stats: DuplicationStats {
                     clone_groups: 1,
+                    clone_families: 0,
                     clone_instances: 1,
                     total_files: 1,
                     files_with_clones: 1,
@@ -727,6 +729,7 @@ mod tests {
             mirrored_directories: Vec::new(),
             stats: DuplicationStats {
                 clone_groups: 0,
+                clone_families: 0,
                 clone_instances: 0,
                 total_files: 1,
                 files_with_clones: 0,
@@ -750,6 +753,40 @@ mod tests {
         assert_eq!(output.duplication.stats.clone_groups_ignored, 4);
         assert_eq!(output.duplication.stats.near_candidates_skipped, 6);
         assert!((output.duplication.stats.duplication_percentage - 20.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn merging_duplication_keeps_the_family_corpus_count_aligned() {
+        let family = |path: &str| CloneFamily {
+            files: vec![PathBuf::from(path)],
+            groups: Vec::new(),
+            total_duplicated_lines: 4,
+            total_duplicated_tokens: 8,
+            suggestions: Vec::new(),
+        };
+        let report = |path: &str, families: usize| EditorDuplicationReport {
+            clone_groups: Vec::new(),
+            clone_families: vec![family(path)],
+            mirrored_directories: Vec::new(),
+            stats: DuplicationStats {
+                clone_families: families,
+                ..DuplicationStats::default()
+            },
+        };
+
+        let mut output = EditorAnalysisOutput {
+            duplication: report("src/a.ts", 3),
+            ..Default::default()
+        };
+        output.merge_duplication(report("src/b.ts", 2));
+
+        assert_eq!(output.duplication.stats.clone_families, 5);
+        assert_eq!(output.duplication.clone_families_shown(), 2);
+        assert_eq!(output.duplication.clone_families_omitted(), 3);
+        assert_eq!(
+            output.duplication.clone_families_total(),
+            output.duplication.stats.clone_families
+        );
     }
 
     #[test]

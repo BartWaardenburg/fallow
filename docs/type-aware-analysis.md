@@ -140,6 +140,16 @@ from every owning project, no contract or dynamic gap, and a matching
 declaration hash. `fallow fix` reruns the same semantic analysis and verifies
 the declaration hash immediately before editing.
 
+Closed-world eligibility is proved over the program the sidecar could see,
+which is the program the run parsed. It is therefore not evidence that the run
+read every file it discovered, and it does not answer the reachability caveat.
+A class-member finding carrying `reachability_caveats` keeps
+`auto_fixable: false` even after a `confirmed-no-static-references` verdict
+with closed-world eligibility, and `fallow fix` withholds its removal, because
+a member whose only call site lives in a file the size guard skipped is absent
+from the closed world for exactly the reason it is absent from the syntactic
+verdict. Resolve the files named in `workspace_diagnostics[]` and re-run.
+
 The current safety policy abstains for every candidate in a TypeScript project
 when configuration, program, syntax, or bind diagnostics make its structure
 unsafe. It also abstains per candidate for decorators, dynamic computed member

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 import {
   QUERY_OPERATIONS,
@@ -9,6 +10,9 @@ import {
 import { checkRepositorySigningKeyParity } from "./signing-key-parity.mjs";
 
 const readJson = (path) => JSON.parse(readFileSync(path, "utf8"));
+
+/** The published release this branch evolves from. */
+const RELEASED_TAG = "v3.23.0";
 
 const markdownFilesUnder = (root) =>
   readdirSync(root, { withFileTypes: true }).flatMap((entry) => {
@@ -63,6 +67,36 @@ const missingDocumentedNodeFunctions = (declarations, readme) => {
   );
 };
 
+/** Durations, speedup ratios, and file counts. Each pattern requires a unit or
+ * a thousands separator so prose numbers ("knip 6", "medians of 5") are not
+ * mistaken for measurements. */
+const BENCHMARK_NUMBER_PATTERNS = [
+  /\b\d+(?:\.\d+)?(?:ms|s)\b/gu,
+  /\b\d+(?:\.\d+)?x\b/gu,
+  /\b\d{1,3}(?:,\d{3})+\b/gu,
+];
+
+const quotedBenchmarkNumbers = (section) => [
+  ...new Set(
+    BENCHMARK_NUMBER_PATTERNS.flatMap((pattern) =>
+      [...section.matchAll(pattern)].map((match) => match[0]),
+    ),
+  ),
+];
+
+const missingBenchmarkNumbers = (readme, benchmarks) =>
+  quotedBenchmarkNumbers(markdownSection(readme, "Performance")).filter(
+    (value) => !benchmarks.includes(value),
+  );
+
+/** The fallow version the README names as the vintage of the numbers it quotes. */
+const readmeBenchmarkVintage = (readme) =>
+  markdownSection(readme, "Performance").match(/Measured on fallow (\d+\.\d+\.\d+)/u)?.[1];
+
+/** The fallow version in the environment line under Reference Results. */
+const benchmarksEnvironmentVersion = (benchmarks) =>
+  benchmarks.match(/^Environment:.*?\bfallow (\d+\.\d+\.\d+)/mu)?.[1];
+
 test("committed binary-signing public keys remain in parity", () => {
   assert.equal(checkRepositorySigningKeyParity().length, 32);
 });
@@ -93,6 +127,38 @@ test("review Electron holds majors that exceed its wrapper and runtime", () => {
     update,
     /- dependency-name: "@types\/node"\s+update-types: \["version-update:semver-major"\]/u,
   );
+});
+
+test("README performance paragraph stays anchored to the benchmark capture", () => {
+  const readme = readFileSync("README.md", "utf8");
+  const benchmarks = readFileSync("BENCHMARKS.md", "utf8");
+
+  const missing = missingBenchmarkNumbers(readme, benchmarks);
+  assert.deepEqual(
+    missing,
+    [],
+    `README quotes numbers absent from BENCHMARKS.md: ${missing.join(", ")}`,
+  );
+
+  const vintage = readmeBenchmarkVintage(readme);
+  assert.ok(vintage, "README must name the fallow version its numbers were measured on");
+  assert.equal(
+    vintage,
+    benchmarksEnvironmentVersion(benchmarks),
+    "README benchmark vintage must match the BENCHMARKS.md environment line",
+  );
+
+  // Mutation control: a number edited on one side alone has to be reported.
+  const performance = markdownSection(readme, "Performance");
+  const [firstNumber] = quotedBenchmarkNumbers(performance);
+  const neuteredReadme = readme.replace(performance, performance.replace(firstNumber, "9999ms"));
+  assert.deepEqual(missingBenchmarkNumbers(neuteredReadme, benchmarks), ["9999ms"]);
+
+  const restampedReadme = readme.replace(
+    performance,
+    performance.replace(`fallow ${vintage}`, "fallow 0.0.0"),
+  );
+  assert.equal(readmeBenchmarkVintage(restampedReadme), "0.0.0");
 });
 
 test("root Node API overview follows the published declarations", () => {
@@ -464,6 +530,21 @@ test("FALLOW_FORMAT docs include every GitHub-native format", () => {
   }
 });
 
+test("the analysis clock env var is documented where users look for it", () => {
+  const clock = readFileSync("crates/engine/src/clock.rs", "utf8");
+  const name = clock.match(/pub const CLOCK_EPOCH_ENV: &str = "([^"]+)";/u);
+  assert.ok(name, "clock.rs must declare the reference-epoch environment variable");
+
+  const docs = readFileSync("docs/environment-variables.md", "utf8");
+  const row = new RegExp(`^\\| \`${name[1]}\` \\|`, "mu");
+  assert.match(docs, row, `environment variable docs are missing a ${name[1]} row`);
+  assert.doesNotMatch(
+    docs.slice(docs.indexOf("## Internal markers")),
+    new RegExp(name[1], "u"),
+    `${name[1]} is a user knob, not an internal marker`,
+  );
+});
+
 test("narrator comment guard runs for commits, Claude, and CI", () => {
   const preCommit = readFileSync(".githooks/pre-commit", "utf8");
   const claudeSettings = readFileSync(".claude/settings.json", "utf8");
@@ -472,4 +553,105 @@ test("narrator comment guard runs for commits, Claude, and CI", () => {
   assert.match(preCommit, /check-comment-quality\.mjs --staged/u);
   assert.match(claudeSettings, /check-comment-quality\.mjs.*--working-tree.*--claude-hook/u);
   assert.match(ci, /node scripts\/check-comment-quality\.mjs --all/u);
+});
+
+/**
+ * The envelope named `name` and every envelope embedding it, mapped to the numeric
+ * `schema_version` it publishes. An envelope is a definition whose
+ * `schema_version` property carries a `const` (or an `enum` of the closed
+ * numeric set a shared CLI/programmatic shape uses).
+ */
+const envelopesEmbedding = (definitions, name) => {
+  const parents = new Map();
+  const collect = (node, owner) => {
+    if (Array.isArray(node)) {
+      for (const item of node) collect(item, owner);
+      return;
+    }
+    if (!node || typeof node !== "object") return;
+    const ref = node.$ref;
+    if (typeof ref === "string" && ref.startsWith("#/definitions/")) {
+      const child = ref.slice("#/definitions/".length);
+      if (!parents.has(child)) parents.set(child, new Set());
+      parents.get(child).add(owner);
+    }
+    for (const value of Object.values(node)) collect(value, owner);
+  };
+  for (const [owner, schema] of Object.entries(definitions)) collect(schema, owner);
+
+  const reached = new Set([name]);
+  const stack = [name];
+  while (stack.length > 0) {
+    for (const parent of parents.get(stack.pop()) ?? []) {
+      if (!reached.has(parent)) {
+        reached.add(parent);
+        stack.push(parent);
+      }
+    }
+  }
+
+  const versions = new Map();
+  for (const owner of reached) {
+    const property = definitions[owner]?.properties?.schema_version;
+    if (!property) continue;
+    const target = property.$ref
+      ? (definitions[property.$ref.slice("#/definitions/".length)] ?? {})
+      : property;
+    const version = target.const ?? target.enum;
+    if (version !== undefined) versions.set(owner, JSON.stringify(version));
+  }
+  return versions;
+};
+
+test("schema policy includes a standalone envelope when its own fields change", () => {
+  const definitions = {
+    Report: { properties: { schema_version: { const: 1 } }, required: ["result"] },
+  };
+  const before = envelopesEmbedding(definitions, "Report");
+  const after = envelopesEmbedding({ Report: { ...definitions.Report, required: [] } }, "Report");
+  assert.equal(before.get("Report"), "1");
+  assert.equal(after.get("Report"), before.get("Report"));
+});
+
+test("a required output field cannot be dropped at a frozen schema_version", (t) => {
+  const previous = spawnSync("git", ["show", `${RELEASED_TAG}:docs/output-schema.json`], {
+    encoding: "utf8",
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  if (previous.status !== 0) {
+    // A clone without the released tag cannot answer this. Report it as
+    // skipped rather than passing: a green line here would say the schema was
+    // compared when nothing was.
+    t.skip(`${RELEASED_TAG} is not in this clone, so the schema baseline is unreachable`);
+    return;
+  }
+
+  const before = JSON.parse(previous.stdout).definitions;
+  const after = readJson("docs/output-schema.json").definitions;
+
+  const breaks = [];
+  for (const [name, schema] of Object.entries(before)) {
+    if (!(name in after)) continue;
+    const lost = (schema.required ?? []).filter(
+      (field) => !(after[name].required ?? []).includes(field),
+    );
+    if (lost.length === 0) continue;
+
+    const oldVersions = envelopesEmbedding(before, name);
+    const newVersions = envelopesEmbedding(after, name);
+    for (const [envelope, version] of newVersions) {
+      if (oldVersions.get(envelope) === version) {
+        breaks.push(
+          `${envelope} still publishes schema_version ${version} while ${name} dropped required ${lost.join(", ")}`,
+        );
+      }
+    }
+  }
+
+  assert.deepEqual(
+    breaks,
+    [],
+    `docs/backwards-compatibility.md requires a bump when an existing wire field is removed, ` +
+      `and every envelope that embeds the changed contract bumps with it:\n  ${breaks.join("\n  ")}`,
+  );
 });

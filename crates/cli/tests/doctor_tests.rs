@@ -9,6 +9,100 @@ mod common;
 
 use common::{parse_json, run_fallow_raw, run_fallow_raw_with_env};
 
+fn cache_snapshot(
+    path: &std::path::Path,
+) -> Vec<(std::ffi::OsString, Vec<u8>, std::time::SystemTime)> {
+    let mut files: Vec<_> = std::fs::read_dir(path)
+        .unwrap()
+        .map(|entry| {
+            let entry = entry.unwrap();
+            (
+                entry.file_name(),
+                std::fs::read(entry.path()).unwrap(),
+                entry.metadata().unwrap().modified().unwrap(),
+            )
+        })
+        .collect();
+    files.sort_by(|left, right| left.0.cmp(&right.0));
+    files
+}
+
+#[test]
+fn doctor_honors_cache_env_precedence_without_mutating_the_cache() {
+    let absolute_cache = tempfile::tempdir().unwrap();
+    for cache_value in [
+        "cache-env".to_string(),
+        absolute_cache.path().to_string_lossy().into_owned(),
+        String::new(),
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(
+            root.path().join("package.json"),
+            r#"{"name":"doctor-cache-env","main":"index.ts"}"#,
+        )
+        .unwrap();
+        std::fs::write(root.path().join("index.ts"), "console.log('cache');\n").unwrap();
+        std::fs::write(
+            root.path().join("fallow.toml"),
+            "[cache]\ndir = 'configured-cache'\n",
+        )
+        .unwrap();
+        let root_text = root.path().to_string_lossy();
+        let env = [("FALLOW_CACHE_DIR", cache_value.as_str())];
+        let analysis = run_fallow_raw_with_env(
+            &[
+                "dead-code",
+                "--root",
+                &root_text,
+                "--format",
+                "json",
+                "--quiet",
+            ],
+            &env,
+        );
+        assert!(matches!(analysis.code, 0 | 1), "{}", analysis.stderr);
+        let cache_dir = root.path().join(if cache_value.is_empty() {
+            "configured-cache"
+        } else {
+            &cache_value
+        });
+        assert!(cache_dir.join("cache.bin").exists());
+        assert!(cache_dir.join("graph-cache.bin").exists());
+        let before = cache_snapshot(&cache_dir);
+
+        let output = run_fallow_raw_with_env(
+            &[
+                "doctor", "--root", &root_text, "--format", "json", "--quiet",
+            ],
+            &env,
+        );
+        assert_eq!(output.code, 0, "{}", output.stderr);
+        let json = parse_json(&output);
+        for (id, expected) in [("cache", "reusable"), ("graph-cache", "loads")] {
+            let check = json["checks"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|check| check["id"] == id)
+                .unwrap();
+            assert_eq!(check["status"], "pass");
+            assert!(
+                check["message"].as_str().unwrap().contains(expected),
+                "{check}"
+            );
+        }
+        assert_eq!(
+            cache_snapshot(&cache_dir),
+            before,
+            "doctor must only read the selected cache"
+        );
+        assert!(!root.path().join(".fallow/cache.bin").exists());
+        if !cache_value.is_empty() {
+            assert!(!root.path().join("configured-cache").exists());
+        }
+    }
+}
+
 #[test]
 fn help_only_advertises_supported_options() {
     for help_flag in ["-h", "--help"] {
@@ -101,9 +195,11 @@ fn zero_config_json_is_stable_and_path_free() {
     assert!(!output.stdout.contains(root_text.as_ref()));
     let json = parse_json(&output);
     assert_eq!(json["kind"], "doctor");
-    assert_eq!(json["schema_version"], 1);
+    assert_eq!(json["schema_version"], 2);
     assert_eq!(json["root"], ".");
-    assert_eq!(json["status"], "pass");
+    // A bare temp root has no node_modules, which is exactly the state the
+    // dependencies check exists to report, so the aggregate is advisory.
+    assert_eq!(json["status"], "warn");
     assert_eq!(
         json["checks"]
             .as_array()
@@ -111,7 +207,16 @@ fn zero_config_json_is_stable_and_path_free() {
             .iter()
             .map(|check| check["id"].as_str().expect("check id"))
             .collect::<Vec<_>>(),
-        ["root", "config", "workspaces", "plugins", "type-aware"]
+        [
+            "root",
+            "config",
+            "workspaces",
+            "plugins",
+            "type-aware",
+            "dependencies",
+            "cache",
+            "graph-cache"
+        ]
     );
 }
 
@@ -135,7 +240,7 @@ fn invalid_config_returns_complete_failed_json_report() {
     let json = parse_json(&output);
     assert_eq!(json["kind"], "doctor");
     assert_eq!(json["status"], "fail");
-    assert_eq!(json["checks"].as_array().map(Vec::len), Some(5));
+    assert_eq!(json["checks"].as_array().map(Vec::len), Some(8));
     assert_eq!(json["checks"][1]["id"], "config");
     assert_eq!(json["checks"][1]["status"], "fail");
 }

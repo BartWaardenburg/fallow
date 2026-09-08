@@ -46,6 +46,19 @@ pub struct ModuleInfo {
     pub has_angular_component_template_url: bool,
     /// xxh3 hash of the file content for incremental caching.
     pub content_hash: u64,
+    /// Number of parser diagnostics the parse of this file produced.
+    ///
+    /// Non-zero means extraction saw a partial or repaired tree, so imports,
+    /// exports, and references after the first error may be missing. Reported
+    /// through `workspace_diagnostics[]` as `source-parse-degraded`; it never
+    /// withholds a finding, because oxc also reports recoverable errors for
+    /// valid syntax newer than the parser, and gating on it would mute real
+    /// results project-wide. Zero for non-JS extraction paths, which do not run
+    /// the oxc parser.
+    pub parse_error_count: u32,
+    /// `true` when the parser abandoned the file instead of recovering. The
+    /// extracted module is then a fragment of the real one at best.
+    pub parse_panicked: bool,
     /// Inline suppression directives parsed from comments.
     pub suppressions: Vec<Suppression>,
     /// Suppression tokens that did not parse to any known `IssueKind`.
@@ -377,6 +390,8 @@ impl ModuleInfo {
             has_cjs_exports: false,
             has_angular_component_template_url: false,
             content_hash: 0,
+            parse_error_count: 0,
+            parse_panicked: false,
             suppressions: Vec::new(),
             unknown_suppression_kinds: Vec::new(),
             unused_import_bindings: Vec::new(),
@@ -3292,7 +3307,7 @@ const _: () = assert!(std::mem::size_of::<SemanticFact>() == 96);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<SinkSite>() == 216);
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 1336);
+const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 1344);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<TypeMemberTypeEntry>() == 72);
 
@@ -3371,6 +3386,9 @@ pub struct ParseResult {
     pub modules: Vec<ModuleInfo>,
     /// Files discovered with stable IDs but unreadable by the parser.
     pub read_failures: Vec<SourceReadFailure>,
+    /// Files that parsed with diagnostics, so their extracted module may be
+    /// incomplete. Reported, never used to withhold findings.
+    pub parse_degradations: Vec<SourceParseDegradation>,
     /// Number of files whose parse results were loaded from cache (unchanged).
     pub cache_hits: usize,
     /// Number of files that required a full parse (new or changed).
@@ -3388,6 +3406,25 @@ pub struct SourceReadFailure {
     pub path: PathBuf,
     /// Underlying filesystem or UTF-8 decoding error.
     pub error: String,
+}
+
+/// A discovered source that was read but did not parse cleanly.
+///
+/// The module it produced is still analyzed: dropping it would turn one broken
+/// file into project-wide silence. The point of carrying the degradation is
+/// that the imports the file failed to parse credited nothing, so its targets
+/// can be reported as unused with full confidence unless a consumer is told the
+/// parse was partial.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceParseDegradation {
+    /// Stable discovery identity of the degraded source.
+    pub file_id: FileId,
+    /// Absolute discovered source path.
+    pub path: PathBuf,
+    /// Number of parser diagnostics reported for the file.
+    pub error_count: u32,
+    /// `true` when the parser abandoned the file instead of recovering.
+    pub panicked: bool,
 }
 
 #[cfg(test)]
@@ -3767,6 +3804,8 @@ mod tests {
             has_cjs_exports: true,
             has_angular_component_template_url: true,
             content_hash: 42,
+            parse_error_count: 0,
+            parse_panicked: false,
             suppressions: Vec::new(),
             unknown_suppression_kinds: Vec::new(),
             unused_import_bindings: vec!["unused".to_string()],

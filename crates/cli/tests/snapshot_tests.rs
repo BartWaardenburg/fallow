@@ -117,6 +117,7 @@ fn api_grouped_duplication_json_document(
         grouping,
         root,
         elapsed,
+        include_fragments: true,
         meta: explain.then(dupes_meta),
         workspace_diagnostics: Vec::new(),
         next_steps: build_dupes_next_steps(DupesNextStepsInput {
@@ -3284,6 +3285,7 @@ fn sample_duplication_report(root: &Path) -> DuplicationReport {
             total_tokens: 25000,
             duplicated_tokens: 25,
             clone_groups: 1,
+            clone_families: 0,
             clone_instances: 2,
             duplication_percentage: 0.22,
             clone_groups_below_min_occurrences: 0,
@@ -3396,6 +3398,7 @@ fn sample_grouped_duplication_report(root: &Path) -> DuplicationReport {
             total_tokens: 25000,
             duplicated_tokens: 86,
             clone_groups: 2,
+            clone_families: 0,
             clone_instances: 5,
             duplication_percentage: 0.7,
             clone_groups_below_min_occurrences: 0,

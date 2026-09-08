@@ -193,9 +193,12 @@ variables:
   image: node:22-alpine
   stage: test
   cache:
-    key: "fallow-${CI_COMMIT_REF_SLUG}"
+    # Scoped per job so a matrix over FALLOW_ROOT does not overwrite itself.
+    # GitLab rejects "/" inside a cache key, so the root cannot be interpolated
+    # directly; every matrix arm already gets a distinct job name slug.
+    key: "fallow-${CI_COMMIT_REF_SLUG}-${CI_JOB_NAME_SLUG}"
     paths:
-      - .fallow/
+      - ${FALLOW_ROOT}/.fallow/
     policy: pull-push
   before_script:
     # Install dependencies: detect Alpine (apk) vs Debian/Ubuntu (apt-get)
@@ -712,7 +715,7 @@ variables:
         audit)           ISSUES=$(jq -r 'if (.attribution.gate // "new-only") == "all" then ((.summary.dead_code_issues // 0) + (.summary.complexity_findings // 0) + (.summary.duplication_clone_groups // 0)) else ((.attribution.dead_code_introduced // 0) + (.attribution.complexity_introduced // 0) + (.attribution.duplication_introduced // 0)) end' fallow-results.json) ;;
         security)        ISSUES=$(jq -r 'if .gate then (.gate.new_count // 0) else (.summary.security_findings // ((.security_findings // []) | length)) end' fallow-results.json) ;;
         fix)             ISSUES=$(jq -r '(.fixes | length)' fallow-results.json) ;;
-        "")              ISSUES=$(jq -r '((.check.total_issues // 0) + ((.dupes.clone_groups // []) | length) + (.health.summary.functions_above_threshold // 0) + ((.health.runtime_coverage.findings // []) | map(select(.verdict == "safe_to_delete" or .verdict == "review_required" or .verdict == "low_traffic")) | length))' fallow-results.json) ;;
+        "")              ISSUES=$(jq -r '((.check.total_issues // 0) + (((.dupes.clone_groups // []) | length) + (.dupes.clone_groups_omitted // 0)) + (.health.summary.functions_above_threshold // 0) + ((.health.runtime_coverage.findings // []) | map(select(.verdict == "safe_to_delete" or .verdict == "review_required" or .verdict == "low_traffic")) | length))' fallow-results.json) ;;
       esac
 
       if ! echo "$ISSUES" | grep -qE '^[0-9]+$'; then

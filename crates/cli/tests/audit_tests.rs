@@ -7,7 +7,7 @@
 #[path = "common/mod.rs"]
 mod common;
 
-use common::{fallow_bin, parse_json, run_fallow_raw};
+use common::{canonical_report, fallow_bin, parse_json, run_fallow_raw};
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -1897,33 +1897,8 @@ fn audit_parallel_output_is_deterministic() {
         .output()
         .unwrap();
 
-    fn normalize(value: &mut serde_json::Value) {
-        match value {
-            serde_json::Value::Object(map) => {
-                map.remove("elapsed_ms");
-                map.remove("head_sha");
-                if let Some(telemetry) = map
-                    .get_mut("_meta")
-                    .and_then(|meta| meta.get_mut("telemetry"))
-                    .and_then(|telemetry| telemetry.as_object_mut())
-                {
-                    telemetry.remove("analysis_run_id");
-                }
-                for v in map.values_mut() {
-                    normalize(v);
-                }
-            }
-            serde_json::Value::Array(items) => {
-                for v in items {
-                    normalize(v);
-                }
-            }
-            _ => {}
-        }
-    }
-
-    let mut canonicalized: Vec<String> = std::iter::repeat_with(|| {
-        let output = run_fallow_raw(&[
+    let audit = |threads: Option<&str>| {
+        let mut args = vec![
             "audit",
             "--root",
             dir.path().to_str().unwrap(),
@@ -1932,19 +1907,21 @@ fn audit_parallel_output_is_deterministic() {
             "--format",
             "json",
             "--quiet",
-        ]);
+        ];
+        if let Some(threads) = threads {
+            args.extend(["--threads", threads]);
+        }
+        let output = run_fallow_raw(&args);
         assert!(
             output.code == 0 || output.code == 1,
             "audit run should not crash: stdout={}\nstderr={}",
             output.stdout,
             output.stderr
         );
-        let mut value = parse_json(&output);
-        normalize(&mut value);
-        serde_json::to_string(&value).expect("re-serialize canonical json")
-    })
-    .take(3)
-    .collect();
+        canonical_report(&output)
+    };
+
+    let mut canonicalized: Vec<String> = std::iter::repeat_with(|| audit(None)).take(3).collect();
 
     let first = canonicalized.remove(0);
     for (idx, run) in canonicalized.iter().enumerate() {
@@ -1953,6 +1930,19 @@ fn audit_parallel_output_is_deterministic() {
             run,
             "audit parallel run #{} differed from run #0",
             idx + 1
+        );
+    }
+
+    // Repeating a run at the same thread count only proves the schedule was
+    // stable, not that the result is independent of it. Vary the pool size:
+    // a single worker serializes every rayon::join the audit path takes, and a
+    // wide pool interleaves them, so an ordering that leaked into the report
+    // shows up here and nowhere else in the suite.
+    for threads in ["1", "8"] {
+        assert_eq!(
+            first,
+            audit(Some(threads)),
+            "audit at --threads {threads} differed from the default thread pool"
         );
     }
 }

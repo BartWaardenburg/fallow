@@ -6,7 +6,7 @@
 
 mod common;
 
-use common::run_fallow;
+use common::{run_fallow, run_fallow_in_root};
 
 #[test]
 fn feature_flag_suppression_next_line() {
@@ -143,5 +143,92 @@ fn empty_result_custom_config_is_terse() {
         !out.stderr.contains("LaunchDarkly"),
         "the built-in provider enumeration should be suppressed for custom config: {}",
         out.stderr
+    );
+}
+
+/// A flags run reports what it skipped, in the envelope, not only on stderr.
+///
+/// This command's envelope carried no `workspace_diagnostics` key at all, so a
+/// skipped, unreadable, or degraded file was unreachable from both channels:
+/// several kinds no longer print a stderr warning, and the JSON had nowhere to
+/// put them. Each is a reason a flag is missing from `feature_flags[]`.
+#[test]
+fn flags_json_reports_the_diagnostics_the_run_recorded() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"flagproj","version":"1.0.0"}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("src/index.ts"),
+        "export const checkout = (): boolean => process.env.FEATURE_CHECKOUT === \"1\";\n",
+    )
+    .unwrap();
+    // A file the parser cannot finish: the flags scan still reads it, and what
+    // it could not reach is a reason a flag is absent.
+    std::fs::write(root.join("src/broken.ts"), "export const oops = ( => {\n").unwrap();
+
+    let output = run_fallow_in_root(
+        "flags",
+        root,
+        &["--format", "json", "--quiet", "--no-cache"],
+    );
+
+    assert_eq!(output.code, 0, "stderr:\n{}", output.stderr);
+    let json: serde_json::Value = serde_json::from_str(&output.stdout).expect("valid JSON");
+    let diagnostics = json["workspace_diagnostics"]
+        .as_array()
+        .unwrap_or_else(|| panic!("flags JSON should carry workspace_diagnostics, got {json}"));
+    let kinds: Vec<&str> = diagnostics
+        .iter()
+        .filter_map(|d| d["kind"].as_str())
+        .collect();
+    assert!(
+        kinds.contains(&"source-parse-degraded"),
+        "the unparseable file must be reported, kinds were {kinds:?}"
+    );
+
+    let degraded = diagnostics
+        .iter()
+        .find(|d| d["kind"] == "source-parse-degraded")
+        .unwrap();
+    assert_eq!(
+        degraded["path"], "src/broken.ts",
+        "paths are project-relative on this envelope, entry was {degraded}"
+    );
+}
+
+/// The unconfigured-detector diagnostics reach this envelope too.
+///
+/// They are recorded by the dead-code analyze pass, and the flag scan runs
+/// that pass to correlate flags with dead exports. They stopped printing on
+/// stderr in this release, so before the array existed they were unreachable
+/// from both channels on `fallow flags` specifically.
+#[test]
+fn flags_json_carries_the_analysis_stage_diagnostics_its_scan_records() {
+    let json: serde_json::Value = serde_json::from_str(
+        &run_fallow(
+            "flags",
+            "feature-flag-suppression",
+            &["--no-cache", "--format", "json"],
+        )
+        .stdout,
+    )
+    .expect("valid JSON from flags command");
+
+    let kinds: Vec<&str> = json["workspace_diagnostics"]
+        .as_array()
+        .unwrap_or_else(|| panic!("flags JSON should carry workspace_diagnostics, got {json}"))
+        .iter()
+        .filter_map(|d| d["kind"].as_str())
+        .collect();
+
+    assert!(
+        kinds.contains(&"boundaries-not-configured")
+            && kinds.contains(&"rule-packs-not-configured"),
+        "the flag scan runs the dead-code pass, so its diagnostics belong here, kinds were {kinds:?}"
     );
 }

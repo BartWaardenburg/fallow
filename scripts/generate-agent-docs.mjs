@@ -83,13 +83,21 @@ const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
  * staleness gate never touches the public skills surface. */
 export const CURATED_SEED_RECORD_PATH = "scripts/agent-doc-curated-seeds.json";
 
-const SKILL_SECTION_IDS = ["commands", "issue-types", "task-matrix"];
+const SKILL_SECTION_IDS = ["task-matrix"];
 // mcp-tools moved out of SKILL.md into references/mcp.md: the full 20+ tool
 // catalogue is reference-grade and (when the server is connected) already
 // advertised via live tool schemas, so it does not belong in the always-loaded
 // entry file. SKILL.md keeps only a short pointer section.
 const MCP_REFERENCE_SECTION_IDS = ["mcp-tools", "mcp-resources"];
+// commands and issue-types followed mcp-tools out for the same reason: both are
+// row-per-entity catalogues an agent consults on demand, and both are already
+// reachable live (`fallow <command> --help`, `fallow schema`, `fallow explain
+// <issue-type>`, the `fallow://issue-types` resource). SKILL.md keeps the two
+// conventions an agent would otherwise invent, the dead-code filter flags and
+// the suppression comment form, plus a pointer to each catalogue.
+const ISSUE_TYPE_REFERENCE_SECTION_IDS = ["issue-types"];
 const CLI_REFERENCE_SECTION_IDS = [
+  "commands",
   "flags:global",
   "flags:fallow-combined",
   "flags:dead-code",
@@ -110,6 +118,7 @@ const CLI_REFERENCE_SECTION_IDS = [
 export const SECTION_IDS = [
   ...SKILL_SECTION_IDS,
   ...MCP_REFERENCE_SECTION_IDS,
+  ...ISSUE_TYPE_REFERENCE_SECTION_IDS,
   ...CLI_REFERENCE_SECTION_IDS,
 ];
 
@@ -802,6 +811,12 @@ export const regenerateCliReferenceMd = (text, schema, fileLabel = "references/c
 export const regenerateMcpReferenceMd = (text, schema, fileLabel = "references/mcp.md") =>
   regenerateSections(text, schema, fileLabel, MCP_REFERENCE_SECTION_IDS);
 
+export const regenerateIssueTypeReferenceMd = (
+  text,
+  schema,
+  fileLabel = "references/issue-types.md",
+) => regenerateSections(text, schema, fileLabel, ISSUE_TYPE_REFERENCE_SECTION_IDS);
+
 const changedSections = (before, schema, fileLabel, sectionIds) =>
   sectionIds.filter(
     (id) =>
@@ -990,6 +1005,30 @@ export const main = (argv = process.argv.slice(2)) => {
           after: cliAfter,
           schema,
           sectionIds: CLI_REFERENCE_SECTION_IDS,
+          check: opts.check,
+        })
+      ) {
+        drifted += 1;
+      }
+    }
+
+    const issueTypeReferenceFile = join(target, "references", "issue-types.md");
+    if (existsSync(issueTypeReferenceFile)) {
+      const issueTypesBefore = readFileSync(issueTypeReferenceFile, "utf8");
+      collectAdoptedSections(issueTypesBefore, ISSUE_TYPE_REFERENCE_SECTION_IDS, adoptedSections);
+      const issueTypesAfter = regenerateIssueTypeReferenceMd(
+        issueTypesBefore,
+        schema,
+        issueTypeReferenceFile,
+      );
+      if (
+        processFile({
+          file: issueTypeReferenceFile,
+          outputFile: join(outputTarget, "references", "issue-types.md"),
+          before: issueTypesBefore,
+          after: issueTypesAfter,
+          schema,
+          sectionIds: ISSUE_TYPE_REFERENCE_SECTION_IDS,
           check: opts.check,
         })
       ) {

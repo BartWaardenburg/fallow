@@ -4,7 +4,8 @@ use rmcp::ErrorData as McpError;
 use rmcp::model::CallToolResult;
 
 use super::{
-    push_global, push_remote_extends, push_scope, run_tool, run_tool_with_top_level_warnings,
+    push_global, push_remote_extends, push_scope, run_tool_with_limit,
+    run_tool_with_top_level_warnings,
 };
 
 /// Run the runtime coverage health merge. This stays CLI-backed while the
@@ -14,7 +15,13 @@ pub async fn run_check_runtime_coverage(
     params: CheckRuntimeCoverageParams,
 ) -> Result<CallToolResult, McpError> {
     let args = build_check_runtime_coverage_args(&params);
-    run_tool(binary, "check_runtime_coverage", &args).await
+    run_tool_with_limit(
+        binary,
+        "check_runtime_coverage",
+        &args,
+        params.max_output_bytes,
+    )
+    .await
 }
 
 pub async fn run_get_hot_paths(
@@ -22,7 +29,7 @@ pub async fn run_get_hot_paths(
     params: CheckRuntimeCoverageParams,
 ) -> Result<CallToolResult, McpError> {
     let args = build_get_hot_paths_args(&params);
-    run_tool_with_top_level_warnings(binary, "get_hot_paths", &args).await
+    run_tool_with_top_level_warnings(binary, "get_hot_paths", &args, params.max_output_bytes).await
 }
 
 pub async fn run_get_blast_radius(
@@ -30,7 +37,8 @@ pub async fn run_get_blast_radius(
     params: CheckRuntimeCoverageParams,
 ) -> Result<CallToolResult, McpError> {
     let args = build_get_blast_radius_args(&params);
-    run_tool_with_top_level_warnings(binary, "get_blast_radius", &args).await
+    run_tool_with_top_level_warnings(binary, "get_blast_radius", &args, params.max_output_bytes)
+        .await
 }
 
 pub async fn run_get_importance(
@@ -38,7 +46,7 @@ pub async fn run_get_importance(
     params: CheckRuntimeCoverageParams,
 ) -> Result<CallToolResult, McpError> {
     let args = build_get_importance_args(&params);
-    run_tool_with_top_level_warnings(binary, "get_importance", &args).await
+    run_tool_with_top_level_warnings(binary, "get_importance", &args, params.max_output_bytes).await
 }
 
 pub async fn run_get_cleanup_candidates(
@@ -46,7 +54,13 @@ pub async fn run_get_cleanup_candidates(
     params: CheckRuntimeCoverageParams,
 ) -> Result<CallToolResult, McpError> {
     let args = build_get_cleanup_candidates_args(&params);
-    run_tool_with_top_level_warnings(binary, "get_cleanup_candidates", &args).await
+    run_tool_with_top_level_warnings(
+        binary,
+        "get_cleanup_candidates",
+        &args,
+        params.max_output_bytes,
+    )
+    .await
 }
 
 pub async fn run_get_token_blast_radius(
@@ -54,7 +68,13 @@ pub async fn run_get_token_blast_radius(
     params: GetTokenBlastRadiusParams,
 ) -> Result<CallToolResult, McpError> {
     let args = build_get_token_blast_radius_args(&params);
-    run_tool_with_top_level_warnings(binary, "get_token_blast_radius", &args).await
+    run_tool_with_top_level_warnings(
+        binary,
+        "get_token_blast_radius",
+        &args,
+        params.max_output_bytes,
+    )
+    .await
 }
 
 /// Build CLI arguments for the `check_runtime_coverage` tool.

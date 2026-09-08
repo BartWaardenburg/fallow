@@ -24,7 +24,7 @@
 
 
 /**
- * Schemas for the JSON output of fallow commands. Object-shaped envelopes covered by the `FallowOutput` contract carry a top-level `kind` discriminator. Current kind values: `audit`, `explain`, `inspect_target`, `trace`, `review-envelope`, `review-reconcile`, `coverage-setup`, `coverage-analyze`, `list-boundaries`, `list-workspaces`, `health`, `dupes`, `dead-code-grouped`, `impact`, `impact-cross-repo`, `security`, `security-survivors`, `security-blind-spots`, `dead-code`, `combined`, `feature-flags`, `audit-brief`, `decision-surface`, `review-walkthrough-guide`, `review-walkthrough-validation`, `suppression-inventory`, `doctor`, `type-aware-status`, `similar-code`, `similar-code-inspect`, `similar-code-review`. Consumers should branch on `kind` instead of probing for unique field presence. `CodeClimateOutput` is a bare JSON array (per the Code Climate / GitLab Code Quality spec) and stays a sibling root branch discriminated by checking whether the document root is an array. `ErrorOutput` is the `--format json` failure document, emitted on stdout with a non-zero exit; it carries no `kind` and is discriminated by the `error: true` field.
+ * Schemas for the JSON output of fallow commands. Object-shaped envelopes covered by the `FallowOutput` contract carry a top-level `kind` discriminator. Current kind values: `audit`, `explain`, `inspect_target`, `trace`, `trace-error`, `review-envelope`, `review-reconcile`, `coverage-setup`, `coverage-analyze`, `list-boundaries`, `list-workspaces`, `health`, `dupes`, `dead-code-grouped`, `impact`, `impact-cross-repo`, `security`, `security-survivors`, `security-blind-spots`, `dead-code`, `combined`, `feature-flags`, `audit-brief`, `decision-surface`, `review-walkthrough-guide`, `review-walkthrough-validation`, `suppression-inventory`, `doctor`, `type-aware-status`, `similar-code`, `similar-code-inspect`, `similar-code-review`. Consumers should branch on `kind` instead of probing for unique field presence. `CodeClimateOutput` is a bare JSON array (per the Code Climate / GitLab Code Quality spec) and stays a sibling root branch discriminated by checking whether the document root is an array. `ErrorOutput` is the `--format json` failure document, emitted on stdout with a non-zero exit; it carries no `kind` and is discriminated by the `error: true` field.
  */
 export type FallowJsonOutput = (FallowOutput | CodeClimateOutput | ErrorOutput)
 /**
@@ -50,8 +50,10 @@ kind: "audit"
 kind: "explain"
 }) | (InspectOutput & {
 kind: "inspect_target"
-}) | ((ExportTrace | ClassMemberTrace | FileTrace | DependencyTrace | CloneTrace | ImpactClosureTrace | SymbolChainTrace | SemanticSymbolTrace) & {
+}) | ((ExportTrace | ClassMemberTrace | FileTrace | DependencyTrace | CloneTrace | ImpactClosureTrace | ImportPathTrace | SymbolChainTrace | SemanticSymbolTrace) & {
 kind: "trace"
+}) | (ErrorTrace & {
+kind: "trace-error"
 }) | (ReviewEnvelopeOutput & {
 kind: "review-envelope"
 }) | (ReviewReconcileOutput & {
@@ -110,7 +112,7 @@ kind: "similar-code-review"
 /**
  * Schema projection for the audit envelope's exact version.
  */
-export type AuditSchemaVersion = 10
+export type AuditSchemaVersion = 11
 /**
  * Fallow CLI version that produced this envelope. Renders to the JSON wire as
  * a bare string (e.g. `"2.74.0"`).
@@ -290,6 +292,27 @@ export type AddToConfigValue = (string | IgnoreExportsRule[] | {
  */
 export type AuditIntroduced = boolean
 /**
+ * A per-finding caveat on a dead-code verdict that a file this run never
+ * fully analyzed can distort.
+ *
+ * Advisory provenance, in the same spirit as the fix path's
+ * `low_confidence_off_graph` / `low_confidence_unresolved_imports` skip
+ * reasons: a caveat NEVER withholds, reorders, downgrades, or re-severities
+ * the finding, and never changes an exit code. It records that the verdict
+ * was computed over an import graph fallow already knows is incomplete, so a
+ * reader who sees the finding also sees the caveat instead of having to
+ * notice a diagnostic at the other end of the envelope.
+ *
+ * Deliberately NOT named `confidence`: `health --targets` already emits a
+ * `confidence` key holding an enum string, and a shared consumer helper that
+ * met both would see the same key change type. Emitted on the four verdicts a
+ * lost import edge can distort: `unused_files[]`, `unused_exports[]`, and the
+ * three dependency arrays. Sorted and deduplicated, absent from the wire when
+ * empty. The set is open in the same sense `workspace_diagnostics[].kind` is:
+ * treat an unrecognised value as "some caveat" rather than as an error.
+ */
+export type ReachabilityCaveat = ("incomplete-file-analysis" | "incomplete-import-graph")
+/**
  * Where in package.json a dependency is listed.
  *
  * # Examples
@@ -452,11 +475,28 @@ kind: "skipped-source-dotdir"
 error: string
 kind: "source-read-failure"
 } | {
+/**
+ * Number of parser diagnostics reported for the file.
+ */
+error_count: number
+/**
+ * `true` when the parser abandoned the file instead of recovering, so
+ * the extracted module is a fragment at best.
+ */
+panicked: boolean
+kind: "source-parse-degraded"
+} | {
 kind: "bun-lockb-override-resolution-skipped"
 } | {
 kind: "bun-lock-override-resolution-skipped"
 } | {
 kind: "bun-resolutions-shadowed-by-overrides"
+} | {
+kind: "node-modules-missing"
+} | {
+kind: "boundaries-not-configured"
+} | {
+kind: "rule-packs-not-configured"
 })
 /**
  * Discriminant for [`CloneGroupAction::kind`]. Mirrors the action types
@@ -577,6 +617,14 @@ export type HotspotActionType = ("refactor-file" | "add-tests" | "low-bus-factor
  * an `unowned-hotspot` action.
  */
 export type HotspotActionHeuristic = "directory-deepest"
+/**
+ * Where the run's reference epoch came from.
+ *
+ * Churn recency weighting and ownership staleness are measured against one
+ * instant. `head_commit` and `environment` resolve to the same value on every
+ * run over the same commit; `wall_clock` does not.
+ */
+export type ClockSource = ("environment" | "head_commit" | "wall_clock")
 /**
  * Runtime coverage JSON contract version. This is scoped to the
  * `runtime_coverage` block and is independent of the top-level fallow
@@ -774,9 +822,36 @@ export type InspectSectionStatus = ("ok" | "partial" | "unavailable" | "error")
  */
 export type InspectEvidenceScope = ("symbol" | "file" | "project_filtered_to_file")
 /**
+ * Wire-version discriminator for [`ImportPathTrace`]. Independent from the
+ * global `SchemaVersion`: the import-path payload versions on its own cadence,
+ * like the other independently-versioned envelopes. Serializes as a string
+ * `const` so JSON consumers can switch on it.
+ */
+export type ImportPathTraceSchemaVersion = "1"
+/**
  * Best-effort classification of why a callee did not resolve to an edge.
  */
 export type UnresolvedReason = ("local-or-global" | "member-or-dynamic")
+/**
+ * Wire-version discriminator for [`ErrorTrace`]. Independent from the global
+ * `SchemaVersion` and from the other trace payloads, like
+ * [`crate::trace::ImportPathTraceSchemaVersion`]. Serializes as a string
+ * `const` so JSON consumers can switch on it.
+ */
+export type ErrorTraceSchemaVersion = "1"
+/**
+ * Where a frame's source location sits relative to the analysed project.
+ */
+export type FrameOrigin = ("in_project" | "node_modules" | "out_of_corpus")
+/**
+ * What the project graph could say about a frame's identifier.
+ *
+ * `not_attempted` is not a softer `not_found`: it records that the graph was
+ * never consulted, because the frame does not point at project source. Keeping
+ * them apart is what lets `resolved + ambiguous + not_found + not_attempted`
+ * equal the frame count without any of the four lying about what it measured.
+ */
+export type FrameResolution = ("resolved" | "ambiguous" | "not_found" | "not_attempted")
 /**
  * Singleton GitHub review-event marker.
  */
@@ -859,7 +934,7 @@ export type GroupByMode = ("owner" | "directory" | "package" | "section")
  * Schema projection for the duplication envelope's CLI and programmatic
  * version lineages.
  */
-export type DupesSchemaVersion = (3 | 9)
+export type DupesSchemaVersion = (4 | 10)
 /**
  * Wire-version discriminator for [`ImpactReport`]. Independent from the global
  * `SchemaVersion` (the impact report versions on its own cadence) and from the
@@ -971,7 +1046,7 @@ export type SecurityBlindSpotsSchemaVersion = "1"
 /**
  * Schema projection for the combined envelope's exact version.
  */
-export type CombinedSchemaVersion = 11
+export type CombinedSchemaVersion = 12
 /**
  * Schema projection for the feature-flags envelope's exact version.
  */
@@ -992,7 +1067,7 @@ export type FeatureFlagActionType = ("investigate-flag" | "suppress-line")
  * Independently-versioned wire-version newtype for the brief envelope.
  * Serializes as the integer `REVIEW_BRIEF_SCHEMA_VERSION`.
  */
-export type ReviewBriefSchemaVersion = 9
+export type ReviewBriefSchemaVersion = 10
 /**
  * The exactly-three shippable decision categories (the SOLID-3). No cut category
  * (abstraction / deletion / convention / irreversibility) is representable: this
@@ -1064,7 +1139,7 @@ export type SuppressionInventoryOrigin = "comment"
 /**
  * Schema projection for the exact doctor envelope version.
  */
-export type DoctorSchemaVersion = 1
+export type DoctorSchemaVersion = 2
 /**
  * Schema projection for `.` as the privacy-safe diagnosed project root.
  */
@@ -1076,11 +1151,11 @@ export type DoctorStatus = ("pass" | "warn" | "fail")
 /**
  * Stable identifier for a doctor check. Declaration order is output order.
  */
-export type DoctorCheckId = ("root" | "config" | "workspaces" | "plugins" | "type-aware")
+export type DoctorCheckId = ("root" | "config" | "workspaces" | "plugins" | "type-aware" | "dependencies" | "cache" | "graph-cache")
 /**
  * Stable category for a doctor check.
  */
-export type DoctorCheckCategory = ("project" | "configuration" | "workspace" | "plugin" | "companion")
+export type DoctorCheckCategory = ("project" | "configuration" | "workspace" | "plugin" | "companion" | "cache")
 /**
  * Per-check readiness outcome.
  */
@@ -2585,7 +2660,7 @@ _meta?: (Meta | null)
  *   `malformed-tsconfig`, `tsconfig-reference-dir-missing`;
  * - source discovery, during the file walk: `skipped-large-file`,
  *   `skipped-minified-file`, `skipped-source-dotdir`,
- *   `source-read-failure`;
+ *   `source-read-failure`, `source-parse-degraded`;
  * - dead-code analysis, from the dependency-catalog and override
  *   detectors: `malformed-pnpm-workspace-yaml`,
  *   `bun-lockb-override-resolution-skipped`.
@@ -2596,6 +2671,16 @@ _meta?: (Meta | null)
  * forward slashes; the array is omitted when empty. The same list is
  * repeated on each top-level command's envelope so single-command
  * consumers see it without having to look at a separate top-level field.
+ *
+ * A diagnostic here is advisory and never withholds a finding. Where an
+ * entry reports a source file this run never fully analyzed
+ * (`source-parse-degraded`, `source-read-failure`, `skipped-large-file`,
+ * `skipped-minified-file`, `skipped-source-dotdir`) it can distort a
+ * verdict, so the affected `unused_files[]`, `unused_exports[]`, and
+ * dependency entries additionally carry the caveat themselves in their own
+ * optional `reachability_caveats[]` array, and a reader who never scrolls
+ * back up to this list still sees it. `fallow fix` reads the same array
+ * and withholds the removal while a caveat stands.
  */
 workspace_diagnostics?: WorkspaceDiagnostic[]
 /**
@@ -2833,6 +2918,14 @@ actions: IssueAction[]
  * the merge-base. `None` when serialized directly from Rust.
  */
 introduced?: (AuditIntroduced | null)
+/**
+ * Advisory caveats on the reachability verdict behind this finding.
+ * Sorted, deduplicated, and omitted from the wire when empty, so a run
+ * that analyzed every discovered file is byte-identical. Never gates the
+ * finding or the `delete-file` action, though `fallow fix` does withhold
+ * the removal of a caveated finding as low confidence.
+ */
+reachability_caveats?: ReachabilityCaveat[]
 }
 /**
  * A code-change fix. `type` is one of the kebab-case identifiers in
@@ -2851,6 +2944,14 @@ type: FixActionType
  * Filter on this bool of each individual action, not on `type`. See the
  * [`IssueAction`] enum-level docs for the full list of per-instance
  * flips.
+ *
+ * One flip is RUN-level rather than finding-level: a dead-code finding
+ * carrying `reachability_caveats` reports `false` here, because a file
+ * this run never fully read may hold the reference that credits it. Every
+ * mutation surface honours the same gate, so a plan built from this flag
+ * never expects a write `fallow fix`, the MCP fix tools, or the LSP quick
+ * fix will refuse. The action stays in the array at the same position and
+ * names the reason in [`Self::note`].
  */
 auto_fixable: boolean
 /**
@@ -3034,6 +3135,13 @@ semantic?: (SemanticCandidateDecision | null)
  * the merge-base.
  */
 introduced?: (AuditIntroduced | null)
+/**
+ * Advisory caveats on the reachability verdict behind this finding.
+ * Sorted, deduplicated, and omitted from the wire when empty. Never gates
+ * the finding or the `remove-export` action, though `fallow fix` does
+ * withhold the removal of a caveated export as low confidence.
+ */
+reachability_caveats?: ReachabilityCaveat[]
 }
 /**
  * Wire-shape envelope for an [`UnusedExport`] finding consumed under the
@@ -3084,6 +3192,14 @@ semantic?: (SemanticCandidateDecision | null)
  * the merge-base.
  */
 introduced?: (AuditIntroduced | null)
+/**
+ * Advisory caveats on the reachability verdict behind this finding.
+ * A type export rests on exactly the reachability test an
+ * `unused_exports[]` entry does, and the LSP offers the same
+ * remove-the-`export`-keyword quick fix for both, so the two must render
+ * with the same confidence. Sorted, deduplicated, omitted when empty.
+ */
+reachability_caveats?: ReachabilityCaveat[]
 }
 /**
  * Wire-shape envelope for a [`PrivateTypeLeak`] finding. Mirrors
@@ -3167,6 +3283,15 @@ actions: IssueAction[]
  * the merge-base.
  */
 introduced?: (AuditIntroduced | null)
+/**
+ * Advisory caveats on the verdict behind this finding. A dependency is
+ * reported unused when NO module in the project imports its specifier,
+ * so a module that parsed with errors can hide the import that would
+ * have credited the package. Sorted, deduplicated, and omitted from the
+ * wire when empty. Never gates the finding, though `fallow fix`
+ * withholds the `remove-dependency` write while a caveat stands.
+ */
+reachability_caveats?: ReachabilityCaveat[]
 }
 /**
  * Wire-shape envelope for an [`UnusedDependency`] finding consumed under
@@ -3204,6 +3329,15 @@ actions: IssueAction[]
  * the merge-base.
  */
 introduced?: (AuditIntroduced | null)
+/**
+ * Advisory caveats on the verdict behind this finding. A dependency is
+ * reported unused when NO module in the project imports its specifier,
+ * so a module that parsed with errors can hide the import that would
+ * have credited the package. Sorted, deduplicated, and omitted from the
+ * wire when empty. Never gates the finding, though `fallow fix`
+ * withholds the `remove-dependency` write while a caveat stands.
+ */
+reachability_caveats?: ReachabilityCaveat[]
 }
 /**
  * Wire-shape envelope for an [`UnusedDependency`] finding consumed under
@@ -3241,6 +3375,15 @@ actions: IssueAction[]
  * the merge-base.
  */
 introduced?: (AuditIntroduced | null)
+/**
+ * Advisory caveats on the verdict behind this finding. A dependency is
+ * reported unused when NO module in the project imports its specifier,
+ * so a module that parsed with errors can hide the import that would
+ * have credited the package. Sorted, deduplicated, and omitted from the
+ * wire when empty. Never gates the finding, though `fallow fix`
+ * withholds the `remove-dependency` write while a caveat stands.
+ */
+reachability_caveats?: ReachabilityCaveat[]
 }
 /**
  * Wire-shape envelope for an [`UnusedMember`] finding consumed under the
@@ -3278,6 +3421,15 @@ actions: IssueAction[]
  * the merge-base.
  */
 introduced?: (AuditIntroduced | null)
+/**
+ * Advisory caveats on the verdict behind this finding. A member's usage
+ * is collected by walking the member accesses of every module the run
+ * parsed, so a member whose only reference lives in a file the run never
+ * read reads as unused exactly like an export does. Sorted,
+ * deduplicated, and omitted from the wire when empty. Never gates the
+ * finding; it does withhold the `remove-enum-member` mutation.
+ */
+reachability_caveats?: ReachabilityCaveat[]
 }
 /**
  * Wire-shape envelope for an [`UnusedMember`] finding consumed under the
@@ -3321,6 +3473,16 @@ semantic?: (SemanticCandidateDecision | null)
  * the merge-base.
  */
 introduced?: (AuditIntroduced | null)
+/**
+ * Advisory caveats on the verdict behind this finding. A class member's
+ * usage is collected by the same reachability-free member-access walk an
+ * enum member's is, so it takes the enum-member rule unchanged: any module
+ * this run analyzed incompletely can hold the access that credits it.
+ * Sorted, deduplicated, and omitted from the wire when empty. Never gates
+ * the finding; it does withhold the `remove-class-member` mutation that
+ * the type-aware pass would otherwise open.
+ */
+reachability_caveats?: ReachabilityCaveat[]
 }
 /**
  * Wire-shape envelope for an [`UnusedMember`] finding consumed under the
@@ -5083,8 +5245,13 @@ start_col: number
 end_col: number
 /**
  * The actual source code fragment.
+ *
+ * Omitted from JSON when the caller asked for a location-only payload
+ * (`fallow dupes --no-fragments`, and the MCP `find_dupes` default). The
+ * five location fields above address the same text, so a consumer that
+ * wants the source reads it from the file.
  */
-fragment: string
+fragment?: string
 }
 /**
  * Per-action wire shape attached to each `CloneGroupFinding` and
@@ -5249,13 +5416,21 @@ total_tokens: number
  */
 duplicated_tokens: number
 /**
- * Number of clone groups in the reported `clone_groups[]` array after
- * filtering and optional `--top` truncation.
+ * Number of clone groups the scoped corpus contains after filtering.
+ * `--top` does not change it; compare it with `clone_groups_shown` on the
+ * envelope to see how much of the corpus the array carries.
  */
 clone_groups: number
 /**
- * Total clone instances across all reported groups after filtering and
- * optional `--top` truncation.
+ * Number of clone families the scoped corpus contains after filtering.
+ * `--top` truncates `clone_families[]` along with `clone_groups[]` but
+ * does not change this counter; compare it with `clone_families_shown` on
+ * the envelope to see how much of the corpus the array carries.
+ */
+clone_families: number
+/**
+ * Total clone instances across the scoped corpus after filtering.
+ * `--top` does not change it.
  */
 clone_instances: number
 /**
@@ -5335,7 +5510,11 @@ prop_drilling_chains?: PropDrillingChainFinding[]
  */
 hotspots?: HotspotFinding[]
 /**
- * Hotspot analysis summary (only set with `--hotspots`).
+ * Hotspot analysis summary.
+ *
+ * Set whenever the run measured churn, which needs readable git history;
+ * `--hotspots` adds the per-file [`hotspots`](Self::hotspots) listing
+ * beside it rather than gating this summary.
  */
 hotspot_summary?: (HotspotSummary | null)
 /**
@@ -6712,6 +6891,32 @@ files_excluded: number
  * truncated.
  */
 shallow_clone: boolean
+/**
+ * Provenance of the instant every churn and staleness number was measured
+ * against. Absent only when a caller assembled a summary without one.
+ */
+clock?: (ClockProvenance | null)
+}
+/**
+ * The instant a run measured commit ages and staleness against.
+ *
+ * A consumer reading `weighted_commits`, `stale_days`, or anything derived
+ * from them needs to know whether re-running over the same commit yields the
+ * same number. The human report says so in a warning that `--quiet` removes,
+ * which left the JSON consumer, who cannot see stderr at all, with no way to
+ * find out.
+ */
+export interface ClockProvenance {
+source: ClockSource
+/**
+ * The reference epoch itself, in unix seconds. Pass it back as
+ * `FALLOW_CLOCK_EPOCH` to reproduce this run's churn-derived numbers.
+ */
+epoch_secs: number
+/**
+ * False only for `wall_clock`, where the numbers drift between runs.
+ */
+reproducible: boolean
 }
 /**
  * Runtime coverage findings merged into the health report or emitted by
@@ -9538,6 +9743,68 @@ consumed_symbols: string[]
 note: string
 }
 /**
+ * Result of asking how one module reaches another: the shortest import path.
+ *
+ * `reachable` is the only field that separates "no route exists" from "the
+ * route is empty because both ends are the same module". Both report
+ * `hops: 0`, so a consumer must read `reachable`, never the hop count.
+ */
+export interface ImportPathTrace {
+schema_version: ImportPathTraceSchemaVersion
+/**
+ * The module the walk started from, root-relative.
+ */
+from: string
+/**
+ * The module the walk was looking for, root-relative.
+ */
+to: string
+/**
+ * Whether `to` is reachable from `from` by following import edges.
+ */
+reachable: boolean
+/**
+ * Number of import edges on the reported route. `0` both when the two ends
+ * are the same module and when there is no route at all.
+ */
+hops: number
+/**
+ * The route, in import order. Empty whenever `hops` is `0`.
+ */
+path: ImportPathHop[]
+/**
+ * Human-readable summary of the outcome.
+ */
+reason: string
+}
+/**
+ * One import edge on an [`ImportPathTrace`].
+ */
+export interface ImportPathHop {
+/**
+ * The importing module, root-relative.
+ */
+from: string
+/**
+ * The imported module, root-relative.
+ */
+to: string
+/**
+ * Whether every symbol on this edge is type-only, so the hop is erased at
+ * build time. Type-only hops are reported, never skipped: an `import type`
+ * chain is a real compile-time coupling.
+ */
+type_only: boolean
+/**
+ * 1-based line in `from` of the imported binding that creates this edge:
+ * the first value-carrying symbol on the import, or the first symbol when
+ * every symbol is type-only. On a multi-line import that is the binding's
+ * own line, not the `import` keyword's. Absent when the edge carries no
+ * span or the source could not be read.
+ */
+import_line?: (number | null)
+}
+/**
  * The result of a symbol-level call-chain trace. Its own surface (`kind:
  * "trace"`), NOT folded into the ranked brief.
  */
@@ -9631,6 +9898,195 @@ export interface UnresolvedCallee {
  */
 callee: string
 reason: UnresolvedReason
+}
+/**
+ * Result of resolving a runtime stack trace against the project graph.
+ */
+export interface ErrorTrace {
+schema_version: ErrorTraceSchemaVersion
+/**
+ * Where the trace was read from: `stdin`, or the path as the caller wrote
+ * it.
+ */
+source: string
+/**
+ * The first non-blank input line that preceded any recognised frame,
+ * verbatim. Conventionally the error type and message, but it is reported
+ * as read and NOT parsed into parts. Absent when the input began with a
+ * frame or was empty.
+ */
+header?: (string | null)
+/**
+ * Every recognised frame, in input order. Nothing is filtered out: a
+ * dependency or runtime-internal frame stays in the array with its origin
+ * recorded, so hop numbering matches the trace the caller pasted.
+ */
+frames: ErrorTraceFrame[]
+counts: ErrorTraceCounts
+/**
+ * Human-readable summary of the outcome.
+ */
+reason: string
+}
+/**
+ * One frame read from the input stack trace.
+ */
+export interface ErrorTraceFrame {
+/**
+ * 0-based position in the input trace, so a caller can quote a frame back
+ * even after filtering the array.
+ */
+index: number
+/**
+ * The input line this frame was read from, trimmed of surrounding
+ * whitespace and otherwise verbatim.
+ */
+raw: string
+/**
+ * The frame's function identifier as written by the runtime, with the
+ * `async` and `new` markers stripped and recorded separately. Absent for a
+ * frame the runtime emitted without one.
+ */
+function?: (string | null)
+/**
+ * Whether the runtime marked this frame as a constructor call (`new X`).
+ */
+is_constructor?: boolean
+/**
+ * Whether the runtime marked this frame as an async call.
+ */
+is_async?: boolean
+/**
+ * The frame's file as read from the trace, with any `file://` or
+ * `http(s)://` wrapper removed and separators forward-slashed. Reported as
+ * read: it is NOT rewritten to the module path it matched, so a caller can
+ * see what its runtime actually said. Absent for a frame with no location.
+ */
+file?: (string | null)
+/**
+ * 1-based line from the frame's location, when the runtime supplied one.
+ */
+line?: (number | null)
+/**
+ * 1-based column from the frame's location, when the runtime supplied one.
+ */
+column?: (number | null)
+origin: FrameOrigin
+resolution: FrameResolution
+/**
+ * Every definition the identifier could name, in deterministic order.
+ * Exactly one entry when `resolution` is `resolved`, more than one when it
+ * is `ambiguous`, and empty otherwise.
+ */
+candidates: ErrorTraceCandidate[]
+/**
+ * How many further candidates a presentation cap withheld.
+ * `candidates.len() + candidates_omitted` is the true match count, so an
+ * `ambiguous` frame never understates how ambiguous it is.
+ */
+candidates_omitted: number
+/**
+ * Set when this frame's own line disagrees with the definition its
+ * identifier matched: some OTHER definition in the same file is declared
+ * closer above the line the runtime reported.
+ *
+ * The look-up matches on the identifier alone, so a `resolved` frame is
+ * resolved however far its line sits from the match. That is honest about
+ * the question asked and silent about a question a reader would ask next,
+ * which is why the disagreement is published instead of left to be
+ * noticed. The frame is NOT reclassified: the graph does know a
+ * definition under this identifier, and only the caller can say whether
+ * the runtime ran that one or a same-named definition elsewhere.
+ * `reason` names the declaration that sits closer. Only set on a
+ * `resolved` frame that carried a line and matched a definition whose own
+ * line could be read.
+ */
+line_mismatch?: boolean
+/**
+ * Human-readable statement of what happened to this frame.
+ */
+reason: string
+}
+/**
+ * One definition a frame's identifier could name.
+ */
+export interface ErrorTraceCandidate {
+/**
+ * Root-relative file declaring the definition.
+ */
+file: string
+/**
+ * The exported name. For a member match this is the owning export.
+ */
+symbol: string
+/**
+ * The member name, when the frame's identifier named a member of
+ * `symbol` rather than `symbol` itself. Absent for a direct export match.
+ */
+member?: (string | null)
+/**
+ * What kind of definition this is: `export`, or the member kind
+ * (`class-method`, `class-property`, `enum-member`, `store-member`,
+ * `namespace-member`).
+ */
+kind: string
+/**
+ * 1-based declaration line of the definition's identifier. Absent when the
+ * source file could not be read; never guessed.
+ */
+line?: (number | null)
+}
+/**
+ * Per-outcome totals for an [`ErrorTrace`].
+ *
+ * `resolved + ambiguous + not_found + not_attempted == frames`, and
+ * `in_project + node_modules + out_of_corpus == frames`. Both identities hold
+ * on every run, so a caller can verify that nothing was dropped.
+ */
+export interface ErrorTraceCounts {
+/**
+ * Frames reported in `frames`.
+ */
+frames: number
+/**
+ * Frames a cap withheld from `frames`. Their outcomes are NOT counted in
+ * the fields below, which describe the reported frames only.
+ */
+frames_omitted: number
+/**
+ * Frames whose file resolved to project source.
+ */
+in_project: number
+/**
+ * Frames whose file lives under an installed dependency tree.
+ */
+node_modules: number
+/**
+ * Frames outside the analysed corpus, including frames with no location.
+ */
+out_of_corpus: number
+/**
+ * Frames that matched exactly one definition.
+ */
+resolved: number
+/**
+ * Frames that matched more than one definition.
+ */
+ambiguous: number
+/**
+ * Frames the graph was asked about and could not name.
+ */
+not_found: number
+/**
+ * Frames the graph was never asked about.
+ */
+not_attempted: number
+/**
+ * Non-blank input lines that were neither recognised as a frame nor taken
+ * as `header`. A trace that is entirely unrecognised reports zero frames
+ * and a non-zero count here, rather than looking like an empty trace.
+ */
+unparsed_lines: number
 }
 /**
  * Envelope emitted by `fallow --format review-github` / `review-gitlab`.
@@ -10205,7 +10661,11 @@ prop_drilling_chains?: PropDrillingChainFinding[]
  */
 hotspots?: HotspotFinding[]
 /**
- * Hotspot analysis summary (only set with `--hotspots`).
+ * Hotspot analysis summary.
+ *
+ * Set whenever the run measured churn, which needs readable git history;
+ * `--hotspots` adds the per-file [`hotspots`](Self::hotspots) listing
+ * beside it rather than gating this summary.
  */
 hotspot_summary?: (HotspotSummary | null)
 /**
@@ -10421,6 +10881,29 @@ clone_families: CloneFamilyFinding[]
 mirrored_directories?: MirroredDirectory[]
 stats: DuplicationStats
 /**
+ * Number of clone groups carried in `clone_groups[]`.
+ */
+clone_groups_shown: number
+/**
+ * Number of scoped-corpus clone groups withheld from `clone_groups[]` by
+ * a presentation cap such as `--top`. `0` on an untruncated run, so
+ * `clone_groups_shown + clone_groups_omitted == stats.clone_groups`
+ * always holds and `stats` keeps describing the whole measured corpus.
+ */
+clone_groups_omitted: number
+/**
+ * Number of clone families carried in `clone_families[]`.
+ */
+clone_families_shown: number
+/**
+ * Number of scoped-corpus clone families withheld from `clone_families[]`
+ * by a presentation cap such as `--top`, which rebuilds the families from
+ * the groups that survived the cap. `0` on an untruncated run, so
+ * `clone_families_shown + clone_families_omitted == stats.clone_families`
+ * always holds and `stats` keeps describing the whole measured corpus.
+ */
+clone_families_omitted: number
+/**
  * Grouping mode when `--group-by` was passed.
  */
 grouped_by?: (GroupByMode | null)
@@ -10556,8 +11039,13 @@ start_col: number
 end_col: number
 /**
  * The actual source code fragment.
+ *
+ * Omitted from JSON when the caller asked for a location-only payload
+ * (`fallow dupes --no-fragments`, and the MCP `find_dupes` default). The
+ * five location fields above address the same text, so a consumer that
+ * wants the source reads it from the file.
  */
-fragment: string
+fragment?: string
 /**
  * Resolver key for this specific instance (per-instance, not the
  * group-level largest-owner).
@@ -11009,6 +11497,13 @@ project_surfacing?: (ImpactCounts | null)
  */
 project_trend?: (TrendSummary | null)
 /**
+ * Recorded gate runs grouped by source, over the same bounded window of
+ * recorded runs `record_count` reports. A floor, not a lifetime total, and
+ * absent when no run in that window carries a gate source. Local
+ * provenance, never an adoption metric.
+ */
+gate_runs?: (GateRunCounts | null)
+/**
  * Lifetime count of commit-gate containment events.
  */
 containment_count: number
@@ -11088,6 +11583,37 @@ previous_total: number
  * Total issues in the later run.
  */
 current_total: number
+}
+/**
+ * Recorded gate runs grouped by the gate that produced them. Local
+ * provenance only: the store never leaves the machine, so this answers "where
+ * do my gate runs come from", never "how widely is fallow adopted".
+ *
+ * Counted over the recorded runs the store still holds, which is the same
+ * window `record_count` reports. The store keeps a bounded number of runs and
+ * drops the oldest, so on a long-lived project these are the shape of recent
+ * gate activity, not a lifetime total: read them as a floor. Absent when no
+ * run in that window carries a gate source, which is not the same as "no gate
+ * ever ran here".
+ */
+export interface GateRunCounts {
+/**
+ * Runs recorded by the agent gate (`--gate-marker agent`).
+ */
+agent: number
+/**
+ * Runs recorded by the git pre-commit hook (`--gate-marker pre-commit`).
+ */
+pre_commit: number
+/**
+ * Runs recorded by a CI gate (`--gate-marker ci`).
+ */
+ci: number
+/**
+ * Gate runs whose marker this build does not recognise, plus every gate
+ * run recorded before the store kept its source (store schema 6 and older).
+ */
+unknown: number
 }
 /**
  * A commit-gate containment event recorded by `fallow impact`.
@@ -12190,6 +12716,24 @@ feature_flags: FeatureFlagFinding[]
  */
 total_flags: number
 /**
+ * Workspace-discovery and source-discovery diagnostics for the run. See
+ * `CheckOutput::workspace_diagnostics` for the full contract.
+ *
+ * A flags run walks and parses the project like every other analysis, so
+ * it records the same discovery kinds: a `skipped-large-file`,
+ * `skipped-minified-file`, or `source-read-failure` file was never
+ * scanned for flags, and a `source-parse-degraded` file was scanned from
+ * a partial module. Each is a reason a flag can be missing from
+ * `feature_flags[]`, which is exactly what a consumer reading a
+ * zero-result run needs to know. The analysis-stage kinds appear here
+ * too: the scan correlates flags with dead exports, so it runs the
+ * dead-code analyze pass that records them.
+ *
+ * Omitted when empty, so a project with no discovery noise sees no
+ * change.
+ */
+workspace_diagnostics?: WorkspaceDiagnostic[]
+/**
  * `_meta` block; see [`FeatureFlagsMeta`].
  */
 _meta?: (FeatureFlagsMeta | null)
@@ -12750,8 +13294,13 @@ fan_io: number
 /**
  * Security source -> sink taint-touch component (0 until a security pass is
  * threaded onto the brief path; the seam is built and tested).
+ *
+ * Omitted from the wire while it is zero, the same treatment `runtime`
+ * gets. Publishing a permanently-zero component as a required field made
+ * it read as a measurement that found nothing, when nothing measured it.
+ * A consumer that sums components must read an absent component as zero.
  */
-security_taint: number
+security_taint?: number
 /**
  * Risk-zone component (boundary / public-API / security-sensitive).
  */
@@ -14319,6 +14868,16 @@ message: string
  * The process exit code the CLI returns alongside this document.
  */
 exit_code: number
+/**
+ * Stable machine-readable code such as `FALLOW_INVALID_COVERAGE_PATH`,
+ * when the failure has one. Present so an agent can branch on the reason
+ * without pattern-matching the human message.
+ */
+code?: (string | null)
+/**
+ * Remediation hint for the caller, when the failure has one.
+ */
+help?: (string | null)
 }
 
 

@@ -8,8 +8,8 @@
 mod common;
 
 use common::{
-    fixture_path, parse_json, redact_all, redact_paths, run_fallow, run_fallow_combined,
-    run_fallow_in_root, run_fallow_raw, run_fallow_raw_with_env,
+    canonical_report, fixture_path, parse_json, redact_all, redact_paths, run_fallow,
+    run_fallow_combined, run_fallow_in_root, run_fallow_raw, run_fallow_raw_with_env,
     run_fallow_raw_with_type_aware_sidecar,
 };
 
@@ -710,30 +710,6 @@ fn combined_performance_includes_duplication_stage() {
 /// inherently nondeterministic wall-clock fields are stripped.
 #[test]
 fn combined_parallel_output_is_deterministic() {
-    fn normalize(value: &mut serde_json::Value) {
-        match value {
-            serde_json::Value::Object(map) => {
-                map.remove("elapsed_ms");
-                if let Some(telemetry) = map
-                    .get_mut("_meta")
-                    .and_then(|meta| meta.get_mut("telemetry"))
-                    .and_then(|telemetry| telemetry.as_object_mut())
-                {
-                    telemetry.remove("analysis_run_id");
-                }
-                for v in map.values_mut() {
-                    normalize(v);
-                }
-            }
-            serde_json::Value::Array(items) => {
-                for v in items {
-                    normalize(v);
-                }
-            }
-            _ => {}
-        }
-    }
-
     let mut canonicalized: Vec<String> = std::iter::repeat_with(|| {
         let output = run_fallow_combined(
             "duplicate-code",
@@ -745,9 +721,7 @@ fn combined_parallel_output_is_deterministic() {
             output.stdout,
             output.stderr
         );
-        let mut value = parse_json(&output);
-        normalize(&mut value);
-        serde_json::to_string(&value).expect("re-serialize canonical json")
+        canonical_report(&output)
     })
     .take(3)
     .collect();
@@ -1203,10 +1177,19 @@ fn bun_resolutions_surface_as_unused_overrides_in_json_output() {
             "the bun hint names the resolutions origin: {hint}"
         );
     }
+    // A parseable bun.lock resolves normally, so no lockfile diagnostic is
+    // recorded. Environment and unconfigured-detector diagnostics are a
+    // different channel and a bare fixture always carries some, so this asserts
+    // the absence of the bun kinds rather than an empty array.
+    let bun_kind = json["workspace_diagnostics"]
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|entry| entry["kind"].as_str())
+        .find(|kind| kind.starts_with("bun-"));
     assert!(
-        json["workspace_diagnostics"]
-            .as_array()
-            .is_none_or(Vec::is_empty),
+        bun_kind.is_none(),
         "a parseable bun.lock resolves normally: {}",
         json["workspace_diagnostics"]
     );
@@ -1783,6 +1766,62 @@ fn combined_json_root_workspace_diagnostics_stay_byte_identical_with_a_skipped_d
     }
 }
 
+/// The two unconfigured-check diagnostics fire on every project that never
+/// opted into boundaries or rule packs, which is the product's default state,
+/// so a stderr warning for them is permanent noise on nearly every run. They
+/// keep their `workspace_diagnostics[]` entries, where a consumer that wants to
+/// tell "measured zero" from "measured nothing" can read them.
+///
+/// `node-modules-missing` in the same run is the control: it reports a real
+/// degradation that changes results, so it stays on stderr and proves the
+/// warning surface is live rather than filtered by the log level.
+#[test]
+fn unconfigured_check_diagnostics_stay_out_of_stderr_but_reach_json() {
+    let root = fixture_path("basic-project");
+    let output = run_fallow_raw_with_env(
+        &[
+            "--root",
+            root.to_str().expect("fixture path is UTF-8"),
+            "dead-code",
+            "--format",
+            "json",
+            "--no-cache",
+        ],
+        &[("RUST_LOG", "warn")],
+    );
+
+    assert!(
+        output.stderr.contains("node_modules"),
+        "the degradation warning proves warnings reach stderr here: {}",
+        output.stderr
+    );
+    assert!(
+        !output
+            .stderr
+            .contains("No architecture boundaries are configured"),
+        "an unconfigured boundary check must not warn: {}",
+        output.stderr
+    );
+    assert!(
+        !output.stderr.contains("No rule packs are configured"),
+        "an unconfigured rule-pack check must not warn: {}",
+        output.stderr
+    );
+
+    let json = parse_json(&output);
+    let kinds: Vec<&str> = json["workspace_diagnostics"]
+        .as_array()
+        .expect("the envelope carries the array")
+        .iter()
+        .filter_map(|diagnostic| diagnostic["kind"].as_str())
+        .collect();
+    assert!(
+        kinds.contains(&"boundaries-not-configured")
+            && kinds.contains(&"rule-packs-not-configured"),
+        "both stay in the structured array: {kinds:?}"
+    );
+}
+
 /// Issue #2366: the combined root's union must be the same ARRAY on every run
 /// of the same command, not just the same set.
 ///
@@ -1834,22 +1873,26 @@ fn combined_json_root_workspace_diagnostics_are_byte_identical_across_repeat_run
                 "skipped-large-file".to_owned(),
                 "src/huge.prod.ts".to_owned()
             ),
-            (
-                "malformed-pnpm-workspace-yaml".to_owned(),
-                "pnpm-workspace.yaml".to_owned()
-            ),
+            ("node-modules-missing".to_owned(), "node_modules".to_owned()),
             (
                 "bun-lockb-override-resolution-skipped".to_owned(),
                 "package.json".to_owned()
             ),
             (
+                "malformed-pnpm-workspace-yaml".to_owned(),
+                "pnpm-workspace.yaml".to_owned()
+            ),
+            ("boundaries-not-configured".to_owned(), ".".to_owned()),
+            ("rule-packs-not-configured".to_owned(), ".".to_owned()),
+            (
                 "skipped-large-file".to_owned(),
                 "src/huge.test.ts".to_owned()
             ),
         ],
-        "the union runs in section order: the dead-code analysis's own list \
-         (its production walk's skip plus the analysis-stage entries it recorded), \
-         then the skip only the full-file-set walks saw"
+        "the union runs in section order: the dead-code analysis's own snapshot \
+         (its production walk's skips and the config-load stash), then the \
+         registry entries recorded after the session was built, sorted by path \
+         and kind, then the skip only the full-file-set walks saw"
     );
     for (index, run) in observed.iter().enumerate() {
         assert_eq!(

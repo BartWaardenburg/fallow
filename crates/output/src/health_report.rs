@@ -57,7 +57,11 @@ pub struct HealthReport {
     /// wire) with a typed `actions` list.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub hotspots: Vec<HotspotFinding>,
-    /// Hotspot analysis summary (only set with `--hotspots`).
+    /// Hotspot analysis summary.
+    ///
+    /// Set whenever the run measured churn, which needs readable git history;
+    /// `--hotspots` adds the per-file [`hotspots`](Self::hotspots) listing
+    /// beside it rather than gating this summary.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hotspot_summary: Option<HotspotSummary>,
     /// Runtime coverage findings from the paid sidecar (only populated with

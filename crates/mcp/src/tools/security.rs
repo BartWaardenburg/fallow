@@ -3,7 +3,9 @@ use crate::params::SecurityCandidatesParams;
 use rmcp::ErrorData as McpError;
 use rmcp::model::{CallToolResult, ContentBlock};
 
-use super::{push_global, push_remote_extends, push_str_flag, run_tool, validation_error_body};
+use super::{
+    push_global, push_remote_extends, push_str_flag, run_tool_with_limit, validation_error_body,
+};
 
 const VALID_SECURITY_GATES: &[&str] = &["new", "newly-reachable"];
 
@@ -18,7 +20,15 @@ pub async fn run_security_candidates(
     params: SecurityCandidatesParams,
 ) -> Result<CallToolResult, McpError> {
     match build_security_candidates_args(&params) {
-        Ok(args) => run_tool(binary, "security_candidates", &args).await,
+        Ok(args) => {
+            run_tool_with_limit(
+                binary,
+                "security_candidates",
+                &args,
+                params.max_output_bytes,
+            )
+            .await
+        }
         Err(msg) => Ok(CallToolResult::error(vec![ContentBlock::text(msg)])),
     }
 }

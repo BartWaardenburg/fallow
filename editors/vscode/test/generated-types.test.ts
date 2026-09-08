@@ -30,17 +30,46 @@ import type {
 import type { LspInitializationOptions } from "../src/generated/lsp-initialization-options.js";
 import type { SecurityFinding, SecurityOutput } from "../src/types.js";
 
+/**
+ * `true` only for a narrow numeric type: a literal, or a union of literals.
+ * A codegen regression that dropped a `const` / `enum` from the schema would
+ * widen the generated alias to plain `number` and flip this to `false`.
+ */
+type IsNarrowNumber<T> = [T] extends [number] ? (number extends T ? false : true) : false;
+
+/**
+ * A value of a generated `*SchemaVersion` type without restating the number.
+ * Nothing in these samples reads `schema_version`; only its presence and its
+ * type are under test, so the samples stay valid across a legitimate bump.
+ */
+const schemaVersion = <T>(): T => 0 as unknown as T;
+
 describe("generated/output-contract.d.ts", () => {
-  it("pins each independently versioned envelope from JSON Schema", () => {
+  /**
+   * The version *numbers* are deliberately not asserted here. They are
+   * generated artifacts: `pnpm run check:contracts` regenerates this file from
+   * the JSON Schema and fails on drift, and the schema itself is asserted
+   * against Rust by the schema-driven test in `crates/cli/src/report/json.rs`.
+   * Restating the numbers would add no coverage over those two gates while
+   * turning every legitimate envelope bump into a red `pnpm run lint`. What
+   * this extension actually depends on is structural: every envelope keeps its
+   * own narrow version type, so a widened alias cannot silently let the
+   * extension accept an envelope it cannot read.
+   */
+  it("keeps each envelope independently and narrowly versioned", () => {
     expectTypeOf<SchemaVersion>().toEqualTypeOf<CheckSchemaVersion>();
-    expectTypeOf<SchemaVersion>().toEqualTypeOf<9>();
-    expectTypeOf<AuditSchemaVersion>().toEqualTypeOf<10>();
-    expectTypeOf<CheckSchemaVersion>().toEqualTypeOf<9>();
-    expectTypeOf<CombinedSchemaVersion>().toEqualTypeOf<11>();
-    expectTypeOf<DupesSchemaVersion>().toEqualTypeOf<3 | 9>();
-    expectTypeOf<FeatureFlagsSchemaVersion>().toEqualTypeOf<8>();
-    expectTypeOf<HealthSchemaVersion>().toEqualTypeOf<11>();
-    expectTypeOf<TypeAwareStatusSchemaVersion>().toEqualTypeOf<8>();
+
+    expectTypeOf<IsNarrowNumber<SchemaVersion>>().toEqualTypeOf<true>();
+    expectTypeOf<IsNarrowNumber<AuditSchemaVersion>>().toEqualTypeOf<true>();
+    expectTypeOf<IsNarrowNumber<CheckSchemaVersion>>().toEqualTypeOf<true>();
+    expectTypeOf<IsNarrowNumber<CombinedSchemaVersion>>().toEqualTypeOf<true>();
+    expectTypeOf<IsNarrowNumber<DupesSchemaVersion>>().toEqualTypeOf<true>();
+    expectTypeOf<IsNarrowNumber<FeatureFlagsSchemaVersion>>().toEqualTypeOf<true>();
+    expectTypeOf<IsNarrowNumber<HealthSchemaVersion>>().toEqualTypeOf<true>();
+    expectTypeOf<IsNarrowNumber<TypeAwareStatusSchemaVersion>>().toEqualTypeOf<true>();
+
+    // Sanity: the helper is not vacuously true.
+    expectTypeOf<IsNarrowNumber<number>>().toEqualTypeOf<false>();
   });
 
   it("exposes the LSP initializationOptions contract sent by the extension", () => {
@@ -82,7 +111,7 @@ describe("generated/output-contract.d.ts", () => {
 
   it("exposes CombinedOutput with optional check/dupes/health branches", () => {
     const sample: CombinedOutput = {
-      schema_version: 11,
+      schema_version: schemaVersion<CombinedSchemaVersion>(),
       version: "0.0.0-test",
       elapsed_ms: 0,
     };
@@ -93,7 +122,7 @@ describe("generated/output-contract.d.ts", () => {
 
   it("requires the schema_version / version / elapsed_ms / total_issues envelope on CheckOutput", () => {
     const sample: CheckOutput = {
-      schema_version: 9,
+      schema_version: schemaVersion<CheckSchemaVersion>(),
       version: "0.0.0-test",
       elapsed_ms: 0,
       total_issues: 0,

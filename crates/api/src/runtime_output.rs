@@ -63,8 +63,14 @@ pub type TraceFileOutput = fallow_types::trace::FileTrace;
 /// Concrete dependency trace output returned by typed programmatic runs.
 pub type TraceDependencyOutput = fallow_types::trace::DependencyTrace;
 
+/// Concrete import-path trace output returned by typed programmatic runs.
+pub type TraceImportPathOutput = fallow_types::trace::ImportPathTrace;
+
 /// Concrete duplicate-code trace output returned by typed programmatic runs.
 pub type TraceCloneOutput = fallow_types::trace::CloneTrace;
+
+/// Concrete stack-trace resolution returned by typed programmatic runs.
+pub type TraceErrorOutput = fallow_types::trace_error::ErrorTrace;
 
 /// Inputs for serializing health JSON output through the API boundary.
 pub struct HealthJsonReportInput<'a> {
@@ -362,6 +368,21 @@ impl TraceFileProgrammaticOutput {
     }
 }
 
+/// Typed programmatic import-path-trace output before JSON serialization.
+#[derive(Debug)]
+pub struct TraceImportPathProgrammaticOutput {
+    /// Typed import-path trace produced by the run.
+    pub output: TraceImportPathOutput,
+}
+
+impl TraceImportPathProgrammaticOutput {
+    /// Typed import-path trace retained by this run.
+    #[must_use]
+    pub const fn trace(&self) -> &TraceImportPathOutput {
+        &self.output
+    }
+}
+
 /// Typed programmatic dependency-trace output before JSON serialization.
 #[derive(Debug)]
 pub struct TraceDependencyProgrammaticOutput {
@@ -373,6 +394,21 @@ impl TraceDependencyProgrammaticOutput {
     /// Typed dependency trace retained by this run.
     #[must_use]
     pub const fn trace(&self) -> &TraceDependencyOutput {
+        &self.output
+    }
+}
+
+/// Typed programmatic stack-trace resolution before JSON serialization.
+#[derive(Debug)]
+pub struct TraceErrorProgrammaticOutput {
+    /// Typed stack-trace resolution produced by the run.
+    pub output: TraceErrorOutput,
+}
+
+impl TraceErrorProgrammaticOutput {
+    /// Typed stack-trace resolution retained by this run.
+    #[must_use]
+    pub const fn trace(&self) -> &TraceErrorOutput {
         &self.output
     }
 }

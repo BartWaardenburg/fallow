@@ -450,13 +450,25 @@
       "section": "commands",
       "row": "trace",
       "column": "Key Flags",
-      "seed": "`symbol`, `--callers`, `--callees`, `--depth`"
+      "seed": "`symbol`, `--path`, `--callers`, `--callees`, `--depth`"
     },
     {
       "section": "commands",
       "row": "trace",
       "column": "Purpose",
-      "seed": "Trace a symbol's call chain (best-effort, syntactic; OFF the ranked path)"
+      "seed": "Trace a symbol's call chain, or the shortest import path between two modules (best-effort, syntactic; OFF the ranked path)"
+    },
+    {
+      "section": "commands",
+      "row": "trace-error",
+      "column": "Key Flags",
+      "seed": "`trace_file`"
+    },
+    {
+      "section": "commands",
+      "row": "trace-error",
+      "column": "Purpose",
+      "seed": "Resolve a runtime stack trace's frames to the definitions they name (best-effort, syntactic; OFF the ranked path)"
     },
     {
       "section": "commands",
@@ -684,7 +696,7 @@
       "section": "flags:dead-code",
       "row": "--top",
       "column": "Description",
-      "seed": "Show only the top N items per category"
+      "seed": "Show only the top N items per category. Human output only: the JSON, SARIF, and CodeClimate envelopes drive exit codes and CI baselines, so they always carry every finding and a consumer slices the arrays itself"
     },
     {
       "section": "flags:dead-code",
@@ -934,6 +946,12 @@
     },
     {
       "section": "flags:dupes",
+      "row": "--no-fragments",
+      "column": "Description",
+      "seed": "Omit the verbatim source text from each clone instance in `--format json`. The file and line/column range still address the same code, and this is most of the payload on a duplicated codebase"
+    },
+    {
+      "section": "flags:dupes",
       "row": "--no-ignore-imports",
       "column": "Description",
       "seed": "Count module wiring as clone candidates (opt out of the default exclusion)"
@@ -954,7 +972,7 @@
       "section": "flags:dupes",
       "row": "--top",
       "column": "Description",
-      "seed": "Show only the N highest-ranked clone groups. Ranking combines clone size, occurrence count, and capped directory or line spread"
+      "seed": "Show only the N highest-ranked clone groups. Ranking combines clone size, occurrence count, and capped directory or line spread. `clone_families[]` is rebuilt from the groups that survive, so it narrows too. `stats` keeps describing the whole corpus; `clone_groups_shown` / `clone_groups_omitted` and `clone_families_shown` / `clone_families_omitted` report the split. Refused with exit code 2 alongside `--group-by`: grouped output reports per-bucket stats over every clone group in the bucket, which a global top-N truncation would silently contradict"
     },
     {
       "section": "flags:dupes",
@@ -1779,6 +1797,12 @@
       "seed": "Chain depth bound for both directions (default 2). Symbol-level is best-effort, so a shallow bound keeps the trace legible"
     },
     {
+      "section": "flags:trace",
+      "row": "--path",
+      "column": "Description",
+      "seed": "Shortest import path between two modules, as two file paths (e.g. `--path src/app.ts src/db.ts`). Mutually exclusive with the symbol target and the call-chain flags"
+    },
+    {
       "section": "issue-types",
       "row": "boundary-call-violation",
       "column": "Description",
@@ -2194,6 +2218,12 @@
     },
     {
       "section": "mcp-resources",
+      "row": "fallow://schema/similar-code-snapshot",
+      "column": "Description",
+      "seed": "JSON Schema of the inspect_similar_code `snapshot` object: the bounded candidate handoff find_similar_code returns, passed back unchanged"
+    },
+    {
+      "section": "mcp-resources",
       "row": "fallow://task-matrix",
       "column": "Description",
       "seed": "Agent task-to-command matrix: which read-only fallow command to run before deleting, refactoring, committing, or scoping work"
@@ -2203,6 +2233,12 @@
       "row": "fallow://tools",
       "column": "Description",
       "seed": "MCP tool manifest: name, kind, one-line description, nearest CLI fallback, key params, license, and read-only flag for every tool"
+    },
+    {
+      "section": "mcp-resources",
+      "row": "fallow://tools/{name}",
+      "column": "Description",
+      "seed": "Per-flag detail for one MCP tool (payload shapes, unit vocabularies, suppression placements) kept out of its tools/list description; name is the wire tool name. Not every tool has a guide"
     },
     {
       "section": "mcp-tools",
@@ -2398,6 +2434,12 @@
     },
     {
       "section": "mcp-tools",
+      "row": "trace_error",
+      "column": "Description",
+      "seed": "Resolve a runtime stack trace's frames against the project graph"
+    },
+    {
+      "section": "mcp-tools",
       "row": "trace_export",
       "column": "Description",
       "seed": "Trace why an export is used or unused, including re-export chains and entry-point status"
@@ -2407,6 +2449,12 @@
       "row": "trace_file",
       "column": "Description",
       "seed": "Trace all module-graph edges for a file (imports, exports, importers, re-exports)"
+    },
+    {
+      "section": "mcp-tools",
+      "row": "trace_import_path",
+      "column": "Description",
+      "seed": "Trace the shortest import path between two modules, hop by hop"
     },
     {
       "section": "mcp-tools",

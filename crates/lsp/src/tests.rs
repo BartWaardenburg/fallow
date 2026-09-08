@@ -2726,6 +2726,7 @@ fn merge_duplication_into_empty_target() {
             total_tokens: 500,
             duplicated_tokens: 50,
             clone_groups: 1,
+            clone_families: 0,
             clone_instances: 1,
             duplication_percentage: 10.0,
             clone_groups_below_min_occurrences: 0,
@@ -2757,6 +2758,7 @@ fn merge_duplication_recomputes_percentage() {
             total_tokens: 1000,
             duplicated_tokens: 100,
             clone_groups: 1,
+            clone_families: 0,
             clone_instances: 2,
             duplication_percentage: 10.0, // 20/200 * 100
             clone_groups_below_min_occurrences: 0,
@@ -2776,6 +2778,7 @@ fn merge_duplication_recomputes_percentage() {
             total_tokens: 1500,
             duplicated_tokens: 300,
             clone_groups: 2,
+            clone_families: 0,
             clone_instances: 4,
             duplication_percentage: 20.0, // 60/300 * 100
             clone_groups_below_min_occurrences: 0,
@@ -2827,6 +2830,7 @@ fn merge_duplication_with_empty_source() {
             total_tokens: 500,
             duplicated_tokens: 50,
             clone_groups: 1,
+            clone_families: 0,
             clone_instances: 1,
             duplication_percentage: 10.0,
             clone_groups_below_min_occurrences: 0,

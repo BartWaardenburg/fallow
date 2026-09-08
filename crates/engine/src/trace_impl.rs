@@ -1,31 +1,29 @@
 use std::path::{Path, PathBuf};
 
+use fallow_types::discover::FileId;
 pub use fallow_types::trace::{
     ClassMemberTrace, CloneTrace, DependencyTrace, ExportReference, ExportTrace, FileTrace,
-    ImpactClosureGap, ImpactClosureTrace, NamespacedExportReferences, PipelineTimings,
-    ReExportChain, TracedCloneGroup, TracedExport, TracedReExport,
+    ImpactClosureGap, ImpactClosureTrace, ImportPathHop, ImportPathTrace,
+    ImportPathTraceSchemaVersion, NamespacedExportReferences, PipelineTimings, ReExportChain,
+    TracedCloneGroup, TracedExport, TracedReExport,
 };
 use fallow_types::trace_chain::StarExportAmbiguity;
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::duplicates::{
     CloneFingerprintSet, CloneGroup, CloneInstance, DuplicationReport, dominant_identifier,
     group_refactoring_suggestion,
 };
-use crate::graph::{EffectiveExportResolution, ExportNamespace, ModuleGraph, ReferenceKind};
+use crate::graph::{
+    EffectiveExportResolution, ExportNamespace, ImportPathHop as GraphImportPathHop, ModuleGraph,
+    ReferenceKind,
+};
 
 /// Match a user-provided file path against a module's actual path.
 ///
 /// Handles monorepo scenarios where module paths may be canonicalized
 /// (symlinks resolved) while user-provided paths are not.
-///
-/// Shared with `trace_chain_impl`, which performs the same module lookup for
-/// `fallow trace <symbol>`.
-#[expect(
-    clippy::redundant_pub_crate,
-    reason = "shared by trace_chain_impl through the crate-private trace_impl module"
-)]
-pub(crate) fn path_matches(module_path: &Path, root: &Path, user_path: &str) -> bool {
+pub fn path_matches(module_path: &Path, root: &Path, user_path: &str) -> bool {
     let user_path_norm = user_path.replace('\\', "/");
     let rel = module_path.strip_prefix(root).unwrap_or(module_path);
     let rel_str = rel.to_string_lossy().replace('\\', "/");
@@ -41,6 +39,38 @@ pub(crate) fn path_matches(module_path: &Path, root: &Path, user_path: &str) -> 
         return true;
     }
     module_str.ends_with(&format!("/{user_path_norm}"))
+}
+
+/// Match exact module paths before considering abbreviated suffixes.
+///
+/// A root-relative `src/a.ts` must not select `packages/x/src/a.ts` merely
+/// because discovery listed that module first. Suffix matches remain useful
+/// for abbreviated requests, but callers must preserve their ambiguity.
+pub fn matching_module_indexes(graph: &ModuleGraph, root: &Path, user_path: &str) -> Vec<usize> {
+    let normalized = user_path.replace('\\', "/");
+    let canonical_root = dunce::canonicalize(root).ok();
+    let canonical_target = dunce::canonicalize(root.join(&normalized)).ok();
+    let mut exact = Vec::new();
+    let mut suffix = Vec::new();
+    let suffix_pattern = format!("/{normalized}");
+    for (index, module) in graph.modules.iter().enumerate() {
+        let module_path = module.path.to_string_lossy().replace('\\', "/");
+        let root_relative = module
+            .path
+            .strip_prefix(root)
+            .ok()
+            .or_else(|| module.path.strip_prefix(canonical_root.as_ref()?).ok());
+        let is_exact = module_path == normalized
+            || canonical_target.as_ref() == Some(&module.path)
+            || root_relative
+                .is_some_and(|path| path.to_string_lossy().replace('\\', "/") == normalized);
+        if is_exact {
+            exact.push(index);
+        } else if module_path.ends_with(&suffix_pattern) {
+            suffix.push(index);
+        }
+    }
+    if exact.is_empty() { suffix } else { exact }
 }
 
 /// Reconcile checker-backed reference evidence with the retained graph's
@@ -913,6 +943,178 @@ pub fn trace_impact_closure(
         affected_not_shown: paths.affected_not_shown,
         coordination_gap,
     })
+}
+
+/// Which endpoint of a `--path` request did not resolve to exactly one module.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImportPathEndpoint {
+    /// The module the walk would start from.
+    From,
+    /// The module the walk is looking for.
+    To,
+    /// Several modules match the starting path abbreviation.
+    AmbiguousFrom,
+    /// Several modules match the destination path abbreviation.
+    AmbiguousTo,
+}
+
+impl ImportPathEndpoint {
+    /// The flag position this endpoint occupies, for diagnostics.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::From | Self::AmbiguousFrom => "from",
+            Self::To | Self::AmbiguousTo => "to",
+        }
+    }
+
+    /// Whether the endpoint matched several modules instead of no module.
+    #[must_use]
+    pub const fn is_ambiguous(self) -> bool {
+        matches!(self, Self::AmbiguousFrom | Self::AmbiguousTo)
+    }
+}
+
+fn import_path_endpoint_index(
+    graph: &ModuleGraph,
+    root: &Path,
+    path: &str,
+    missing: ImportPathEndpoint,
+    ambiguous: ImportPathEndpoint,
+) -> Result<usize, ImportPathEndpoint> {
+    match matching_module_indexes(graph, root, path).as_slice() {
+        [index] => Ok(*index),
+        [] => Err(missing),
+        _ => Err(ambiguous),
+    }
+}
+
+/// Trace the shortest import path from one module to another.
+///
+/// Exact paths take priority over abbreviated suffixes. Returns the unresolved
+/// endpoint when either side names no module or an ambiguous suffix, so the
+/// caller can name which half of the request was wrong.
+///
+/// # Errors
+///
+/// Returns the endpoint that did not resolve to exactly one module in the graph.
+pub fn trace_import_path(
+    graph: &ModuleGraph,
+    root: &Path,
+    from_path: &str,
+    to_path: &str,
+) -> Result<ImportPathTrace, ImportPathEndpoint> {
+    let from_index = import_path_endpoint_index(
+        graph,
+        root,
+        from_path,
+        ImportPathEndpoint::From,
+        ImportPathEndpoint::AmbiguousFrom,
+    )?;
+    let to_index = import_path_endpoint_index(
+        graph,
+        root,
+        to_path,
+        ImportPathEndpoint::To,
+        ImportPathEndpoint::AmbiguousTo,
+    )?;
+    let from = &graph.modules[from_index];
+    let to = &graph.modules[to_index];
+
+    let from_rel = relativize(&from.path, root);
+    let to_rel = relativize(&to.path, root);
+
+    let Some(hops) = graph.shortest_import_path(from.file_id, to.file_id) else {
+        return Ok(ImportPathTrace {
+            schema_version: ImportPathTraceSchemaVersion::V1,
+            reason: format!("no import path from {from_rel} to {to_rel}"),
+            from: from_rel,
+            to: to_rel,
+            reachable: false,
+            hops: 0,
+            path: Vec::new(),
+        });
+    };
+
+    if hops.is_empty() {
+        return Ok(ImportPathTrace {
+            schema_version: ImportPathTraceSchemaVersion::V1,
+            reason: format!("{from_rel} is the same module as {to_rel}"),
+            from: from_rel,
+            to: to_rel,
+            reachable: true,
+            hops: 0,
+            path: Vec::new(),
+        });
+    }
+
+    let path = resolve_import_path_hops(graph, root, &hops);
+    let hop_count = path.len();
+    let plural = if hop_count == 1 { "hop" } else { "hops" };
+    // A route whose every hop is type-only is erased at build time. Saying so is
+    // the difference between "these modules ship coupled" and "the coupling only
+    // exists for the type checker".
+    let reason = if path.iter().all(|hop| hop.type_only) {
+        format!(
+            "{from_rel} reaches {to_rel} in {hop_count} type-only {plural}, erased at build time"
+        )
+    } else {
+        format!("{from_rel} reaches {to_rel} in {hop_count} {plural}")
+    };
+
+    Ok(ImportPathTrace {
+        schema_version: ImportPathTraceSchemaVersion::V1,
+        from: from_rel,
+        to: to_rel,
+        reachable: true,
+        hops: hop_count,
+        path,
+        reason,
+    })
+}
+
+/// Resolve graph-level hops to the wire shape, turning each import span into a
+/// 1-based line. Each source file is read at most once per trace; a file that
+/// cannot be read yields `import_line: None` rather than a guessed line.
+fn resolve_import_path_hops(
+    graph: &ModuleGraph,
+    root: &Path,
+    hops: &[GraphImportPathHop],
+) -> Vec<ImportPathHop> {
+    let mut line_offsets: FxHashMap<FileId, Option<Vec<u32>>> = FxHashMap::default();
+    hops.iter()
+        .filter_map(|hop| {
+            let from = graph.modules.get(hop.from.0 as usize)?;
+            let to = graph.modules.get(hop.to.0 as usize)?;
+            let import_line = hop.import_span_start.and_then(|span_start| {
+                line_offsets
+                    .entry(hop.from)
+                    .or_insert_with(|| {
+                        std::fs::read_to_string(&from.path)
+                            .ok()
+                            .map(|source| fallow_types::extract::compute_line_offsets(&source))
+                    })
+                    .as_ref()
+                    .map(|offsets| {
+                        fallow_types::extract::byte_offset_to_line_col(offsets, span_start).0
+                    })
+            });
+            Some(ImportPathHop {
+                from: relativize(&from.path, root),
+                to: relativize(&to.path, root),
+                type_only: hop.all_type_only,
+                import_line,
+            })
+        })
+        .collect()
+}
+
+/// Relativize a module path against the project root, forward-slashed.
+pub fn relativize(path: &Path, root: &Path) -> String {
+    path.strip_prefix(root)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .replace('\\', "/")
 }
 
 /// Build a [`TracedCloneGroup`] from a raw clone group, computing the
@@ -2650,6 +2852,7 @@ mod tests {
                 total_tokens: 200,
                 duplicated_tokens: 120,
                 clone_groups: 1,
+                clone_families: 0,
                 clone_instances: 2,
                 duplication_percentage: 22.0,
                 clone_groups_below_min_occurrences: 0,
@@ -2738,6 +2941,7 @@ mod tests {
                 total_tokens: 100,
                 duplicated_tokens: 60,
                 clone_groups: 1,
+                clone_families: 0,
                 clone_instances: 1,
                 duplication_percentage: 22.0,
                 clone_groups_below_min_occurrences: 0,
@@ -2787,6 +2991,7 @@ mod tests {
                 total_tokens: 200,
                 duplicated_tokens: 100,
                 clone_groups: 1,
+                clone_families: 0,
                 clone_instances: 2,
                 duplication_percentage: 22.0,
                 clone_groups_below_min_occurrences: 0,
@@ -2849,6 +3054,7 @@ mod tests {
                 total_tokens: 100,
                 duplicated_tokens: 100,
                 clone_groups: 1,
+                clone_families: 0,
                 clone_instances: 2,
                 duplication_percentage: 40.0,
                 clone_groups_below_min_occurrences: 0,

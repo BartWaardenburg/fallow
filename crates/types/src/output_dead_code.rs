@@ -95,6 +95,294 @@ fn suppress_line(comment: &str) -> IssueAction {
     })
 }
 
+/// A per-finding caveat on a dead-code verdict that a file this run never
+/// fully analyzed can distort.
+///
+/// Advisory provenance, in the same spirit as the fix path's
+/// `low_confidence_off_graph` / `low_confidence_unresolved_imports` skip
+/// reasons: a caveat NEVER withholds, reorders, downgrades, or re-severities
+/// the finding, and never changes an exit code. It records that the verdict
+/// was computed over an import graph fallow already knows is incomplete, so a
+/// reader who sees the finding also sees the caveat instead of having to
+/// notice a diagnostic at the other end of the envelope.
+///
+/// Deliberately NOT named `confidence`: `health --targets` already emits a
+/// `confidence` key holding an enum string, and a shared consumer helper that
+/// met both would see the same key change type. Emitted on the four verdicts a
+/// lost import edge can distort: `unused_files[]`, `unused_exports[]`, and the
+/// three dependency arrays. Sorted and deduplicated, absent from the wire when
+/// empty. The set is open in the same sense `workspace_diagnostics[].kind` is:
+/// treat an unrecognised value as "some caveat" rather than as an error.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum ReachabilityCaveat {
+    /// This finding's own file is one the run did not fully analyze, so the
+    /// export and import lists extracted from it may stop short of the real
+    /// ones. That reaches an `unused-file` verdict directly, because the
+    /// "is any export of this file referenced from a reachable module" test
+    /// reads exactly that truncated export list.
+    ///
+    /// Two workspace diagnostics put a file in this state: it was read but did
+    /// not parse cleanly (`source-parse-degraded`), or it could not be read at
+    /// all (`source-read-failure`). The token names the consequence rather than
+    /// either cause, so a future kind that leaves a discovered file partially
+    /// extracted carries the same value.
+    ///
+    /// Dependency findings never carry this value: the file they name is a
+    /// `package.json`, not a parsed source module.
+    IncompleteFileAnalysis,
+    /// A module whose import list feeds this verdict was not analyzed, so the
+    /// import that would have credited this finding may never have been seen.
+    ///
+    /// The cause is any workspace diagnostic that leaves a source file's
+    /// imports unseen: a degraded parse (`source-parse-degraded`), a file that
+    /// could not be read (`source-read-failure`), or a file discovery skipped
+    /// before reading it (`skipped-large-file`, `skipped-minified-file`,
+    /// `skipped-source-dotdir`). The token names the class rather than any one
+    /// cause.
+    ///
+    /// Which modules feed the verdict differs by array, and the caveat is
+    /// emitted only when a degraded module is actually one of them:
+    ///
+    /// - `unused_files[]` and `unused_exports[]` rest on reachability, so only
+    ///   a degraded module that is itself observed reachable can change the
+    ///   verdict. When every degraded module is unreachable the caveat is
+    ///   absent, and soundly: the FIRST missing edge on any entry-point path
+    ///   leaves from a module whose every predecessor edge was observed, so
+    ///   that module is observed reachable. A file the run never read has no
+    ///   module and no graph node, so its reachability is not observable at
+    ///   all and that narrowing cannot be applied: any skipped or unreadable
+    ///   source caveats every reachability verdict in the run.
+    /// - the dependency arrays rest on whether ANY module in the project
+    ///   imports the package specifier, reachable or not, so any degraded
+    ///   parse anywhere can hide the import that would have credited the
+    ///   package. Reachability does not narrow that one.
+    ///
+    /// The limit, stated because an approximation presented as exact is worse
+    /// than nothing: this is a RUN-level condition, not proof that a degraded
+    /// module imports this path or package. An import the parser never saw
+    /// cannot be attributed to a target, so the link cannot be narrowed
+    /// further without re-reading the source. Read `workspace_diagnostics[]`
+    /// for which files degraded.
+    IncompleteImportGraph,
+}
+
+impl ReachabilityCaveat {
+    /// The wire token.
+    #[must_use]
+    pub const fn token(self) -> &'static str {
+        match self {
+            Self::IncompleteFileAnalysis => "incomplete-file-analysis",
+            Self::IncompleteImportGraph => "incomplete-import-graph",
+        }
+    }
+
+    /// A one-line explanation for human and agent-facing renderers.
+    ///
+    /// Neither sentence names a single cause. A degraded parse is only one of
+    /// the ways a file goes unread: it may also have been unreadable, or
+    /// skipped before it was ever opened (oversized, minified, in a dotdir).
+    /// Naming the parse case alone sent a reader whose run was degraded by the
+    /// size guard hunting for parse errors that do not exist, so both messages
+    /// point at `workspace_diagnostics[]`, which names the actual files.
+    #[must_use]
+    pub const fn message(self) -> &'static str {
+        match self {
+            Self::IncompleteFileAnalysis => {
+                "low: this file was not fully analyzed, so its extracted exports and imports may be incomplete; see workspace_diagnostics[]"
+            }
+            Self::IncompleteImportGraph => {
+                "low: a module this run did not fully read may hold an import that would credit this; see workspace_diagnostics[]"
+            }
+        }
+    }
+
+    /// A compact label for a one-line human renderer, where the full
+    /// [`Self::message`] would not fit next to the finding.
+    #[must_use]
+    pub const fn short_label(self) -> &'static str {
+        match self {
+            Self::IncompleteFileAnalysis => "incomplete file analysis",
+            Self::IncompleteImportGraph => "incomplete import graph",
+        }
+    }
+}
+
+/// The compact labels of `caveats`, joined for a one-line renderer, or `None`
+/// when there is nothing to say.
+#[must_use]
+pub fn caveat_labels(caveats: &[ReachabilityCaveat]) -> Option<String> {
+    if caveats.is_empty() {
+        return None;
+    }
+    let labels: Vec<&str> = caveats
+        .iter()
+        .map(|caveat| ReachabilityCaveat::short_label(*caveat))
+        .collect();
+    Some(labels.join(", "))
+}
+
+/// The compact parenthetical a one-line human renderer appends to a finding
+/// carrying `caveats`, or `None` when there is nothing to say. Shared by every
+/// dead-code section so the suffix reads the same everywhere.
+#[must_use]
+pub fn caveat_suffix(caveats: &[ReachabilityCaveat]) -> Option<String> {
+    caveat_labels(caveats).map(|labels| format!("{CAVEAT_SUFFIX_MARKER}{labels})"))
+}
+
+/// The opening of the parenthetical [`caveat_suffix`] renders. Public because
+/// one consumer can only see the rendered description: the CI review formats
+/// build their comments from CodeClimate issues, whose `description` is the
+/// only place the caveat survives (the CodeClimate wire is a published
+/// contract with no field for it). Recognising the marker is what lets those
+/// formats withhold a one-click mutation.
+pub const CAVEAT_SUFFIX_MARKER: &str = " (caveat: ";
+
+/// Whether a rendered finding description already carries a caveat
+/// parenthetical, for a surface holding the string rather than the typed
+/// finding.
+///
+/// Lives here, next to the renderer, so the producer and the recogniser cannot
+/// drift; `a_rendered_suffix_is_recognised_by_the_marker` pins the pair.
+#[must_use]
+pub fn description_carries_caveat(description: &str) -> bool {
+    description.contains(CAVEAT_SUFFIX_MARKER)
+}
+
+/// The compact label for one wire token, for a renderer that reads
+/// `reachability_caveats[]` back off a serialized envelope instead of holding
+/// the typed findings.
+///
+/// The value set is OPEN, exactly as the wire documentation says: a token this
+/// build does not recognise is still a caveat, so it is rendered as itself with
+/// its separators relaxed into spaces rather than dropped. Dropping it would
+/// turn a finding whose evidence is incomplete back into a confident one,
+/// which is the failure this whole mechanism exists to prevent.
+#[must_use]
+pub fn caveat_label_for_token(token: &str) -> String {
+    match token {
+        "incomplete-file-analysis" => {
+            ReachabilityCaveat::short_label(ReachabilityCaveat::IncompleteFileAnalysis).to_owned()
+        }
+        "incomplete-import-graph" => {
+            ReachabilityCaveat::short_label(ReachabilityCaveat::IncompleteImportGraph).to_owned()
+        }
+        other => other.replace('-', " "),
+    }
+}
+
+/// The joined compact labels for wire tokens, or `None` when there are none.
+/// The token-side twin of [`caveat_labels`], for renderers driven by a
+/// serialized envelope rather than by typed findings.
+#[must_use]
+pub fn caveat_labels_for_tokens<'a>(tokens: impl IntoIterator<Item = &'a str>) -> Option<String> {
+    let labels: Vec<String> = tokens.into_iter().map(caveat_label_for_token).collect();
+    if labels.is_empty() {
+        return None;
+    }
+    Some(labels.join(", "))
+}
+
+/// The token-side twin of [`caveat_suffix`], so an envelope-driven renderer
+/// appends the same parenthetical as a findings-driven one.
+#[must_use]
+pub fn caveat_suffix_for_tokens<'a>(tokens: impl IntoIterator<Item = &'a str>) -> Option<String> {
+    caveat_labels_for_tokens(tokens).map(|labels| format!("{CAVEAT_SUFFIX_MARKER}{labels})"))
+}
+
+/// The note every mutating action carries once [`MutationEvidence`] withholds
+/// it. One string, so the CLI action array, the LSP diagnostic, and the MCP
+/// tool contract all say the same thing about the same finding.
+pub const INCOMPLETE_EVIDENCE_NOTE: &str = "Evidence is incomplete: a file this run did not fully analyze may hold the reference that \
+     credits this finding, so this mutation is not applied automatically. Resolve the files named \
+     in workspace_diagnostics[] and re-run, or confirm and remove it by hand.";
+
+/// The one question every mutation surface asks before it offers, plans, or
+/// performs a dead-code finding's removal.
+///
+/// A finding whose reachability verdict rests on a file the run never fully
+/// read is still REPORTED, always: a caveat withholds no finding, changes no
+/// severity, and moves no exit code. What it withholds is the automation. The
+/// predicate lives here, next to the findings, rather than in any one consumer,
+/// because it was re-derived per surface three times and a fourth door opened
+/// every time: `fallow fix`, the LSP quick fix, and the `auto_fixable` flag an
+/// agent plans against each answered it differently. Every one of those now
+/// calls [`Self::may_auto_apply_mutation`], so a sixth finding type or a fourth
+/// mutation surface cannot silently opt out.
+///
+/// Implemented only by the findings that can carry a caveat. A finding type
+/// that exposes an auto-fixable mutation and does NOT implement this trait is
+/// the bug this trait exists to make visible; `mutation_gate_holds_for_every_
+/// finding_type` in this module's tests pins that.
+pub trait MutationEvidence {
+    /// The advisory caveats recorded on the reachability verdict behind this
+    /// finding. Empty when the run analyzed every file it discovered.
+    fn reachability_caveats(&self) -> &[ReachabilityCaveat];
+
+    /// Whether this finding's mutation may be applied without a human first
+    /// being told the evidence is incomplete. THE gate: never re-derive it,
+    /// never widen it per surface.
+    fn may_auto_apply_mutation(&self) -> bool {
+        self.reachability_caveats().is_empty()
+    }
+}
+
+/// Record a run's caveats on a finding, enforcing [`MutationEvidence`] on its
+/// typed `actions` in the same step.
+///
+/// Separate from [`MutationEvidence`] so a read-only consumer (the fixer, the
+/// LSP, a renderer) depends only on the question and never on the answer's
+/// setter. `annotate` in the analysis layer is the single writer.
+pub trait CaveatedFinding: MutationEvidence {
+    /// Store `caveats` and downgrade every mutating action the gate now
+    /// withholds. Storing the field without the downgrade is not reachable
+    /// from outside this module, which is the point.
+    fn set_reachability_caveats(&mut self, caveats: Vec<ReachabilityCaveat>);
+}
+
+/// Downgrade every `Fix` action in `actions` when `caveats` is non-empty, so
+/// the `auto_fixable` flag an agent plans against matches what `fallow fix`
+/// will actually do. Only ever downgrades: a surface that has already decided
+/// a mutation is unsafe for its own reasons keeps that decision.
+fn withhold_caveated_mutations(actions: &mut [IssueAction], caveats: &[ReachabilityCaveat]) {
+    if caveats.is_empty() {
+        return;
+    }
+    for action in actions {
+        let IssueAction::Fix(fix) = action else {
+            continue;
+        };
+        fix.auto_fixable = false;
+        fix.note = Some(match fix.note.take() {
+            Some(existing) => format!("{existing}. {INCOMPLETE_EVIDENCE_NOTE}"),
+            None => INCOMPLETE_EVIDENCE_NOTE.to_string(),
+        });
+    }
+}
+
+/// Implement the gate for a finding wrapper carrying a `reachability_caveats`
+/// field alongside a typed `actions` array. A new caveated finding type adds
+/// one line here rather than a new per-surface branch.
+macro_rules! impl_caveated_finding {
+    ($($finding:ty),+ $(,)?) => {
+        $(
+            impl MutationEvidence for $finding {
+                fn reachability_caveats(&self) -> &[ReachabilityCaveat] {
+                    &self.reachability_caveats
+                }
+            }
+
+            impl CaveatedFinding for $finding {
+                fn set_reachability_caveats(&mut self, caveats: Vec<ReachabilityCaveat>) {
+                    withhold_caveated_mutations(&mut self.actions, &caveats);
+                    self.reachability_caveats = caveats;
+                }
+            }
+        )+
+    };
+}
+
 /// Wire-shape envelope for an [`UnusedFile`] finding. The bare finding
 /// flattens in via `#[serde(flatten)]`, with a typed `actions` array
 /// populated at construction time and the audit-pass `introduced` flag
@@ -112,6 +400,13 @@ pub struct UnusedFileFinding {
     /// the merge-base. `None` when serialized directly from Rust.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub introduced: Option<AuditIntroduced>,
+    /// Advisory caveats on the reachability verdict behind this finding.
+    /// Sorted, deduplicated, and omitted from the wire when empty, so a run
+    /// that analyzed every discovered file is byte-identical. Never gates the
+    /// finding or the `delete-file` action, though `fallow fix` does withhold
+    /// the removal of a caveated finding as low confidence.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reachability_caveats: Vec<ReachabilityCaveat>,
 }
 
 impl UnusedFileFinding {
@@ -144,6 +439,7 @@ impl UnusedFileFinding {
             file,
             actions,
             introduced: None,
+            reachability_caveats: Vec::new(),
         }
     }
 }
@@ -657,6 +953,12 @@ pub struct UnusedExportFinding {
     /// the merge-base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub introduced: Option<AuditIntroduced>,
+    /// Advisory caveats on the reachability verdict behind this finding.
+    /// Sorted, deduplicated, and omitted from the wire when empty. Never gates
+    /// the finding or the `remove-export` action, though `fallow fix` does
+    /// withhold the removal of a caveated export as low confidence.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reachability_caveats: Vec<ReachabilityCaveat>,
 }
 
 impl UnusedExportFinding {
@@ -695,13 +997,14 @@ impl UnusedExportFinding {
             actions,
             semantic: None,
             introduced: None,
+            reachability_caveats: Vec::new(),
         }
     }
 
     /// Attach type-aware evidence and disable the syntactic fix when semantic
     /// analysis could not establish complete negative evidence.
     pub fn set_semantic_decision(&mut self, decision: SemanticCandidateDecision) {
-        set_export_semantic_action(&mut self.actions, &decision);
+        set_export_semantic_action(&mut self.actions, &decision, &self.reachability_caveats);
         self.semantic = Some(decision);
     }
 }
@@ -726,6 +1029,13 @@ pub struct UnusedTypeFinding {
     /// the merge-base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub introduced: Option<AuditIntroduced>,
+    /// Advisory caveats on the reachability verdict behind this finding.
+    /// A type export rests on exactly the reachability test an
+    /// `unused_exports[]` entry does, and the LSP offers the same
+    /// remove-the-`export`-keyword quick fix for both, so the two must render
+    /// with the same confidence. Sorted, deduplicated, omitted when empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reachability_caveats: Vec<ReachabilityCaveat>,
 }
 
 impl UnusedTypeFinding {
@@ -765,30 +1075,42 @@ impl UnusedTypeFinding {
             actions,
             semantic: None,
             introduced: None,
+            reachability_caveats: Vec::new(),
         }
     }
 
     /// Attach type-aware evidence and disable the syntactic fix when semantic
     /// analysis could not establish complete negative evidence.
     pub fn set_semantic_decision(&mut self, decision: SemanticCandidateDecision) {
-        set_export_semantic_action(&mut self.actions, &decision);
+        set_export_semantic_action(&mut self.actions, &decision, &self.reachability_caveats);
         self.semantic = Some(decision);
     }
 }
 
-fn set_export_semantic_action(actions: &mut [IssueAction], decision: &SemanticCandidateDecision) {
+/// The semantic pass runs in the API layer, AFTER the analysis layer stamped
+/// this run's caveats, and it is the one code path that RAISES `auto_fixable`.
+/// It therefore has to ask the gate too, or a `Complete` semantic verdict would
+/// silently re-open a mutation the incomplete run had already withheld.
+fn set_export_semantic_action(
+    actions: &mut [IssueAction],
+    decision: &SemanticCandidateDecision,
+    caveats: &[ReachabilityCaveat],
+) {
     let complete_negative = decision.decision
         == SemanticCandidateDecisionKind::ConfirmedNoStaticReferences
         && decision.status == SemanticCompleteness::Complete;
     let Some(IssueAction::Fix(action)) = actions.first_mut() else {
         return;
     };
-    action.auto_fixable = complete_negative;
+    action.auto_fixable = complete_negative && caveats.is_empty();
     if !complete_negative {
         action.note = Some(
             "Type-aware analysis retained this candidate because complete negative evidence was not available"
                 .to_string(),
         );
+    }
+    if !caveats.is_empty() {
+        action.note = Some(INCOMPLETE_EVIDENCE_NOTE.to_string());
     }
 }
 
@@ -1602,6 +1924,14 @@ pub struct UnusedEnumMemberFinding {
     /// the merge-base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub introduced: Option<AuditIntroduced>,
+    /// Advisory caveats on the verdict behind this finding. A member's usage
+    /// is collected by walking the member accesses of every module the run
+    /// parsed, so a member whose only reference lives in a file the run never
+    /// read reads as unused exactly like an export does. Sorted,
+    /// deduplicated, and omitted from the wire when empty. Never gates the
+    /// finding; it does withhold the `remove-enum-member` mutation.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reachability_caveats: Vec<ReachabilityCaveat>,
 }
 
 impl UnusedEnumMemberFinding {
@@ -1629,6 +1959,7 @@ impl UnusedEnumMemberFinding {
             member,
             actions,
             introduced: None,
+            reachability_caveats: Vec::new(),
         }
     }
 }
@@ -1659,6 +1990,15 @@ pub struct UnusedClassMemberFinding {
     /// the merge-base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub introduced: Option<AuditIntroduced>,
+    /// Advisory caveats on the verdict behind this finding. A class member's
+    /// usage is collected by the same reachability-free member-access walk an
+    /// enum member's is, so it takes the enum-member rule unchanged: any module
+    /// this run analyzed incompletely can hold the access that credits it.
+    /// Sorted, deduplicated, and omitted from the wire when empty. Never gates
+    /// the finding; it does withhold the `remove-class-member` mutation that
+    /// the type-aware pass would otherwise open.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reachability_caveats: Vec<ReachabilityCaveat>,
 }
 
 impl UnusedClassMemberFinding {
@@ -1693,6 +2033,7 @@ impl UnusedClassMemberFinding {
             semantic: None,
             semantic_only_candidate: false,
             introduced: None,
+            reachability_caveats: Vec::new(),
         }
     }
 
@@ -1705,11 +2046,26 @@ impl UnusedClassMemberFinding {
     }
 
     /// Attach the canonical semantic decision and expose the class-member fix
-    /// only when the API policy granted closed-world eligibility.
+    /// only when the API policy granted closed-world eligibility AND this run
+    /// holds the evidence for the mutation.
+    ///
+    /// This is the one code path that RAISES `auto_fixable` on a class member,
+    /// and it runs in the API layer AFTER the analysis layer stamped the run's
+    /// caveats, so it asks the gate for the same reason
+    /// `set_export_semantic_action` does: a closed-world verdict computed
+    /// over a program the run never fully read must not re-open a removal the
+    /// incomplete run already withheld. The withheld note names the evidence
+    /// gap rather than the semantic explanation, which stays readable on the
+    /// finding's own `semantic` object.
     pub fn set_semantic_decision(&mut self, decision: SemanticCandidateDecision) {
+        let evidence_complete = self.reachability_caveats.is_empty();
         if let Some(IssueAction::Fix(action)) = self.actions.first_mut() {
-            action.auto_fixable = decision.closed_world_eligible;
-            action.note = Some(decision.explanation.clone());
+            action.auto_fixable = decision.closed_world_eligible && evidence_complete;
+            action.note = Some(if evidence_complete {
+                decision.explanation.clone()
+            } else {
+                INCOMPLETE_EVIDENCE_NOTE.to_string()
+            });
         }
         self.semantic = Some(decision);
     }
@@ -1848,6 +2204,14 @@ pub struct UnusedDependencyFinding {
     /// the merge-base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub introduced: Option<AuditIntroduced>,
+    /// Advisory caveats on the verdict behind this finding. A dependency is
+    /// reported unused when NO module in the project imports its specifier,
+    /// so a module that parsed with errors can hide the import that would
+    /// have credited the package. Sorted, deduplicated, and omitted from the
+    /// wire when empty. Never gates the finding, though `fallow fix`
+    /// withholds the `remove-dependency` write while a caveat stands.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reachability_caveats: Vec<ReachabilityCaveat>,
 }
 
 impl UnusedDependencyFinding {
@@ -1860,6 +2224,7 @@ impl UnusedDependencyFinding {
             dep,
             actions,
             introduced: None,
+            reachability_caveats: Vec::new(),
         }
     }
 }
@@ -1882,6 +2247,14 @@ pub struct UnusedDevDependencyFinding {
     /// the merge-base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub introduced: Option<AuditIntroduced>,
+    /// Advisory caveats on the verdict behind this finding. A dependency is
+    /// reported unused when NO module in the project imports its specifier,
+    /// so a module that parsed with errors can hide the import that would
+    /// have credited the package. Sorted, deduplicated, and omitted from the
+    /// wire when empty. Never gates the finding, though `fallow fix`
+    /// withholds the `remove-dependency` write while a caveat stands.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reachability_caveats: Vec<ReachabilityCaveat>,
 }
 
 impl UnusedDevDependencyFinding {
@@ -1894,6 +2267,7 @@ impl UnusedDevDependencyFinding {
             dep,
             actions,
             introduced: None,
+            reachability_caveats: Vec::new(),
         }
     }
 }
@@ -1916,6 +2290,14 @@ pub struct UnusedOptionalDependencyFinding {
     /// the merge-base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub introduced: Option<AuditIntroduced>,
+    /// Advisory caveats on the verdict behind this finding. A dependency is
+    /// reported unused when NO module in the project imports its specifier,
+    /// so a module that parsed with errors can hide the import that would
+    /// have credited the package. Sorted, deduplicated, and omitted from the
+    /// wire when empty. Never gates the finding, though `fallow fix`
+    /// withholds the `remove-dependency` write while a caveat stands.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reachability_caveats: Vec<ReachabilityCaveat>,
 }
 
 impl UnusedOptionalDependencyFinding {
@@ -1928,6 +2310,7 @@ impl UnusedOptionalDependencyFinding {
             dep,
             actions,
             introduced: None,
+            reachability_caveats: Vec::new(),
         }
     }
 }
@@ -2628,6 +3011,23 @@ fn build_ignore_dependency_overrides_suppress(
     }))
 }
 
+// ── The mutation gate, registered once ──────────────────────────
+//
+// Every finding whose reachability verdict a lost import edge can distort.
+// The analysis layer stamps caveats through `set_reachability_caveats`, which
+// enforces the gate on the finding's actions in the same call; every mutation
+// surface reads the answer back through `may_auto_apply_mutation`.
+impl_caveated_finding!(
+    UnusedFileFinding,
+    UnusedExportFinding,
+    UnusedTypeFinding,
+    UnusedEnumMemberFinding,
+    UnusedClassMemberFinding,
+    UnusedDependencyFinding,
+    UnusedDevDependencyFinding,
+    UnusedOptionalDependencyFinding,
+);
+
 // ── Position-0 invariant golden tests ───────────────────────────
 //
 // These tests document the load-bearing position-0 semantics that flow
@@ -2637,6 +3037,514 @@ fn build_ignore_dependency_overrides_suppress(
 // document WHY position 0 has a specific value, so a future refactor that
 // re-orders actions tells you what broke instead of just "the snapshot
 // changed".
+#[cfg(test)]
+mod caveat_tokens {
+    use super::*;
+
+    /// The token-side helpers must render the same words as the typed ones, so
+    /// one finding reads identically whether a surface holds the findings or
+    /// re-reads them off a serialized envelope.
+    #[test]
+    fn token_labels_match_the_typed_labels() {
+        let typed = [
+            ReachabilityCaveat::IncompleteFileAnalysis,
+            ReachabilityCaveat::IncompleteImportGraph,
+        ];
+        let tokens: Vec<&str> = typed.iter().map(|c| c.token()).collect();
+
+        assert_eq!(
+            caveat_labels_for_tokens(tokens.iter().copied()),
+            caveat_labels(&typed)
+        );
+        assert_eq!(
+            caveat_suffix_for_tokens(tokens.iter().copied()),
+            caveat_suffix(&typed)
+        );
+    }
+
+    #[test]
+    fn no_tokens_means_nothing_to_say() {
+        assert_eq!(caveat_labels_for_tokens(std::iter::empty()), None);
+        assert_eq!(caveat_suffix_for_tokens(std::iter::empty()), None);
+    }
+
+    /// The CI review formats can only see the rendered description, so the
+    /// recogniser and the renderer have to stay one pair. A description with
+    /// no caveat must not match, or the review formats would withhold the
+    /// suggestion block on every finding in a clean run.
+    #[test]
+    fn a_rendered_suffix_is_recognised_by_the_marker() {
+        for caveats in [
+            &[ReachabilityCaveat::IncompleteImportGraph][..],
+            &[
+                ReachabilityCaveat::IncompleteFileAnalysis,
+                ReachabilityCaveat::IncompleteImportGraph,
+            ][..],
+        ] {
+            let suffix = caveat_suffix(caveats).expect("a caveat renders a suffix");
+            assert!(
+                description_carries_caveat(&format!("Something is never referenced{suffix}")),
+                "the marker must match what caveat_suffix writes: {suffix}"
+            );
+        }
+        assert!(
+            description_carries_caveat(&format!(
+                "Something is never referenced{}",
+                caveat_suffix_for_tokens(["some-future-cause"]).expect("token suffix")
+            )),
+            "the token-side renderer writes the same marker"
+        );
+        assert!(
+            !description_carries_caveat("Class member 'Widget.helper' is never referenced"),
+            "a clean description must not read as caveated"
+        );
+    }
+
+    /// A caveat is a RUN-level condition covering several ways a file goes
+    /// unread: a degraded parse, an unreadable file, and three kinds of file
+    /// discovery skipped before opening. A message naming only the parse case
+    /// told a reader whose run was degraded by the size guard to go fix parse
+    /// errors that do not exist, which is the same overclaiming the caveat
+    /// itself exists to prevent.
+    #[test]
+    fn no_caveat_message_names_a_single_cause() {
+        for caveat in [
+            ReachabilityCaveat::IncompleteFileAnalysis,
+            ReachabilityCaveat::IncompleteImportGraph,
+        ] {
+            let message = caveat.message();
+            assert!(
+                !message.contains("parse cleanly") && !message.contains("parse error"),
+                "{} names the parse cause alone, but a size-skipped or unreadable \
+                 file reaches the same caveat: {message}",
+                caveat.token()
+            );
+            assert!(
+                message.contains("workspace_diagnostics"),
+                "{} must point at the list that names the actual files: {message}",
+                caveat.token()
+            );
+        }
+    }
+
+    /// The value set is open. A token a consumer build does not recognise still
+    /// means the evidence is incomplete, so it must survive into the rendered
+    /// hedge rather than being dropped back into a confident-looking finding.
+    #[test]
+    fn an_unrecognised_token_still_renders_as_a_caveat() {
+        let suffix = caveat_suffix_for_tokens(["some-future-cause"])
+            .expect("an unknown token is still a caveat");
+
+        assert_eq!(suffix, " (caveat: some future cause)");
+    }
+}
+
+/// The gate, pinned as one property across every finding type rather than as
+/// one test per mutation surface.
+///
+/// Three separate reviewers found three separate mutation paths that had never
+/// learned about the caveat, because each earlier round fixed the door it
+/// found. These tests assert the invariant itself: for every dead-code finding
+/// that can carry a caveat, a caveated finding exposes NO auto-fixable action,
+/// and an uncaveated one is untouched. Adding a caveated finding type without
+/// registering it in `impl_caveated_finding!` fails to compile at the
+/// `set_reachability_caveats` call the annotation pass makes; adding one that
+/// exposes an auto-fixable mutation and never gets annotated is what
+/// `every_auto_fixable_dead_code_mutation_is_gated` catches.
+#[cfg(test)]
+mod mutation_gate {
+    use super::*;
+    use crate::extract::MemberKind;
+    use crate::results::DependencyLocation;
+    use std::path::PathBuf;
+
+    const BOTH: [ReachabilityCaveat; 2] = [
+        ReachabilityCaveat::IncompleteFileAnalysis,
+        ReachabilityCaveat::IncompleteImportGraph,
+    ];
+
+    fn export(name: &str) -> UnusedExport {
+        UnusedExport {
+            path: PathBuf::from("/p/src/mod.ts"),
+            export_name: name.to_string(),
+            is_type_only: false,
+            line: 1,
+            col: 0,
+            span_start: 0,
+            is_re_export: false,
+        }
+    }
+
+    fn member(name: &str) -> UnusedMember {
+        UnusedMember {
+            path: PathBuf::from("/p/src/mod.ts"),
+            parent_name: "Color".to_string(),
+            member_name: name.to_string(),
+            kind: MemberKind::EnumMember,
+            line: 2,
+            col: 2,
+        }
+    }
+
+    fn class_member(name: &str) -> UnusedMember {
+        UnusedMember {
+            parent_name: "Widget".to_string(),
+            kind: MemberKind::ClassMethod,
+            ..member(name)
+        }
+    }
+
+    fn dependency(name: &str) -> UnusedDependency {
+        UnusedDependency {
+            package_name: name.to_string(),
+            location: DependencyLocation::Dependencies,
+            path: PathBuf::from("/p/package.json"),
+            line: 5,
+            used_in_workspaces: Vec::new(),
+        }
+    }
+
+    /// One finding type: its name, the uncaveated finding, and the same
+    /// finding after the annotation pass stamped a caveat on it.
+    type GatedPair = (&'static str, Box<dyn Gated>, Box<dyn Gated>);
+
+    /// Every caveated finding type, boxed behind the one question the mutation
+    /// surfaces ask.
+    fn every_finding_type() -> Vec<GatedPair> {
+        fn pair<T: Gated + Clone + 'static>(name: &'static str, clean: T) -> GatedPair {
+            let mut caveated = clean.clone();
+            caveated.stamp(BOTH.to_vec());
+            (name, Box::new(clean), Box::new(caveated))
+        }
+        vec![
+            pair(
+                "unused_files",
+                UnusedFileFinding::with_actions(UnusedFile {
+                    path: PathBuf::from("/p/src/orphan.ts"),
+                }),
+            ),
+            pair(
+                "unused_exports",
+                UnusedExportFinding::with_actions(export("helper")),
+            ),
+            pair(
+                "unused_types",
+                UnusedTypeFinding::with_actions(export("Shape")),
+            ),
+            pair(
+                "unused_enum_members",
+                UnusedEnumMemberFinding::with_actions(member("Blue")),
+            ),
+            pair(
+                "unused_class_members",
+                UnusedClassMemberFinding::with_actions(class_member("legacyMethod")),
+            ),
+            pair(
+                "unused_dependencies",
+                UnusedDependencyFinding::with_actions(dependency("lodash")),
+            ),
+            pair(
+                "unused_dev_dependencies",
+                UnusedDevDependencyFinding::with_actions(dependency("vitest")),
+            ),
+            pair(
+                "unused_optional_dependencies",
+                UnusedOptionalDependencyFinding::with_actions(dependency("fsevents")),
+            ),
+        ]
+    }
+
+    /// Erases the finding type down to what a mutation surface needs: the gate,
+    /// the actions it gates, and the annotation-pass write.
+    trait Gated {
+        fn actions(&self) -> &[IssueAction];
+        fn gate_allows_mutation(&self) -> bool;
+        fn stamp(&mut self, caveats: Vec<ReachabilityCaveat>);
+    }
+
+    impl<T: MutationEvidence + CaveatedFinding + HasActions> Gated for T {
+        fn actions(&self) -> &[IssueAction] {
+            HasActions::actions(self)
+        }
+        fn gate_allows_mutation(&self) -> bool {
+            self.may_auto_apply_mutation()
+        }
+        fn stamp(&mut self, caveats: Vec<ReachabilityCaveat>) {
+            self.set_reachability_caveats(caveats);
+        }
+    }
+
+    trait HasActions {
+        fn actions(&self) -> &[IssueAction];
+    }
+
+    macro_rules! has_actions {
+        ($($ty:ty),+ $(,)?) => { $( impl HasActions for $ty {
+            fn actions(&self) -> &[IssueAction] { &self.actions }
+        } )+ };
+    }
+    has_actions!(
+        UnusedFileFinding,
+        UnusedExportFinding,
+        UnusedTypeFinding,
+        UnusedEnumMemberFinding,
+        UnusedClassMemberFinding,
+        UnusedDependencyFinding,
+        UnusedDevDependencyFinding,
+        UnusedOptionalDependencyFinding,
+    );
+
+    /// THE property. Not "the CLI withholds it" or "the LSP hides it": no
+    /// finding whose evidence the run itself flagged may advertise an
+    /// automatically applicable mutation, whichever surface is reading.
+    #[test]
+    fn every_auto_fixable_dead_code_mutation_is_gated() {
+        for (name, _clean, caveated) in every_finding_type() {
+            assert!(
+                !caveated.gate_allows_mutation(),
+                "{name}: a stamped finding must fail the gate"
+            );
+            for action in caveated.actions() {
+                assert!(
+                    !action.is_auto_fixable(),
+                    "{name}: a caveated finding still advertises an auto-fixable action, so an \
+                     agent following the documented actions contract would plan a removal \
+                     `fallow fix` refuses"
+                );
+            }
+        }
+    }
+
+    /// The other half, and the one a blunt fix breaks: the gate must not turn
+    /// every finding into a manual one. A run that read every file it
+    /// discovered keeps exactly the behavior it had.
+    #[test]
+    fn an_uncaveated_finding_keeps_its_auto_fix() {
+        let auto_fixable_types = [
+            "unused_exports",
+            "unused_types",
+            "unused_enum_members",
+            "unused_dependencies",
+            "unused_dev_dependencies",
+            "unused_optional_dependencies",
+        ];
+        for (name, clean, _caveated) in every_finding_type() {
+            assert!(
+                clean.gate_allows_mutation(),
+                "{name}: a finding with no caveat must pass the gate"
+            );
+            if auto_fixable_types.contains(&name) {
+                assert!(
+                    clean.actions().iter().any(IssueAction::is_auto_fixable),
+                    "{name}: the gate must not withhold a mutation the run has the evidence for"
+                );
+            }
+        }
+    }
+
+    /// The caveat is advisory about the FINDING and decisive only about the
+    /// MUTATION: the actions array keeps its shape so a consumer reading
+    /// `actions[0].type` is unaffected, and the suppress alternative stays.
+    #[test]
+    fn the_gate_downgrades_a_mutation_without_removing_it() {
+        let clean = UnusedExportFinding::with_actions(export("helper"));
+        let mut caveated = clean.clone();
+        caveated.set_reachability_caveats(BOTH.to_vec());
+
+        assert_eq!(caveated.actions.len(), clean.actions.len());
+        let IssueAction::Fix(fix) = &caveated.actions[0] else {
+            panic!("position 0 stays the fix action");
+        };
+        assert!(!fix.auto_fixable);
+        assert_eq!(
+            fix.note.as_deref(),
+            Some(INCOMPLETE_EVIDENCE_NOTE),
+            "the withheld action says why in its own note, not only in a sibling array"
+        );
+    }
+
+    /// A pre-existing note is context the user still needs (the re-export
+    /// warning names a public-API risk the caveat says nothing about), so the
+    /// gate appends rather than overwrites.
+    #[test]
+    fn a_gated_mutation_keeps_the_note_it_already_had() {
+        let mut re_export = export("helper");
+        re_export.is_re_export = true;
+        let mut finding = UnusedExportFinding::with_actions(re_export);
+        finding.set_reachability_caveats(vec![ReachabilityCaveat::IncompleteImportGraph]);
+
+        let IssueAction::Fix(fix) = &finding.actions[0] else {
+            panic!("position 0 stays the fix action");
+        };
+        let note = fix.note.as_deref().expect("note present");
+        assert!(note.contains("public API"), "the original note survives");
+        assert!(
+            note.contains("Evidence is incomplete"),
+            "the caveat is added"
+        );
+    }
+
+    /// The gate is complete only if every finding type that can ever expose an
+    /// auto-fixable mutation is in it. The one member type deliberately left
+    /// out is safe for a different reason, and this pins that reason rather
+    /// than trusting a comment: a store member exposes no fix action at all,
+    /// because reflective access via a Pinia plugin or `$onAction` is
+    /// invisible to syntactic analysis, so no evidence this run could gather
+    /// would open the removal. If it ever ships one, it needs
+    /// `reachability_caveats` and a row in `impl_caveated_finding!` first.
+    ///
+    /// A class member used to sit here on the weaker argument that its removal
+    /// STARTS withheld. That argument covered only the syntactic finding: the
+    /// type-aware sidecar reopens the removal through
+    /// [`UnusedClassMemberFinding::set_semantic_decision`], and the review
+    /// formats rendered a one-click commit for it regardless of
+    /// `auto_fixable`. It is inside the gate now, so the assertion here is
+    /// only that the SYNTACTIC finding still ships no auto-fix; the reopening
+    /// path is pinned by `a_complete_semantic_verdict_cannot_reopen_a_
+    /// caveated_class_member`.
+    #[test]
+    fn a_store_member_exposes_no_mutation_at_all() {
+        let store = UnusedStoreMemberFinding::with_actions(member("total"));
+        assert!(
+            !store.actions.iter().any(IssueAction::is_auto_fixable),
+            "a store member must expose no automatically applicable mutation"
+        );
+        assert!(
+            !store
+                .actions
+                .iter()
+                .any(|action| matches!(action, IssueAction::Fix(_))),
+            "and no fix action at all"
+        );
+
+        let class = UnusedClassMemberFinding::with_actions(class_member("helper"));
+        assert!(
+            !class.actions.iter().any(IssueAction::is_auto_fixable),
+            "a class member's syntactic removal stays withheld until semantic evidence opens it"
+        );
+    }
+
+    /// The semantic pass runs after the annotation pass and is the only code
+    /// path that RAISES `auto_fixable`. A `Complete` verdict must not re-open a
+    /// mutation the incomplete run already withheld.
+    #[test]
+    fn a_complete_semantic_verdict_cannot_reopen_a_caveated_mutation() {
+        use crate::semantic::{
+            SemanticCandidateDecision, SemanticCandidateDecisionKind, SemanticCompleteness,
+            SemanticNamespace, SemanticSymbol,
+        };
+
+        let complete_negative = || SemanticCandidateDecision {
+            query_id: 0,
+            subject: SemanticSymbol {
+                path: PathBuf::from("/p/src/mod.ts"),
+                namespace: SemanticNamespace::Value,
+                declaration_kind: "function".to_string(),
+                exported_name: "helper".to_string(),
+                local_name: "helper".to_string(),
+                owner: None,
+                line: 1,
+                col: 0,
+            },
+            decision: SemanticCandidateDecisionKind::ConfirmedNoStaticReferences,
+            status: SemanticCompleteness::Complete,
+            owning_projects: Vec::new(),
+            evidence: Vec::new(),
+            contract: None,
+            framework_contract: None,
+            closed_world_eligible: false,
+            edit_guard: None,
+            reason_code: None,
+            explanation: String::new(),
+            actions: Vec::new(),
+            total_evidence_count: 0,
+            truncated: false,
+            omissions: Vec::new(),
+        };
+
+        let mut clean = UnusedExportFinding::with_actions(export("helper"));
+        clean.set_semantic_decision(complete_negative());
+        assert!(
+            clean.actions.iter().any(IssueAction::is_auto_fixable),
+            "a complete negative verdict on a clean run still enables the fix"
+        );
+
+        let mut caveated = UnusedExportFinding::with_actions(export("helper"));
+        caveated.set_reachability_caveats(vec![ReachabilityCaveat::IncompleteImportGraph]);
+        caveated.set_semantic_decision(complete_negative());
+        assert!(
+            !caveated.actions.iter().any(IssueAction::is_auto_fixable),
+            "the semantic pass must ask the gate too"
+        );
+    }
+
+    /// The class-member twin, on its own eligibility flag. `closed_world_
+    /// eligible` is proved over the program the sidecar could see, which is
+    /// the program this run parsed; a member whose only call site sits in a
+    /// file the run never opened is absent from that world for the same reason
+    /// it is absent from the syntactic verdict, so a `true` here is not
+    /// evidence the run lacks.
+    #[test]
+    fn a_complete_semantic_verdict_cannot_reopen_a_caveated_class_member() {
+        use crate::semantic::{
+            SemanticCandidateDecision, SemanticCandidateDecisionKind, SemanticCompleteness,
+            SemanticNamespace, SemanticSymbol,
+        };
+
+        let eligible = || SemanticCandidateDecision {
+            query_id: 0,
+            subject: SemanticSymbol {
+                path: PathBuf::from("/p/src/mod.ts"),
+                namespace: SemanticNamespace::Value,
+                declaration_kind: "method".to_string(),
+                exported_name: "Widget".to_string(),
+                local_name: "legacyMethod".to_string(),
+                owner: Some("Widget".to_string()),
+                line: 2,
+                col: 2,
+            },
+            decision: SemanticCandidateDecisionKind::ConfirmedNoStaticReferences,
+            status: SemanticCompleteness::Complete,
+            owning_projects: Vec::new(),
+            evidence: Vec::new(),
+            contract: None,
+            framework_contract: None,
+            closed_world_eligible: true,
+            edit_guard: None,
+            reason_code: None,
+            explanation: "closed world proved".to_string(),
+            actions: Vec::new(),
+            total_evidence_count: 0,
+            truncated: false,
+            omissions: Vec::new(),
+        };
+
+        let mut clean = UnusedClassMemberFinding::with_actions(class_member("legacyMethod"));
+        clean.set_semantic_decision(eligible());
+        assert!(
+            clean.actions.iter().any(IssueAction::is_auto_fixable),
+            "a closed-world verdict on a run that read every file still opens the removal"
+        );
+
+        let mut caveated = UnusedClassMemberFinding::with_actions(class_member("legacyMethod"));
+        caveated.set_reachability_caveats(vec![ReachabilityCaveat::IncompleteImportGraph]);
+        caveated.set_semantic_decision(eligible());
+        assert!(
+            !caveated.actions.iter().any(IssueAction::is_auto_fixable),
+            "the class-member semantic pass must ask the gate too"
+        );
+        let IssueAction::Fix(fix) = &caveated.actions[0] else {
+            panic!("position 0 stays the fix action");
+        };
+        assert_eq!(
+            fix.note.as_deref(),
+            Some(INCOMPLETE_EVIDENCE_NOTE),
+            "the withheld action says why, rather than repeating a closed-world explanation \
+             computed over a program the run did not fully read"
+        );
+    }
+}
+
 #[cfg(test)]
 mod position_0_invariants {
     use super::*;

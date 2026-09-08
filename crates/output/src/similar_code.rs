@@ -628,6 +628,19 @@ pub struct SimilarCodeCandidateSnapshot {
     pub diagnostics: Vec<SimilarCodeDiagnostic>,
 }
 
+#[cfg(feature = "schema")]
+impl SimilarCodeCandidateSnapshot {
+    /// JSON Schema of the inspect handoff object, published as the
+    /// `fallow://schema/similar-code-snapshot` MCP resource so the
+    /// `inspect_similar_code` input schema can accept a plain object instead
+    /// of inlining this shape on every `tools/list`.
+    #[must_use]
+    pub fn json_schema() -> serde_json::Value {
+        serde_json::to_value(schemars::schema_for!(SimilarCodeCandidateSnapshot))
+            .unwrap_or_default()
+    }
+}
+
 /// One named graph reference used in an inspect packet.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]

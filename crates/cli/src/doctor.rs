@@ -12,9 +12,10 @@ use crate::report::{HumanStatus, human_status_line, sink::outln};
 pub const HELP: &str = "\
 Diagnose project readiness without analysis or mutation.
 
-Checks the root, config resolution, workspace discovery, external plugins, and
-the optional type-aware companion. Uses only local reads and supports human and
-JSON output.
+Checks the root, config resolution, workspace discovery, external plugins, the
+optional type-aware companion, installed dependencies, and whether the
+persisted extraction and module-graph caches would be reused. Uses only local
+reads and supports human and JSON output.
 
 Usage: fallow doctor [OPTIONS]
 
@@ -28,7 +29,11 @@ Options:
 ";
 
 pub fn collect_report(root: &Path, config_path: Option<&Path>) -> DoctorOutput {
-    fallow_api::run_doctor(&fallow_api::DoctorOptions { root, config_path })
+    let cache_dir = crate::runtime_support::resolve_cache_dir_env();
+    fallow_api::run_doctor_with_cache_dir(
+        &fallow_api::DoctorOptions { root, config_path },
+        cache_dir.as_deref(),
+    )
 }
 
 pub fn render_report(
@@ -125,6 +130,9 @@ const fn check_id(id: fallow_output::DoctorCheckId) -> &'static str {
         fallow_output::DoctorCheckId::Workspaces => "workspaces",
         fallow_output::DoctorCheckId::Plugins => "plugins",
         fallow_output::DoctorCheckId::TypeAware => "type-aware",
+        fallow_output::DoctorCheckId::Dependencies => "dependencies",
+        fallow_output::DoctorCheckId::Cache => "cache",
+        fallow_output::DoctorCheckId::GraphCache => "graph-cache",
     }
 }
 
@@ -147,6 +155,24 @@ mod tests {
             config_path: None,
         });
         assert_eq!(report_exit(&report), ExitCode::from(2));
-        assert_eq!(report.checks.len(), 5);
+        // A required failure still emits the complete envelope, in the stable
+        // order the compatibility contract documents.
+        assert_eq!(
+            report
+                .checks
+                .iter()
+                .map(|c| check_id(c.id))
+                .collect::<Vec<_>>(),
+            vec![
+                "root",
+                "config",
+                "workspaces",
+                "plugins",
+                "type-aware",
+                "dependencies",
+                "cache",
+                "graph-cache",
+            ]
+        );
     }
 }

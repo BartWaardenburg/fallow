@@ -11,6 +11,7 @@ import {
   parseExistingTable,
   readCuratedSeedRecord,
   regenerateCliReferenceMd,
+  regenerateIssueTypeReferenceMd,
   regenerateMcpReferenceMd,
   regenerateSkillMd,
   sectionIsAbsent,
@@ -276,25 +277,10 @@ const DOC = `# Skill
 
 Hand-written intro stays.
 
-## Commands
+## Catalogues
 
-<!-- generated:commands:start -->
-| Command | Purpose | Key Flags |
-|---|---|---|
-| \`fallow\` | Curated combined purpose | \`--only\`, \`--skip\` |
-| \`dead-code\` | Curated dead code purpose | \`--changed-since\` |
-| \`coverage\` | Coverage helper | \`setup\` |
-| \`coverage upload-source-maps\` | Upload source maps from CI | \`--dir dist\` |
-| \`removed-command\` | Should disappear | \`--gone\` |
-<!-- generated:commands:end -->
-
-## Issue Types
-
-<!-- generated:issue-types:start -->
-| Type | Filter flag | Fixable | Suppress comment | Description |
-|---|---|---|---|---|
-| \`unused-file\` | \`--unused-files\` | - | \`// fallow-ignore-file unused-file\` | Curated teaching prose for unused files |
-<!-- generated:issue-types:end -->
+Commands live in \`references/cli-reference.md\` and issue types live in
+\`references/issue-types.md\`.
 
 ## Task Map
 
@@ -307,28 +293,16 @@ Hand-written intro stays.
 Hand-written outro stays.
 `;
 
-/** A target that has NOT adopted the task-matrix markers. The generator must
- * regenerate the other three sections and leave this file otherwise intact. */
+/** A skill target that has NOT adopted the task-matrix markers. The generator
+ * must tolerate the absent section and leave the file otherwise intact. */
 const DOC_WITHOUT_TASK_MATRIX = `# Skill
 
 Hand-written intro stays.
 
-## Commands
+## Catalogues
 
-<!-- generated:commands:start -->
-| Command | Purpose | Key Flags |
-|---|---|---|
-| \`fallow\` | Curated combined purpose | \`--only\`, \`--skip\` |
-| \`dead-code\` | Curated dead code purpose | \`--changed-since\` |
-<!-- generated:commands:end -->
-
-## Issue Types
-
-<!-- generated:issue-types:start -->
-| Type | Filter flag | Fixable | Suppress comment | Description |
-|---|---|---|---|---|
-| \`unused-file\` | \`--unused-files\` | - | \`// fallow-ignore-file unused-file\` | Curated teaching prose for unused files |
-<!-- generated:issue-types:end -->
+Commands live in \`references/cli-reference.md\` and issue types live in
+\`references/issue-types.md\`.
 
 Hand-written outro stays.
 `;
@@ -360,7 +334,36 @@ Hand-written intro stays.
 Hand-written outro stays.
 `;
 
+/** A dedicated references/issue-types.md target: the issue-types section moved
+ * here out of SKILL.md. Stale relative to SCHEMA so regeneration has work. */
+const DOC_ISSUE_TYPE_REFERENCE = `# Fallow Issue Types
+
+Hand-written intro stays.
+
+## Catalogue
+
+<!-- generated:issue-types:start -->
+| Type | Filter flag | Fixable | Suppress comment | Description |
+|---|---|---|---|---|
+| \`unused-file\` | \`--unused-files\` | - | \`// fallow-ignore-file unused-file\` | Curated teaching prose for unused files |
+<!-- generated:issue-types:end -->
+
+Hand-written outro stays.
+`;
+
 const DOC_CLI_REFERENCE = `# Fallow CLI Reference
+
+## Command catalogue
+
+<!-- generated:commands:start -->
+| Command | Purpose | Key Flags |
+|---|---|---|
+| \`fallow\` | Curated combined purpose | \`--only\`, \`--skip\` |
+| \`dead-code\` | Curated dead code purpose | \`--changed-since\` |
+| \`coverage\` | Coverage helper | \`setup\` |
+| \`coverage upload-source-maps\` | Upload source maps from CI | \`--dir dist\` |
+| \`removed-command\` | Should disappear | \`--gone\` |
+<!-- generated:commands:end -->
 
 ## \`dead-code\`: Dead Code Analysis
 
@@ -436,14 +439,15 @@ test("regeneration is idempotent and preserves content outside markers", () => {
 });
 
 test("curated cells are preserved; identity columns are regenerated", () => {
-  const out = regenerateSkillMd(DOC, SCHEMA);
-  assert.ok(out.includes("Curated dead code purpose"));
-  assert.ok(out.includes("`--changed-since`"));
-  assert.ok(out.includes("Curated teaching prose for unused files"));
+  const commands = regenerateCliReferenceMd(DOC_CLI_REFERENCE, SCHEMA);
+  assert.ok(commands.includes("Curated dead code purpose"));
+  assert.ok(commands.includes("`--changed-since`"));
+  const issueTypes = regenerateIssueTypeReferenceMd(DOC_ISSUE_TYPE_REFERENCE, SCHEMA);
+  assert.ok(issueTypes.includes("Curated teaching prose for unused files"));
 });
 
 test("new rows are seeded from the manifest", () => {
-  const out = regenerateSkillMd(DOC, SCHEMA);
+  const out = regenerateIssueTypeReferenceMd(DOC_ISSUE_TYPE_REFERENCE, SCHEMA);
   // New issue type seeded with description + note.
   assert.ok(
     out.includes(
@@ -487,8 +491,59 @@ test("SKILL.md no longer carries or regenerates an mcp-tools section", () => {
   assert.ok(!out.includes("list_boundaries"));
 });
 
-test("removed rows drop; nested-subcommand rows survive while their parent exists", () => {
+test("SKILL.md no longer carries or regenerates the commands and issue-types catalogues", () => {
+  assert.ok(sectionIsAbsent(DOC, "commands"));
+  assert.ok(sectionIsAbsent(DOC, "issue-types"));
   const out = regenerateSkillMd(DOC, SCHEMA);
+  assert.ok(!out.includes("generated:commands"));
+  assert.ok(!out.includes("generated:issue-types"));
+  // Neither catalogue leaks back into the entry file.
+  assert.ok(!out.includes("`type-only-dependency`"));
+  assert.ok(!out.includes("| `dupes` |"));
+  // The pointers to both reference files survive regeneration.
+  assert.ok(out.includes("references/cli-reference.md"));
+  assert.ok(out.includes("references/issue-types.md"));
+});
+
+test("issue-types regenerates in references/issue-types.md and is idempotent", () => {
+  const out = regenerateIssueTypeReferenceMd(DOC_ISSUE_TYPE_REFERENCE, SCHEMA);
+  assert.equal(regenerateIssueTypeReferenceMd(out, SCHEMA), out);
+  assert.ok(out.startsWith("# Fallow Issue Types"));
+  assert.ok(out.trimEnd().endsWith("Hand-written outro stays."));
+  // The reference target regenerates only its own section.
+  assert.ok(!out.includes("generated:commands"));
+  assert.ok(!out.includes("generated:task-matrix"));
+});
+
+test("a half-present issue-types marker in the reference target throws", () => {
+  const bare = "# Fallow Issue Types\n\nHand-written outro stays.\n";
+
+  const halfStart = bare.replace(
+    "Hand-written outro stays.",
+    "<!-- generated:issue-types:start -->\n\nHand-written outro stays.",
+  );
+  assert.ok(!sectionIsAbsent(halfStart, "issue-types"));
+  assert.throws(
+    () => regenerateIssueTypeReferenceMd(halfStart, SCHEMA),
+    /missing marker.*issue-types/s,
+  );
+
+  const halfEnd = bare.replace(
+    "Hand-written outro stays.",
+    "<!-- generated:issue-types:end -->\n\nHand-written outro stays.",
+  );
+  assert.ok(!sectionIsAbsent(halfEnd, "issue-types"));
+  assert.throws(
+    () => regenerateIssueTypeReferenceMd(halfEnd, SCHEMA),
+    /missing marker.*issue-types/s,
+  );
+
+  const duplicated = `${DOC_ISSUE_TYPE_REFERENCE}\n<!-- generated:issue-types:start -->\n<!-- generated:issue-types:end -->\n`;
+  assert.throws(() => regenerateIssueTypeReferenceMd(duplicated, SCHEMA), /duplicated marker/);
+});
+
+test("removed rows drop; nested-subcommand rows survive while their parent exists", () => {
+  const out = regenerateCliReferenceMd(DOC_CLI_REFERENCE, SCHEMA);
   assert.ok(!out.includes("removed-command"));
   assert.ok(out.includes("`coverage upload-source-maps`"));
   const coverageIdx = out.indexOf("| `coverage` |");
@@ -497,7 +552,7 @@ test("removed rows drop; nested-subcommand rows survive while their parent exist
 });
 
 test("security catalogue and freemium rows stay out of the issue-types table", () => {
-  const out = regenerateSkillMd(DOC, SCHEMA);
+  const out = regenerateIssueTypeReferenceMd(DOC_ISSUE_TYPE_REFERENCE, SCHEMA);
   assert.ok(!out.includes("sql-injection"));
   assert.ok(!out.includes("runtime-safe-to-delete"));
   assert.ok(out.includes("`tainted-sink`"));
@@ -513,7 +568,7 @@ test("missing, duplicated, and inverted markers fail loudly", () => {
     () => spliceSection("no markers here", "commands", SCHEMA, "f.md"),
     /missing marker.*commands/s,
   );
-  const dup = `${DOC}\n<!-- generated:commands:start -->\n<!-- generated:commands:end -->\n`;
+  const dup = `${DOC_CLI_REFERENCE}\n<!-- generated:commands:start -->\n<!-- generated:commands:end -->\n`;
   assert.throws(() => spliceSection(dup, "commands", SCHEMA, "f.md"), /duplicated marker/);
   const inverted = "<!-- generated:commands:end -->\n<!-- generated:commands:start -->\n";
   assert.throws(
@@ -542,19 +597,21 @@ test("task-matrix section regenerates from the manifest and is idempotent", () =
   );
 });
 
-test("a target without the task-matrix markers regenerates the other sections and is left intact", () => {
+test("a target without the task-matrix markers is tolerated and left byte-identical", () => {
   assert.ok(sectionIsAbsent(DOC_WITHOUT_TASK_MATRIX, "task-matrix"));
   // Tolerance: regeneration must NOT throw on the absent section.
   const out = regenerateSkillMd(DOC_WITHOUT_TASK_MATRIX, SCHEMA);
-  // The adopted sections still regenerate: new command + issue-type rows appear.
-  assert.ok(out.includes("| `dupes` |"));
-  assert.ok(out.includes("`type-only-dependency`"));
   // No task-matrix markers were injected, and the surrounding prose is intact.
+  assert.equal(out, DOC_WITHOUT_TASK_MATRIX);
   assert.ok(!out.includes("generated:task-matrix"));
-  assert.ok(out.startsWith("# Skill\n\nHand-written intro stays."));
-  assert.ok(out.trimEnd().endsWith("Hand-written outro stays."));
   // Idempotent on the tolerant path too.
   assert.equal(regenerateSkillMd(out, SCHEMA), out);
+});
+
+test("a reference target without the issue-types markers is tolerated", () => {
+  const withoutSection = `# Fallow Issue Types\n\nHand-written only.\n`;
+  assert.ok(sectionIsAbsent(withoutSection, "issue-types"));
+  assert.equal(regenerateIssueTypeReferenceMd(withoutSection, SCHEMA), withoutSection);
 });
 
 test("a half-present task-matrix marker still throws", () => {
@@ -637,7 +694,9 @@ test("CLI reference fails loudly when an explicit global reference mapping is st
 test("CLI reference ignores command arguments that are not flags", () => {
   const out = regenerateCliReferenceMd(DOC_CLI_REFERENCE, SCHEMA);
   assert.match(out, /Arguments are hand-written here\./);
-  assert.doesNotMatch(out, /issue_type/);
+  // Scoped past the commands catalogue: no flag table may carry a positional argument.
+  const flagTables = out.slice(out.indexOf("<!-- generated:flags:dead-code:start -->"));
+  assert.doesNotMatch(flagTables, /issue_type/);
 });
 
 test("manifest_version and expect-version guards", async () => {
@@ -664,6 +723,7 @@ test("--check exits 1 on drift, writes nothing, and exits 0 when in sync", async
   writeFileSync(join(dir, "SKILL.md"), DOC);
   mkdirSync(referencesDir);
   writeFileSync(join(referencesDir, "cli-reference.md"), DOC_CLI_REFERENCE);
+  writeFileSync(join(referencesDir, "issue-types.md"), DOC_ISSUE_TYPE_REFERENCE);
   writeFileSync(join(referencesDir, "mcp.md"), DOC_MCP_REFERENCE);
 
   // DOC is stale relative to SCHEMA: --check must report drift without writing.
@@ -671,11 +731,13 @@ test("--check exits 1 on drift, writes nothing, and exits 0 when in sync", async
   const before = readFileSync(join(dir, "SKILL.md"), "utf8");
   const cliBefore = readFileSync(join(referencesDir, "cli-reference.md"), "utf8");
   const mcpBefore = readFileSync(join(referencesDir, "mcp.md"), "utf8");
+  const issueTypesBefore = readFileSync(join(referencesDir, "issue-types.md"), "utf8");
   const args = ["--schema", schemaPath, "--target", dir, "--seed-record", seedRecord];
   assert.equal(main([...args, "--check"]), 1);
   assert.equal(readFileSync(join(dir, "SKILL.md"), "utf8"), before);
   assert.equal(readFileSync(join(referencesDir, "cli-reference.md"), "utf8"), cliBefore);
   assert.equal(readFileSync(join(referencesDir, "mcp.md"), "utf8"), mcpBefore);
+  assert.equal(readFileSync(join(referencesDir, "issue-types.md"), "utf8"), issueTypesBefore);
 
   // Regenerate for real, then --check must pass.
   assert.equal(main(args), 0);
@@ -683,6 +745,14 @@ test("--check exits 1 on drift, writes nothing, and exits 0 when in sync", async
   // The mcp-tools table now lives in references/mcp.md, not SKILL.md.
   assert.ok(readFileSync(join(referencesDir, "mcp.md"), "utf8").includes("list_boundaries"));
   assert.ok(!readFileSync(join(dir, "SKILL.md"), "utf8").includes("generated:mcp-tools"));
+  // The commands and issue-types catalogues moved to their reference files too.
+  assert.ok(readFileSync(join(referencesDir, "cli-reference.md"), "utf8").includes("`dupes`"));
+  assert.ok(
+    readFileSync(join(referencesDir, "issue-types.md"), "utf8").includes("type-only-dependency"),
+  );
+  const skillAfter = readFileSync(join(dir, "SKILL.md"), "utf8");
+  assert.ok(!skillAfter.includes("generated:commands"));
+  assert.ok(!skillAfter.includes("generated:issue-types"));
   rmSync(dir, { recursive: true });
 });
 
@@ -701,6 +771,7 @@ test("--output-target stages regenerated docs without changing the source target
   writeFileSync(schemaPath, JSON.stringify(SCHEMA));
   writeFileSync(join(source, "SKILL.md"), DOC);
   writeFileSync(join(sourceReferences, "cli-reference.md"), DOC_CLI_REFERENCE);
+  writeFileSync(join(sourceReferences, "issue-types.md"), DOC_ISSUE_TYPE_REFERENCE);
   writeFileSync(join(sourceReferences, "mcp.md"), DOC_MCP_REFERENCE);
 
   try {
@@ -728,6 +799,15 @@ test("--output-target stages regenerated docs without changing the source target
     );
     assert.ok(
       readFileSync(join(output, "references", "mcp.md"), "utf8").includes("list_boundaries"),
+    );
+    assert.equal(
+      readFileSync(join(sourceReferences, "issue-types.md"), "utf8"),
+      DOC_ISSUE_TYPE_REFERENCE,
+    );
+    assert.ok(
+      readFileSync(join(output, "references", "issue-types.md"), "utf8").includes(
+        "type-only-dependency",
+      ),
     );
   } finally {
     rmSync(dir, { recursive: true });

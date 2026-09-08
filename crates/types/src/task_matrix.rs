@@ -60,6 +60,14 @@ pub const TASK_MATRIX: &[TaskRow] = &[
         ],
     },
     TaskRow {
+        task: "find how one module reaches another",
+        command: "fallow trace --path <from> <to>",
+        note: Some(
+            "Reports `reachable: false` instead of failing when no import path exists; type-only hops are reported, not skipped.",
+        ),
+        probe: &["trace", "--path", "src/app.ts", "src/db.ts"],
+    },
+    TaskRow {
         task: "delete an \"unused\" dependency",
         command: "fallow dead-code --trace-dependency <name>",
         note: None,
@@ -70,6 +78,14 @@ pub const TASK_MATRIX: &[TaskRow] = &[
         command: "fallow audit --base <ref>",
         note: None,
         probe: &["audit", "--base", "main"],
+    },
+    TaskRow {
+        task: "read a diff before approving it",
+        command: "fallow review --base <ref> --brief",
+        note: Some(
+            "orientation, never gates: deterministic and always exit 0, unlike the audit row",
+        ),
+        probe: &["review", "--base", "main", "--brief"],
     },
     TaskRow {
         task: "prioritize refactoring",

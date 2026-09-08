@@ -26,11 +26,40 @@ pub fn run_doctor(options: &DoctorOptions<'_>) -> DoctorOutput {
     run_doctor_with_discovery(options, &crate::type_aware::discover_companion)
 }
 
+/// Inspect readiness using an explicit cache-directory override.
+///
+/// The override takes precedence over `cache.dir`; relative paths resolve from
+/// the validated project root. Empty paths are ignored. Hosts can forward their
+/// environment settings here without making the API read ambient cache settings
+/// or changing existing [`DoctorOptions`] callers. Inspection never writes caches.
+#[must_use]
+pub fn run_doctor_with_cache_dir(
+    options: &DoctorOptions<'_>,
+    cache_dir: Option<&Path>,
+) -> DoctorOutput {
+    run_doctor_with_cache_dir_and_discovery(
+        options,
+        cache_dir,
+        &crate::type_aware::discover_companion,
+    )
+}
+
 fn run_doctor_with_discovery<F>(options: &DoctorOptions<'_>, discover_companion: &F) -> DoctorOutput
 where
     F: Fn(&Path) -> Result<(), String>,
 {
-    let mut checks = Vec::with_capacity(5);
+    run_doctor_with_cache_dir_and_discovery(options, None, discover_companion)
+}
+
+fn run_doctor_with_cache_dir_and_discovery<F>(
+    options: &DoctorOptions<'_>,
+    cache_dir: Option<&Path>,
+    discover_companion: &F,
+) -> DoctorOutput
+where
+    F: Fn(&Path) -> Result<(), String>,
+{
+    let mut checks = Vec::with_capacity(7);
     let root = match fallow_engine::validate::validate_root(options.root) {
         Ok(root) => {
             checks.push(check(
@@ -72,13 +101,22 @@ where
     );
 
     match project {
-        Ok(readiness) => push_ready_project_checks(
-            &mut checks,
-            &root,
-            &readiness.project,
-            &readiness.configured_plugin_diagnostics,
-            discover_companion,
-        ),
+        Ok(mut readiness) => {
+            if let Some(path) = cache_dir.filter(|path| !path.as_os_str().is_empty()) {
+                readiness.project.config.cache_dir = if path.is_absolute() {
+                    path.to_path_buf()
+                } else {
+                    root.join(path)
+                };
+            }
+            push_ready_project_checks(
+                &mut checks,
+                &root,
+                &readiness.project,
+                &readiness.configured_plugin_diagnostics,
+                discover_companion,
+            );
+        }
         Err(error) => {
             push_project_failure_checks(&mut checks, error.message(), &root, options.config_path);
         }
@@ -163,6 +201,152 @@ fn push_ready_project_checks<F>(
         &project.config.type_aware,
         discover_companion,
     ));
+
+    checks.push(dependencies_check(root));
+    checks.push(cache_check(&project.config));
+    checks.push(graph_cache_check(&project.config));
+}
+
+/// Report whether the project has an installed dependency tree.
+///
+/// Advisory, never required: analysis runs without `node_modules`, it just
+/// runs blind to package `exports`, to plugins that activate on an installed
+/// package, and to a dependency's installed shape. Doctor used to report
+/// `pass` on a tree that had never been installed, which is the one state this
+/// command exists to catch.
+fn dependencies_check(root: &Path) -> DoctorCheck {
+    if !fallow_config::node_modules_missing(root) {
+        return check(
+            DoctorCheckId::Dependencies,
+            DoctorCheckCategory::Project,
+            DoctorCheckStatus::Pass,
+            false,
+            "Dependencies are installed, or the project runs without a node_modules directory.",
+            None,
+        );
+    }
+    check(
+        DoctorCheckId::Dependencies,
+        DoctorCheckCategory::Project,
+        DoctorCheckStatus::Warn,
+        false,
+        "No node_modules directory. Package exports, plugin activation, and dependency \
+         classification degrade until dependencies are installed.",
+        Some(remediation("npm install", true)),
+    )
+}
+
+/// Report whether a persisted extraction cache would be reused.
+///
+/// Advisory, never required, and never a `fail`: a refused cache costs time,
+/// not correctness. A missing cache passes, because a first run legitimately
+/// has none; a cache that exists and would be discarded warns, because the
+/// project is paying for a blob it never gets back.
+fn cache_check(config: &fallow_config::ResolvedConfig) -> DoctorCheck {
+    let status = fallow_engine::cache_status::inspect_parse_cache(config);
+    let size = status
+        .size_bytes
+        .map_or_else(String::new, |bytes| format!(" ({})", format_size_mb(bytes)));
+    match status.rejection {
+        None => check(
+            DoctorCheckId::Cache,
+            DoctorCheckCategory::Cache,
+            DoctorCheckStatus::Pass,
+            false,
+            format!("Extraction cache is reusable{size}."),
+            None,
+        ),
+        Some(fallow_types::cache_rejection::CacheRejection::Absent) => check(
+            DoctorCheckId::Cache,
+            DoctorCheckCategory::Cache,
+            DoctorCheckStatus::Pass,
+            false,
+            "No extraction cache yet; the next run writes one.",
+            None,
+        ),
+        Some(rejection) => check(
+            DoctorCheckId::Cache,
+            DoctorCheckCategory::Cache,
+            DoctorCheckStatus::Warn,
+            false,
+            format!(
+                "Extraction cache{size} would not be reused: {}. The next run parses every file.",
+                rejection.describe()
+            ),
+            Some(remediation("fallow dead-code --quiet", false)),
+        ),
+    }
+}
+
+/// Report whether the persisted module graph would load.
+///
+/// Advisory for the same reason as the extraction-cache check, and reported
+/// separately because the two blobs are reused independently: a project whose
+/// extraction cache is perfectly healthy can still rebuild the whole graph on
+/// every run, and the graph is the larger file of the two.
+///
+/// This answers whether the blob LOADS, not whether a run would reuse it. The
+/// reuse decision also compares resolver options, entry points, and per-file
+/// content hashes, and computing those means running discovery and extraction,
+/// which doctor deliberately does not do.
+fn graph_cache_check(config: &fallow_config::ResolvedConfig) -> DoctorCheck {
+    let status = fallow_engine::cache_status::inspect_graph_cache(config);
+    let size = status
+        .size_bytes
+        .map_or_else(String::new, |bytes| format!(" ({})", format_size_mb(bytes)));
+    match status.rejection {
+        None => check(
+            DoctorCheckId::GraphCache,
+            DoctorCheckCategory::Cache,
+            DoctorCheckStatus::Pass,
+            false,
+            format!(
+                "Module-graph cache{size} loads; a run reuses it when the analysed files and \
+                 options are unchanged."
+            ),
+            None,
+        ),
+        Some(fallow_types::cache_rejection::CacheRejection::Absent) => check(
+            DoctorCheckId::GraphCache,
+            DoctorCheckCategory::Cache,
+            DoctorCheckStatus::Pass,
+            false,
+            "No module-graph cache yet; the next run writes one.",
+            None,
+        ),
+        Some(rejection) => check(
+            DoctorCheckId::GraphCache,
+            DoctorCheckCategory::Cache,
+            DoctorCheckStatus::Warn,
+            false,
+            format!(
+                "Module-graph cache{size} would not be reused: {}. The next run resolves imports \
+                 and rebuilds the graph.",
+                rejection.describe()
+            ),
+            Some(remediation("fallow dead-code --quiet", false)),
+        ),
+    }
+}
+
+/// Render a byte count at a unit that shows it.
+///
+/// A fixed megabyte figure reported every small blob as `0.0 MB`, which reads
+/// as "empty" next to a message about a cache that exists and was refused: a
+/// corrupt 4 KB file and a truncated 40-byte one printed the same size.
+fn format_size_mb(bytes: u64) -> String {
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "display-only size figure; precision loss past 2^53 bytes is irrelevant"
+    )]
+    let scaled = bytes as f64;
+    if bytes >= 1024 * 1024 {
+        format!("{:.1} MB", scaled / (1024.0 * 1024.0))
+    } else if bytes >= 1024 {
+        format!("{:.1} KB", scaled / 1024.0)
+    } else {
+        format!("{bytes} bytes")
+    }
 }
 
 fn plugin_check(
@@ -346,6 +530,17 @@ fn push_project_failure_checks(
         DoctorCheckCategory::Companion,
         "Configuration readiness did not establish whether type-aware analysis is enabled.",
     ));
+    checks.push(dependencies_check(root));
+    checks.push(skipped(
+        DoctorCheckId::Cache,
+        DoctorCheckCategory::Cache,
+        "Configuration readiness did not establish which cache this project uses.",
+    ));
+    checks.push(skipped(
+        DoctorCheckId::GraphCache,
+        DoctorCheckCategory::Cache,
+        "Configuration readiness did not establish which cache this project uses.",
+    ));
 }
 
 fn type_aware_check<F>(
@@ -512,6 +707,9 @@ fn push_prerequisite_skips(checks: &mut Vec<DoctorCheck>, message: &str) {
         (DoctorCheckId::Workspaces, DoctorCheckCategory::Workspace),
         (DoctorCheckId::Plugins, DoctorCheckCategory::Plugin),
         (DoctorCheckId::TypeAware, DoctorCheckCategory::Companion),
+        (DoctorCheckId::Dependencies, DoctorCheckCategory::Project),
+        (DoctorCheckId::Cache, DoctorCheckCategory::Cache),
+        (DoctorCheckId::GraphCache, DoctorCheckCategory::Cache),
     ] {
         checks.push(skipped(id, category, message));
     }
@@ -604,7 +802,7 @@ mod tests {
             &|_| Err("missing companion".to_string()),
         );
 
-        assert_eq!(output.status, DoctorStatus::Pass);
+        assert_eq!(output.status, DoctorStatus::Warn);
         assert_eq!(output.root, ".");
         assert_eq!(
             output
@@ -618,6 +816,9 @@ mod tests {
                 DoctorCheckId::Workspaces,
                 DoctorCheckId::Plugins,
                 DoctorCheckId::TypeAware,
+                DoctorCheckId::Dependencies,
+                DoctorCheckId::Cache,
+                DoctorCheckId::GraphCache,
             ]
         );
         assert_eq!(
@@ -625,6 +826,247 @@ mod tests {
             "Zero-config defaults resolved successfully."
         );
         assert_eq!(output.checks[4].status, DoctorCheckStatus::Skipped);
+    }
+
+    /// Issue: doctor reported `pass` on a tree that had never been installed,
+    /// while the command exists to diagnose exactly that.
+    #[test]
+    fn missing_node_modules_warns_without_failing() {
+        let root = tempfile::tempdir().expect("temp root");
+
+        let output = run_doctor_with_discovery(
+            &DoctorOptions {
+                root: root.path(),
+                config_path: None,
+            },
+            &|_| Err("missing companion".to_string()),
+        );
+
+        let dependencies = output
+            .checks
+            .iter()
+            .find(|check| check.id == DoctorCheckId::Dependencies)
+            .expect("dependencies check is reported");
+        assert_eq!(dependencies.status, DoctorCheckStatus::Warn);
+        assert!(!dependencies.required);
+        assert_eq!(output.status, DoctorStatus::Warn);
+        assert!(
+            dependencies
+                .remediation
+                .as_ref()
+                .is_some_and(|remediation| remediation.mutating),
+            "installing dependencies mutates the project"
+        );
+    }
+
+    #[test]
+    fn installed_dependencies_pass_the_dependency_check() {
+        let root = tempfile::tempdir().expect("temp root");
+        std::fs::create_dir(root.path().join("node_modules")).expect("create node_modules");
+
+        let output = run_doctor_with_discovery(
+            &DoctorOptions {
+                root: root.path(),
+                config_path: None,
+            },
+            &|_| Err("missing companion".to_string()),
+        );
+
+        let dependencies = output
+            .checks
+            .iter()
+            .find(|check| check.id == DoctorCheckId::Dependencies)
+            .expect("dependencies check is reported");
+        assert_eq!(dependencies.status, DoctorCheckStatus::Pass);
+        assert_eq!(output.status, DoctorStatus::Pass);
+    }
+
+    /// A project with no cache yet is not a problem; only a cache that exists
+    /// and would be thrown away is worth a warning.
+    #[test]
+    fn absent_cache_passes_the_cache_check() {
+        let root = tempfile::tempdir().expect("temp root");
+
+        let output = run_doctor_with_discovery(
+            &DoctorOptions {
+                root: root.path(),
+                config_path: None,
+            },
+            &|_| Err("missing companion".to_string()),
+        );
+
+        let cache = output
+            .checks
+            .iter()
+            .find(|check| check.id == DoctorCheckId::Cache)
+            .expect("cache check is reported");
+        assert_eq!(cache.status, DoctorCheckStatus::Pass);
+        assert!(!cache.required);
+    }
+
+    /// Framing this build never wrote is corruption, and must not be reported
+    /// as a format bump.
+    ///
+    /// "cache format version changed" sends the reader to look for an upgrade;
+    /// the fix for a blob with no fallow framing is to delete it. The upgrade
+    /// message has its own test below, on a blob that keeps the framing and
+    /// moves only the declared version.
+    #[test]
+    fn a_corrupt_cache_warns_as_undecodable_with_a_size_that_shows() {
+        let root = tempfile::tempdir().expect("temp root");
+        let cache_dir = root.path().join(".fallow");
+        std::fs::create_dir_all(&cache_dir).expect("create cache dir");
+        std::fs::write(
+            cache_dir.join("cache.bin"),
+            b"not-a-payload-this-build-wrote",
+        )
+        .expect("write foreign cache");
+
+        let output = run_doctor_with_discovery(
+            &DoctorOptions {
+                root: root.path(),
+                config_path: None,
+            },
+            &|_| Err("missing companion".to_string()),
+        );
+
+        let cache = output
+            .checks
+            .iter()
+            .find(|check| check.id == DoctorCheckId::Cache)
+            .expect("cache check is reported");
+        assert_eq!(cache.status, DoctorCheckStatus::Warn);
+        assert!(!cache.required);
+        assert!(
+            cache.message.contains("could not be decoded"),
+            "a blob without fallow's framing is corrupt, not stale: {}",
+            cache.message
+        );
+        assert!(
+            !cache.message.contains("cache format version changed"),
+            "corruption must not send the reader hunting for an upgrade: {}",
+            cache.message
+        );
+        assert!(
+            cache.message.contains("30 bytes"),
+            "a small blob must report a size that shows it exists, not 0.0 MB: {}",
+            cache.message
+        );
+        assert_ne!(
+            output.status,
+            DoctorStatus::Fail,
+            "a refused cache costs time, not correctness"
+        );
+    }
+
+    /// The message a user reads after upgrading. A blob that keeps fallow's
+    /// framing and declares a version this build does not write is stale, and
+    /// costs exactly one rebuild.
+    #[test]
+    fn a_cache_from_an_older_format_version_warns_as_a_format_change() {
+        let root = tempfile::tempdir().expect("temp root");
+        let cache_dir = root.path().join(".fallow");
+        std::fs::create_dir_all(&cache_dir).expect("create cache dir");
+        // `FLWX` plus a little-endian version, the framing `fallow-extract`
+        // writes. Version 1 is far below anything this build produces, so the
+        // blob is stale rather than foreign.
+        let mut framed = b"FLWX".to_vec();
+        framed.extend_from_slice(&1_u32.to_le_bytes());
+        framed.extend_from_slice(b"payload-from-an-older-release");
+        std::fs::write(cache_dir.join("cache.bin"), framed).expect("write stale cache");
+
+        let output = run_doctor_with_discovery(
+            &DoctorOptions {
+                root: root.path(),
+                config_path: None,
+            },
+            &|_| Err("missing companion".to_string()),
+        );
+
+        let cache = output
+            .checks
+            .iter()
+            .find(|check| check.id == DoctorCheckId::Cache)
+            .expect("cache check is reported");
+        assert_eq!(cache.status, DoctorCheckStatus::Warn);
+        assert!(
+            cache.message.contains("cache format version changed"),
+            "{}",
+            cache.message
+        );
+        assert!(
+            !cache.message.contains("could not be decoded"),
+            "an upgrade must not be reported as corruption: {}",
+            cache.message
+        );
+    }
+
+    /// The graph blob is the larger of the two persisted caches and is reused
+    /// independently of the extraction blob, so a doctor that only looked at
+    /// the extraction cache called a project healthy while the expensive half
+    /// was discarded on every run.
+    #[test]
+    fn absent_graph_cache_passes_its_own_check() {
+        let root = tempfile::tempdir().expect("temp root");
+
+        let output = run_doctor_with_discovery(
+            &DoctorOptions {
+                root: root.path(),
+                config_path: None,
+            },
+            &|_| Err("missing companion".to_string()),
+        );
+
+        let graph_cache = output
+            .checks
+            .iter()
+            .find(|check| check.id == DoctorCheckId::GraphCache)
+            .expect("graph cache check is reported");
+        assert_eq!(graph_cache.status, DoctorCheckStatus::Pass);
+        assert!(!graph_cache.required);
+    }
+
+    #[test]
+    fn a_corrupt_graph_cache_warns_as_undecodable_with_a_size_that_shows() {
+        let root = tempfile::tempdir().expect("temp root");
+        let cache_dir = root.path().join(".fallow");
+        std::fs::create_dir_all(&cache_dir).expect("create cache dir");
+        std::fs::write(
+            cache_dir.join("graph-cache.bin"),
+            b"not-a-payload-this-build-wrote",
+        )
+        .expect("write foreign graph cache");
+
+        let output = run_doctor_with_discovery(
+            &DoctorOptions {
+                root: root.path(),
+                config_path: None,
+            },
+            &|_| Err("missing companion".to_string()),
+        );
+
+        let graph_cache = output
+            .checks
+            .iter()
+            .find(|check| check.id == DoctorCheckId::GraphCache)
+            .expect("graph cache check is reported");
+        assert_eq!(graph_cache.status, DoctorCheckStatus::Warn);
+        assert!(!graph_cache.required);
+        assert!(
+            graph_cache.message.contains("could not be decoded"),
+            "a blob without fallow's framing is corrupt, not stale: {}",
+            graph_cache.message
+        );
+        assert!(
+            graph_cache.message.contains("30 bytes"),
+            "a small blob must report a size that shows it exists, not 0.0 MB: {}",
+            graph_cache.message
+        );
+        assert_ne!(
+            output.status,
+            DoctorStatus::Fail,
+            "a refused cache costs time, not correctness"
+        );
     }
 
     #[test]
@@ -640,14 +1082,32 @@ mod tests {
             &|_| Err("missing companion".to_string()),
         );
 
+        // Look checks up by id, not by position: the report's completeness is
+        // the contract, the order in which the rows happen to be pushed is not.
+        let check = |id: DoctorCheckId| {
+            output
+                .checks
+                .iter()
+                .find(|check| check.id == id)
+                .unwrap_or_else(|| panic!("{id:?} is reported even when config fails"))
+        };
+
         assert_eq!(output.status, DoctorStatus::Fail);
-        assert_eq!(output.checks.len(), 5);
-        assert_eq!(output.checks[1].status, DoctorCheckStatus::Fail);
-        assert_eq!(output.checks[2].status, DoctorCheckStatus::Skipped);
+        assert_eq!(
+            output.checks.len(),
+            8,
+            "a failing config must not truncate the report"
+        );
+        assert_eq!(check(DoctorCheckId::Config).status, DoctorCheckStatus::Fail);
+        assert_eq!(
+            check(DoctorCheckId::Workspaces).status,
+            DoctorCheckStatus::Skipped
+        );
         assert!(
-            !output.checks[1]
+            !check(DoctorCheckId::Config)
                 .message
-                .contains(&root.path().display().to_string())
+                .contains(&root.path().display().to_string()),
+            "the failure must not echo the host path"
         );
     }
 
@@ -728,6 +1188,7 @@ mod tests {
     #[test]
     fn external_config_does_not_echo_its_host_path() {
         let root = tempfile::tempdir().expect("temp root");
+        std::fs::create_dir(root.path().join("node_modules")).expect("create node_modules");
         let config_dir = tempfile::tempdir().expect("temp config dir");
         let config_path = config_dir.path().join("external.fallowrc.json");
         std::fs::write(&config_path, "{}").expect("write config");
@@ -754,6 +1215,7 @@ mod tests {
         let sandbox = tempfile::tempdir().expect("temp sandbox");
         let root = sandbox.path().join("project");
         std::fs::create_dir(&root).expect("create project root");
+        std::fs::create_dir(root.join("node_modules")).expect("create node_modules");
         let config_path = root.join("../customer-secret.json");
         std::fs::write(&config_path, "{}").expect("write config");
 
@@ -774,6 +1236,7 @@ mod tests {
     #[test]
     fn successful_config_below_external_symlink_stays_private() {
         let root = tempfile::tempdir().expect("temp root");
+        std::fs::create_dir(root.path().join("node_modules")).expect("create node_modules");
         let external = tempfile::tempdir().expect("external root");
         std::fs::write(external.path().join("config.json"), "{}").expect("write config");
         std::os::unix::fs::symlink(external.path(), root.path().join("external"))
@@ -1064,6 +1527,7 @@ mod tests {
     #[test]
     fn active_external_plugin_passes() {
         let root = tempfile::tempdir().expect("temp root");
+        std::fs::create_dir(root.path().join("node_modules")).expect("create node_modules");
         std::fs::write(
             root.path().join("package.json"),
             r#"{"name":"doctor-test","dependencies":{"doctor-framework":"1.0.0"}}"#,

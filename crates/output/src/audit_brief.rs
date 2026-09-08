@@ -6,7 +6,7 @@ use serde::Serialize;
 use serde_json::Value;
 
 /// Wire version for the `fallow audit --brief --format json` envelope.
-pub const REVIEW_BRIEF_SCHEMA_VERSION: u32 = 9;
+pub const REVIEW_BRIEF_SCHEMA_VERSION: u32 = 10;
 
 /// Maximum number of affected-but-not-in-diff paths sampled into
 /// [`ImpactClosureFacts::affected_not_shown`].

@@ -109,14 +109,11 @@ pub fn run_trace(opts: &TraceChainOptions<'_>) -> ExitCode {
     emit_trace(trace, opts)
 }
 
-/// Split a `FILE:SYMBOL` target. The symbol is everything after the LAST `:` so
-/// Windows drive-letter paths and nested colons survive.
+/// Split a `FILE:SYMBOL` target into owned halves, on the shared selector
+/// contract in [`crate::selector`].
 fn parse_target(target: &str) -> Option<(String, String)> {
-    let (file, symbol) = target.rsplit_once(':')?;
-    if file.trim().is_empty() || symbol.trim().is_empty() {
-        return None;
-    }
-    Some((file.to_string(), symbol.to_string()))
+    crate::selector::parse_file_symbol_selector(target)
+        .map(|(file, symbol)| (file.to_string(), symbol.to_string()))
 }
 
 fn emit_trace(trace: SymbolChainTrace, opts: &TraceChainOptions<'_>) -> ExitCode {
@@ -295,5 +292,27 @@ mod tests {
         assert!(parse_target("src/utils.ts:").is_none());
         assert!(parse_target(":foo").is_none());
         assert!(parse_target("no-colon").is_none());
+    }
+
+    /// Characterisation of the whole `FILE:SYMBOL` table, including the rows no
+    /// other test pinned: an empty spec, a bare colon, and whitespace-only
+    /// halves. `trace` shares one parser with `inspect --symbol` and
+    /// `check --trace`, so this table is the contract all three answer to.
+    #[test]
+    fn parse_target_pins_the_whole_selector_table() {
+        assert_eq!(parse_target(""), None);
+        assert_eq!(parse_target(":"), None);
+        assert_eq!(parse_target(" : "), None);
+        assert_eq!(parse_target("\t:foo"), None);
+        assert_eq!(
+            parse_target("a:b:c"),
+            Some(("a:b".to_string(), "c".to_string()))
+        );
+        // Halves that survive the emptiness guard are returned VERBATIM: the
+        // trim is a guard, not a normalisation.
+        assert_eq!(
+            parse_target(" src/a.ts : foo "),
+            Some((" src/a.ts ".to_string(), " foo ".to_string()))
+        );
     }
 }

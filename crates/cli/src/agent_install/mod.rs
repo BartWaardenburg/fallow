@@ -31,7 +31,7 @@ pub const MARKER_VERSION: &str = "v1";
 /// Common prefix of every marker this command writes.
 pub const MARKER_PREFIX: &str = "fallow:agent-install";
 /// JSON envelope version of `agent install|status|uninstall`.
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;
 
 /// A coding-agent harness fallow knows how to wire up.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, clap::ValueEnum)]

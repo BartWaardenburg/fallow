@@ -59,7 +59,16 @@ def prod_hot_path_label($n):
   (if prod_hot_paths_touched then "hot path\(if $n == 1 then "" else "s" end) touched" else "hot path\(if $n == 1 then "" else "s" end)" end);
 
 (count(.check; "total_issues")) as $check |
-((.dupes.clone_groups // []) | length) as $dupes |
+# Visible groups plus what a presentation cap withheld, NOT `stats.clone_groups`.
+# The two differ for two unrelated reasons and only one of them belongs here:
+# a filtered combined run (`--changed-since`, a diff filter) leaves `stats`
+# describing the unfiltered corpus while `clone_groups[]` holds the actionable
+# set, and gating on `stats` there fails a run with nothing to show (issue
+# #1250); a presentation cap such as `--top` truncates the array while `stats`
+# stays right. `clone_groups_omitted` counts only the second, and no combined
+# envelope carries it today because the bare command takes no `--top`, so this
+# is byte-identical now and stays correct if that ever changes.
+(((.dupes.clone_groups // []) | length) + (.dupes.clone_groups_omitted // 0)) as $dupes |
 (count(.health.summary; "functions_above_threshold")) as $complex |
 (($complex) + (prod_failing_findings | length)) as $health |
 (prod_failing_findings | length) as $prod_failing |

@@ -334,7 +334,7 @@ fn create_cache_fixture() -> CacheFixture {
             BASE_MTIME_NS + u64::try_from(index).expect("fixture index fits in u64"),
             u64::try_from(source.len()).expect("fixture source length fits in u64"),
         );
-        modules.push(module_to_cached(&module, fingerprint));
+        modules.push(module_to_cached(&module, fingerprint, false));
         paths.push(path);
     }
     CacheFixture {
@@ -345,7 +345,7 @@ fn create_cache_fixture() -> CacheFixture {
 }
 
 fn populated_store(fixture: &CacheFixture) -> CacheStore {
-    let mut store = CacheStore::new();
+    let mut store = CacheStore::new(fixture.dir.path());
     for (path, module) in fixture.paths.iter().zip(fixture.modules.iter()) {
         store.insert(path, module.clone());
     }
@@ -391,8 +391,13 @@ fn component_cache_store_load(c: &mut Criterion) {
 
     c.bench_function("component_cache_store_load", |bencher| {
         bencher.iter(|| {
-            CacheStore::load(fixture.dir.path(), CONFIG_HASH, DEFAULT_CACHE_MAX_SIZE)
-                .expect("warm cache loads")
+            CacheStore::load(
+                fixture.dir.path(),
+                fixture.dir.path(),
+                CONFIG_HASH,
+                DEFAULT_CACHE_MAX_SIZE,
+            )
+            .expect("warm cache loads")
         });
     });
 }
@@ -413,8 +418,13 @@ fn component_cache_cached_to_module(c: &mut Criterion) {
     c.bench_function("component_cache_cached_to_module", |bencher| {
         bencher.iter_batched(
             || {
-                CacheStore::load(fixture.dir.path(), CONFIG_HASH, DEFAULT_CACHE_MAX_SIZE)
-                    .expect("warm cache loads")
+                CacheStore::load(
+                    fixture.dir.path(),
+                    fixture.dir.path(),
+                    CONFIG_HASH,
+                    DEFAULT_CACHE_MAX_SIZE,
+                )
+                .expect("warm cache loads")
             },
             |store| {
                 let mut modules = Vec::with_capacity(paths.len());

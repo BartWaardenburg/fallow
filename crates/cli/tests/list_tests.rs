@@ -1181,10 +1181,14 @@ fn every_envelope_reports_one_entry_per_directory_for_a_glob_in_two_manifests() 
         assert_eq!(output.code, 0, "stderr: {}", output.stderr);
 
         let json = parse_json(&output);
+        // Restricted to the glob kind: a bare fixture also reports environment
+        // and unconfigured-detector kinds, which carry no pattern and say
+        // nothing about per-directory deduplication.
         let reported: Vec<(String, String)> = json["workspace_diagnostics"]
             .as_array()
             .expect("workspace_diagnostics array")
             .iter()
+            .filter(|entry| entry["kind"] == "glob-matched-no-package-json")
             .map(|entry| {
                 (
                     entry["pattern"].as_str().unwrap_or_default().to_owned(),
@@ -1312,9 +1316,15 @@ fn a_dotted_glob_declared_once_reports_the_undotted_spelling_everywhere() {
         assert_eq!(output.code, 0, "stderr: {}", output.stderr);
 
         let json = parse_json(&output);
-        let diagnostics = json["workspace_diagnostics"]
+        // Only the glob diagnostics are the subject here. A bare fixture also
+        // reports environment and unconfigured-detector kinds, which carry no
+        // pattern and are a separate channel.
+        let diagnostics: Vec<&serde_json::Value> = json["workspace_diagnostics"]
             .as_array()
-            .expect("workspace_diagnostics array");
+            .expect("workspace_diagnostics array")
+            .iter()
+            .filter(|entry| entry["kind"] == "glob-matched-no-package-json")
+            .collect();
         assert_eq!(
             diagnostics.len(),
             1,

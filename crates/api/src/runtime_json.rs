@@ -12,7 +12,8 @@ use crate::{
         DeadCodeProgrammaticOutput, DecisionSurfaceProgrammaticOutput,
         DuplicationProgrammaticOutput, FeatureFlagsProgrammaticOutput, HealthJsonReportInput,
         HealthProgrammaticOutput, TraceCloneProgrammaticOutput, TraceDependencyProgrammaticOutput,
-        TraceExportProgrammaticOutput, TraceFileProgrammaticOutput, serialize_health_report_json,
+        TraceErrorProgrammaticOutput, TraceExportProgrammaticOutput, TraceFileProgrammaticOutput,
+        TraceImportPathProgrammaticOutput, serialize_health_report_json,
     },
 };
 use fallow_output::{
@@ -492,6 +493,22 @@ pub fn serialize_trace_file_programmatic_json(
     )
 }
 
+/// Serialize typed import-path-trace output into the JSON compatibility contract.
+///
+/// # Errors
+///
+/// Returns a structured error if the trace output cannot be serialized.
+pub fn serialize_trace_import_path_programmatic_json(
+    output: TraceImportPathProgrammaticOutput,
+) -> ProgrammaticResult<serde_json::Value> {
+    serialize_trace_programmatic_output(
+        output.output,
+        "import path trace",
+        "FALLOW_SERIALIZE_TRACE_IMPORT_PATH",
+        "trace_import_path",
+    )
+}
+
 /// Serialize typed dependency-trace output into the JSON compatibility contract.
 ///
 /// # Errors
@@ -505,6 +522,22 @@ pub fn serialize_trace_dependency_programmatic_json(
         "dependency trace",
         "FALLOW_SERIALIZE_TRACE_DEPENDENCY",
         "trace_dependency",
+    )
+}
+
+/// Serialize typed stack-trace resolution into the JSON compatibility contract.
+///
+/// # Errors
+///
+/// Returns a structured error if the trace output cannot be serialized.
+pub fn serialize_trace_error_programmatic_json(
+    output: TraceErrorProgrammaticOutput,
+) -> ProgrammaticResult<serde_json::Value> {
+    serialize_trace_programmatic_output(
+        output.output,
+        "stack-trace resolution",
+        "FALLOW_SERIALIZE_TRACE_ERROR",
+        "trace_error",
     )
 }
 
@@ -693,6 +726,10 @@ mod tests {
                 version: "0.0.0-test".to_owned(),
                 elapsed: Duration::ZERO,
                 report: DupesReportPayload::from_report(&DuplicationReport::default()),
+                clone_groups_shown: 0,
+                clone_groups_omitted: 0,
+                clone_families_shown: 0,
+                clone_families_omitted: 0,
                 grouped_by: None,
                 total_issues: None,
                 groups: None,

@@ -6,13 +6,15 @@ use fallow_types::workspace::WorkspaceDiagnostic;
 use serde::Serialize;
 
 /// Current schema version for `fallow audit --format json`.
-pub const AUDIT_SCHEMA_VERSION: u32 = 10;
+pub const AUDIT_SCHEMA_VERSION: u32 = 11;
 
 /// Current schema version for bare combined JSON output.
 ///
-/// Version 11 tracks the expanded required semantic omission reason-code enum
-/// embedded by its analysis subreports.
-pub const COMBINED_SCHEMA_VERSION: u32 = 11;
+/// Version 12 tracks `clone_groups[].instances[].fragment` becoming optional on
+/// the shared clone-instance shape this envelope embeds. Bare combined output
+/// cannot suppress that text today, so its wire stays byte-identical; the bump
+/// records that the contract no longer guarantees the key.
+pub const COMBINED_SCHEMA_VERSION: u32 = 12;
 
 /// Schema projection for the audit envelope's exact version.
 #[cfg(feature = "schema")]

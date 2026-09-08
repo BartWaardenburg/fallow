@@ -70,6 +70,13 @@ Contract rules:
 - Schema resources are byte-for-byte the CLI schema documents
   (`fallow config-schema`, `fallow plugin-schema`, `fallow rule-pack-schema`);
   the explain template is exactly the `fallow_explain` tool payload.
+- A `fallow://tools/{name}` miss distinguishes its two causes. A registered
+  tool with no long-form guide answers `code: "no_tool_guide"` with
+  `registered_tool: true` (the `tools/list` description is the whole
+  contract); a name that is not a fallow MCP tool answers
+  `code: "unknown_tool"` with `registered_tool: false` (correct the name).
+  Membership is tested against `MCP_TOOLS`, so a new tool inherits the split
+  without a resources-side change.
 - Unknown URIs and unknown issue types return a structured
   `resource_not_found` error whose `data` lists the known URIs and templates,
   or the nearest explain URIs plus the index URI. The wire code depends on the
@@ -93,6 +100,15 @@ Contract rules:
 - Use JSON, quiet mode, and explanation metadata for CLI-backed analysis.
 - Keep parameter names, defaults, license metadata, read-only status, and tool
   descriptions synchronized with the shared manifest.
+- `tools/list` is budgeted on both of its channels, because every byte of it is
+  resident in every agent session that connects whether or not the tool is ever
+  called. `crates/mcp/src/server/tests/tool_descriptions.rs` ratchets the total
+  `description` bytes and, separately, the total serialized `input_schema`
+  bytes. A parameter doc comment is wire text: schemars renders it into the
+  schema's `description`, so it spends the schema budget the same way prose
+  spends the description one. Both ratchets re-pin downward within the same
+  tolerance, sized as a small multiple of the per-tool one, so a real reduction
+  is banked in the change that made it instead of becoming silent budget.
 - Preserve project-relative paths in analysis results.
 - Mutation tools expose preview and explicit confirmation semantics.
 - Apply bounded timeouts and clean up the complete owned process tree on

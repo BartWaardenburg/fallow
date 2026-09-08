@@ -1883,9 +1883,9 @@ mod tests {
         }
         let template = resources
             .iter()
-            .find(|r| r["template"] == true)
+            .find(|r| r["uri"] == "fallow://explain/{issue_type}")
             .expect("explain template in mcp_resources");
-        assert_eq!(template["uri"], "fallow://explain/{issue_type}");
+        assert_eq!(template["template"], true);
     }
 
     #[test]

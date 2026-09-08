@@ -417,6 +417,7 @@ fn analyze_and_report(config: &fallow_config::ResolvedConfig, opts: &WatchOption
         skip_score_and_trend: false,
         css_requested: false,
         json_style: opts.json_style,
+        include_fragments: true,
     };
     let report_code = report::print_results(&results, &ctx, config.output, None);
     if report_code != ExitCode::SUCCESS {

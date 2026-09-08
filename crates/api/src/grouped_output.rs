@@ -448,6 +448,7 @@ fn duplication_group(
     let mut subset = duplication_subset_report(&attributed_groups, report);
     subset.stats = fallow_engine::duplicates::recompute_stats(&subset);
     let clone_families = clone_families_for_bucket(&attributed_groups, report, fingerprints);
+    subset.stats.clone_families = clone_families.len();
     let clone_groups = attributed_groups
         .into_iter()
         .map(|group| {
@@ -492,6 +493,7 @@ fn duplication_subset_report(
             total_tokens: report.stats.total_tokens,
             duplicated_tokens: 0,
             clone_groups: 0,
+            clone_families: 0,
             clone_instances: 0,
             duplication_percentage: 0.0,
             // Filtering and bounded-work counters are report-scoped and cannot

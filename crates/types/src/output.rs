@@ -117,6 +117,14 @@ pub struct FixAction {
     /// Filter on this bool of each individual action, not on `type`. See the
     /// [`IssueAction`] enum-level docs for the full list of per-instance
     /// flips.
+    ///
+    /// One flip is RUN-level rather than finding-level: a dead-code finding
+    /// carrying `reachability_caveats` reports `false` here, because a file
+    /// this run never fully read may hold the reference that credits it. Every
+    /// mutation surface honours the same gate, so a plan built from this flag
+    /// never expects a write `fallow fix`, the MCP fix tools, or the LSP quick
+    /// fix will refuse. The action stays in the array at the same position and
+    /// names the reason in [`Self::note`].
     pub auto_fixable: bool,
     /// Human-readable description of the fix.
     pub description: String,

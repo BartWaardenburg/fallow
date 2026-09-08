@@ -3,19 +3,19 @@ use crate::params::FixParams;
 use rmcp::ErrorData as McpError;
 use rmcp::model::CallToolResult;
 
-use super::{push_global, push_remote_extends, push_scope, run_tool};
+use super::{push_global, push_remote_extends, push_scope, run_tool_with_limit};
 
 /// Run the read-only fix preview. It is CLI-backed because fix planning shares
 /// the same command-owned mutation safeguards as fix apply.
 pub async fn run_fix_preview(binary: &str, params: FixParams) -> Result<CallToolResult, McpError> {
     let args = build_fix_preview_args(&params);
-    run_tool(binary, "fix_preview", &args).await
+    run_tool_with_limit(binary, "fix_preview", &args, params.max_output_bytes).await
 }
 
 /// Run the mutating fix apply path. This intentionally remains CLI-backed.
 pub async fn run_fix_apply(binary: &str, params: FixParams) -> Result<CallToolResult, McpError> {
     let args = build_fix_apply_args(&params);
-    run_tool(binary, "fix_apply", &args).await
+    run_tool_with_limit(binary, "fix_apply", &args, params.max_output_bytes).await
 }
 
 /// Build CLI arguments for the `fix_preview` tool.

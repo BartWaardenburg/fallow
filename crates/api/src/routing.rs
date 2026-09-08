@@ -15,13 +15,13 @@ pub use fallow_output::{RoutingFacts, RoutingUnit};
 use rustc_hash::FxHashSet;
 
 use fallow_config::ResolvedConfig;
-use fallow_engine::churn::{ChurnResult, SinceDuration, analyze_churn};
+use fallow_engine::churn::{ChurnResult, ChurnWindowUnit, SinceDuration, analyze_churn};
 use fallow_engine::codeowners::CodeOwners;
 use fallow_engine::health::ownership::{OwnershipContext, compile_bot_globs, compute_ownership};
 
 /// Default churn window for routing: one year of history is enough to identify
 /// the per-file experts without an unbounded `git log`.
-const ROUTING_CHURN_WINDOW: &str = "1 year ago";
+const ROUTING_CHURN_WINDOW_YEARS: u64 = 1;
 
 /// Compute the routing section for the changed files. Best-effort: returns an
 /// empty `RoutingFacts` when churn is unavailable (non-git repo, shallow clone
@@ -36,10 +36,8 @@ pub fn compute_routing(
     config: &ResolvedConfig,
     changed_files: &FxHashSet<PathBuf>,
 ) -> RoutingFacts {
-    let since = SinceDuration {
-        git_after: ROUTING_CHURN_WINDOW.to_string(),
-        display: "1 year".to_string(),
-    };
+    let since =
+        SinceDuration::relative(ROUTING_CHURN_WINDOW_YEARS, ChurnWindowUnit::Years, "1 year");
     let Some(churn_result) = analyze_churn(root, &since) else {
         return RoutingFacts::default();
     };
@@ -49,10 +47,9 @@ pub fn compute_routing(
         return RoutingFacts::default();
     };
     let codeowners = CodeOwners::load(root, None).ok();
-    let now_secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
+    // Reuse the churn run's clock so routing and the health ownership block
+    // agree on "now" and neither flips a staleness threshold between runs.
+    let now_secs = churn_result.clock.epoch_secs();
     let ctx = OwnershipContext {
         author_pool: &churn_result.author_pool,
         bot_globs: &bot_globs,

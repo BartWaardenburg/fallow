@@ -1,14 +1,19 @@
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
-use crate::params::{TraceCloneParams, TraceDependencyParams, TraceExportParams, TraceFileParams};
+use crate::params::{
+    TraceCloneParams, TraceDependencyParams, TraceErrorParams, TraceExportParams, TraceFileParams,
+    TraceImportPathParams,
+};
 
 use fallow_api::{
     AnalysisOptions, DuplicationMode, DuplicationOptions, TraceCloneOptions, TraceCloneTarget,
-    TraceDependencyOptions, TraceExportOptions, TraceFileOptions, run_trace_clone,
-    run_trace_dependency, run_trace_export, run_trace_file,
+    TraceDependencyOptions, TraceErrorOptions, TraceExportOptions, TraceFileOptions,
+    TraceImportPathOptions, run_trace_clone, run_trace_dependency, run_trace_error,
+    run_trace_export, run_trace_file, run_trace_import_path,
     serialize_trace_clone_programmatic_json, serialize_trace_dependency_programmatic_json,
-    serialize_trace_export_programmatic_json, serialize_trace_file_programmatic_json,
+    serialize_trace_error_programmatic_json, serialize_trace_export_programmatic_json,
+    serialize_trace_file_programmatic_json, serialize_trace_import_path_programmatic_json,
 };
 use rmcp::ErrorData as McpError;
 use rmcp::model::{CallToolResult, ContentBlock};
@@ -47,6 +52,39 @@ pub async fn run_trace_file_tool(params: TraceFileParams) -> Result<CallToolResu
     };
     let result = run_api_blocking("trace_file", move || {
         run_trace_file(&options).and_then(serialize_trace_file_programmatic_json)
+    })
+    .await?
+    .map_or_else(
+        |err| CallToolResult::error(vec![ContentBlock::text(programmatic_error_body(&err))]),
+        |value| json_success(&value),
+    );
+    Ok(result)
+}
+
+/// Run `trace_import_path` through the typed API.
+pub async fn run_trace_import_path_tool(
+    params: TraceImportPathParams,
+) -> Result<CallToolResult, McpError> {
+    let options = match trace_import_path_options_from_params(&params) {
+        Ok(options) => options,
+        Err(msg) => return Ok(CallToolResult::error(vec![ContentBlock::text(msg)])),
+    };
+    let result = run_api_blocking("trace_import_path", move || {
+        run_trace_import_path(&options).and_then(serialize_trace_import_path_programmatic_json)
+    })
+    .await?
+    .map_or_else(
+        |err| CallToolResult::error(vec![ContentBlock::text(programmatic_error_body(&err))]),
+        |value| json_success(&value),
+    );
+    Ok(result)
+}
+
+/// Run `trace_error` through the typed API.
+pub async fn run_trace_error_tool(params: TraceErrorParams) -> Result<CallToolResult, McpError> {
+    let options = trace_error_options_from_params(&params);
+    let result = run_api_blocking("trace_error", move || {
+        run_trace_error(&options).and_then(serialize_trace_error_programmatic_json)
     })
     .await?
     .map_or_else(
@@ -383,6 +421,59 @@ fn trace_file_options_from_params(params: &TraceFileParams) -> Result<TraceFileO
     })
 }
 
+fn trace_import_path_options_from_params(
+    params: &TraceImportPathParams,
+) -> Result<TraceImportPathOptions, String> {
+    require_non_empty("from", &params.from)?;
+    require_non_empty("to", &params.to)?;
+    Ok(TraceImportPathOptions {
+        analysis: dead_code_analysis_options(DeadCodeAnalysisInput {
+            root: params.root.as_deref(),
+            config: params.config.as_deref(),
+            allow_remote_extends: params.allow_remote_extends,
+            production: params.production,
+            workspace: params.workspace.as_deref(),
+            no_cache: params.no_cache,
+            threads: params.threads,
+        }),
+        from: params.from.clone(),
+        to: params.to.clone(),
+    })
+}
+
+/// The `source` label reported back when the caller supplied none. An MCP
+/// caller pastes the trace itself rather than naming a file, so the honest
+/// label is where it arrived from, not a path that does not exist.
+const MCP_TRACE_SOURCE: &str = "mcp";
+
+/// Build the typed options without pre-validating `trace`.
+///
+/// The API layer refuses an empty or oversized trace with a `code`, a `help`
+/// and a `context`; short-circuiting the empty case here replaced that with a
+/// bare `{error, message, exit_code}` body, so the weakest refusal on the tool
+/// was the one an agent hits first.
+fn trace_error_options_from_params(params: &TraceErrorParams) -> TraceErrorOptions {
+    let source = params
+        .source
+        .as_deref()
+        .map(str::trim)
+        .filter(|source| !source.is_empty())
+        .unwrap_or(MCP_TRACE_SOURCE);
+    TraceErrorOptions {
+        analysis: dead_code_analysis_options(DeadCodeAnalysisInput {
+            root: params.root.as_deref(),
+            config: params.config.as_deref(),
+            allow_remote_extends: params.allow_remote_extends,
+            production: params.production,
+            workspace: params.workspace.as_deref(),
+            no_cache: params.no_cache,
+            threads: params.threads,
+        }),
+        trace: params.trace.clone(),
+        source: source.to_string(),
+    }
+}
+
 fn trace_dependency_options_from_params(
     params: &TraceDependencyParams,
 ) -> Result<TraceDependencyOptions, String> {
@@ -424,6 +515,7 @@ fn trace_clone_options_from_params(params: &TraceCloneParams) -> Result<TraceClo
             cross_language: params.cross_language,
             ignore_imports: params.ignore_imports,
             top: None,
+            include_fragments: None,
         },
         target: trace_clone_target(params)?,
     })
@@ -524,6 +616,66 @@ fn min_occurrences_from_param(value: Option<u32>) -> Result<Option<usize>, Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An empty `trace` is a refused input, and every other refusal on this
+    /// tool (the oversized trace beside it, the sibling trace tools) carries a
+    /// `code`, a `help` and a `context`. It used to be the one that did not,
+    /// because MCP validated the field itself and never reached the API's
+    /// typed error.
+    #[tokio::test]
+    async fn empty_trace_is_refused_with_the_typed_error_shape() {
+        let params: TraceErrorParams = serde_json::from_value(serde_json::json!({
+            "trace": "   ",
+        }))
+        .expect("trace error params");
+
+        let result = run_trace_error_tool(params)
+            .await
+            .expect("empty trace stays a tool result");
+
+        assert_eq!(result.is_error, Some(true));
+        let ContentBlock::Text(text) = result.content.first().expect("refusal body") else {
+            panic!("refusal body must be text");
+        };
+        let body: serde_json::Value =
+            serde_json::from_str(&text.text).expect("refusal body is JSON");
+        assert_eq!(body["error"], true);
+        assert_eq!(body["exit_code"], 2);
+        assert_eq!(body["code"], "FALLOW_INVALID_TRACE_OPTIONS");
+        assert_eq!(body["context"], "trace_error");
+        assert!(
+            body["help"].as_str().is_some_and(|help| !help.is_empty()),
+            "a refusal without a help leaves the caller guessing: {body}"
+        );
+    }
+
+    #[tokio::test]
+    async fn oversized_trace_is_refused_with_the_documented_error_code() {
+        const OVERSIZED_TRACE_BYTES: usize = 1024 * 1024 + 1;
+        let params: TraceErrorParams = serde_json::from_value(serde_json::json!({
+            "trace": "x".repeat(OVERSIZED_TRACE_BYTES),
+        }))
+        .expect("trace error params");
+
+        let result = run_trace_error_tool(params)
+            .await
+            .expect("oversized trace stays a tool result");
+
+        assert_eq!(result.is_error, Some(true));
+        let ContentBlock::Text(text) = result.content.first().expect("refusal body") else {
+            panic!("refusal body must be text");
+        };
+        let body: serde_json::Value =
+            serde_json::from_str(&text.text).expect("refusal body is JSON");
+        assert_eq!(body["error"], true);
+        assert_eq!(body["exit_code"], 2);
+        assert_eq!(body["code"], "FALLOW_INVALID_TRACE_OPTIONS");
+        assert_eq!(body["context"], "trace_error");
+        assert!(
+            body["help"].as_str().is_some_and(|help| !help.is_empty()),
+            "a refusal without a help leaves the caller guessing: {body}"
+        );
+    }
 
     #[test]
     fn trace_clone_forwards_near_detection() {

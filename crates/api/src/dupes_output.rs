@@ -148,6 +148,23 @@ pub struct DuplicationGroup {
     pub clone_families: Vec<CloneFamilyFinding>,
 }
 
+impl DuplicationGroup {
+    /// Drop the verbatim source text from every clone instance in this bucket,
+    /// including the copies nested in `clone_families[].groups[]`.
+    pub fn strip_fragments(&mut self) {
+        for finding in &mut self.clone_groups {
+            for instance in &mut finding.group.instances {
+                instance.instance.fragment.clear();
+            }
+        }
+        for family in &mut self.clone_families {
+            for finding in &mut family.groups {
+                finding.group.strip_fragments();
+            }
+        }
+    }
+}
+
 /// Wrapper carrying the resolver mode label and grouped buckets.
 #[derive(Debug, Clone, Serialize)]
 pub struct DuplicationGrouping {
@@ -397,6 +414,34 @@ impl DupesReportPayload {
             stats: report.stats.clone(),
         }
     }
+
+    /// Build the payload and drop the verbatim source text when the caller
+    /// asked for a location-only body.
+    ///
+    /// Fingerprints, suggested names and actions are computed by
+    /// [`Self::from_report`], so the text is only removed after every consumer
+    /// that reads it has run.
+    #[must_use]
+    pub fn from_report_with_fragments(report: &DuplicationReport, include_fragments: bool) -> Self {
+        let mut payload = Self::from_report(report);
+        if !include_fragments {
+            payload.strip_fragments();
+        }
+        payload
+    }
+
+    /// Drop the verbatim source text from every clone instance, including the
+    /// copies nested in `clone_families[].groups[]`.
+    pub fn strip_fragments(&mut self) {
+        for finding in &mut self.clone_groups {
+            finding.group.strip_fragments();
+        }
+        for family in &mut self.clone_families {
+            for finding in &mut family.groups {
+                finding.group.strip_fragments();
+            }
+        }
+    }
 }
 
 /// Build CodeClimate issues from duplication analysis results.
@@ -535,6 +580,54 @@ mod tests {
         let value = serde_json::to_value(&finding).expect("finding serializes");
         assert!(value.get("introduced").is_none());
         assert!(value.get("demotion_reason").is_none());
+    }
+
+    #[test]
+    fn suppressed_fragments_leave_locations_and_fingerprints_intact() {
+        let mut with_text = group(2);
+        for (index, instance) in with_text.instances.iter_mut().enumerate() {
+            instance.fragment = format!("const shared{index} = compute(input);");
+        }
+        let family = CloneFamily {
+            files: vec![PathBuf::from("/root/file_0.ts")],
+            groups: vec![with_text.clone()],
+            total_duplicated_lines: 20,
+            total_duplicated_tokens: 100,
+            suggestions: Vec::new(),
+        };
+        let report = DuplicationReport {
+            clone_groups: vec![with_text],
+            clone_families: vec![family],
+            mirrored_directories: Vec::new(),
+            stats: DuplicationStats::default(),
+        };
+
+        let kept = DupesReportPayload::from_report_with_fragments(&report, true);
+        let dropped = DupesReportPayload::from_report_with_fragments(&report, false);
+
+        assert_eq!(
+            kept.clone_groups[0].fingerprint, dropped.clone_groups[0].fingerprint,
+            "fingerprints are computed before the text is dropped"
+        );
+
+        let kept_value = serde_json::to_value(&kept).expect("payload serializes");
+        assert!(kept_value["clone_groups"][0]["instances"][0]["fragment"].is_string());
+
+        let value = serde_json::to_value(&dropped).expect("payload serializes");
+        let instance = &value["clone_groups"][0]["instances"][0];
+        assert!(
+            instance.get("fragment").is_none(),
+            "the verbatim source text must be absent, not empty"
+        );
+        assert!(instance.get("file").is_some());
+        assert!(instance.get("start_line").is_some());
+        assert!(instance.get("end_col").is_some());
+        assert!(
+            value["clone_families"][0]["groups"][0]["instances"][0]
+                .get("fragment")
+                .is_none(),
+            "nested clone-family copies carry the same text and must be dropped too"
+        );
     }
 
     #[test]

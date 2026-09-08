@@ -5,6 +5,21 @@ def nl: "%0A";
 def pm: $ENV.PKG_MANAGER // "npm";
 def remove_cmd(pkg): if pm == "pnpm" then "pnpm remove \(pkg)" elif pm == "yarn" then "yarn remove \(pkg)" else "npm uninstall \(pkg)" end;
 def add_cmd(pkg): if pm == "pnpm" then "pnpm add \(pkg)" elif pm == "yarn" then "yarn add \(pkg)" else "npm install \(pkg)" end;
+# The verdict behind this finding rests on a file the run never fully read.
+# An annotation is the surface that suggests the mutation ("Run: npm uninstall
+# x", "remove the export keyword"), so the qualifier has to travel with it: a
+# suggestion that reads as confident while its evidence is incomplete is the
+# failure this mechanism exists to prevent. The token set is OPEN, so an
+# unrecognised value is rendered as itself with its separators relaxed rather
+# than dropped; dropping it would turn a caveated finding back into a
+# confident one.
+def caveat_note:
+  ((.reachability_caveats // []) | map(select(type == "string") | gsub("-"; " ") | san)) as $labels |
+  if ($labels | length) == 0 then
+    ""
+  else
+    "\(nl)\(nl)Caveat: \($labels | join(", ")). A file this run did not fully read can hide the reference that would credit this, so verify before removing."
+  end;
 def workspace_context:
   if ((.used_in_workspaces // []) | length) > 0 then
     "\(nl)\(nl)Imported in other workspaces: " + (.used_in_workspaces | map(san) | join(", "))
@@ -19,19 +34,19 @@ def dependency_action(pkg):
   end;
 [
   (.unused_files[]? |
-    "::warning file=\(.path | prop),title=Unused file::This file is not imported by any other module and unreachable from entry points.\(nl)Consider removing it or importing it where needed."),
+    "::warning file=\(.path | prop),title=Unused file::This file is not imported by any other module and unreachable from entry points.\(nl)Consider removing it or importing it where needed.\(caveat_note)"),
   (.unused_exports[]? |
-    "::warning file=\(.path | prop),line=\(.line | n(1)),col=\((.col | n(0)) + 1),title=Unused export::\(if .is_re_export then "Re-exported" else "Exported" end) \(if .is_type_only then "type" else "value" end) '\(.export_name | san)' is never imported by other modules.\(nl)\(nl)If this export is part of a public API, consider adding it to the entry configuration.\(nl)Otherwise, remove the export keyword or delete the declaration."),
+    "::warning file=\(.path | prop),line=\(.line | n(1)),col=\((.col | n(0)) + 1),title=Unused export::\(if .is_re_export then "Re-exported" else "Exported" end) \(if .is_type_only then "type" else "value" end) '\(.export_name | san)' is never imported by other modules.\(nl)\(nl)If this export is part of a public API, consider adding it to the entry configuration.\(nl)Otherwise, remove the export keyword or delete the declaration.\(caveat_note)"),
   (.unused_types[]? |
     "::warning file=\(.path | prop),line=\(.line | n(1)),col=\((.col | n(0)) + 1),title=Unused type::\(if .is_re_export then "Re-exported" else "Exported" end) type '\(.export_name | san)' is never imported by other modules.\(nl)\(nl)If only used internally, remove the export keyword."),
   (.private_type_leaks[]? |
     "::warning file=\(.path | prop),line=\(.line | n(1)),col=\((.col | n(0)) + 1),title=Private type leak::Export '\(.export_name | san)' references private type '\(.type_name | san)'.\(nl)\(nl)Export the referenced type or remove it from the public signature."),
   (.unused_dependencies[]? |
-    "::warning file=\(.path | prop)\(if .line > 0 then ",line=\(.line | n(1))" else "" end),title=Unused dependency::Package '\(.package_name | san)' is listed in dependencies but never imported by this package.\(workspace_context)\(nl)\(nl)\(dependency_action(.package_name | san))"),
+    "::warning file=\(.path | prop)\(if .line > 0 then ",line=\(.line | n(1))" else "" end),title=Unused dependency::Package '\(.package_name | san)' is listed in dependencies but never imported by this package.\(workspace_context)\(nl)\(nl)\(dependency_action(.package_name | san))\(caveat_note)"),
   (.unused_dev_dependencies[]? |
-    "::warning file=\(.path | prop)\(if .line > 0 then ",line=\(.line | n(1))" else "" end),title=Unused devDependency::Package '\(.package_name | san)' is listed in devDependencies but never imported by this package.\(workspace_context)\(nl)\(nl)\(dependency_action(.package_name | san))"),
+    "::warning file=\(.path | prop)\(if .line > 0 then ",line=\(.line | n(1))" else "" end),title=Unused devDependency::Package '\(.package_name | san)' is listed in devDependencies but never imported by this package.\(workspace_context)\(nl)\(nl)\(dependency_action(.package_name | san))\(caveat_note)"),
   (.unused_optional_dependencies[]? |
-    "::warning file=\(.path | prop)\(if .line > 0 then ",line=\(.line | n(1))" else "" end),title=Unused optionalDependency::Package '\(.package_name | san)' is listed in optionalDependencies but never imported by this package.\(workspace_context)\(nl)\(nl)\(dependency_action(.package_name | san))"),
+    "::warning file=\(.path | prop)\(if .line > 0 then ",line=\(.line | n(1))" else "" end),title=Unused optionalDependency::Package '\(.package_name | san)' is listed in optionalDependencies but never imported by this package.\(workspace_context)\(nl)\(nl)\(dependency_action(.package_name | san))\(caveat_note)"),
   (.unused_enum_members[]? |
     "::warning file=\(.path | prop),line=\(.line | n(1)),col=\((.col | n(0)) + 1),title=Unused enum member::Enum member '\(.parent_name | san).\(.member_name | san)' is never referenced in the codebase.\(nl)\(nl)Consider removing it to keep the enum minimal."),
   (.unused_class_members[]? |

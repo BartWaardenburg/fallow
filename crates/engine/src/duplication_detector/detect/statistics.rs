@@ -50,6 +50,9 @@ pub(super) fn compute_stats(
         total_tokens,
         duplicated_tokens,
         clone_groups: clone_groups.len(),
+        // Families are grouped after detection; the pipeline sets the real
+        // count once `clone_families` exists.
+        clone_families: 0,
         clone_instances,
         duplication_percentage,
         clone_groups_below_min_occurrences: 0,

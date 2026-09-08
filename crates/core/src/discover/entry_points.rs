@@ -1156,17 +1156,46 @@ pub fn discover_plugin_entry_point_sets(
     config: &ResolvedConfig,
     files: &[DiscoveredFile],
 ) -> CategorizedEntryPoints {
+    discover_plugin_entry_point_sets_timed(plugin_result, config, files).entries
+}
+
+/// Plugin entry discovery split into the two halves that scale differently:
+/// compiling the glob set once, and matching it against every discovered file.
+pub struct TimedPluginEntryPoints {
+    pub entries: CategorizedEntryPoints,
+    /// Compiling plugin patterns into a glob set plus per-glob rules. Scales
+    /// with the number of active plugin patterns, not with project size.
+    pub build_ms: f64,
+    /// Matching the compiled set against every discovered file. Scales with
+    /// file count times pattern count.
+    pub match_ms: f64,
+}
+
+pub fn discover_plugin_entry_point_sets_timed(
+    plugin_result: &crate::plugins::AggregatedPluginResult,
+    config: &ResolvedConfig,
+    files: &[DiscoveredFile],
+) -> TimedPluginEntryPoints {
     let mut entries = CategorizedEntryPoints::default();
 
+    let build_start = std::time::Instant::now();
     let relative_paths = relative_paths_for(files, &config.root);
     let (glob_set, glob_meta) = build_plugin_glob_meta(plugin_result);
+    let build_ms = build_start.elapsed().as_secs_f64() * 1000.0;
+
+    let match_start = std::time::Instant::now();
     if let Some(glob_set) = glob_set.filter(|set| !set.is_empty()) {
         match_plugin_entry_files(&mut entries, &glob_set, &glob_meta, &relative_paths, files);
     }
+    let match_ms = match_start.elapsed().as_secs_f64() * 1000.0;
 
     push_plugin_setup_files(&mut entries, &config.root, plugin_result);
 
-    entries.dedup()
+    TimedPluginEntryPoints {
+        entries: entries.dedup(),
+        build_ms,
+        match_ms,
+    }
 }
 
 /// Compile plugin entry-pattern and support globs into a glob set plus per-glob metadata.

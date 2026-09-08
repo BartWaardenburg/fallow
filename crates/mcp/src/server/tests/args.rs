@@ -9,7 +9,7 @@ use crate::tools::{
     build_impact_args, build_impact_closure_args, build_inspect_similar_code_args,
     build_list_boundaries_args, build_list_suppressions_args, build_project_info_args,
     build_security_candidates_args, build_trace_clone_args, build_trace_dependency_args,
-    build_trace_export_args, build_trace_file_args,
+    build_trace_export_args, build_trace_file_args, parse_candidate_snapshot,
 };
 
 /// Parse a validation error body into its `message` field. Arg builders emit
@@ -50,6 +50,7 @@ fn check_runtime_coverage(coverage: &str) -> CheckRuntimeCoverageParams {
         max_crap: None,
         top: None,
         group_by: None,
+        max_output_bytes: None,
     }
 }
 
@@ -78,6 +79,7 @@ fn guard_params() -> GuardParams {
         files: vec!["src/domain/user.ts".to_string()],
         root: None,
         allow_remote_extends: None,
+        max_output_bytes: None,
     }
 }
 
@@ -373,6 +375,7 @@ fn security_candidates_args_with_scope_and_performance_options() {
         gate: None,
         no_cache: Some(true),
         threads: Some(4),
+        max_output_bytes: None,
     };
     let args = build_security_candidates_args(&params).unwrap();
     assert_eq!(
@@ -596,7 +599,8 @@ fn inspect_similar_code_requires_and_forwards_candidate_id() {
         "snapshot": similar_code_snapshot_json("sc_abc123"),
     }))
     .unwrap();
-    let args = build_inspect_similar_code_args(&params).unwrap();
+    let snapshot = parse_candidate_snapshot(&params.snapshot).unwrap();
+    let args = build_inspect_similar_code_args(&params, &snapshot).unwrap();
     assert_eq!(
         args,
         [
@@ -610,6 +614,33 @@ fn inspect_similar_code_requires_and_forwards_candidate_id() {
             "sc_abc123",
             "--candidate-snapshot-stdin",
         ]
+    );
+}
+
+/// The wire `snapshot` parameter is an open JSON object, so a malformed
+/// snapshot must still be refused by name instead of surfacing a serde parser
+/// message the caller cannot dispatch on.
+#[test]
+fn inspect_similar_code_names_a_malformed_snapshot_refusal() {
+    let mut snapshot = similar_code_snapshot_json("sc_abc123");
+    snapshot["candidate"]["similarity"] = serde_json::json!("high");
+    let params: InspectSimilarCodeParams = serde_json::from_value(serde_json::json!({
+        "candidate_id": "sc_abc123",
+        "snapshot": snapshot,
+    }))
+    .expect("snapshot is an open object on the wire");
+
+    let error = parse_candidate_snapshot(&params.snapshot).unwrap_err();
+    let body: serde_json::Value = serde_json::from_str(&error).expect("refusal is JSON");
+
+    assert_eq!(body["code"], "FALLOW_MCP_INVALID_CANDIDATE_SNAPSHOT");
+    assert_eq!(body["exit_code"], 2);
+    assert_eq!(body["context"], "inspect_similar_code.snapshot");
+    assert!(
+        body["help"]
+            .as_str()
+            .is_some_and(|help| help.contains("fallow://schema/similar-code-snapshot")),
+        "{body}"
     );
 }
 
@@ -708,7 +739,17 @@ fn similar_code_snapshot_json(candidate_id: &str) -> serde_json::Value {
 #[test]
 fn find_dupes_args_minimal() {
     let args = build_find_dupes_args(&FindDupesParams::default()).unwrap();
-    assert_eq!(args, ["dupes", "--format", "json", "--quiet", "--explain"]);
+    assert_eq!(
+        args,
+        [
+            "dupes",
+            "--format",
+            "json",
+            "--quiet",
+            "--explain",
+            "--no-fragments"
+        ]
+    );
 }
 
 #[test]
@@ -735,6 +776,7 @@ fn find_dupes_args_with_all_options() {
         changed_since: Some("main".to_string()),
         group_by: None,
         min_occurrences: None,
+        include_fragments: Some(true),
     };
     let args = build_find_dupes_args(&params).unwrap();
     assert_eq!(
@@ -894,6 +936,7 @@ fn fix_preview_args_with_all_options() {
         no_create_config: Some(true),
         no_cache: Some(true),
         threads: Some(4),
+        max_output_bytes: None,
     };
     let args = build_fix_preview_args(&params);
     assert_eq!(
@@ -930,6 +973,7 @@ fn fix_apply_args_with_all_options() {
         no_create_config: Some(true),
         no_cache: Some(true),
         threads: Some(4),
+        max_output_bytes: None,
     };
     let args = build_fix_apply_args(&params);
     assert_eq!(
@@ -1126,6 +1170,7 @@ fn impact_closure_args_with_scope() {
         workspace: Some("packages/web".to_string()),
         no_cache: Some(true),
         threads: Some(3),
+        max_output_bytes: None,
     })
     .unwrap();
     assert_eq!(
@@ -1383,6 +1428,7 @@ fn trace_args_reject_blank_required_values() {
         workspace: None,
         no_cache: None,
         threads: None,
+        max_output_bytes: None,
     })
     .unwrap_err();
     assert_eq!(
@@ -1543,11 +1589,22 @@ fn validation_errors_use_structured_json_body() {
     for body in &errors {
         let v: serde_json::Value = serde_json::from_str(body)
             .unwrap_or_else(|e| panic!("body should be valid JSON: `{body}` ({e})"));
-        assert_eq!(
-            v.as_object().map(serde_json::Map::len),
-            Some(3),
-            "exactly 3 keys expected in {body}"
-        );
+        let keys: Vec<&str> = v
+            .as_object()
+            .expect("refusal body is an object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        for key in &keys {
+            assert!(
+                matches!(
+                    *key,
+                    "error" | "message" | "exit_code" | "code" | "help" | "context"
+                ),
+                "unexpected key '{key}' in {body}; a refusal carries the three required fields \
+                 plus at most the three typed ones"
+            );
+        }
         assert_eq!(
             v["error"],
             serde_json::Value::Bool(true),
@@ -1807,6 +1864,7 @@ fn impact_args_minimal() {
 fn impact_args_with_root() {
     let args = build_impact_args(&ImpactParams {
         root: Some("/some/project".to_string()),
+        max_output_bytes: None,
     });
     assert_eq!(
         args,
@@ -1825,6 +1883,7 @@ fn impact_args_with_root() {
 fn impact_args_empty_root_dropped() {
     let args = build_impact_args(&ImpactParams {
         root: Some(String::new()),
+        max_output_bytes: None,
     });
     assert_eq!(args, ["impact", "--format", "json", "--quiet"]);
 }
@@ -1835,6 +1894,7 @@ fn guard_args_emit_json_quiet_and_files() {
         files: vec!["src/domain/user.ts".to_string(), "src/new.ts".to_string()],
         root: None,
         allow_remote_extends: None,
+        max_output_bytes: None,
     })
     .expect("plain file entries are valid");
     assert_eq!(
@@ -1856,6 +1916,7 @@ fn guard_args_with_root() {
         files: vec!["src/domain/user.ts".to_string()],
         root: Some("/repo".to_string()),
         allow_remote_extends: None,
+        max_output_bytes: None,
     })
     .expect("plain file entries are valid");
     assert_eq!(
@@ -1883,6 +1944,7 @@ fn impact_all_args_with_sort_and_limit() {
     let args = build_impact_all_args(&ImpactAllParams {
         sort: Some("resolved".to_string()),
         limit: Some(5),
+        max_output_bytes: None,
     });
     assert_eq!(
         args,
@@ -1897,6 +1959,7 @@ fn impact_all_args_empty_sort_dropped() {
     let args = build_impact_all_args(&ImpactAllParams {
         sort: Some(String::new()),
         limit: None,
+        max_output_bytes: None,
     });
     assert_eq!(args, ["impact", "--all", "--format", "json", "--quiet"]);
 }
@@ -1945,6 +2008,7 @@ fn all_arg_builders_include_format_json_and_quiet() {
         workspace: None,
         no_cache: None,
         threads: None,
+        max_output_bytes: None,
     })
     .unwrap();
     let trace_dependency = build_trace_dependency_args(&TraceDependencyParams {
@@ -1992,6 +2056,7 @@ fn all_arg_builders_include_format_json_and_quiet() {
         files: vec!["src/domain/user.ts".to_string()],
         root: None,
         allow_remote_extends: None,
+        max_output_bytes: None,
     })
     .expect("plain file entries are valid");
     let impact_all = build_impact_all_args(&ImpactAllParams::default());
@@ -2108,6 +2173,7 @@ fn each_tool_uses_correct_subcommand() {
             workspace: None,
             no_cache: None,
             threads: None,
+            max_output_bytes: None,
         })
         .unwrap()[0],
         "dead-code"
@@ -2186,6 +2252,7 @@ fn check_runtime_coverage_all_tuning_flags_emit() {
         max_crap: Some(42.5),
         top: Some(10),
         group_by: Some("owner".to_string()),
+        max_output_bytes: None,
     };
     let args = build_check_runtime_coverage_args(&params);
     assert!(args.contains(&"--root".to_string()));
@@ -2260,6 +2327,7 @@ fn get_token_blast_radius_threads_root_and_config() {
         allow_remote_extends: None,
         no_cache: Some(true),
         threads: Some(4),
+        max_output_bytes: None,
     };
     let args = build_get_token_blast_radius_args(&params);
     assert!(args.starts_with(&[
@@ -2918,6 +2986,7 @@ fn list_suppressions_args_with_all_options() {
         file: Some(vec!["src/a.ts".to_string(), "src/b.ts".to_string()]),
         no_cache: Some(true),
         threads: Some(4),
+        max_output_bytes: None,
     })
     .unwrap();
     assert!(args.contains(&"--allow-remote-extends".to_string()));

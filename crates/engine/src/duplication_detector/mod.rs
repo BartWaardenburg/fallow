@@ -353,6 +353,7 @@ fn detect_and_postprocess(
     report.clone_families = families::group_into_families(&report.clone_groups, root);
     report.mirrored_directories =
         families::detect_mirrored_directories(&report.clone_families, root);
+    report.stats.clone_families = report.clone_families.len();
     report.sort();
     report
 }

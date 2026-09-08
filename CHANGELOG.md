@@ -7,6 +7,505 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`fallow trace --path <FROM> <TO>` reports how one module reaches
+  another.** The symbol positional is now optional and mutually exclusive with
+  `--path`, which walks the import graph and returns the shortest chain of
+  imports between two modules. Type-only hops are reported with
+  `type_only: true` rather than skipped, because an `import type` chain is a
+  real compile-time coupling. Two answers are not errors and both report
+  `hops: 0`: an unreachable pair (`reachable: false`) and the same module on
+  both sides (`reachable: true`), so branch on `reachable`, never on the hop
+  count. Equal-length routes resolve to the same route on every run. The
+  payload carries its own `schema_version`, and the question is reachable over
+  MCP as `trace_import_path`.
+
+- **`fallow trace-error [FILE|-]` resolves a runtime stack trace against the
+  project graph.** It reads a trace from a file or stdin, recognises the
+  V8 / Node and SpiderMonkey / JavaScriptCore frame forms, and reports, per
+  frame, which definitions in the project that frame's identifier names. It is
+  built to refuse overclaiming: a frame matching several definitions is
+  `ambiguous` and lists all of them, a frame matching none stays visible as
+  `not_found`, and a frame the graph was never asked about is `not_attempted`.
+  Absolute frame paths are resolved with symlinks followed on both sides, so a
+  project reached through a symlink resolves the same frames as the canonical
+  spelling. A `resolved` frame whose own line sits at a different declaration
+  carries `line_mismatch`, because the look-up matches on the identifier alone.
+  No source maps are read. The question is reachable over MCP as `trace_error`.
+
+- **`fallow doctor` checks installed dependencies and cache reuse.** Three
+  advisory checks are appended after the existing five, so the earlier checks
+  keep their positions. `dependencies` warns when the project has no
+  `node_modules` tree and is not a Deno project that runs without one, which
+  is the state where package `exports` cannot be read, plugins that activate
+  on an installed package stay inactive, and dependency classification
+  degrades. `cache` warns when a persisted extraction cache exists but would
+  not be reused, and `graph-cache` warns when a persisted module graph exists
+  but could not be loaded; both name the reason and the on-disk size. The two
+  caches are reported separately because a run reuses them independently. A
+  project with no cache yet passes. None of the three can fail, so a project
+  without installed dependencies now reports the aggregate `warn` where it
+  reported `pass`, still exiting 0. The envelope moves to `schema_version` 2.
+
+- **Duplication output can leave the source text out.** `fallow dupes
+  --no-fragments`, and the MCP `find_dupes` tool through its new
+  `include_fragments` parameter, return location-only clone instances. Each
+  instance still carries `file`, `start_line`, `end_line`, `start_col`, and
+  `end_col`, which address the same code, and fingerprints, suggested names,
+  and refactoring suggestions are computed before serialization, so dropping
+  the text changes no other value. The CLI keeps emitting fragments by
+  default; the MCP parameter defaults to false, where the text was most of
+  what an agent paid for.
+
+- **`fallow impact` records which gate produced a run.** The local store keeps
+  the `--gate-marker` value the installed gates pass (`agent`, `pre-commit`,
+  `ci`) instead of only a boolean, so the report can say where your gate runs
+  come from. JSON gains an optional `gate_runs` object with a run count per
+  source, absent when the store holds none, and the human report gains one
+  line naming the non-zero sources. The store is local, never leaves the
+  machine, and is never written in CI, so these counts are run provenance and
+  not an adoption measure.
+
+- **CLI failures carry a machine-readable code and a remediation hint.** The
+  `--format json` error document may now carry `code` (a stable identifier
+  such as `unknown_issue_type`) and `help` beside `message` and `exit_code`,
+  and human output appends the hint on its own `hint:` line. Commands whose
+  failure already had a structured code stop flattening the three fields into
+  one message string. Both fields are omitted when the failure has neither, so
+  every unchanged failure path is byte-identical.
+
+- **An unrecognized selector suggests the nearest registered one.** `fallow
+  explain <token>` and the Code Mode `fallow.run(tool, ...)` host call answer
+  an unknown name with the registered token one or two edits away instead of a
+  fixed example list. The matcher is the bounded, deterministic one config
+  rule-name typo detection already uses, and it stays silent when nothing is
+  close, so a novel token keeps the previous message. Exit codes are
+  unchanged.
+
+### Changed
+
+- **The three analysis caches change format together, so the first run after
+  upgrading is cold.** Extraction cache entries now carry the inode change
+  time beside the modification time, record whether complexity was actually
+  extracted, record what a degraded parse produced, and key on the
+  root-relative path with the root stored in the header; the graph cache keys
+  its manifest on file content rather than modification time. Older blobs are
+  refused on version and rebuilt, and nothing about the cache location, the
+  `cache` config field, or `--no-cache` changes. Two consequences are worth
+  naming: extraction entries in a warm tree copied with `cp -Rp` to a sibling
+  path are reused instead of reparsed, while the graph is rebuilt to avoid
+  retaining paths into the original checkout. On Windows, where the inode change time is unavailable, the
+  metadata-only fast path is disabled and every entry is read and
+  content-hashed before it is reused.
+
+- **`health --hotspots --format json` says which clock its churn numbers were
+  measured against.** Churn recency weighting, hotspot ranking, and ownership
+  `stale_days` are all measured against one instant, and whether that instant is
+  reproducible decides whether two runs over the same commit can be compared.
+  The only signal was a stderr warning that `--quiet` removes and a machine
+  consumer never sees. `hotspot_summary` now carries a `clock` object with
+  `source` (`head_commit`, `environment`, or `wall_clock`), the `epoch_secs` it
+  resolved to, and `reproducible`. Pass `epoch_secs` back as
+  `FALLOW_CLOCK_EPOCH` to reproduce a run. The field is additive and optional,
+  and `hotspot_summary` carries it whenever the run measured churn, which a
+  default health run over a git repository does; a project with no readable
+  git history has no `hotspot_summary` and is byte-identical.
+
+- **The performance table's nested rows add up.** In the entry-point breakdown,
+  `compile` and `match` are the two measured halves of the `plugin globs` span
+  and the rest of it (merging matched entries into the entry set) was simply
+  missing, so two children visibly fell short of the parent they claimed to
+  divide with nothing to explain the gap. Both nested levels now close with
+  their own `(other)` row, to within the one-decimal display rounding, because
+  every span in this breakdown is carved from one entry-point clock. Each row is
+  printed to a tenth of a millisecond, so on a real project the visible child
+  rows can land a tenth either side of the parent they divide; the underlying
+  spans partition it. The outer table is a different case:
+  `discover files`, `workspaces`, `parse/extract` and `cache update` are all
+  measured before the clock `TOTAL` reads starts, so its rows are per-stage
+  costs rather than a partition of `TOTAL`, and its `(other)` row reads `0.0ms`
+  whenever they overshoot. That was true before this release too; the code now
+  documents it instead of implying the rows reconcile.
+  The stage row formerly labelled `plugins` is now `plugin detection`, and it
+  names the plugin-glob time that lands inside the entry-point stage
+  as a separate contribution, because
+  the two are different stretches of wall clock that cannot be summed into one
+  row without breaking the stage partition. A reader adding the two now sees the
+  real plugin bill instead of the detection half alone.
+
+- **A detector that found nothing says whether it was asked to look.** A run
+  with no boundary zones and a run whose zones are all clean both reported
+  zero boundary violations, and the same held for rule packs. Both now record
+  a `boundaries-not-configured` or `rule-packs-not-configured` workspace
+  diagnostic, so the zero can be read as "nothing configured" rather than
+  "nothing found". A project that sets `boundary-violation` or
+  `policy-violation` to `off` chose that silence and is not reported. Neither
+  kind prints a stderr warning: they describe a check the project never
+  configured rather than a run whose results degraded, so on the default
+  configuration they would warn on every run forever and the only remedy on
+  offer would be to write config to silence a warning about not having written
+  config. A project with no installed dependency tree is reported the same way,
+  as `node-modules-missing`, and that one does warn on stderr, because it
+  changes what the analysis can see.
+
+- **`fallow flags --format json` reports what the run skipped.** The envelope
+  carried no `workspace_diagnostics[]` key at all, so on this one command a
+  skipped, unreadable, or degraded file was unreachable from both channels:
+  several kinds no longer print on stderr, and the JSON had nowhere to put
+  them. A flags run walks and parses the project like every other analysis, and
+  each of those kinds is a reason a flag is missing from `feature_flags[]`,
+  which is exactly what a consumer reading a zero-result run needs. The array
+  matches the one the `dead-code`, `dupes`, `health`, and `security` envelopes
+  carry, with project-relative paths, and is omitted when the run records
+  nothing, so a clean project sees no wire change and `schema_version` stays
+  at 8. The scan correlates flags with dead exports, so it runs the dead-code
+  analyze pass and reports that pass's diagnostics too, including the
+  unconfigured-detector kinds this release adds.
+
+- **`dupes --top N --group-by <mode>` is refused instead of dropping `--top`.**
+  The pair was accepted, `--top` was silently ignored, and the run exited 0
+  reporting every clone group with `clone_groups_omitted` at 0 to confirm
+  nothing had been withheld. The combination now exits 2 with a message naming
+  why: grouped output reports per-bucket stats computed over every clone group
+  in the bucket, so a global top-N truncation would leave those stats
+  describing groups the output no longer lists. Either flag on its own is
+  unchanged.
+
+- **`workspace_diagnostics[]` has a stable order.** Analysis-stage diagnostics
+  are recorded from a parallel detector pool, so their arrival order followed
+  the thread schedule: the same command over the same commit emitted them in a
+  different order at one worker than at eight. They are now ordered by path,
+  then kind, then message, at the single point every consumer reads them. The
+  list a section captured from its own discovery walk keeps its meaningful
+  order and still comes first. A consumer that pinned the old positional order
+  should key on `kind` and `path` instead.
+
+- **Churn is measured against the commit, not the wall clock.** Recency
+  weighting, ownership staleness, and the churn window read the system clock
+  at three separate points, so `weighted_commits` drifted on every run and
+  `stale_days` flipped its fixed thresholds as the day rolled over. All three
+  now resolve one reference instant per run from HEAD's committer timestamp,
+  and the window is passed to git as an absolute epoch instead of a phrase git
+  re-resolved against the wall clock, so two runs over one commit produce the
+  same churn-derived numbers on any machine. `FALLOW_CLOCK_EPOCH` pins the
+  instant explicitly. Imported churn in a non-git project has no commit to
+  read and warns that it fell back to the wall clock. The on-disk churn cache
+  is keyed on the window duration rather than a resolved date, and a warm load
+  prunes to the same cutoff a cold history read applies, so a cache minted
+  months ago no longer reports history a fresh run excludes.
+
+- **The review brief stops publishing a component nothing measured.** The
+  focus score's `security_taint` is omitted from the wire while it is zero,
+  the treatment `runtime` already had. It is permanently zero today, since no
+  security pass is threaded onto the brief path, and publishing it as a
+  required field made it read as a measurement that found nothing rather than
+  as something nothing measured. A consumer that sums the components must read
+  an absent component as zero; `total` still equals the sum of every component
+  that ran. Removing a wire field bumps the brief `schema_version` from 8 to
+  9.
+
+- **The MCP tool list stops carrying detail an agent pays for on connect.**
+  Every `tools/list` byte is resident in every session, whether or not the
+  tool is called. The `inspect_similar_code` snapshot parameter no longer
+  inlines the candidate-snapshot shape, which was its largest input schema:
+  that shape is published once as the `fallow://schema/similar-code-snapshot`
+  resource, and a snapshot that is not a candidate snapshot is now refused by
+  the handler with a code, `exit_code: 2`, and a `help` pointing at the
+  resource, rather than a raw parser message. Per-flag prose is moving the
+  same way, into a new `fallow://tools/{name}` guide resource an agent reads
+  once for the tool it is about to call; `check_health` is the first tool
+  split this way, with its content preserved and relocated. A caller passing
+  the snapshot back unchanged, as documented, sees no difference. The six
+  parameters nearly every tool carries (`root`, `config`,
+  `allow_remote_extends`, `workspace`, `no_cache`, `threads`) now describe
+  themselves in one sentence, worded identically wherever the parameter means
+  the same thing, which is nearly everywhere it appears. A handful of tools
+  keep their own sentence because the parameter does something different
+  there: `root` on `code_execute` is the default injected into host calls, on
+  `impact` it names the project whose value history is read from a store
+  outside the repo, and on `recommend` it drives framework and tooling
+  detection; `workspace` on `find_similar_code` and `security_candidates`
+  states its mutual exclusion with `changed_workspaces`. Only the prose
+  changed, and no request that was accepted before is refused now.
+
+- **An MCP response over the byte cap carries its measurement.** It used to
+  return a contentless tool error: a refusal that said nothing about what the
+  stream produced. It is still a refusal, with `isError`, `error: true`, and
+  `exit_code: 2` intact, because a caller that got no result must not read the
+  call as having answered. The body now also carries `ok: false`,
+  `truncated: true`, `result_bytes`, `result_preview`, `limit_bytes`, and
+  `stream`, so a caller learns what the stream actually produced and where it
+  was cut. The field names match the Code Mode result refusal, which refuses
+  this class the same way, so an agent parses one shape on both surfaces.
+  Subprocess-backed tools also accept an optional `max_output_bytes` per call,
+  which may only lower the default, so the remedy is to narrow the analysis
+  rather than to raise the cap.
+
+- **The GitHub Action and the GitLab template stop sharing one cache entry
+  between two roots.** A matrix over roots could restore a sibling's cache.
+  The Action's cache key and its restore keys now include the analyzed root.
+  The GitLab template reaches the same isolation differently, because GitLab
+  rejects a `/` inside a cache key and the root cannot be interpolated into
+  one: its key carries the job name slug, which every matrix arm already gets
+  a distinct value of, and the cached path is scoped to the root.
+
+### Fixed
+
+- **`dupes --top 0` no longer reports a clean project.** Both human surfaces
+  tested the length of `clone_groups[]` for their empty state, and `--top 0`
+  empties that array without changing what the run measured, so `fallow dupes
+  --top 0` printed a green "No code duplication found" (and `--summary` printed
+  "No duplication found") over a run whose own JSON reported dozens of clone
+  groups. Both clean states now test the measured corpus, so a fully capped
+  listing keeps its header and states that every group and family was withheld.
+  `dead-code --top 0` already behaved this way; the two commands agree again.
+
+- **`fix --quiet` reports the mutations it refused.** `--quiet` kept every
+  `Would remove` line for a removal fallow would make and dropped every `Kept`
+  line for one it refused, so a quiet plan read as complete when it was
+  partial. The withheld lines are now gated on output format alone, exactly
+  like the `Would remove` lines beside them; a JSON run still reads them off
+  `fixes[]` instead. `Dry run complete` and `Fixed N issue(s)` are progress and
+  stay gated on `--quiet`.
+
+- **A routine cache miss is no longer a warning.** Editing a file and re-running
+  printed `WARN Graph cache decoded but not reused: at least one file changed`,
+  which `fallow watch` emitted once per save and `--quiet` did not suppress.
+  Content drift is what a cache is for, so the two content-drift reasons log at
+  debug; the five reasons that need a change on disk or in the config stay on
+  stderr. Both reasons are still reported by `fallow doctor` and the
+  `--performance` table. The redundant `reason=` field, which restated the
+  sentence beside it, is gone.
+
+- **The `--performance` table says on screen that its rows are not a sum.** An
+  `(other)` row above a horizontal rule above `TOTAL` is summation grammar, and
+  the entry-point breakdown one indent level down really does close its sums
+  that way, so the outer rows exceeding `TOTAL` read as an arithmetic error. A
+  dimmed line under `TOTAL` now states that the rows are per-stage costs and
+  that several run outside or beside the `TOTAL` clock. The entry-point
+  breakdown also gained a per-row cost floor, so sections that render as
+  `0.0ms` fold into their `(other)` row instead of spending ten lines to
+  explain a 6.6ms stage.
+
+- **`trace --path` puts `reachable` in the human header.** `hops: 0` is the
+  answer for both an unreachable pair and the same module on both sides, and
+  the header carried only the ambiguous half while the JSON carried the answer.
+
+- **`trace-error` states a repeated frame reason once.** A 60-frame
+  `node_modules` stack printed 60 byte-identical explanations between the reader
+  and the counts. A reason now prints when it changes; every frame keeps its own
+  `[origin/resolution]` labels. The empty state stated the same fact three times
+  with no next step: it now states it once, keeps the unparsed-line count inside
+  that sentence so `--quiet` cannot hide it, and names how to pipe a trace in.
+
+- **Failures on the trace commands and on `dupes --top` with `--group-by` carry
+  a remedy.** Each uses the `Error: ... hint: ...` shape, and JSON callers read
+  the remedy off `help`. The `--top` with `--group-by` refusal was a single
+  279-character sentence that soft-wrapped to four lines and buried "run one or
+  the other" at the end; the actionable half is now one line with the reason on
+  a `hint:` line below it.
+
+- **Cache diagnostics distinguish unreadable paths from absent files.** A
+  recognized header reports an explicit format-version mismatch. An unframed
+  blob may come from an older release or contain damaged data, so its decode
+  failure states that uncertainty instead of claiming corruption. `fallow
+  doctor` also scales small sizes to KB or bytes, and oversize descriptions
+  report the file size and ceiling separately.
+
+- **`trace-error` counts the input lines it says it counted.** On a trace
+  where nothing parsed as a frame, the summary read "no stack frames recognised
+  in 2 non-blank input lines" for a three-line input: the first line is taken
+  as the error header and reported under `header`, so it was excluded from a
+  count whose sentence claimed to describe the input. The frameless summary now
+  counts the header line, and the sentence on a run that did recognise frames
+  says "further input lines", because the header and the frames are already
+  reported above it. `counts.unparsed_lines` is unchanged and still counts
+  lines that were neither a frame nor the header.
+
+- **A file that does not parse is reported instead of counted as empty.** A
+  source file that failed to parse silently yielded zero imports, so a broken
+  importer made its healthy import target look unreachable and the target was
+  reported as dead. The failure is now recorded as a `source-parse-degraded`
+  workspace diagnostic carrying the error count and whether the parser
+  panicked. It is reported and never gated on: the parser also emits
+  recoverable errors for valid syntax newer than it, so gating on a degraded
+  parse would mute real findings project-wide.
+
+  Where a file the run did not fully analyze can distort a verdict, the
+  affected entries carry the caveat themselves, in an optional
+  `reachability_caveats[]` array, so a reader who never scrolls back to the
+  diagnostics list still sees it. Eight arrays carry it: `unused_files[]`,
+  `unused_exports[]`, `unused_types[]`, `unused_enum_members[]`,
+  `unused_class_members[]`, and the three dependency arrays. A caveated finding also reports `auto_fixable: false` on
+  its mutating action, with the reason in that action's `note`, so an agent
+  reading the actions contract no longer plans a write `fix` would refuse. The
+  human report names the caveat as a compact suffix on the finding line, and
+  every other surface that recommends acting on a finding names it too. A degraded
+  parse is one cause; the others are a file that could not be read
+  (`source-read-failure`) and a file discovery skipped before reading it
+  (`skipped-large-file`, `skipped-minified-file`, `skipped-source-dotdir`). A
+  6 MB file whose first line imports a module is the plainest case: the size
+  guard means that import is never seen, and the module it named reads as
+  unused at default settings. The dependency arrays do not get the reachability
+  narrowing the file and export verdicts do: a package is unused only when no
+  module imports it, and fallow credits an import from an unreachable module,
+  so any unseen import can hide it.
+
+  The array never withholds, filters, downgrades, or re-severities a finding,
+  and never changes an exit code. It is omitted when empty, so a run that
+  analyzed every file it discovered is byte-identical.
+
+- **`fallow fix` no longer applies a mutation it flagged as resting on an
+  incomplete import graph.** A syntax error on one line hid the import on the
+  next, the export it credited read as unused, and `fix` removed it, breaking
+  the build with a change fallow's own output had already marked as low
+  confidence. A file the size guard skipped hid the same import just as
+  effectively, at default settings and with no broken syntax anywhere. The most
+  destructive case was `remove-dependency`, which emptied `dependencies` for a
+  package whose only import sat in the file the run never read. All of them are
+  withheld now, in the same intentional family as the existing off-graph export
+  skip: `skip_reason: "low_confidence_incomplete_analysis"`, the caveat tokens
+  repeated on the entry so a caller can gate on the marker,
+  `skipped_low_confidence_exports` and the new
+  `skipped_low_confidence_dependencies` and `skipped_low_confidence_members`
+  counting them, no exit-code change, and the finding still reported by
+  `fallow dead-code` for manual confirmation. `remove-enum-member` is withheld
+  the same way, on its own rule: a member access is credited from any resolved
+  module, reachable or not, so any file the run did not read can hide one. The
+  withholding follows the caveat rather than its cause, so a future reason a
+  file goes unread inherits it.
+
+- **An unused class member no longer ships a one-click deletion off an
+  unread file.** `unused_class_members[]` sat outside the caveat gate, on the
+  argument that its removal starts withheld and only the type-aware sidecar
+  opens it. That argument covered `fallow fix` and nothing else. The two review
+  formats never asked: `--format review-github` and `--format review-gitlab`
+  dispatch the ```` ```suggestion ```` block on the rule id alone, so a member
+  whose only caller sat in a file the size guard skipped shipped as an inline
+  review comment with an empty suggestion block under it, which on GitHub is one
+  click from a commit that deletes the member. Raising the size limit made the
+  finding disappear entirely. The array is inside the gate now, on the
+  enum-member rule rather than a new one: both kinds are scanned against one
+  member-access map built with no reachability filter, so any module the run
+  analyzed incompletely can hold the access that credits either. The
+  `remove-class-member` action reports `auto_fixable: false` under a caveat, the
+  finding carries its `reachability_caveats[]` on the wire, and every surface
+  that names the caveat for an enum member now names it for a class member.
+  `unused_store_members[]` stays out, and can: no surface offers a mutation for
+  one.
+
+  Two paths that raise `auto_fixable` back up ask the gate now as well. The
+  semantic decision that grants closed-world eligibility no longer reopens a
+  caveated removal, and `fallow fix` no longer reads that eligibility flag on
+  its own: closed-world eligibility is proved over the program the sidecar could
+  see, which is the program the run parsed, so a member whose only call site
+  lives in an unread file is absent from that world for exactly the reason it is
+  absent from the syntactic verdict. A withheld class member is reported as a
+  `remove_class_member` entry with `applied: false`, `skipped: true`,
+  `skip_reason: "low_confidence_incomplete_analysis"` and its caveat tokens, and
+  is counted by the existing `skipped_low_confidence_members`.
+
+- **A caveated finding no longer renders a committable suggestion block.** The
+  review formats used to ship the ```` ```suggestion ```` edit and rely on the
+  caveat text several lines above it to hedge. A suggestion block is not part of
+  the finding, it is the mutation: one click commits it. Every other mutation
+  surface asks the same gate first, so this one does too. The finding still
+  ships, at the same location, with the same fingerprint (so no resolved review
+  thread reopens) and the same caveat text; in place of the block the body says
+  `No one-click fix offered` and points at `workspace_diagnostics[]`. A run that
+  read every file it discovered is unchanged.
+
+- **The unused-file review comment no longer recommends a flag that does not
+  exist.** Every `--format review-github` and `--format review-gitlab` comment
+  on an `unused-file` finding ended with ``Run `fallow fix --files` or delete
+  this file.`` There has never been a `--files` flag; the CLI answers
+  `unexpected argument '--files' found`, and `fallow fix` has no file-deletion
+  path at all, which is why `delete-file` ships `auto_fixable: false` on every
+  run. The comment now says so and names the two things a reader can actually
+  do: delete it by hand after confirming nothing loads it at runtime, or keep it
+  with a `// fallow-ignore-file unused-file` comment.
+
+- **A size-preserving edit with a restored modification time no longer serves
+  a stale warm result.** The extraction fingerprint compared modification time
+  and size only, so a rewrite that preserved both read back the previous
+  file's analysis, up to and including an auto-fixable suggestion to remove an
+  export the new bytes still use. The fingerprint carries the inode change
+  time now, which a content rewrite always moves.
+
+- **`fallow dupes --top` no longer reports two scopes in one object.**
+  `--top N` truncated `clone_groups[]` and then rewrote `stats.clone_groups`
+  and `stats.clone_instances` from the truncated array, while
+  `stats.files_with_clones` and `stats.duplication_percentage` beside them
+  stayed corpus-wide. All four now describe the corpus the run measured, and
+  two required integers say what the presentation cap did:
+  `clone_groups_shown` is the length of the array and `clone_groups_omitted`
+  is what was withheld, so the two always sum to `stats.clone_groups` and are
+  `0` on an untruncated run. Scope filters still recompute `stats` against the
+  narrowed corpus and therefore omit nothing. The `dupes` envelope moves to
+  schema version 10 and the programmatic duplication envelope to 4. Because
+  the clone-instance shape no longer guarantees the fragment text, the `audit`
+  envelope moves to 11 and the bare combined envelope to 12; neither of those
+  paths can suppress the text today, so their wire is byte-identical.
+
+  The family axis carried the identical defect and is fixed in the same
+  version, so nothing moves twice: `--top` rebuilt `clone_families[]` from the
+  groups that survived the cap with nothing on the envelope recording the
+  drop, and no corpus-wide family counter to compare it against. A new
+  required integer `stats.clone_families` counts the families the scoped
+  corpus holds after filtering, and `clone_families_shown` and
+  `clone_families_omitted` split it exactly as the group pair does.
+  `stats.clone_families` is present on every duplication `stats` object,
+  including each `--group-by` bucket.
+
+  The human report moved with the wire. The default `Duplicates (N clone
+  groups)` header and its withheld-groups footer name the measured corpus
+  instead of the capped listing, and the footer additionally names the families
+  a cap withheld. The two footer lines name their own limits rather than
+  claiming one between them: groups read `... N of M clone groups withheld by a
+  display limit` (the ten-group render cap narrows them even without `--top`)
+  and families read `... N of M clone families withheld by --top` (only `--top`
+  rebuilds the family array). Both pluralize, and both hold at `--top 0`, where
+  nothing was listed and "and N more" had no antecedent. The `--summary` block
+  had the same split:
+  `Clone families` and `Clone groups` counted the rendered vectors while
+  `Duplicated lines` and `Duplication rate` beside them described the corpus.
+  Its withheld-notice now covers both axes and states both corpus totals, so
+  the four aligned numbers can no longer be read as one scope. `--format
+  markdown` had the split in one sentence, its heading counting the listing
+  while the duplication rate beside it described the corpus; the heading now
+  counts the corpus and a separate line names what a display limit withheld.
+  An untruncated run renders byte-identically on every one of these surfaces.
+
+- **A complexity run after a dead-code run reuses the cache.** An empty
+  complexity vector was treated as a not-cached sentinel, but a dead-code run
+  writes one legitimately, and so does a file that genuinely has no functions.
+  Cache entries record whether the run that wrote them actually extracted
+  complexity, so a complexity consumer hits on a rich entry and a
+  complexity-blind run cannot downgrade one.
+
+- **`fallow agent status` reports a gate that would not gate.** An installed
+  gate whose script was written by an older fallow, and one whose run-time
+  prerequisites are missing, both rendered as `installed`. Both report `stale`
+  now, with the reason in `detail` and a matching entry in `next_actions[]`:
+  `gate-requires-jq` for the missing prerequisite, which makes the script exit
+  0 after one stderr line that a Claude Code PreToolUse hook never surfaces,
+  and `gate-path-version` for a gate that runs the `fallow` on PATH rather
+  than the build that installed it. No field was added, removed, or retyped
+  and `state` gained no value, but a consumer keyed on `installed` versus
+  `stale` now sees `stale` where the gate would not have gated, so the three
+  agent envelopes move to `schema_version` 2.
+
+- **An empty half of a `FILE:SYMBOL` selector fails with the format
+  diagnosis.** `inspect --symbol`, `trace <target>`, `check --trace`, and
+  `check --symbol-impact` each carried their own split and the emptiness guard
+  had drifted, so `check --trace ":"` parsed into two empty halves and failed
+  later with an error naming neither. One parser answers for every selector
+  now. The exit code is 2 either way, so only the message changed. Selectors
+  still split on the last colon, so Windows drive letters and
+  workspace-qualified paths keep theirs, and surviving halves are still passed
+  through verbatim.
+
 ### Changed
 
 - **The rest of the human review brief holds to eighty columns too.** The
@@ -139,6 +638,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `closest_known_rule_name` would hand it to a user as the correction for their
   typo. The reverse direction is proven now too.
   ([#2541](https://github.com/fallow-rs/fallow/pull/2541).)
+
+- **The GitHub Action's cache no longer bleeds between sibling roots.** The
+  restore key interpolated `root` raw, and `restore-keys` are literal
+  string-prefix matches, so the prefix for `root: packages/app` was a prefix of
+  the real key for `root: packages/app-admin` and a matrix over roots could
+  restore a sibling's parse cache. The root now enters the key as a
+  fixed-width digest, which ends the segment at a known length. Existing caches
+  miss once on upgrade and repopulate on the same run. The GitLab template
+  needs no change: GitLab matches cache keys exactly and rejects `/` inside
+  one, so it never interpolated the root to begin with.
+
+- **The Action's fix summary agrees with the job that runs it.** The summary
+  read three of the five skip counters, so a run whose only outcome was a
+  withheld dependency or enum member printed "No fixable issues found" while
+  the same job reported fixable issues from the same envelope. All five reach
+  the headline now. The same summary also listed withheld removals under
+  "Dependency removals" and in the details block, reporting a write that never
+  happened; only entries that actually landed are counted there.
+  `skipped_low_confidence_members` additionally reached no summary at all and
+  now reaches both the native `github-summary` and the bundled jq fallback.
+
+- **A duplication listing no longer reports its own cap as the corpus.** The
+  bundled `summary-dupes.jq` labelled the details block "Clone Families (N)"
+  with N the length of the `--top`-truncated array, two lines under a header
+  correctly counting the whole corpus, and its "and N more" tail measured the
+  omission against the display limit rather than against the rows it actually
+  rendered, under-reporting what was withheld. Both listings now count the
+  corpus and name what they do not show. The combined gate keeps counting
+  visible clone groups (a filtered run has fewer actionable groups than `stats`
+  describes) and now adds `clone_groups_omitted`, so a presentation cap can
+  never quietly lower the value the Action publishes as `outputs.issues`.
+
+- **The Action's annotation fallback carries the reachability caveat.** Both
+  the native `github-annotations` renderer and the bundled
+  `annotations-check.jq` rendered "Run: npm uninstall x" and "remove the export
+  keyword" with no sign that the verdict behind them rests on a file the run
+  never fully read. Both now append the qualifier to the five finding types
+  that carry `reachability_caveats[]`. An unrecognised caveat token is rendered
+  as itself rather than dropped, because dropping it would turn a finding whose
+  evidence is incomplete back into a confident one.
 
 ### Fixed
 

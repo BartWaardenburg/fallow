@@ -8,7 +8,7 @@
     "public_fixture": true
   },
   "deterministic_baseline": {
-    "schema_version": 9,
+    "schema_version": 10,
     "mode": "semantic",
     "near": true,
     "min_tokens": 10,

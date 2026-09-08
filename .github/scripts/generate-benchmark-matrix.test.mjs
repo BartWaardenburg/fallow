@@ -58,6 +58,21 @@ test("component bench file changes select the matching shard", () => {
   ]);
 });
 
+test("discovery changes select the entry point discovery shard", () => {
+  assert.deepEqual(names(selectFastTargets(["crates/core/src/discover/entry_points.rs"])), [
+    "analysis",
+    "component_engine",
+    "entry_point_discovery",
+    "programmatic_stable",
+    "representative_sources",
+  ]);
+  assert.ok(
+    names(selectFastTargets(["crates/core/benches/entry_point_discovery.rs"])).includes(
+      "entry_point_discovery",
+    ),
+  );
+});
+
 test("health ingestion and CRAP scoring changes select engine benchmark coverage", () => {
   for (const file of [
     "crates/engine/src/health/coverage_settings.rs",

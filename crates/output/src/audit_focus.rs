@@ -68,6 +68,13 @@ pub struct FocusScore {
     pub fan_io: u32,
     /// Security source -> sink taint-touch component (0 until a security pass is
     /// threaded onto the brief path; the seam is built and tested).
+    ///
+    /// Omitted from the wire while it is zero, the same treatment `runtime`
+    /// gets. Publishing a permanently-zero component as a required field made
+    /// it read as a measurement that found nothing, when nothing measured it.
+    /// A consumer that sums components must read an absent component as zero.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    #[cfg_attr(feature = "schema", schemars(default))]
     pub security_taint: u32,
     /// Risk-zone component (boundary / public-API / security-sensitive).
     pub risk_zone: u32,

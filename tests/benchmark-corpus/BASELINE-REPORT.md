@@ -1,8 +1,22 @@
 # Fallow Duplication Accuracy Baseline
 
-**Date:** 2026-03-18
-**Fallow version:** current main (commit HEAD)
+**Corpus designed:** 2026-03-18
+**Floor last verified:** 2026-09-07 on fallow 3.23.0, reproduced exactly
 **Corpus:** Custom curated JS/TS benchmark (`tests/benchmark-corpus/`)
+
+## What these numbers are
+
+The corpus is hand-written by this project: the clones were authored to be
+found, and the negative pairs were authored to be missed. Precision and recall
+measured against it therefore say nothing about accuracy on real code, and
+nothing about how fallow compares to any other tool.
+
+What they do say is whether today's binary still behaves the way it did when
+the floor was recorded. `results/accuracy-baseline.json` is that floor, and
+`evaluate.sh` exits non-zero when any mode drops below it. Treat it as a
+regression tripwire and nothing more. Re-verify with the command under
+[Reproducing](#reproducing); the version line above records the last binary the
+floor was checked against.
 
 ## Methodology
 
@@ -37,13 +51,28 @@
 
 | Mode | Groups | TP | FP | FN | Precision | Recall | F1 |
 |------|--------|----|----|------|-----------|--------|------|
-| **strict** | 28 | 4 | 0 | 0 | **100.0%** | **100.0%** | **100.0%** |
-| **mild** | 28 | 4 | 0 | 0 | **100.0%** | **100.0%** | **100.0%** |
-| **weak** | 29 | 4 | 0 | 0 | **100.0%** | **100.0%** | **100.0%** |
-| **semantic** | 35 | 6 | 2 | 0 | **75.0%** | **100.0%** | **85.7%** |
-| **defaults** | 11 | 4 | 0 | 0 | **100.0%** | **100.0%** | **100.0%** |
+| strict | 28 | 4 | 0 | 0 | 100.0% | 100.0% | 100.0% |
+| mild | 28 | 4 | 0 | 0 | 100.0% | 100.0% | 100.0% |
+| weak | 29 | 4 | 0 | 0 | 100.0% | 100.0% | 100.0% |
+| semantic | 35 | 6 | 2 | 0 | 75.0% | 100.0% | 85.7% |
+| defaults | 11 | 4 | 0 | 0 | 100.0% | 100.0% | 100.0% |
 
 > Note: "defaults" uses `--min-tokens 50 --min-lines 5` (production settings).
+
+The semantic row's two false positives are the only place this corpus produces
+a wrong answer, so they are worth naming rather than reading as a percentage.
+Both are interface declarations that survive identifier blinding:
+
+- **AuthToken vs CacheEntry** (`src/negative/auth-service.ts` against
+  `src/type1-exact/cache-manager-a.ts`): 4 to 5 typed fields each, 12 lines of
+  overlap once identifiers are blinded.
+- **AuthToken vs WatchEvent** (`src/negative/auth-service.ts` against
+  `src/negative/file-watcher.ts`): the same shape, 15 lines of overlap.
+
+A third detection, the shared binary-search helper inside the Type-4 sort pair,
+is scored as a false positive because Type-4 is out of scope for token
+matching, but the two helpers really do share structure. See
+[False Positive Analysis](#false-positive-analysis) for the full trace.
 
 ### Per Clone Type
 
@@ -105,9 +134,18 @@ The `binarySearch`/`searchSorted` helper functions share structural similarity a
 ## Reproducing
 
 ```bash
-# From project root
-bash tests/benchmark-corpus/evaluate.sh
-python3 tests/benchmark-corpus/evaluate-results.py
+# From project root, against a built binary
+npm run check:dupes-accuracy
+
+# Or directly, choosing the binary and keeping the raw JSON
+./tests/benchmark-corpus/evaluate.sh \
+  --fallow-bin ./target/release/fallow \
+  --results-dir /tmp/dupes-eval
 ```
 
-Machine-readable results: `tests/benchmark-corpus/results/accuracy-baseline.json`
+`evaluate.sh` writes to a scratch directory unless `--results-dir` says
+otherwise, scores the run against the committed floor, and exits non-zero when
+a mode drops below it. Pass `--update-floor` only after the new numbers are
+understood.
+
+Committed floor: `tests/benchmark-corpus/results/accuracy-baseline.json`

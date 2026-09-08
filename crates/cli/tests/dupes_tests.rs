@@ -292,6 +292,391 @@ fn dupes_top_flag() {
     );
 }
 
+/// `--top` and `--group-by` are refused together instead of one being dropped.
+///
+/// The pair used to be accepted and `--top` silently ignored: the run exited 0
+/// and reported every clone group after being asked for N, with
+/// `clone_groups_omitted` at 0 to confirm nothing had been withheld. A refusal
+/// costs one flag and cannot be mistaken for a measurement.
+#[test]
+fn dupes_refuses_top_together_with_group_by() {
+    let output = run_fallow(
+        "dupes",
+        "duplicate-code",
+        &[
+            "--top",
+            "1",
+            "--group-by",
+            "directory",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+
+    assert_eq!(
+        output.code, 2,
+        "an unserviceable flag pair is invalid input. stdout:\n{}\nstderr:\n{}",
+        output.stdout, output.stderr
+    );
+    let json = parse_json(&output);
+    assert_eq!(json["error"], true);
+    assert_eq!(json["exit_code"], 2);
+    let message = json["message"].as_str().unwrap();
+    assert!(
+        message.contains("--top") && message.contains("--group-by"),
+        "the message must name both flags, was: {message}"
+    );
+    // The reason moved onto `help`: as one sentence the refusal was 279
+    // characters that soft-wrapped to four terminal lines and buried the
+    // actionable half at the end of the fourth.
+    let help = json["help"].as_str().unwrap();
+    assert!(
+        help.contains("per-bucket stats"),
+        "the remedy must say why the pair cannot be served, was: {help}"
+    );
+    assert!(
+        help.contains("run one flag or the other"),
+        "the remedy must name the way out, was: {help}"
+    );
+    assert!(
+        message.len() < 60,
+        "the actionable half must fit one terminal line, was {} chars: {message}",
+        message.len()
+    );
+    assert!(
+        json.get("clone_groups").is_none(),
+        "a refused run must not also emit a duplication report"
+    );
+}
+
+/// The refusal reaches the human surface too, and neither flag alone trips it.
+#[test]
+fn dupes_accepts_top_and_group_by_on_their_own() {
+    let refused = run_fallow(
+        "dupes",
+        "duplicate-code",
+        &["--top", "1", "--group-by", "directory", "--quiet"],
+    );
+    assert_eq!(refused.code, 2, "stderr:\n{}", refused.stderr);
+    assert!(
+        refused
+            .stderr
+            .contains("--top and --group-by cannot be combined"),
+        "stderr should carry the refusal, was: {}",
+        refused.stderr
+    );
+
+    let grouped = run_fallow(
+        "dupes",
+        "duplicate-code",
+        &["--group-by", "directory", "--format", "json", "--quiet"],
+    );
+    assert_eq!(grouped.code, 0, "stderr:\n{}", grouped.stderr);
+    assert!(
+        parse_json(&grouped)["clone_groups"].is_array(),
+        "--group-by alone still reports the full grouped run"
+    );
+
+    let capped = run_fallow(
+        "dupes",
+        "duplicate-code",
+        &["--top", "1", "--format", "json", "--quiet"],
+    );
+    assert_eq!(capped.code, 0, "stderr:\n{}", capped.stderr);
+    assert!(
+        parse_json(&capped)["clone_groups"]
+            .as_array()
+            .unwrap()
+            .len()
+            <= 1,
+        "--top alone still caps the rendered groups"
+    );
+}
+
+/// `--top` narrows the rendered vector, never the measurement.
+///
+/// The envelope used to mix two scopes in one object: `clone_groups` and
+/// `clone_instances` were recomputed from the truncated vector while
+/// `files_with_clones` and `duplication_percentage` still described the whole
+/// corpus, so a consumer reading all four got numbers that cannot come from the
+/// same run. All four now describe the corpus, and the truncation is disclosed
+/// through `clone_groups_shown` / `clone_groups_omitted` instead.
+#[test]
+fn dupes_top_keeps_corpus_stats_and_discloses_the_split() {
+    let full = parse_json(&run_fallow(
+        "dupes",
+        "duplicate-code",
+        &["--format", "json", "--quiet"],
+    ));
+    let limited = parse_json(&run_fallow(
+        "dupes",
+        "duplicate-code",
+        &["--top", "1", "--format", "json", "--quiet"],
+    ));
+
+    let corpus_groups = full["stats"]["clone_groups"].as_u64().unwrap();
+    assert!(
+        corpus_groups > 1,
+        "fixture must produce more than one clone group for --top to omit any"
+    );
+
+    for field in [
+        "clone_groups",
+        "clone_families",
+        "clone_instances",
+        "files_with_clones",
+        "duplication_percentage",
+    ] {
+        assert_eq!(
+            limited["stats"][field], full["stats"][field],
+            "stats.{field} must describe the measured corpus, not the truncated vector"
+        );
+    }
+
+    let shown = limited["clone_groups_shown"].as_u64().unwrap();
+    let omitted = limited["clone_groups_omitted"].as_u64().unwrap();
+    assert_eq!(
+        shown,
+        limited["clone_groups"].as_array().unwrap().len() as u64,
+        "clone_groups_shown must count the groups actually rendered"
+    );
+    assert!(omitted > 0, "--top 1 must omit the remaining groups");
+    assert_eq!(
+        shown + omitted,
+        corpus_groups,
+        "clone_groups_shown + clone_groups_omitted must equal stats.clone_groups"
+    );
+
+    assert_eq!(
+        full["clone_groups_omitted"].as_u64().unwrap(),
+        0,
+        "a run without --top omits nothing"
+    );
+}
+
+/// `--top` narrows the family array too, and that has to be recoverable.
+///
+/// `--top N` truncates `clone_groups[]` and rebuilds `clone_families[]` from
+/// what survives, so the family array collapsed with no corpus-wide counter to
+/// compare it against and no shown/omitted pair: a consumer could not recover
+/// the true family count by any means. `stats.clone_families` now measures the
+/// corpus and the pair discloses the split, exactly as on the group axis.
+#[test]
+fn dupes_top_discloses_the_family_split_it_truncates() {
+    let full = parse_json(&run_fallow(
+        "dupes",
+        "duplicate-code",
+        &["--format", "json", "--quiet"],
+    ));
+    let limited = parse_json(&run_fallow(
+        "dupes",
+        "duplicate-code",
+        &["--top", "1", "--format", "json", "--quiet"],
+    ));
+
+    let corpus_families = full["stats"]["clone_families"].as_u64().unwrap();
+    assert!(
+        corpus_families > 1,
+        "fixture must produce more than one clone family for --top to withhold any"
+    );
+    assert_eq!(
+        corpus_families,
+        full["clone_families"].as_array().unwrap().len() as u64,
+        "an uncapped run measures exactly the families it carries"
+    );
+    assert_eq!(
+        full["clone_families_omitted"].as_u64().unwrap(),
+        0,
+        "a run without --top withholds no family"
+    );
+
+    let shown = limited["clone_families_shown"].as_u64().unwrap();
+    let omitted = limited["clone_families_omitted"].as_u64().unwrap();
+    assert_eq!(
+        shown,
+        limited["clone_families"].as_array().unwrap().len() as u64,
+        "clone_families_shown must count the families actually carried"
+    );
+    assert!(
+        omitted > 0,
+        "the capped run carries fewer families than the corpus holds"
+    );
+    assert_eq!(
+        shown + omitted,
+        corpus_families,
+        "clone_families_shown + clone_families_omitted must equal stats.clone_families"
+    );
+}
+
+/// The default human header must not present a cap as the project total.
+///
+/// Without `--top` the header named every measured group and a footer named
+/// the rest. Under `--top N` both vanished: the header printed `N` as though
+/// the project had `N` clone groups, and nothing said otherwise.
+#[test]
+fn dupes_human_header_names_the_corpus_under_top() {
+    let full = parse_json(&run_fallow(
+        "dupes",
+        "duplicate-code",
+        &["--format", "json", "--quiet"],
+    ));
+    let corpus_groups = full["stats"]["clone_groups"].as_u64().unwrap();
+    assert!(
+        corpus_groups > 1,
+        "fixture must produce more than one clone group for --top to withhold any"
+    );
+
+    let capped = run_fallow("dupes", "duplicate-code", &["--top", "1", "--quiet"]);
+    assert!(
+        capped
+            .stdout
+            .contains(&format!("Duplicates ({corpus_groups} clone groups)")),
+        "the capped header must name the measured corpus: {}",
+        capped.stdout
+    );
+    assert!(
+        capped.stdout.contains(&format!(
+            "... {} of {corpus_groups} clone groups withheld by a display limit",
+            corpus_groups - 1
+        )),
+        "the capped report must name the groups it withheld: {}",
+        capped.stdout
+    );
+    assert!(
+        capped.stdout.contains("clone families withheld by --top"),
+        "the capped report must name the families it withheld: {}",
+        capped.stdout
+    );
+    assert!(
+        !capped.stdout.contains("the same display limit"),
+        "the group and family axes are narrowed by different limits: {}",
+        capped.stdout
+    );
+}
+
+/// `--top 0` renders no clone group, and both human surfaces used to read that
+/// empty array as a clean project.
+///
+/// The run still measured the corpus: `stats.clone_groups` is unchanged by a
+/// display cap, so a green "no duplication found" over a non-zero count is the
+/// exact false-clean state the shown/omitted split exists to prevent. `dead-code
+/// --top 0` already kept its sections, so the two commands disagreed.
+#[test]
+fn dupes_top_zero_never_reports_a_clean_project() {
+    let full = parse_json(&run_fallow(
+        "dupes",
+        "duplicate-code",
+        &["--format", "json", "--quiet"],
+    ));
+    let corpus_groups = full["stats"]["clone_groups"].as_u64().unwrap();
+    assert!(
+        corpus_groups > 0,
+        "fixture must produce clone groups for --top 0 to withhold"
+    );
+
+    let capped = run_fallow("dupes", "duplicate-code", &["--top", "0"]);
+    let combined = format!("{}{}", capped.stdout, capped.stderr);
+    assert!(
+        !combined.contains("No code duplication found"),
+        "a fully capped listing must not read as a clean project: {combined}"
+    );
+    assert!(
+        capped
+            .stdout
+            .contains(&format!("Duplicates ({corpus_groups} clone groups)")),
+        "the header must still name the measured corpus: {}",
+        capped.stdout
+    );
+    assert!(
+        capped.stdout.contains(&format!(
+            "... {corpus_groups} of {corpus_groups} clone groups withheld by a display limit"
+        )),
+        "the footer must say every measured group was withheld: {}",
+        capped.stdout
+    );
+
+    let summary = run_fallow("dupes", "duplicate-code", &["--top", "0", "--summary"]);
+    let summary_combined = format!("{}{}", summary.stdout, summary.stderr);
+    assert!(
+        !summary_combined.contains("No duplication found"),
+        "the summary block must not read as a clean project either: {summary_combined}"
+    );
+    assert!(
+        summary
+            .stdout
+            .contains(&format!("Corpus totals: {corpus_groups} clone groups")),
+        "the summary must state the corpus it measured: {}",
+        summary.stdout
+    );
+}
+
+/// The human summary block must disclose the same split the envelope does, on
+/// both axes.
+///
+/// `Clone families` and `Clone groups` count the rendered vectors while
+/// `Duplicated lines` and `Duplication rate` describe the measured corpus, so
+/// under `--top` the four aligned numbers come from two different scopes. The
+/// note used to name the group axis only, which left the truncated family
+/// count reading as a corpus number sitting right above a notice that names
+/// groups.
+#[test]
+fn dupes_summary_discloses_both_axes_a_display_limit_withheld() {
+    let full = parse_json(&run_fallow(
+        "dupes",
+        "duplicate-code",
+        &["--format", "json", "--quiet"],
+    ));
+    let corpus_groups = full["stats"]["clone_groups"].as_u64().unwrap();
+    let corpus_families = full["stats"]["clone_families"].as_u64().unwrap();
+    assert!(
+        corpus_groups > 1 && corpus_families > 1,
+        "fixture must produce more than one clone group and family for --top to withhold any"
+    );
+
+    let limited = parse_json(&run_fallow(
+        "dupes",
+        "duplicate-code",
+        &["--top", "1", "--format", "json", "--quiet"],
+    ));
+    let families_omitted = limited["clone_families_omitted"].as_u64().unwrap();
+    assert!(families_omitted > 0, "--top 1 must withhold a family");
+
+    let summary = run_fallow(
+        "dupes",
+        "duplicate-code",
+        &["--summary", "--top", "1", "--quiet"],
+    );
+    assert!(
+        summary
+            .stdout
+            .contains(&format!("{} more clone group", corpus_groups - 1)),
+        "the capped summary must name the withheld groups: {}",
+        summary.stdout
+    );
+    assert!(
+        summary
+            .stdout
+            .contains(&format!("{families_omitted} more clone famil")),
+        "the capped summary must name the withheld families: {}",
+        summary.stdout
+    );
+    assert!(
+        summary.stdout.contains(&format!(
+            "Corpus totals: {corpus_groups} clone groups, {corpus_families} clone families"
+        )),
+        "the capped summary must say which scope the measured stats describe: {}",
+        summary.stdout
+    );
+
+    let uncapped = run_fallow("dupes", "duplicate-code", &["--summary", "--quiet"]);
+    assert!(
+        !uncapped.stdout.contains("withheld"),
+        "an uncapped summary withholds nothing and must stay silent: {}",
+        uncapped.stdout
+    );
+}
+
 #[test]
 fn dupes_filters_atomic_function_call_clones() {
     let dir = tempdir().unwrap();
