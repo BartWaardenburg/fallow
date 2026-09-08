@@ -8,6 +8,9 @@
 //! - a frame that matches several definitions reports `ambiguous` and lists
 //!   every candidate, instead of picking one and calling it the answer;
 //! - a frame that matches nothing reports `not_found` instead of being dropped;
+//! - a frame that matches one definition but whose own line sits at a
+//!   different declaration carries `line_mismatch`, because the look-up asks
+//!   about the identifier and not about the line;
 //! - a frame the project graph was never asked about (a dependency frame, a
 //!   runtime-internal frame, a generated bundle, or a frame carrying no
 //!   identifier to look up) reports `not_attempted` rather than borrowing
@@ -169,6 +172,22 @@ pub struct ErrorTraceFrame {
     /// `candidates.len() + candidates_omitted` is the true match count, so an
     /// `ambiguous` frame never understates how ambiguous it is.
     pub candidates_omitted: usize,
+    /// Set when this frame's own line disagrees with the definition its
+    /// identifier matched: some OTHER definition in the same file is declared
+    /// closer above the line the runtime reported.
+    ///
+    /// The look-up matches on the identifier alone, so a `resolved` frame is
+    /// resolved however far its line sits from the match. That is honest about
+    /// the question asked and silent about a question a reader would ask next,
+    /// which is why the disagreement is published instead of left to be
+    /// noticed. The frame is NOT reclassified: the graph does know a
+    /// definition under this identifier, and only the caller can say whether
+    /// the runtime ran that one or a same-named definition elsewhere.
+    /// `reason` names the declaration that sits closer. Only set on a
+    /// `resolved` frame that carried a line and matched a definition whose own
+    /// line could be read.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub line_mismatch: bool,
     /// Human-readable statement of what happened to this frame.
     pub reason: String,
 }

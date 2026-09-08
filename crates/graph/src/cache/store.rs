@@ -19,7 +19,7 @@ use super::{CachedResolvedProject, GRAPH_CACHE_VERSION, GraphCacheManifest};
 use crate::graph::ModuleGraph;
 
 /// Filename of the persisted graph cache inside the cache directory.
-const GRAPH_CACHE_FILE: &str = "graph-cache.bin";
+pub const GRAPH_CACHE_FILE: &str = "graph-cache.bin";
 
 /// On-disk graph cache entry: a manifest plus the graph it validates.
 #[derive(Serialize, Deserialize)]
@@ -49,25 +49,36 @@ impl GraphCacheStore {
     /// the current inputs before trusting the graph or resolver payload, and
     /// reports its own rejection reason for that comparison.
     ///
+    /// The version is read from the file header BEFORE the payload is
+    /// decoded. A format bump changes the encoded shape, so a blob
+    /// from the previous release fails to decode and a version comparison made
+    /// afterwards is unreachable on the one event that triggers it most: an
+    /// upgrade. `fallow doctor` reports this reason verbatim, and "could not be
+    /// decoded" reads as corruption when the truth is a routine version bump.
+    ///
     /// A file that existed and was then refused logs at warn: the run paid the
     /// read and the decode and reused nothing. A missing file stays quiet.
     pub fn load(cache_dir: &Path) -> Result<Self, CacheRejection> {
         let cache_file = cache_dir.join(GRAPH_CACHE_FILE);
         let data = std::fs::read(&cache_file).map_err(|_| CacheRejection::Absent)?;
-        let mut store: Self = match postcard::from_bytes(&data) {
+        let payload = read_header(&data)?;
+        let mut store: Self = match postcard::from_bytes(payload) {
             Ok(store) => store,
             Err(_) => {
                 tracing::warn!(
-                    "Graph cache could not be decoded, rebuilding (one-time cost after version bump)"
+                    "Graph cache carries the current format version but its payload could not be \
+                     decoded, rebuilding"
                 );
                 return Err(CacheRejection::Undecodable);
             }
         };
+        // The header already agreed with `GRAPH_CACHE_VERSION`, so this catches
+        // only a file whose header and payload disagree.
         if store.version != GRAPH_CACHE_VERSION {
             tracing::warn!(
                 cached_version = store.version,
                 expected_version = GRAPH_CACHE_VERSION,
-                "Graph cache format upgraded, rebuilding (one-time cost after version bump)"
+                "Graph cache header and payload declare different format versions, rebuilding"
             );
             return Err(CacheRejection::VersionMismatch);
         }
@@ -102,10 +113,67 @@ impl GraphCacheStore {
         };
 
         let cache_file = cache_dir.join(GRAPH_CACHE_FILE);
-        if let Err(error) = atomic_write(&cache_file, &encoded) {
+        if let Err(error) = atomic_write(&cache_file, &framed(self.version, &encoded)) {
             tracing::debug!("Failed to write graph cache: {error}");
         }
     }
+}
+
+/// Marker written ahead of every graph-cache payload so the format version can
+/// be read without decoding the payload it describes.
+///
+/// A blob without it was written by a build that predates the framing, which is
+/// a different format version by definition, so it is reported as one instead
+/// of as a decode failure.
+const GRAPH_CACHE_MAGIC: [u8; 4] = *b"FLWG";
+
+/// Bytes the framing adds ahead of the payload: the magic plus a little-endian
+/// `u32` format version.
+const GRAPH_CACHE_HEADER_LEN: usize = GRAPH_CACHE_MAGIC.len() + 4;
+
+/// Prepend the format header to an encoded payload.
+///
+/// The version comes from the store being written rather than from the
+/// constant, so the header always describes the payload behind it.
+fn framed(version: u32, payload: &[u8]) -> Vec<u8> {
+    let mut framed = Vec::with_capacity(GRAPH_CACHE_HEADER_LEN + payload.len());
+    framed.extend_from_slice(&GRAPH_CACHE_MAGIC);
+    framed.extend_from_slice(&version.to_le_bytes());
+    framed.extend_from_slice(payload);
+    framed
+}
+
+/// Split a cache file into its declared version and its payload, refusing
+/// anything this binary cannot read WITHOUT decoding it first.
+fn read_header(data: &[u8]) -> Result<&[u8], CacheRejection> {
+    let Some((header, payload)) = data.split_at_checked(GRAPH_CACHE_HEADER_LEN) else {
+        tracing::warn!(
+            "Graph cache is too short to carry a format header, rebuilding (one-time cost after \
+             version bump)"
+        );
+        return Err(CacheRejection::VersionMismatch);
+    };
+    let (declared_magic, declared_version) = header.split_at(GRAPH_CACHE_MAGIC.len());
+    if declared_magic != GRAPH_CACHE_MAGIC {
+        tracing::warn!(
+            "Graph cache was written by a build with a different cache format, rebuilding \
+             (one-time cost after version bump)"
+        );
+        return Err(CacheRejection::VersionMismatch);
+    }
+    // The slice is exactly four bytes; the fallback only has to be a version
+    // this binary never writes, so an impossible header is refused rather than
+    // trusted.
+    let declared = declared_version.try_into().map_or(0, u32::from_le_bytes);
+    if declared != GRAPH_CACHE_VERSION {
+        tracing::warn!(
+            cached_version = declared,
+            expected_version = GRAPH_CACHE_VERSION,
+            "Graph cache format upgraded, rebuilding (one-time cost after version bump)"
+        );
+        return Err(CacheRejection::VersionMismatch);
+    }
+    Ok(payload)
 }
 
 /// Write `.fallow/.gitignore` (`*\n`) so the cache directory is never committed.
@@ -139,4 +207,46 @@ fn atomic_write(cache_file: &Path, data: &[u8]) -> std::io::Result<()> {
     }
 
     std::fs::rename(&tmp_file, cache_file)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A blob written before the framing existed cannot be decoded into the
+    /// current shape at all, so a version comparison made after the decode
+    /// never ran. Every upgrade then reported a decode failure, which reads as
+    /// corruption in `fallow doctor`.
+    #[test]
+    fn a_blob_without_a_header_reports_a_version_change() {
+        assert_eq!(
+            read_header(b"written-by-an-older-build").err(),
+            Some(CacheRejection::VersionMismatch)
+        );
+    }
+
+    #[test]
+    fn a_blob_too_short_to_carry_a_header_reports_a_version_change() {
+        assert_eq!(
+            read_header(&[0_u8; 3]).err(),
+            Some(CacheRejection::VersionMismatch)
+        );
+    }
+
+    #[test]
+    fn a_header_declaring_another_version_is_refused_without_reading_the_payload() {
+        let blob = framed(GRAPH_CACHE_VERSION + 1, b"payload");
+
+        assert_eq!(
+            read_header(&blob).err(),
+            Some(CacheRejection::VersionMismatch)
+        );
+    }
+
+    #[test]
+    fn a_header_at_the_current_version_hands_back_the_payload_it_frames() {
+        let blob = framed(GRAPH_CACHE_VERSION, b"payload");
+
+        assert_eq!(read_header(&blob), Ok(b"payload".as_slice()));
+    }
 }

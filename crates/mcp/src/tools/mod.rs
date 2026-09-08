@@ -71,8 +71,8 @@ pub use suppressions::build_list_suppressions_args;
 pub use suppressions::run_list_suppressions;
 pub use trace::{
     build_trace_clone_args, build_trace_dependency_args, build_trace_export_args,
-    build_trace_file_args, run_trace_clone_tool, run_trace_dependency_tool, run_trace_export_tool,
-    run_trace_file_tool, run_trace_import_path_tool,
+    build_trace_file_args, run_trace_clone_tool, run_trace_dependency_tool, run_trace_error_tool,
+    run_trace_export_tool, run_trace_file_tool, run_trace_import_path_tool,
 };
 
 use std::io;

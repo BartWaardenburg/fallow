@@ -5,6 +5,7 @@
 
 use std::path::{Path, PathBuf};
 
+use fallow_types::output_dead_code::ReachabilityCaveat;
 use rustc_hash::{FxHashMap, FxHashSet};
 use tempfile::NamedTempFile;
 
@@ -35,6 +36,14 @@ pub(super) enum SkipReason {
     LowConfidenceOffGraph,
     /// Conservative skip for files with unresolved imports.
     LowConfidenceUnresolvedImports,
+    /// Conservative skip for findings whose verdict carries a
+    /// `reachability_caveats` entry: the run already knows some file's imports
+    /// went unseen (a degraded parse, an unreadable file, or a file discovery
+    /// skipped before reading it), so the removal would rest on evidence
+    /// fallow itself flagged. The reason names the consequence rather than any
+    /// one cause, and the skip follows the caveat, so a new cause needs no
+    /// wiring here.
+    LowConfidenceIncompleteAnalysis,
 }
 
 impl SkipReason {
@@ -44,6 +53,7 @@ impl SkipReason {
             Self::MixedLineEndings => "mixed_line_endings",
             Self::LowConfidenceOffGraph => "low_confidence_off_graph",
             Self::LowConfidenceUnresolvedImports => "low_confidence_unresolved_imports",
+            Self::LowConfidenceIncompleteAnalysis => "low_confidence_incomplete_analysis",
         }
     }
 
@@ -51,7 +61,9 @@ impl SkipReason {
     pub(super) fn is_intentional(self) -> bool {
         matches!(
             self,
-            Self::LowConfidenceOffGraph | Self::LowConfidenceUnresolvedImports
+            Self::LowConfidenceOffGraph
+                | Self::LowConfidenceUnresolvedImports
+                | Self::LowConfidenceIncompleteAnalysis
         )
     }
 
@@ -73,6 +85,10 @@ impl SkipReason {
                 "Kept unused export(s) in {}: unresolved imports make the usage graph incomplete.",
                 path.display(),
             ),
+            Self::LowConfidenceIncompleteAnalysis => format!(
+                "Kept unused export(s) in {}: a source file was not fully analyzed, so this run flagged the verdict itself as resting on an incomplete import graph.",
+                path.display(),
+            ),
         }
     }
 }
@@ -81,6 +97,9 @@ impl SkipReason {
 pub(super) struct SkippedFile {
     pub path: PathBuf,
     pub reason: SkipReason,
+    /// The caveats the withheld findings carried, surfaced on the fix entry so
+    /// a caller can gate on the marker instead of inferring it from the reason.
+    pub caveats: Vec<ReachabilityCaveat>,
 }
 
 /// Outcome of [`FixPlan::commit`].
@@ -187,6 +206,16 @@ impl FixPlan {
 
     /// Record that a file was skipped. Deduped on `(path, reason)`.
     pub(super) fn skip(&mut self, path: PathBuf, reason: SkipReason) {
+        self.skip_with_caveats(path, reason, Vec::new());
+    }
+
+    /// Record a skip that carries the reachability caveats behind it.
+    pub(super) fn skip_with_caveats(
+        &mut self,
+        path: PathBuf,
+        reason: SkipReason,
+        caveats: Vec<ReachabilityCaveat>,
+    ) {
         if self
             .skipped
             .iter()
@@ -194,7 +223,11 @@ impl FixPlan {
         {
             return;
         }
-        self.skipped.push(SkippedFile { path, reason });
+        self.skipped.push(SkippedFile {
+            path,
+            reason,
+            caveats,
+        });
     }
 
     pub(super) fn skipped(&self) -> &[SkippedFile] {

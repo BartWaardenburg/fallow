@@ -5,6 +5,7 @@
 //! contained while the engine-owned contracts continue to stabilize.
 
 use fallow_config::{ExternalPluginDef, PackageJson, ResolvedConfig};
+use fallow_types::cache_rejection::CacheRejection;
 use fallow_types::trace::PipelineTimings;
 use rustc_hash::FxHashSet;
 use std::path::{Path, PathBuf};
@@ -40,7 +41,7 @@ pub struct ParseMetrics {
     pub cache_misses: usize,
     pub parse_cpu_ms: f64,
     /// Why the persisted parse cache was not reused, when it was not.
-    pub cache_rejection: Option<fallow_types::cache_rejection::CacheRejection>,
+    pub cache_rejection: Option<CacheRejection>,
 }
 
 pub struct DeadCodeBackendPrelude<'a> {
@@ -212,11 +213,17 @@ pub fn discover_dead_code_entry_points(
     }
 }
 
+/// Try to reuse the persisted module graph, naming why it was refused.
+///
+/// # Errors
+///
+/// `Err(Some(reason))` is the refusal the perf table reports; `Err(None)` means
+/// the run disabled caching, so there was nothing to refuse.
 pub fn try_load_dead_code_graph_cache(
     prelude: &DeadCodeBackendPrelude<'_>,
     entry_points: &DeadCodeEntryPoints,
     modules: &[ModuleInfo],
-) -> Option<(DeadCodeResolvedModules, DeadCodeGraphRun)> {
+) -> Result<(DeadCodeResolvedModules, DeadCodeGraphRun), Option<CacheRejection>> {
     fallow_core::try_load_dead_code_graph_cache(&prelude.inner, &entry_points.inner, modules).map(
         |(resolved, graph)| {
             (
@@ -297,6 +304,8 @@ pub struct DeadCodePipelineProfileInput<'a> {
     pub detector: &'a DeadCodeDetectorRun,
     pub file_count: usize,
     pub workspace_count: usize,
+    /// Why the persisted module graph was not reused, when it was not.
+    pub graph_cache_rejection: Option<CacheRejection>,
 }
 
 pub fn dead_code_pipeline_profile(
@@ -314,6 +323,7 @@ pub fn dead_code_pipeline_profile(
         detector,
         file_count,
         workspace_count,
+        graph_cache_rejection,
     } = input;
     EngineDeadCodePipelineProfile {
         timings: retain_timings.then_some(PipelineTimings {
@@ -329,7 +339,7 @@ pub fn dead_code_pipeline_profile(
             cache_hits: parse_metrics.cache_hits,
             cache_misses: parse_metrics.cache_misses,
             cache_rejection: parse_metrics.cache_rejection,
-            graph_cache_rejection: None,
+            graph_cache_rejection,
             cache_update_ms: parse_metrics.cache_ms,
             entry_points_ms: entry_points.elapsed_ms(),
             entry_point_spans: entry_points.spans(),

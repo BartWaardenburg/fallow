@@ -100,6 +100,7 @@ mod tests {
             total_tokens: 5_000,
             duplicated_tokens: 400,
             clone_groups: 2,
+            clone_families: 0,
             clone_instances: 4,
             duplication_percentage: 40.0,
             clone_groups_below_min_occurrences: 1,

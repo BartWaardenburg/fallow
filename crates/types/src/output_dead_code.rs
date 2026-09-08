@@ -95,56 +95,85 @@ fn suppress_line(comment: &str) -> IssueAction {
     })
 }
 
-/// A per-finding confidence flag on a dead-code reachability verdict.
+/// A per-finding caveat on a dead-code verdict that a file this run never
+/// fully analyzed can distort.
 ///
 /// Advisory provenance, in the same spirit as the fix path's
 /// `low_confidence_off_graph` / `low_confidence_unresolved_imports` skip
-/// reasons and the focus map's per-unit confidence flags: a flag NEVER
-/// withholds, reorders, downgrades, or re-severities the finding, and never
-/// changes an exit code. It records that the verdict was computed over an
-/// import graph fallow already knows is incomplete, so a reader who sees the
-/// finding also sees the caveat instead of having to notice a diagnostic at
-/// the other end of the envelope.
+/// reasons: a caveat NEVER withholds, reorders, downgrades, or re-severities
+/// the finding, and never changes an exit code. It records that the verdict
+/// was computed over an import graph fallow already knows is incomplete, so a
+/// reader who sees the finding also sees the caveat instead of having to
+/// notice a diagnostic at the other end of the envelope.
 ///
-/// Emitted only on the two verdicts a lost import edge can distort:
-/// `unused_files[]` and `unused_exports[]`. Sorted and deduplicated, absent
-/// from the wire when empty. The set is open in the same sense
-/// `workspace_diagnostics[].kind` is: treat an unrecognised value as "some
-/// confidence caveat" rather than as an error.
+/// Deliberately NOT named `confidence`: `health --targets` already emits a
+/// `confidence` key holding an enum string, and a shared consumer helper that
+/// met both would see the same key change type. Emitted on the four verdicts a
+/// lost import edge can distort: `unused_files[]`, `unused_exports[]`, and the
+/// three dependency arrays. Sorted and deduplicated, absent from the wire when
+/// empty. The set is open in the same sense `workspace_diagnostics[].kind` is:
+/// treat an unrecognised value as "some caveat" rather than as an error.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
-pub enum ReachabilityConfidenceFlag {
-    /// This finding's own file is the subject of a `source-parse-degraded`
-    /// workspace diagnostic: it was read but did not parse cleanly, so the
+pub enum ReachabilityCaveat {
+    /// This finding's own file is one the run did not fully analyze, so the
     /// export and import lists extracted from it may stop short of the real
     /// ones. That reaches an `unused-file` verdict directly, because the
     /// "is any export of this file referenced from a reachable module" test
     /// reads exactly that truncated export list.
-    SourceParseDegraded,
-    /// At least one module that IS reachable from an entry point parsed with
-    /// errors, so its import list is incomplete and an import that would have
-    /// credited this path may never have been seen.
+    ///
+    /// Two workspace diagnostics put a file in this state: it was read but did
+    /// not parse cleanly (`source-parse-degraded`), or it could not be read at
+    /// all (`source-read-failure`). The token names the consequence rather than
+    /// either cause, so a future kind that leaves a discovered file partially
+    /// extracted carries the same value.
+    ///
+    /// Dependency findings never carry this value: the file they name is a
+    /// `package.json`, not a parsed source module.
+    IncompleteFileAnalysis,
+    /// A module whose import list feeds this verdict was not analyzed, so the
+    /// import that would have credited this finding may never have been seen.
+    ///
+    /// The cause is any workspace diagnostic that leaves a source file's
+    /// imports unseen: a degraded parse (`source-parse-degraded`), a file that
+    /// could not be read (`source-read-failure`), or a file discovery skipped
+    /// before reading it (`skipped-large-file`, `skipped-minified-file`,
+    /// `skipped-source-dotdir`). The token names the class rather than any one
+    /// cause.
+    ///
+    /// Which modules feed the verdict differs by array, and the caveat is
+    /// emitted only when a degraded module is actually one of them:
+    ///
+    /// - `unused_files[]` and `unused_exports[]` rest on reachability, so only
+    ///   a degraded module that is itself observed reachable can change the
+    ///   verdict. When every degraded module is unreachable the caveat is
+    ///   absent, and soundly: the FIRST missing edge on any entry-point path
+    ///   leaves from a module whose every predecessor edge was observed, so
+    ///   that module is observed reachable. A file the run never read has no
+    ///   module and no graph node, so its reachability is not observable at
+    ///   all and that narrowing cannot be applied: any skipped or unreadable
+    ///   source caveats every reachability verdict in the run.
+    /// - the dependency arrays rest on whether ANY module in the project
+    ///   imports the package specifier, reachable or not, so any degraded
+    ///   parse anywhere can hide the import that would have credited the
+    ///   package. Reachability does not narrow that one.
     ///
     /// The limit, stated because an approximation presented as exact is worse
     /// than nothing: this is a RUN-level condition, not proof that a degraded
-    /// module imports this path. An import the parser never saw cannot be
-    /// attributed to a target, so the link cannot be narrowed further without
-    /// re-reading the source. It does narrow in one direction, and soundly:
-    /// when every degraded module is itself unreachable, no missing edge
-    /// attributable to a degraded parse can change a reachability verdict,
-    /// because the first missing edge on any entry-point path leaves from a
-    /// module that is observed reachable. The flag is then absent. Read
-    /// `workspace_diagnostics[]` for which files degraded.
+    /// module imports this path or package. An import the parser never saw
+    /// cannot be attributed to a target, so the link cannot be narrowed
+    /// further without re-reading the source. Read `workspace_diagnostics[]`
+    /// for which files degraded.
     IncompleteImportGraph,
 }
 
-impl ReachabilityConfidenceFlag {
+impl ReachabilityCaveat {
     /// The wire token.
     #[must_use]
     pub const fn token(self) -> &'static str {
         match self {
-            Self::SourceParseDegraded => "source-parse-degraded",
+            Self::IncompleteFileAnalysis => "incomplete-file-analysis",
             Self::IncompleteImportGraph => "incomplete-import-graph",
         }
     }
@@ -153,14 +182,46 @@ impl ReachabilityConfidenceFlag {
     #[must_use]
     pub const fn message(self) -> &'static str {
         match self {
-            Self::SourceParseDegraded => {
-                "low: this file did not parse cleanly, so its extracted exports and imports may be incomplete"
+            Self::IncompleteFileAnalysis => {
+                "low: this file was not fully analyzed, so its extracted exports and imports may be incomplete"
             }
             Self::IncompleteImportGraph => {
-                "low: a module reachable from an entry point did not parse cleanly, so an import that would credit this may be missing"
+                "low: a module did not parse cleanly, so an import that would credit this may be missing"
             }
         }
     }
+
+    /// A compact label for a one-line human renderer, where the full
+    /// [`Self::message`] would not fit next to the finding.
+    #[must_use]
+    pub const fn short_label(self) -> &'static str {
+        match self {
+            Self::IncompleteFileAnalysis => "incomplete file analysis",
+            Self::IncompleteImportGraph => "incomplete import graph",
+        }
+    }
+}
+
+/// The compact labels of `caveats`, joined for a one-line renderer, or `None`
+/// when there is nothing to say.
+#[must_use]
+pub fn caveat_labels(caveats: &[ReachabilityCaveat]) -> Option<String> {
+    if caveats.is_empty() {
+        return None;
+    }
+    let labels: Vec<&str> = caveats
+        .iter()
+        .map(|caveat| ReachabilityCaveat::short_label(*caveat))
+        .collect();
+    Some(labels.join(", "))
+}
+
+/// The compact parenthetical a one-line human renderer appends to a finding
+/// carrying `caveats`, or `None` when there is nothing to say. Shared by every
+/// dead-code section so the suffix reads the same everywhere.
+#[must_use]
+pub fn caveat_suffix(caveats: &[ReachabilityCaveat]) -> Option<String> {
+    caveat_labels(caveats).map(|labels| format!(" (caveat: {labels})"))
 }
 
 /// Wire-shape envelope for an [`UnusedFile`] finding. The bare finding
@@ -182,10 +243,11 @@ pub struct UnusedFileFinding {
     pub introduced: Option<AuditIntroduced>,
     /// Advisory caveats on the reachability verdict behind this finding.
     /// Sorted, deduplicated, and omitted from the wire when empty, so a run
-    /// over a project that parses cleanly is byte-identical. Never gates the
-    /// finding or the `delete-file` action.
+    /// that analyzed every discovered file is byte-identical. Never gates the
+    /// finding or the `delete-file` action, though `fallow fix` does withhold
+    /// the removal of a caveated finding as low confidence.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub confidence: Vec<ReachabilityConfidenceFlag>,
+    pub reachability_caveats: Vec<ReachabilityCaveat>,
 }
 
 impl UnusedFileFinding {
@@ -218,7 +280,7 @@ impl UnusedFileFinding {
             file,
             actions,
             introduced: None,
-            confidence: Vec::new(),
+            reachability_caveats: Vec::new(),
         }
     }
 }
@@ -734,9 +796,10 @@ pub struct UnusedExportFinding {
     pub introduced: Option<AuditIntroduced>,
     /// Advisory caveats on the reachability verdict behind this finding.
     /// Sorted, deduplicated, and omitted from the wire when empty. Never gates
-    /// the finding or the `remove-export` action.
+    /// the finding or the `remove-export` action, though `fallow fix` does
+    /// withhold the removal of a caveated export as low confidence.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub confidence: Vec<ReachabilityConfidenceFlag>,
+    pub reachability_caveats: Vec<ReachabilityCaveat>,
 }
 
 impl UnusedExportFinding {
@@ -775,7 +838,7 @@ impl UnusedExportFinding {
             actions,
             semantic: None,
             introduced: None,
-            confidence: Vec::new(),
+            reachability_caveats: Vec::new(),
         }
     }
 
@@ -1929,6 +1992,14 @@ pub struct UnusedDependencyFinding {
     /// the merge-base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub introduced: Option<AuditIntroduced>,
+    /// Advisory caveats on the verdict behind this finding. A dependency is
+    /// reported unused when NO module in the project imports its specifier,
+    /// so a module that parsed with errors can hide the import that would
+    /// have credited the package. Sorted, deduplicated, and omitted from the
+    /// wire when empty. Never gates the finding, though `fallow fix`
+    /// withholds the `remove-dependency` write while a caveat stands.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reachability_caveats: Vec<ReachabilityCaveat>,
 }
 
 impl UnusedDependencyFinding {
@@ -1941,6 +2012,7 @@ impl UnusedDependencyFinding {
             dep,
             actions,
             introduced: None,
+            reachability_caveats: Vec::new(),
         }
     }
 }
@@ -1963,6 +2035,14 @@ pub struct UnusedDevDependencyFinding {
     /// the merge-base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub introduced: Option<AuditIntroduced>,
+    /// Advisory caveats on the verdict behind this finding. A dependency is
+    /// reported unused when NO module in the project imports its specifier,
+    /// so a module that parsed with errors can hide the import that would
+    /// have credited the package. Sorted, deduplicated, and omitted from the
+    /// wire when empty. Never gates the finding, though `fallow fix`
+    /// withholds the `remove-dependency` write while a caveat stands.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reachability_caveats: Vec<ReachabilityCaveat>,
 }
 
 impl UnusedDevDependencyFinding {
@@ -1975,6 +2055,7 @@ impl UnusedDevDependencyFinding {
             dep,
             actions,
             introduced: None,
+            reachability_caveats: Vec::new(),
         }
     }
 }
@@ -1997,6 +2078,14 @@ pub struct UnusedOptionalDependencyFinding {
     /// the merge-base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub introduced: Option<AuditIntroduced>,
+    /// Advisory caveats on the verdict behind this finding. A dependency is
+    /// reported unused when NO module in the project imports its specifier,
+    /// so a module that parsed with errors can hide the import that would
+    /// have credited the package. Sorted, deduplicated, and omitted from the
+    /// wire when empty. Never gates the finding, though `fallow fix`
+    /// withholds the `remove-dependency` write while a caveat stands.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reachability_caveats: Vec<ReachabilityCaveat>,
 }
 
 impl UnusedOptionalDependencyFinding {
@@ -2009,6 +2098,7 @@ impl UnusedOptionalDependencyFinding {
             dep,
             actions,
             introduced: None,
+            reachability_caveats: Vec::new(),
         }
     }
 }

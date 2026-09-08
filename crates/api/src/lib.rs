@@ -183,14 +183,15 @@ pub use runtime::{
     ProgrammaticHealthAnalysis, ProgrammaticHealthNextStepFacts, ProgrammaticHealthRun,
     ProgrammaticHealthRunner, TraceClassMemberOutput, TraceCloneBenchmarkResult, TraceCloneOutput,
     TraceCloneProgrammaticOutput, TraceDependencyOutput, TraceDependencyProgrammaticOutput,
-    TraceExportOutput, TraceExportProgrammaticOutput, TraceExportTargetOutput, TraceFileOutput,
+    TraceErrorOutput, TraceErrorProgrammaticOutput, TraceExportOutput,
+    TraceExportProgrammaticOutput, TraceExportTargetOutput, TraceFileOutput,
     TraceFileProgrammaticOutput, TraceImportPathOutput, TraceImportPathProgrammaticOutput,
     benchmark_trace_clone_compact_json, benchmark_trace_graph_family_compact_json,
     inspect_similar_code, load_health_config, parse_similar_code_candidate_snapshot,
     review_similar_code, run_audit, run_boundary_violations, run_circular_dependencies,
     run_combined, run_complexity_with_runner, run_dead_code, run_decision_surface, run_duplication,
     run_feature_flags, run_health, run_health_with_runner, run_similar_code, run_trace_clone,
-    run_trace_dependency, run_trace_export, run_trace_file, run_trace_import_path,
+    run_trace_dependency, run_trace_error, run_trace_export, run_trace_file, run_trace_import_path,
     select_similar_code_candidate_snapshot, serialize_health_report_json,
 };
 pub use runtime_json::{
@@ -199,8 +200,9 @@ pub use runtime_json::{
     serialize_dead_code_programmatic_json, serialize_decision_surface_programmatic_json,
     serialize_duplication_programmatic_json, serialize_feature_flags_programmatic_json,
     serialize_health_programmatic_json, serialize_trace_clone_programmatic_json,
-    serialize_trace_dependency_programmatic_json, serialize_trace_export_programmatic_json,
-    serialize_trace_file_programmatic_json, serialize_trace_import_path_programmatic_json,
+    serialize_trace_dependency_programmatic_json, serialize_trace_error_programmatic_json,
+    serialize_trace_export_programmatic_json, serialize_trace_file_programmatic_json,
+    serialize_trace_import_path_programmatic_json,
 };
 pub use sarif_output::{
     annotate_sarif_results, build_duplication_sarif, build_grouped_duplication_sarif,
@@ -756,6 +758,17 @@ pub struct TraceImportPathOptions {
     pub from: String,
     /// Path of the module the walk is looking for.
     pub to: String,
+}
+
+/// Options for stack-trace frame resolution.
+#[derive(Debug, Clone, Default)]
+pub struct TraceErrorOptions {
+    /// Shared analysis options.
+    pub analysis: AnalysisOptions,
+    /// The runtime stack trace, verbatim.
+    pub trace: String,
+    /// Where the trace came from, reported back as the payload's `source`.
+    pub source: String,
 }
 
 /// Options for dependency trace analysis.

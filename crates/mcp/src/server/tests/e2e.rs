@@ -12,7 +12,7 @@ use crate::tools::{
     build_analyze_args, build_health_args, build_impact_closure_args, build_project_info_args,
     build_security_candidates_args, build_trace_clone_args, build_trace_dependency_args,
     build_trace_export_args, build_trace_file_args, execute_code_mode, inspect_target, run_fallow,
-    run_trace_clone_tool, run_trace_export_tool,
+    run_trace_clone_tool, run_trace_error_tool, run_trace_export_tool,
 };
 
 /// Resolve the fallow binary from `FALLOW_BIN`, or the workspace target dir.
@@ -369,6 +369,69 @@ async fn api_backed_trace_export_tool_returns_json() {
     assert_eq!(json["export_name"].as_str(), Some("usedFunction"));
     assert_eq!(json["namespace"].as_str(), Some("value"));
     assert_eq!(json["is_used"].as_bool(), Some(true));
+}
+
+#[tokio::test]
+async fn api_backed_trace_error_tool_resolves_frames_against_the_graph() {
+    let root = fixture_path("basic-project");
+    let result = run_trace_error_tool(crate::params::TraceErrorParams {
+        trace: "TypeError: value is not a function\n    at usedFunction (src/utils.ts:1:29)\n    at boot (node:internal/main/run_main_module:23:47)\n"
+            .to_string(),
+        source: None,
+        root: Some(root.to_string_lossy().to_string()),
+        config: None,
+        allow_remote_extends: None,
+        production: None,
+        workspace: None,
+        no_cache: None,
+        threads: None,
+    })
+    .await
+    .unwrap();
+
+    assert_eq!(result.is_error, Some(false));
+
+    let text = extract_text(&result);
+    let json: serde_json::Value = serde_json::from_str(text)
+        .unwrap_or_else(|e| panic!("should parse as JSON: {e}\ntext: {text}"));
+    assert_eq!(json["schema_version"].as_str(), Some("1"));
+    assert_eq!(json["source"].as_str(), Some("mcp"));
+    assert_eq!(json["frames"][0]["resolution"].as_str(), Some("resolved"));
+    assert_eq!(
+        json["frames"][0]["candidates"][0]["symbol"].as_str(),
+        Some("usedFunction")
+    );
+    assert_eq!(
+        json["frames"][1]["origin"].as_str(),
+        Some("out_of_corpus"),
+        "a runtime-internal frame keeps its row and is never asked about"
+    );
+    assert_eq!(json["counts"]["frames"].as_u64(), Some(2));
+}
+
+#[tokio::test]
+async fn api_backed_trace_error_tool_refuses_an_empty_trace() {
+    let root = fixture_path("basic-project");
+    let result = run_trace_error_tool(crate::params::TraceErrorParams {
+        trace: "   ".to_string(),
+        source: None,
+        root: Some(root.to_string_lossy().to_string()),
+        config: None,
+        allow_remote_extends: None,
+        production: None,
+        workspace: None,
+        no_cache: None,
+        threads: None,
+    })
+    .await
+    .unwrap();
+
+    assert_eq!(result.is_error, Some(true));
+    assert!(
+        extract_text(&result).contains("trace"),
+        "the refusal must name the field: {}",
+        extract_text(&result)
+    );
 }
 
 #[tokio::test]

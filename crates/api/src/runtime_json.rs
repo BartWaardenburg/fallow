@@ -12,7 +12,7 @@ use crate::{
         DeadCodeProgrammaticOutput, DecisionSurfaceProgrammaticOutput,
         DuplicationProgrammaticOutput, FeatureFlagsProgrammaticOutput, HealthJsonReportInput,
         HealthProgrammaticOutput, TraceCloneProgrammaticOutput, TraceDependencyProgrammaticOutput,
-        TraceExportProgrammaticOutput, TraceFileProgrammaticOutput,
+        TraceErrorProgrammaticOutput, TraceExportProgrammaticOutput, TraceFileProgrammaticOutput,
         TraceImportPathProgrammaticOutput, serialize_health_report_json,
     },
 };
@@ -525,6 +525,22 @@ pub fn serialize_trace_dependency_programmatic_json(
     )
 }
 
+/// Serialize typed stack-trace resolution into the JSON compatibility contract.
+///
+/// # Errors
+///
+/// Returns a structured error if the trace output cannot be serialized.
+pub fn serialize_trace_error_programmatic_json(
+    output: TraceErrorProgrammaticOutput,
+) -> ProgrammaticResult<serde_json::Value> {
+    serialize_trace_programmatic_output(
+        output.output,
+        "stack-trace resolution",
+        "FALLOW_SERIALIZE_TRACE_ERROR",
+        "trace_error",
+    )
+}
+
 /// Serialize typed clone-trace output into the JSON compatibility contract.
 ///
 /// # Errors
@@ -712,6 +728,8 @@ mod tests {
                 report: DupesReportPayload::from_report(&DuplicationReport::default()),
                 clone_groups_shown: 0,
                 clone_groups_omitted: 0,
+                clone_families_shown: 0,
+                clone_families_omitted: 0,
                 grouped_by: None,
                 total_issues: None,
                 groups: None,

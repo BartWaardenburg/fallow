@@ -89,11 +89,15 @@ pub struct CheckOutput {
     /// repeated on each top-level command's envelope so single-command
     /// consumers see it without having to look at a separate top-level field.
     ///
-    /// A diagnostic here is advisory and never withholds a finding. Where a
-    /// `source-parse-degraded` entry can distort a reachability verdict, the
-    /// affected `unused_files[]` and `unused_exports[]` entries additionally
-    /// carry the caveat themselves in their own optional `confidence[]` array,
-    /// so a reader who never scrolls back up to this list still sees it.
+    /// A diagnostic here is advisory and never withholds a finding. Where an
+    /// entry reports a source file this run never fully analyzed
+    /// (`source-parse-degraded`, `source-read-failure`, `skipped-large-file`,
+    /// `skipped-minified-file`, `skipped-source-dotdir`) it can distort a
+    /// verdict, so the affected `unused_files[]`, `unused_exports[]`, and
+    /// dependency entries additionally carry the caveat themselves in their own
+    /// optional `reachability_caveats[]` array, and a reader who never scrolls
+    /// back up to this list still sees it. `fallow fix` reads the same array
+    /// and withholds the removal while a caveat stands.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
     /// Read-only follow-up commands computed from this run's findings, emitted
@@ -989,7 +993,7 @@ mod tests {
     use super::*;
     use crate::{ComplexityViolation, ExceededThreshold, FindingSeverity, HealthFinding};
     use fallow_types::output_dead_code::{
-        ReachabilityConfidenceFlag, UnusedExportFinding, UnusedFileFinding, UnusedTypeFinding,
+        ReachabilityCaveat, UnusedExportFinding, UnusedFileFinding, UnusedTypeFinding,
     };
     use fallow_types::results::{UnusedExport, UnusedFile};
     use fallow_types::workspace::WorkspaceDiagnosticKind;
@@ -1162,7 +1166,7 @@ mod tests {
     /// diagnostic at the other end of the envelope. It is advisory only: the
     /// actions are untouched, and a clean finding stays byte-identical.
     #[test]
-    fn reachability_confidence_is_absent_when_clean_and_named_when_flagged() {
+    fn reachability_caveats_are_absent_when_clean_and_named_when_flagged() {
         let mut results = AnalysisResults::default();
         results
             .unused_files
@@ -1172,9 +1176,9 @@ mod tests {
         let mut flagged = UnusedFileFinding::with_actions(UnusedFile {
             path: "/project/src/orphan.ts".into(),
         });
-        flagged.confidence = vec![
-            ReachabilityConfidenceFlag::SourceParseDegraded,
-            ReachabilityConfidenceFlag::IncompleteImportGraph,
+        flagged.reachability_caveats = vec![
+            ReachabilityCaveat::IncompleteFileAnalysis,
+            ReachabilityCaveat::IncompleteImportGraph,
         ];
         results.unused_files.push(flagged);
 
@@ -1208,14 +1212,14 @@ mod tests {
         };
 
         assert!(
-            find("clean.ts").get("confidence").is_none(),
+            find("clean.ts").get("reachability_caveats").is_none(),
             "a finding with no caveat must keep the previous wire shape exactly"
         );
 
         let flagged = find("orphan.ts");
         assert_eq!(
-            flagged["confidence"],
-            serde_json::json!(["source-parse-degraded", "incomplete-import-graph"]),
+            flagged["reachability_caveats"],
+            serde_json::json!(["incomplete-file-analysis", "incomplete-import-graph"]),
             "both caveats are named on the wire, in declaration order"
         );
         assert_eq!(

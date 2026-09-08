@@ -66,6 +66,10 @@ fn run_feature_flags_inner(
         elapsed: start.elapsed(),
         flags: &flags,
         root: session.root(),
+        // Read live, like the dead-code route: the parse stage records
+        // `source-read-failure` and `source-parse-degraded` after the session
+        // captured its walk snapshot, and both are reasons a flag is missing.
+        workspace_diagnostics: session.current_workspace_diagnostics(),
         meta: resolved.explain_enabled().then(feature_flags_meta),
     });
 

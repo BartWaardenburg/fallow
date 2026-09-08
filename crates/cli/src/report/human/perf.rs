@@ -23,10 +23,14 @@ fn parallel_annotation(wall_ms: f64, cpu_ms: f64) -> String {
     format!("  (parallel: ~{cpu_ms:.0}ms CPU)")
 }
 
-/// Time inside TOTAL not attributed to any displayed stage (report assembly,
-/// coverage load, inter-stage glue). Clamped at 0 so floating-point rounding
-/// where the stage sum slightly exceeds TOTAL never renders a negative row.
-/// Surfacing this makes every breakdown's rows provably sum to TOTAL.
+/// Time inside a parent duration not attributed to any of the rows displayed
+/// under it (report assembly, coverage load, inter-stage glue).
+///
+/// Clamped at 0 because a parent and its children are read from separate
+/// clocks and the children can genuinely exceed the parent. In the outer
+/// pipeline table that is the normal case rather than a rounding artifact, for
+/// the reason `push_performance_total_lines` documents. A `0.0ms` row means
+/// "no unattributed time was found", not "the rows above sum to their parent".
 fn other_ms(total_ms: f64, stages_sum_ms: f64) -> f64 {
     (total_ms - stages_sum_ms).max(0.0)
 }
@@ -116,12 +120,39 @@ fn push_discovery_stage_lines(lines: &mut Vec<String>, t: &PipelineTimings) {
     );
     push_dimmed(
         lines,
-        &format!("│  plugins:          {:>8.1}ms", t.plugins_ms),
+        &format!(
+            "│  plugin detection: {:>8.1}ms{}",
+            t.plugins_ms,
+            plugin_glob_cross_reference(t)
+        ),
     );
     push_dimmed(
         lines,
         &format!("│  script analysis:  {:>8.1}ms", t.script_analysis_ms),
     );
+}
+
+/// Name the OTHER place plugin cost lands, next to the number that is not it.
+///
+/// Plugin work is timed in two different stages: detecting which plugins are
+/// active, and matching their entry-point globs against every discovered file,
+/// which happens inside entry-point discovery. On real projects the glob half is
+/// the larger of the two, so a row labelled `plugins` carrying only the
+/// detection half reads as the whole plugin bill and understates it several
+/// times over. The two spans are genuinely different stretches of wall clock and
+/// cannot be summed into one row without breaking the stage partition, so both
+/// numbers are printed and the reader adds them.
+///
+/// Emitted only when the entry-point breakdown is printed, so the row this
+/// points at is on screen.
+fn plugin_glob_cross_reference(t: &PipelineTimings) -> String {
+    if t.entry_points_ms < ENTRY_POINT_BREAKDOWN_FLOOR_MS {
+        return String::new();
+    }
+    format!(
+        "  (+{:.1}ms plugin globs under entry points)",
+        t.entry_point_spans.plugins_ms
+    )
 }
 
 fn push_analysis_stage_lines(lines: &mut Vec<String>, t: &PipelineTimings) {
@@ -158,19 +189,37 @@ fn push_analysis_stage_lines(lines: &mut Vec<String>, t: &PipelineTimings) {
 /// stage rather than add to it; `displayed_stage_sum` must keep ignoring them
 /// or the `(other)` row would go negative. Rows are printed in pipeline order
 /// rather than sorted by cost so two runs of the same project diff cleanly.
+///
+/// Both nested levels close with their own `(other)` row: `compile + match +
+/// (other)` sums to `plugin globs`, and the six sections plus their `(other)`
+/// sum to the stage, to within rounding, because every span here is carved
+/// from inside the entry-point stage's own clock. The outer table has no such
+/// property (see `push_performance_total_lines`). Without these rows the two
+/// nested sums silently fell short of the parents they claimed to divide, and
+/// a reader had no way to tell an unmeasured remainder from an arithmetic
+/// error.
 fn push_entry_point_span_lines(lines: &mut Vec<String>, stage_ms: f64, spans: EntryPointSpans) {
     if stage_ms < ENTRY_POINT_BREAKDOWN_FLOOR_MS {
         return;
     }
+    let sections_sum = spans.root_ms
+        + spans.workspaces_ms
+        + spans.plugins_ms
+        + spans.infrastructure_ms
+        + spans.dynamic_ms
+        + spans.dedup_ms;
+    let glob_sum = spans.plugin_glob_build_ms + spans.plugin_glob_match_ms;
     for (label, value) in [
         ("root package", spans.root_ms),
         ("workspaces", spans.workspaces_ms),
         ("plugin globs", spans.plugins_ms),
         ("  compile", spans.plugin_glob_build_ms),
         ("  match", spans.plugin_glob_match_ms),
+        ("  (other)", other_ms(spans.plugins_ms, glob_sum)),
         ("infrastructure", spans.infrastructure_ms),
         ("dynamic globs", spans.dynamic_ms),
         ("dedup", spans.dedup_ms),
+        ("(other)", other_ms(stage_ms, sections_sum)),
     ] {
         push_dimmed(lines, &format!("│    {label:<16}{value:>8.1}ms"));
     }
@@ -189,6 +238,17 @@ fn displayed_stage_sum(t: &PipelineTimings) -> f64 {
         + t.analyze_ms
 }
 
+/// Print the unattributed remainder and the TOTAL row.
+///
+/// TOTAL is not the sum of the rows above it and cannot be read as one. It is
+/// the wall clock of the dead-code backend, started when the prelude begins
+/// (workspace package loading, then plugin detection) and read after the
+/// detectors finish. File discovery, workspace discovery, parse/extract and the
+/// cache update are all measured before that clock starts, yet they are listed
+/// as rows, so on a warm run the rows exceed TOTAL by tens of milliseconds and
+/// `(other)` clamps to `0.0ms`. Duplication is left out of the sum for the
+/// opposite reason: it runs concurrently with the stages above it. Read the
+/// rows as per-stage costs, not as a partition of TOTAL.
 fn push_performance_total_lines(lines: &mut Vec<String>, t: &PipelineTimings) {
     push_dimmed(
         lines,
@@ -362,7 +422,7 @@ mod tests {
         assert!(text.contains("100 files"));
         assert!(text.contains("workspaces"));
         assert!(text.contains("3 workspaces"));
-        assert!(text.contains("plugins"));
+        assert!(text.contains("plugin detection"));
         assert!(text.contains("script analysis"));
         assert!(text.contains("parse/extract"));
         assert!(text.contains("80 modules"));
@@ -532,6 +592,110 @@ mod tests {
         );
     }
 
+    /// `compile` and `match` are the two halves of the plugin-glob span that
+    /// were measured; the rest of that span is the entry-set merge and was
+    /// simply missing from the table. Without an `(other)` row a reader saw two
+    /// children that did not add up to their parent and no way to tell an
+    /// unmeasured remainder from a bug.
+    #[test]
+    fn entry_point_sub_tables_close_with_their_own_other_rows() {
+        let mut timings = pipeline_timings_with_parse(20.0, 20.0);
+        timings.entry_points_ms = 200.0;
+        timings.entry_point_spans = EntryPointSpans {
+            root_ms: 10.0,
+            workspaces_ms: 5.0,
+            plugins_ms: 157.6,
+            plugin_glob_build_ms: 100.0,
+            plugin_glob_match_ms: 49.3,
+            infrastructure_ms: 2.0,
+            dynamic_ms: 0.0,
+            dedup_ms: 1.0,
+        };
+
+        let text = plain(&build_performance_human_lines(&timings));
+
+        assert!(
+            text.contains("│      (other)            8.3ms"),
+            "compile + match must close against plugin globs: {text}"
+        );
+        assert!(
+            text.contains("│    (other)             24.4ms"),
+            "the six sections must close against the entry-point stage: {text}"
+        );
+    }
+
+    /// Adjacent spans are carved from separate clock reads, so rounding can put
+    /// a child fractionally above its parent. Both remainders clamp at zero
+    /// rather than rendering a negative row, the same guarantee `other_ms`
+    /// already gave the outer table.
+    #[test]
+    fn entry_point_other_rows_never_go_negative_when_children_overrun() {
+        let mut timings = pipeline_timings_with_parse(20.0, 20.0);
+        timings.entry_points_ms = 6.0;
+        timings.entry_point_spans = EntryPointSpans {
+            root_ms: 5.0,
+            workspaces_ms: 5.0,
+            plugins_ms: 5.0,
+            plugin_glob_build_ms: 4.0,
+            plugin_glob_match_ms: 4.0,
+            infrastructure_ms: 0.0,
+            dynamic_ms: 0.0,
+            dedup_ms: 0.0,
+        };
+
+        let text = plain(&build_performance_human_lines(&timings));
+
+        assert!(
+            text.contains("│      (other)            0.0ms"),
+            "children that overrun their parent clamp to zero, not a negative: {text}"
+        );
+        assert!(
+            text.contains("│    (other)              0.0ms"),
+            "sections that overrun the stage clamp to zero, not a negative: {text}"
+        );
+    }
+
+    /// The row labelled for plugins carried only the DETECTION half while the
+    /// larger glob half sat inside the entry-point stage, so the table
+    /// understated plugin cost several times over with nothing saying so. Both
+    /// numbers are now on the plugin row for the reader to add.
+    #[test]
+    fn plugin_row_names_the_glob_cost_that_lands_in_another_stage() {
+        let mut timings = pipeline_timings_with_parse(20.0, 20.0);
+        timings.plugins_ms = 29.9;
+        timings.entry_points_ms = 200.0;
+        timings.entry_point_spans = EntryPointSpans {
+            plugins_ms: 157.6,
+            plugin_glob_build_ms: 100.0,
+            plugin_glob_match_ms: 49.3,
+            ..EntryPointSpans::default()
+        };
+
+        let text = plain(&build_performance_human_lines(&timings));
+
+        assert!(
+            text.contains(
+                "plugin detection:     29.9ms  (+157.6ms plugin globs under entry points)"
+            ),
+            "both halves of the plugin bill must be readable off one row: {text}"
+        );
+    }
+
+    /// The cross-reference points at a row, so it is silent when the breakdown
+    /// that carries that row is not printed.
+    #[test]
+    fn plugin_row_omits_the_cross_reference_without_a_breakdown() {
+        let mut timings = pipeline_timings_with_parse(20.0, 20.0);
+        timings.entry_points_ms = 0.3;
+
+        let text = plain(&build_performance_human_lines(&timings));
+
+        assert!(
+            !text.contains("plugin globs"),
+            "no breakdown, nothing to point at: {text}"
+        );
+    }
+
     /// A cheap stage is not worth six rows of rounding noise.
     #[test]
     fn performance_output_omits_the_breakdown_for_a_cheap_entry_point_stage() {
@@ -546,6 +710,41 @@ mod tests {
 
         assert!(!text.contains("root package"), "{text}");
         assert!(!text.contains("plugin globs"), "{text}");
+    }
+
+    /// Timings measured by running the release binary over this repository. The
+    /// listed stages add to roughly 145ms against a TOTAL of 68.8ms, because
+    /// discovery, workspace discovery, parse/extract and the cache update are
+    /// all timed before the clock TOTAL reads starts. The table must survive
+    /// that without a negative row, and nothing may claim the rows partition
+    /// TOTAL.
+    #[test]
+    fn outer_rows_can_exceed_total_because_earlier_stages_sit_outside_its_clock() {
+        let mut timings = pipeline_timings_with_parse(22.6, 22.6);
+        timings.discover_files_ms = 48.6;
+        timings.workspaces_ms = 5.0;
+        timings.plugins_ms = 13.8;
+        timings.script_analysis_ms = 6.6;
+        timings.cache_update_ms = 1.0;
+        timings.entry_points_ms = 21.5;
+        timings.resolve_imports_ms = 0.0;
+        timings.build_graph_ms = 4.5;
+        timings.analyze_ms = 21.1;
+        timings.total_ms = 68.8;
+
+        let sum = displayed_stage_sum(&timings);
+        assert!(
+            sum > timings.total_ms + 50.0,
+            "the measured stage rows must overshoot TOTAL by far more than rounding: {sum} vs {}",
+            timings.total_ms
+        );
+
+        let text = plain(&build_performance_human_lines(&timings));
+
+        assert!(
+            text.contains("│  (other):               0.0ms"),
+            "an overshooting stage sum clamps the remainder to zero rather than going negative: {text}"
+        );
     }
 
     fn pipeline_timings_with_parse(parse_extract_ms: f64, parse_cpu_ms: f64) -> PipelineTimings {

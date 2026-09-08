@@ -65,13 +65,18 @@ pub fn run_flags(opts: &FlagsOptions<'_>) -> ExitCode {
         return code;
     }
 
-    print_flags_result(
-        &flags,
-        session.config(),
+    print_flags_result(FlagsRenderInput {
+        flags: &flags,
+        config: session.config(),
         opts,
         elapsed,
-        analysis.files_scanned,
-    );
+        files_scanned: analysis.files_scanned,
+        // Read live rather than from the session snapshot: the parse stage
+        // records `source-read-failure` and `source-parse-degraded` after the
+        // session captured its walk, and both are reasons a flag is missing
+        // from the array this envelope reports.
+        workspace_diagnostics: session.current_workspace_diagnostics(),
+    });
 
     ExitCode::SUCCESS
 }
@@ -146,18 +151,38 @@ fn validate_flags_output(output: OutputFormat) -> Result<(), ExitCode> {
     Ok(())
 }
 
-/// Print feature flag results in the requested format.
-fn print_flags_result(
-    flags: &[FeatureFlag],
-    config: &ResolvedConfig,
-    opts: &FlagsOptions<'_>,
+/// Everything the flags renderers need, kept in one struct so the run-owned
+/// diagnostics travel with the findings instead of adding a seventh parameter.
+struct FlagsRenderInput<'a> {
+    flags: &'a [FeatureFlag],
+    config: &'a ResolvedConfig,
+    opts: &'a FlagsOptions<'a>,
     elapsed: std::time::Duration,
     files_scanned: usize,
-) {
+    workspace_diagnostics: Vec<fallow_config::WorkspaceDiagnostic>,
+}
+
+/// Print feature flag results in the requested format.
+fn print_flags_result(input: FlagsRenderInput<'_>) {
+    let FlagsRenderInput {
+        flags,
+        config,
+        opts,
+        elapsed,
+        files_scanned,
+        workspace_diagnostics,
+    } = input;
     match opts.output {
         OutputFormat::Human => print_flags_human(flags, config, elapsed, opts.quiet, files_scanned),
         OutputFormat::Json => {
-            print_flags_json(flags, config, elapsed, opts.explain, opts.json_style);
+            print_flags_json(
+                flags,
+                config,
+                elapsed,
+                opts.explain,
+                opts.json_style,
+                workspace_diagnostics,
+            );
         }
         OutputFormat::Compact => print_flags_compact(flags, config),
         OutputFormat::Sarif => print_flags_sarif(flags, config),
@@ -645,6 +670,7 @@ fn print_flags_json(
     elapsed: std::time::Duration,
     explain: bool,
     json_style: crate::json_style::JsonStyle,
+    workspace_diagnostics: Vec<fallow_config::WorkspaceDiagnostic>,
 ) {
     let output =
         fallow_output::build_feature_flags_output(fallow_output::FeatureFlagsOutputInput {
@@ -653,6 +679,7 @@ fn print_flags_json(
             elapsed,
             flags,
             root: &config.root,
+            workspace_diagnostics,
             meta: explain.then(fallow_output::feature_flags_meta),
         });
     let output = fallow_output::serialize_feature_flags_json_output(

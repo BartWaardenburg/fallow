@@ -56,6 +56,14 @@ pub struct DupesOutput<Report, Group> {
     /// `clone_groups_shown + clone_groups_omitted == stats.clone_groups`
     /// always holds and `stats` keeps describing the whole measured corpus.
     pub clone_groups_omitted: usize,
+    /// Number of clone families carried in `clone_families[]`.
+    pub clone_families_shown: usize,
+    /// Number of scoped-corpus clone families withheld from `clone_families[]`
+    /// by a presentation cap such as `--top`, which rebuilds the families from
+    /// the groups that survived the cap. `0` on an untruncated run, so
+    /// `clone_families_shown + clone_families_omitted == stats.clone_families`
+    /// always holds and `stats` keeps describing the whole measured corpus.
+    pub clone_families_omitted: usize,
     /// Grouping mode when `--group-by` was passed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub grouped_by: Option<GroupByMode>,
@@ -100,6 +108,10 @@ pub struct DupesOutputInput<Report, Group> {
     pub clone_groups_shown: usize,
     /// Number of scoped-corpus clone groups withheld by a presentation cap.
     pub clone_groups_omitted: usize,
+    /// Number of clone families carried in `clone_families[]`.
+    pub clone_families_shown: usize,
+    /// Number of scoped-corpus clone families withheld by a presentation cap.
+    pub clone_families_omitted: usize,
     /// Grouping mode when `--group-by` was passed.
     pub grouped_by: Option<GroupByMode>,
     /// Total finding count across all groups, for grouped output.
@@ -127,6 +139,8 @@ pub fn build_dupes_output<Report, Group>(
         report: input.report,
         clone_groups_shown: input.clone_groups_shown,
         clone_groups_omitted: input.clone_groups_omitted,
+        clone_families_shown: input.clone_families_shown,
+        clone_families_omitted: input.clone_families_omitted,
         grouped_by: input.grouped_by,
         total_issues: input.total_issues,
         groups: input.groups,
@@ -316,6 +330,8 @@ mod tests {
             report: json!({"stats": {"clone_groups": 0}}),
             clone_groups_shown: 0,
             clone_groups_omitted: 0,
+            clone_families_shown: 0,
+            clone_families_omitted: 0,
             grouped_by: None,
             total_issues: None,
             groups: None,

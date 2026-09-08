@@ -6,9 +6,10 @@ use serde::Serialize;
 
 /// Current schema version for `fallow doctor --format json`.
 ///
-/// Bumped to 2 for the `dependencies` and `cache` checks. Both are appended
-/// after the existing five, so the previous order is unchanged, but a consumer
-/// that enumerates `checks[]` sees two new `id` values.
+/// Bumped to 2 for the `dependencies`, `cache`, and `graph-cache` checks. All
+/// three are appended after the existing five, so the previous order is
+/// unchanged, but a consumer that enumerates `checks[]` sees three new `id`
+/// values.
 pub const DOCTOR_SCHEMA_VERSION: u32 = 2;
 
 /// Schema projection for the exact doctor envelope version.
@@ -72,6 +73,13 @@ pub enum DoctorCheckId {
     Dependencies,
     /// Persisted extraction-cache reuse.
     Cache,
+    /// Persisted module-graph reuse.
+    ///
+    /// Separate from [`Cache`](Self::Cache) because a warm run reuses the two
+    /// blobs independently: the extraction cache can be perfectly reusable
+    /// while the graph is discarded on every run, and the graph is the larger
+    /// of the two on a real project.
+    GraphCache,
 }
 
 /// Stable category for a doctor check.

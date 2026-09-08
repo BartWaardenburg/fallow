@@ -446,6 +446,42 @@ impl DuplicationReport {
             .saturating_sub(self.clone_groups.len())
     }
 
+    /// Number of clone groups the measured corpus holds, shown plus omitted.
+    ///
+    /// Reads `stats.clone_groups` except on a report whose stats were never
+    /// populated, where it falls back to the array length so a caller never
+    /// renders a total smaller than the rows beneath it.
+    #[must_use]
+    pub fn clone_groups_total(&self) -> usize {
+        self.clone_groups_shown() + self.clone_groups_omitted()
+    }
+
+    /// Number of clone families actually carried in `clone_families[]`.
+    #[must_use]
+    pub fn clone_families_shown(&self) -> usize {
+        self.clone_families.len()
+    }
+
+    /// Number of scoped-corpus clone families withheld from
+    /// `clone_families[]`.
+    ///
+    /// `--top` truncates `clone_groups[]` and rebuilds the families from what
+    /// survives, so the family array narrows with the group array. Scope
+    /// filters (diff, workspace, baseline) rebuild the families and then
+    /// recompute `stats`, so they leave nothing omitted.
+    #[must_use]
+    pub fn clone_families_omitted(&self) -> usize {
+        self.stats
+            .clone_families
+            .saturating_sub(self.clone_families.len())
+    }
+
+    /// Number of clone families the measured corpus holds, shown plus omitted.
+    #[must_use]
+    pub fn clone_families_total(&self) -> usize {
+        self.clone_families_shown() + self.clone_families_omitted()
+    }
+
     /// Drop the verbatim source text from every clone instance, including the
     /// copies nested in `clone_families[].groups[]`.
     ///
@@ -484,6 +520,11 @@ pub struct DuplicationStats {
     /// `--top` does not change it; compare it with `clone_groups_shown` on the
     /// envelope to see how much of the corpus the array carries.
     pub clone_groups: usize,
+    /// Number of clone families the scoped corpus contains after filtering.
+    /// `--top` truncates `clone_families[]` along with `clone_groups[]` but
+    /// does not change this counter; compare it with `clone_families_shown` on
+    /// the envelope to see how much of the corpus the array carries.
+    pub clone_families: usize,
     /// Total clone instances across the scoped corpus after filtering.
     /// `--top` does not change it.
     pub clone_instances: usize,

@@ -47,6 +47,13 @@ fn entry_point_spans_partition_the_stage_they_subdivide() {
 /// Plugin glob work dominates the stage on every real project measured, so the
 /// report has to say which half of it paid: compiling the pattern set once, or
 /// matching it against every discovered file.
+///
+/// The workspace fixture activates no plugins, so its glob set is empty and the
+/// matching loop is skipped entirely. Asserting a positive match time here
+/// measured nothing but the gap between two adjacent clock reads, and failed
+/// whenever they landed in the same tick. What this fixture can prove is that
+/// the two sub-spans stay inside the stage they subdivide and that neither one
+/// borrows time it did not spend.
 #[test]
 fn plugin_glob_work_is_split_into_compile_and_match() {
     let config = create_config(fixture_path("workspace-project"));
@@ -57,8 +64,63 @@ fn plugin_glob_work_is_split_into_compile_and_match() {
         .entry_point_spans;
 
     assert!(
+        spans.plugin_glob_build_ms >= 0.0 && spans.plugin_glob_match_ms >= 0.0,
+        "sub-spans are elapsed times, not differences: {} compile, {} match",
+        spans.plugin_glob_build_ms,
+        spans.plugin_glob_match_ms
+    );
+    assert!(
+        spans.plugin_glob_build_ms + spans.plugin_glob_match_ms <= spans.plugins_ms,
+        "compile plus match must fit inside the plugin span: {} + {} vs {}",
+        spans.plugin_glob_build_ms,
+        spans.plugin_glob_match_ms,
+        spans.plugins_ms
+    );
+}
+
+/// Files in the plugin-glob project. Enough that matching the compiled set
+/// against them is real work rather than clock noise.
+const PLUGIN_GLOB_PROJECT_FILES: usize = 300;
+
+/// The split only means something on a project whose plugins contribute globs:
+/// there, matching scales with files times patterns and is the half that grows.
+/// A `vitest.config.ts` activates the test-runner plugin from the file alone,
+/// so the project needs no installed dependencies to carry a real glob set.
+#[test]
+fn plugin_glob_match_time_is_reported_when_a_plugin_contributes_globs() {
+    let project = tempfile::tempdir().expect("create project");
+    let root = project.path();
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"plugin-glob-project","version":"1.0.0"}"#,
+    )
+    .expect("write package.json");
+    std::fs::write(
+        root.join("vitest.config.ts"),
+        "export default { test: { include: ['src/**/*.test.ts'] } };\n",
+    )
+    .expect("write vitest config");
+    let src = root.join("src");
+    std::fs::create_dir_all(&src).expect("create src");
+    for index in 0..PLUGIN_GLOB_PROJECT_FILES {
+        std::fs::write(
+            src.join(format!("module{index}.ts")),
+            format!("export const value{index} = {index};\n"),
+        )
+        .expect("write module");
+    }
+
+    let config = create_config(root.to_path_buf());
+    let output = fallow_core::analyze_with_trace(&config).expect("plugin glob analysis");
+    let spans = output
+        .timings
+        .expect("trace timings retained")
+        .entry_point_spans;
+
+    assert!(
         spans.plugin_glob_match_ms > 0.0,
-        "matching runs on every project, got {}ms",
+        "matching {PLUGIN_GLOB_PROJECT_FILES} files against an active plugin glob set is timeable \
+         work, got {}ms",
         spans.plugin_glob_match_ms
     );
     assert!(

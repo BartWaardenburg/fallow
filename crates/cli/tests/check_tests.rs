@@ -1766,6 +1766,62 @@ fn combined_json_root_workspace_diagnostics_stay_byte_identical_with_a_skipped_d
     }
 }
 
+/// The two unconfigured-check diagnostics fire on every project that never
+/// opted into boundaries or rule packs, which is the product's default state,
+/// so a stderr warning for them is permanent noise on nearly every run. They
+/// keep their `workspace_diagnostics[]` entries, where a consumer that wants to
+/// tell "measured zero" from "measured nothing" can read them.
+///
+/// `node-modules-missing` in the same run is the control: it reports a real
+/// degradation that changes results, so it stays on stderr and proves the
+/// warning surface is live rather than filtered by the log level.
+#[test]
+fn unconfigured_check_diagnostics_stay_out_of_stderr_but_reach_json() {
+    let root = fixture_path("basic-project");
+    let output = run_fallow_raw_with_env(
+        &[
+            "--root",
+            root.to_str().expect("fixture path is UTF-8"),
+            "dead-code",
+            "--format",
+            "json",
+            "--no-cache",
+        ],
+        &[("RUST_LOG", "warn")],
+    );
+
+    assert!(
+        output.stderr.contains("node_modules"),
+        "the degradation warning proves warnings reach stderr here: {}",
+        output.stderr
+    );
+    assert!(
+        !output
+            .stderr
+            .contains("No architecture boundaries are configured"),
+        "an unconfigured boundary check must not warn: {}",
+        output.stderr
+    );
+    assert!(
+        !output.stderr.contains("No rule packs are configured"),
+        "an unconfigured rule-pack check must not warn: {}",
+        output.stderr
+    );
+
+    let json = parse_json(&output);
+    let kinds: Vec<&str> = json["workspace_diagnostics"]
+        .as_array()
+        .expect("the envelope carries the array")
+        .iter()
+        .filter_map(|diagnostic| diagnostic["kind"].as_str())
+        .collect();
+    assert!(
+        kinds.contains(&"boundaries-not-configured")
+            && kinds.contains(&"rule-packs-not-configured"),
+        "both stay in the structured array: {kinds:?}"
+    );
+}
+
 /// Issue #2366: the combined root's union must be the same ARRAY on every run
 /// of the same command, not just the same set.
 ///

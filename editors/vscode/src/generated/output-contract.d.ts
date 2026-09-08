@@ -292,24 +292,26 @@ export type AddToConfigValue = (string | IgnoreExportsRule[] | {
  */
 export type AuditIntroduced = boolean
 /**
- * A per-finding confidence flag on a dead-code reachability verdict.
+ * A per-finding caveat on a dead-code verdict that a file this run never
+ * fully analyzed can distort.
  *
  * Advisory provenance, in the same spirit as the fix path's
  * `low_confidence_off_graph` / `low_confidence_unresolved_imports` skip
- * reasons and the focus map's per-unit confidence flags: a flag NEVER
- * withholds, reorders, downgrades, or re-severities the finding, and never
- * changes an exit code. It records that the verdict was computed over an
- * import graph fallow already knows is incomplete, so a reader who sees the
- * finding also sees the caveat instead of having to notice a diagnostic at
- * the other end of the envelope.
+ * reasons: a caveat NEVER withholds, reorders, downgrades, or re-severities
+ * the finding, and never changes an exit code. It records that the verdict
+ * was computed over an import graph fallow already knows is incomplete, so a
+ * reader who sees the finding also sees the caveat instead of having to
+ * notice a diagnostic at the other end of the envelope.
  *
- * Emitted only on the two verdicts a lost import edge can distort:
- * `unused_files[]` and `unused_exports[]`. Sorted and deduplicated, absent
- * from the wire when empty. The set is open in the same sense
- * `workspace_diagnostics[].kind` is: treat an unrecognised value as "some
- * confidence caveat" rather than as an error.
+ * Deliberately NOT named `confidence`: `health --targets` already emits a
+ * `confidence` key holding an enum string, and a shared consumer helper that
+ * met both would see the same key change type. Emitted on the four verdicts a
+ * lost import edge can distort: `unused_files[]`, `unused_exports[]`, and the
+ * three dependency arrays. Sorted and deduplicated, absent from the wire when
+ * empty. The set is open in the same sense `workspace_diagnostics[].kind` is:
+ * treat an unrecognised value as "some caveat" rather than as an error.
  */
-export type ReachabilityConfidenceFlag = ("source-parse-degraded" | "incomplete-import-graph")
+export type ReachabilityCaveat = ("incomplete-file-analysis" | "incomplete-import-graph")
 /**
  * Where in package.json a dependency is listed.
  *
@@ -615,6 +617,14 @@ export type HotspotActionType = ("refactor-file" | "add-tests" | "low-bus-factor
  * an `unowned-hotspot` action.
  */
 export type HotspotActionHeuristic = "directory-deepest"
+/**
+ * Where the run's reference epoch came from.
+ *
+ * Churn recency weighting and ownership staleness are measured against one
+ * instant. `head_commit` and `environment` resolve to the same value on every
+ * run over the same commit; `wall_clock` does not.
+ */
+export type ClockSource = ("environment" | "head_commit" | "wall_clock")
 /**
  * Runtime coverage JSON contract version. This is scoped to the
  * `runtime_coverage` block and is independent of the top-level fallow
@@ -1141,7 +1151,7 @@ export type DoctorStatus = ("pass" | "warn" | "fail")
 /**
  * Stable identifier for a doctor check. Declaration order is output order.
  */
-export type DoctorCheckId = ("root" | "config" | "workspaces" | "plugins" | "type-aware" | "dependencies" | "cache")
+export type DoctorCheckId = ("root" | "config" | "workspaces" | "plugins" | "type-aware" | "dependencies" | "cache" | "graph-cache")
 /**
  * Stable category for a doctor check.
  */
@@ -2662,11 +2672,15 @@ _meta?: (Meta | null)
  * repeated on each top-level command's envelope so single-command
  * consumers see it without having to look at a separate top-level field.
  *
- * A diagnostic here is advisory and never withholds a finding. Where a
- * `source-parse-degraded` entry can distort a reachability verdict, the
- * affected `unused_files[]` and `unused_exports[]` entries additionally
- * carry the caveat themselves in their own optional `confidence[]` array,
- * so a reader who never scrolls back up to this list still sees it.
+ * A diagnostic here is advisory and never withholds a finding. Where an
+ * entry reports a source file this run never fully analyzed
+ * (`source-parse-degraded`, `source-read-failure`, `skipped-large-file`,
+ * `skipped-minified-file`, `skipped-source-dotdir`) it can distort a
+ * verdict, so the affected `unused_files[]`, `unused_exports[]`, and
+ * dependency entries additionally carry the caveat themselves in their own
+ * optional `reachability_caveats[]` array, and a reader who never scrolls
+ * back up to this list still sees it. `fallow fix` reads the same array
+ * and withholds the removal while a caveat stands.
  */
 workspace_diagnostics?: WorkspaceDiagnostic[]
 /**
@@ -2907,10 +2921,11 @@ introduced?: (AuditIntroduced | null)
 /**
  * Advisory caveats on the reachability verdict behind this finding.
  * Sorted, deduplicated, and omitted from the wire when empty, so a run
- * over a project that parses cleanly is byte-identical. Never gates the
- * finding or the `delete-file` action.
+ * that analyzed every discovered file is byte-identical. Never gates the
+ * finding or the `delete-file` action, though `fallow fix` does withhold
+ * the removal of a caveated finding as low confidence.
  */
-confidence?: ReachabilityConfidenceFlag[]
+reachability_caveats?: ReachabilityCaveat[]
 }
 /**
  * A code-change fix. `type` is one of the kebab-case identifiers in
@@ -3115,9 +3130,10 @@ introduced?: (AuditIntroduced | null)
 /**
  * Advisory caveats on the reachability verdict behind this finding.
  * Sorted, deduplicated, and omitted from the wire when empty. Never gates
- * the finding or the `remove-export` action.
+ * the finding or the `remove-export` action, though `fallow fix` does
+ * withhold the removal of a caveated export as low confidence.
  */
-confidence?: ReachabilityConfidenceFlag[]
+reachability_caveats?: ReachabilityCaveat[]
 }
 /**
  * Wire-shape envelope for an [`UnusedExport`] finding consumed under the
@@ -3251,6 +3267,15 @@ actions: IssueAction[]
  * the merge-base.
  */
 introduced?: (AuditIntroduced | null)
+/**
+ * Advisory caveats on the verdict behind this finding. A dependency is
+ * reported unused when NO module in the project imports its specifier,
+ * so a module that parsed with errors can hide the import that would
+ * have credited the package. Sorted, deduplicated, and omitted from the
+ * wire when empty. Never gates the finding, though `fallow fix`
+ * withholds the `remove-dependency` write while a caveat stands.
+ */
+reachability_caveats?: ReachabilityCaveat[]
 }
 /**
  * Wire-shape envelope for an [`UnusedDependency`] finding consumed under
@@ -3288,6 +3313,15 @@ actions: IssueAction[]
  * the merge-base.
  */
 introduced?: (AuditIntroduced | null)
+/**
+ * Advisory caveats on the verdict behind this finding. A dependency is
+ * reported unused when NO module in the project imports its specifier,
+ * so a module that parsed with errors can hide the import that would
+ * have credited the package. Sorted, deduplicated, and omitted from the
+ * wire when empty. Never gates the finding, though `fallow fix`
+ * withholds the `remove-dependency` write while a caveat stands.
+ */
+reachability_caveats?: ReachabilityCaveat[]
 }
 /**
  * Wire-shape envelope for an [`UnusedDependency`] finding consumed under
@@ -3325,6 +3359,15 @@ actions: IssueAction[]
  * the merge-base.
  */
 introduced?: (AuditIntroduced | null)
+/**
+ * Advisory caveats on the verdict behind this finding. A dependency is
+ * reported unused when NO module in the project imports its specifier,
+ * so a module that parsed with errors can hide the import that would
+ * have credited the package. Sorted, deduplicated, and omitted from the
+ * wire when empty. Never gates the finding, though `fallow fix`
+ * withholds the `remove-dependency` write while a caveat stands.
+ */
+reachability_caveats?: ReachabilityCaveat[]
 }
 /**
  * Wire-shape envelope for an [`UnusedMember`] finding consumed under the
@@ -5344,6 +5387,13 @@ duplicated_tokens: number
  */
 clone_groups: number
 /**
+ * Number of clone families the scoped corpus contains after filtering.
+ * `--top` truncates `clone_families[]` along with `clone_groups[]` but
+ * does not change this counter; compare it with `clone_families_shown` on
+ * the envelope to see how much of the corpus the array carries.
+ */
+clone_families: number
+/**
  * Total clone instances across the scoped corpus after filtering.
  * `--top` does not change it.
  */
@@ -6802,6 +6852,32 @@ files_excluded: number
  * truncated.
  */
 shallow_clone: boolean
+/**
+ * Provenance of the instant every churn and staleness number was measured
+ * against. Absent only when a caller assembled a summary without one.
+ */
+clock?: (ClockProvenance | null)
+}
+/**
+ * The instant a run measured commit ages and staleness against.
+ *
+ * A consumer reading `weighted_commits`, `stale_days`, or anything derived
+ * from them needs to know whether re-running over the same commit yields the
+ * same number. The human report says so in a warning that `--quiet` removes,
+ * which left the JSON consumer, who cannot see stderr at all, with no way to
+ * find out.
+ */
+export interface ClockProvenance {
+source: ClockSource
+/**
+ * The reference epoch itself, in unix seconds. Pass it back as
+ * `FALLOW_CLOCK_EPOCH` to reproduce this run's churn-derived numbers.
+ */
+epoch_secs: number
+/**
+ * False only for `wall_clock`, where the numbers drift between runs.
+ */
+reproducible: boolean
 }
 /**
  * Runtime coverage findings merged into the health report or emitted by
@@ -9871,6 +9947,23 @@ candidates: ErrorTraceCandidate[]
  */
 candidates_omitted: number
 /**
+ * Set when this frame's own line disagrees with the definition its
+ * identifier matched: some OTHER definition in the same file is declared
+ * closer above the line the runtime reported.
+ *
+ * The look-up matches on the identifier alone, so a `resolved` frame is
+ * resolved however far its line sits from the match. That is honest about
+ * the question asked and silent about a question a reader would ask next,
+ * which is why the disagreement is published instead of left to be
+ * noticed. The frame is NOT reclassified: the graph does know a
+ * definition under this identifier, and only the caller can say whether
+ * the runtime ran that one or a same-named definition elsewhere.
+ * `reason` names the declaration that sits closer. Only set on a
+ * `resolved` frame that carried a line and matched a definition whose own
+ * line could be read.
+ */
+line_mismatch?: boolean
+/**
  * Human-readable statement of what happened to this frame.
  */
 reason: string
@@ -10755,6 +10848,18 @@ clone_groups_shown: number
  * always holds and `stats` keeps describing the whole measured corpus.
  */
 clone_groups_omitted: number
+/**
+ * Number of clone families carried in `clone_families[]`.
+ */
+clone_families_shown: number
+/**
+ * Number of scoped-corpus clone families withheld from `clone_families[]`
+ * by a presentation cap such as `--top`, which rebuilds the families from
+ * the groups that survived the cap. `0` on an untruncated run, so
+ * `clone_families_shown + clone_families_omitted == stats.clone_families`
+ * always holds and `stats` keeps describing the whole measured corpus.
+ */
+clone_families_omitted: number
 /**
  * Grouping mode when `--group-by` was passed.
  */
@@ -12567,6 +12672,24 @@ feature_flags: FeatureFlagFinding[]
  * Number of entries in `feature_flags`.
  */
 total_flags: number
+/**
+ * Workspace-discovery and source-discovery diagnostics for the run. See
+ * `CheckOutput::workspace_diagnostics` for the full contract.
+ *
+ * A flags run walks and parses the project like every other analysis, so
+ * it records the same discovery kinds: a `skipped-large-file`,
+ * `skipped-minified-file`, or `source-read-failure` file was never
+ * scanned for flags, and a `source-parse-degraded` file was scanned from
+ * a partial module. Each is a reason a flag can be missing from
+ * `feature_flags[]`, which is exactly what a consumer reading a
+ * zero-result run needs to know. The analysis-stage kinds appear here
+ * too: the scan correlates flags with dead exports, so it runs the
+ * dead-code analyze pass that records them.
+ *
+ * Omitted when empty, so a project with no discovery noise sees no
+ * change.
+ */
+workspace_diagnostics?: WorkspaceDiagnostic[]
 /**
  * `_meta` block; see [`FeatureFlagsMeta`].
  */

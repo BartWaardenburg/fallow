@@ -934,6 +934,45 @@ fn fix_summary_single_fix_uses_singular_noun() {
     );
 }
 
+/// A withheld `remove_dependency` entry keeps its `type` so a caller can see
+/// which finding was declined. The CI summary must not read that as a write
+/// that happened: listing it under "Dependencies removed" would tell a
+/// reviewer the package left `package.json` when it is still there.
+#[test]
+fn fix_summary_does_not_report_a_withheld_dependency_as_removed() {
+    let env = json!({
+        "dry_run": false,
+        "total_fixed": 0,
+        "skipped": 0,
+        "skipped_content_changed": 0,
+        "skipped_mixed_line_endings": 0,
+        "skipped_low_confidence_exports": 0,
+        "skipped_low_confidence_dependencies": 1,
+        "fixes": [
+            {
+                "type": "remove_dependency",
+                "package": "lodash",
+                "location": "dependencies",
+                "file": "package.json",
+                "applied": false,
+                "skipped": true,
+                "skip_reason": "low_confidence_incomplete_analysis",
+                "reachability_caveats": ["incomplete-import-graph"]
+            }
+        ]
+    });
+    let rendered = fallow_cli::report::github_summary::render_fix_summary(&env);
+
+    assert!(
+        !rendered.contains("`lodash`"),
+        "a withheld package must not be listed as removed: {rendered}"
+    );
+    assert!(
+        rendered.contains("kept 1 declared package(s)"),
+        "the withholding has to be stated instead: {rendered}"
+    );
+}
+
 /// The bundled action no-ops annotations for the fix command, so the native
 /// `EnvelopeKind::Fix` annotation renderer must emit nothing.
 #[test]

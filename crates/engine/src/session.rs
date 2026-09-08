@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use fallow_config::{DuplicatesConfig, ResolvedConfig, WorkspaceInfo};
+use fallow_types::cache_rejection::CacheRejection;
 use fallow_types::discover::DiscoveredFile;
 use fallow_types::extract::ModuleInfo;
 #[cfg(test)]
@@ -1084,7 +1085,8 @@ fn run_engine_owned_dead_code_pipeline(
     stopped("dead-code entry-point discovery")?;
     let entry_points = core_backend::discover_dead_code_entry_points(&prelude);
     stopped("import resolution and graph construction")?;
-    let (resolved, graph) = resolve_or_build_dead_code_graph(&prelude, &entry_points, &modules);
+    let (resolved, graph, graph_cache_rejection) =
+        resolve_or_build_dead_code_graph(&prelude, &entry_points, &modules);
     stopped("the dead-code detectors")?;
 
     let mut detector = core_backend::run_dead_code_detectors(
@@ -1114,6 +1116,7 @@ fn run_engine_owned_dead_code_pipeline(
             detector: &detector,
             file_count: discovery.files().len(),
             workspace_count: discovery.workspaces().len(),
+            graph_cache_rejection,
         });
     let script_used_packages = prelude.script_used_packages();
     prelude.finish();
@@ -1130,6 +1133,13 @@ fn run_engine_owned_dead_code_pipeline(
     })
 }
 
+/// Reuse the persisted module graph, or rebuild it and carry the reason the
+/// persisted one was refused.
+///
+/// The reason is the third element rather than a discarded `Option`: a warm run
+/// that paid for a multi-megabyte decode and reused none of it is the case the
+/// perf table exists to explain, and every engine-backed command reaches the
+/// pipeline through here.
 fn resolve_or_build_dead_code_graph(
     prelude: &core_backend::DeadCodeBackendPrelude,
     entry_points: &core_backend::DeadCodeEntryPoints,
@@ -1137,17 +1147,18 @@ fn resolve_or_build_dead_code_graph(
 ) -> (
     core_backend::DeadCodeResolvedModules,
     core_backend::DeadCodeGraphRun,
+    Option<CacheRejection>,
 ) {
-    if let Some((resolved, graph)) =
-        core_backend::try_load_dead_code_graph_cache(prelude, entry_points, modules)
-    {
-        return (resolved, graph);
-    }
+    let rejection =
+        match core_backend::try_load_dead_code_graph_cache(prelude, entry_points, modules) {
+            Ok((resolved, graph)) => return (resolved, graph, None),
+            Err(rejection) => rejection,
+        };
 
     let resolved = core_backend::resolve_dead_code_imports(prelude, modules);
     let graph =
         core_backend::build_dead_code_graph(prelude, &resolved.project, entry_points, modules);
-    (resolved, graph)
+    (resolved, graph, rejection)
 }
 
 fn collect_file_hashes(
@@ -1229,6 +1240,47 @@ mod tests {
             .expect_err("a cancelled session must not return results");
         assert!(error.is_cancelled(), "unexpected error: {error}");
         assert!(error.message().contains("cancelled"));
+    }
+
+    /// The engine pipeline is what every CLI command runs, and it reported no
+    /// graph-cache reason at all: the loader produced one, the boundary threw
+    /// it away, and the profile hardcoded `None`. A warm run that decoded a
+    /// multi-megabyte graph and then rebuilt from scratch looked exactly like a
+    /// first run, so the row that explains it could never print.
+    #[test]
+    fn a_refused_graph_cache_names_its_reason_in_the_engine_timings() {
+        let project = tempfile::tempdir().expect("project");
+        let root = project.path();
+        std::fs::create_dir(root.join("src")).expect("create source directory");
+        std::fs::write(root.join("src/index.ts"), "export const entry = 1;\n").expect("entry");
+
+        let cold = AnalysisSession::load_default(root)
+            .analyze_dead_code_with_artifacts(false, true)
+            .expect("cold run analyzes");
+        assert_eq!(
+            cold.timings
+                .expect("cold timings retained")
+                .graph_cache_rejection,
+            Some(CacheRejection::Absent),
+            "a first run has no persisted graph to refuse"
+        );
+
+        std::fs::write(
+            root.join("src/index.ts"),
+            "export const entry = 1;\nexport const added = 2;\n",
+        )
+        .expect("edit the entry");
+
+        let warm = AnalysisSession::load_default(root)
+            .analyze_dead_code_with_artifacts(false, true)
+            .expect("warm run analyzes");
+        assert_eq!(
+            warm.timings
+                .expect("warm timings retained")
+                .graph_cache_rejection,
+            Some(CacheRejection::FingerprintChanged),
+            "the decoded graph was refused because a file changed, and the run must say so"
+        );
     }
 
     /// A session that is not given a token can never be cancelled, so every

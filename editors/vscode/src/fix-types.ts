@@ -60,12 +60,24 @@ export interface FixAction {
    * - `low_confidence_unresolved_imports` (#602: the file has an
    *   unresolved import, so its usage graph is incomplete; export removal
    *   withheld).
+   * - `low_confidence_incomplete_analysis` (the finding carries
+   *   `reachability_caveats`: a source file was skipped, unreadable, or
+   *   did not parse cleanly, so the import that would have credited the
+   *   export or the package may never have been seen. Both the export
+   *   removal and the `remove-dependency` write are withheld).
    *
-   * The two `low_confidence_*` reasons are INTENTIONAL skips: they do NOT
-   * cause a non-zero exit code (unlike `content_changed` /
+   * The three `low_confidence_*` reasons are INTENTIONAL skips: they do
+   * NOT cause a non-zero exit code (unlike `content_changed` /
    * `mixed_line_endings`).
    */
   readonly skip_reason?: string;
+  /**
+   * Reachability caveat tokens copied from the finding, present on
+   * `skip_reason: "low_confidence_incomplete_analysis"` entries so a
+   * consumer gates on the marker instead of parsing the reason string.
+   * Same open token set as the dead-code `reachability_caveats` array.
+   */
+  readonly reachability_caveats?: ReadonlyArray<string>;
   /**
    * Workspace root path emitted on `skip_reason: "monorepo_subpackage"`
    * entries so consumers can point the user at `fallow init` at the
@@ -105,8 +117,19 @@ export interface FallowFixResult {
    * an unresolved import. Always present; defaults to 0. Unlike the two
    * counters above, a non-zero value does NOT change the exit code (it
    * is an intentional, conservative skip). The exports stay reported by
-   * `fallow check`; the per-entry `skip_reason` distinguishes the two
-   * `low_confidence_*` causes.
+   * `fallow check`; the per-entry `skip_reason` distinguishes the three
+   * `low_confidence_*` causes, the third being a finding whose verdict
+   * rests on a source file the run did not fully analyze.
    */
   readonly skipped_low_confidence_exports?: number;
+  /**
+   * Count of declared packages whose `remove-dependency` write was
+   * withheld because the finding carried `reachability_caveats`: a source
+   * file was skipped, unreadable, or did not parse cleanly, so the import
+   * that would have credited the package may never have been seen. Always present; defaults to 0.
+   * Counted apart from `skipped_low_confidence_exports` so neither name
+   * lies about what it counts, and likewise does NOT change the exit
+   * code.
+   */
+  readonly skipped_low_confidence_dependencies?: number;
 }

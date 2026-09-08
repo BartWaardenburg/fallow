@@ -73,7 +73,8 @@ fn all_tools_registered() {
     assert!(names.contains(&"decision_surface".to_string()));
     assert!(names.contains(&"recommend".to_string()));
     assert!(names.contains(&"trace_import_path".to_string()));
-    assert_eq!(tools.len(), 36);
+    assert!(names.contains(&"trace_error".to_string()));
+    assert_eq!(tools.len(), 37);
 }
 
 #[test]
@@ -98,6 +99,7 @@ fn read_only_tools_have_annotations() {
         "trace_file",
         "impact_closure",
         "trace_dependency",
+        "trace_error",
         "trace_clone",
         "check_health",
         "audit",

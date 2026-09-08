@@ -10,7 +10,7 @@
 use std::path::Path;
 
 use fallow_config::{WorkspaceDiagnostic, WorkspaceDiagnosticKind};
-use fallow_types::output_dead_code::ReachabilityConfidenceFlag;
+use fallow_types::output_dead_code::ReachabilityCaveat;
 
 use super::common::create_config_with_cache;
 
@@ -122,12 +122,12 @@ fn a_project_that_parses_cleanly_reports_no_degradation() {
         results
             .unused_files
             .iter()
-            .all(|issue| issue.confidence.is_empty())
+            .all(|issue| issue.reachability_caveats.is_empty())
             && results
                 .unused_exports
                 .iter()
-                .all(|issue| issue.confidence.is_empty()),
-        "a project that parses cleanly must carry no confidence marker anywhere"
+                .all(|issue| issue.reachability_caveats.is_empty()),
+        "a project that parses cleanly must carry no caveat marker anywhere"
     );
 }
 
@@ -149,8 +149,8 @@ fn a_finding_a_degraded_parse_can_distort_carries_the_caveat() {
         .find(|issue| issue.file.path.ends_with("src/helper.ts"))
         .expect("the file the broken entry imports is still reported unused");
     assert_eq!(
-        helper.confidence,
-        vec![ReachabilityConfidenceFlag::IncompleteImportGraph],
+        helper.reachability_caveats,
+        vec![ReachabilityCaveat::IncompleteImportGraph],
         "the entry file that failed to parse is reachable, so the verdict on the file it \
          imports rests on an import graph fallow knows is incomplete"
     );
@@ -160,5 +160,48 @@ fn a_finding_a_degraded_parse_can_distort_carries_the_caveat() {
         helper.actions.len(),
         2,
         "the marker must not withhold or trim the finding's actions"
+    );
+}
+
+/// A dependency is reported unused when NO module imports its specifier, and
+/// fallow credits an import from an unreachable module too. So the reachability
+/// narrowing that keeps the caveat off a clean `unused_files[]` entry must not
+/// be applied here: any degraded parse can hide the import that would have kept
+/// the package. `remove-dependency` is the most destructive write `fallow fix`
+/// has, so this array has to carry the caveat as well.
+#[test]
+fn a_dependency_only_the_broken_file_imports_carries_the_caveat() {
+    let temp = tempfile::tempdir().expect("create temp dir");
+    let root = temp.path().join("project");
+    std::fs::create_dir_all(root.join("src")).expect("create project src");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{ "name": "degraded-dep", "version": "1.0.0", "main": "src/index.ts", "dependencies": { "lodash": "^4.17.21" } }"#,
+    )
+    .expect("write manifest");
+    std::fs::write(
+        root.join("src/index.ts"),
+        "const broken = = 1;\nimport { chunk } from \"lodash\";\n\nexport const run = (): void => {\n  chunk([1], 1);\n};\n",
+    )
+    .expect("write broken entry module");
+    let config = create_config_with_cache(root, temp.path().join("cache"));
+
+    let results = fallow_core::analyze(&config).expect("analysis succeeds on a broken source");
+
+    let lodash = results
+        .unused_dependencies
+        .iter()
+        .find(|issue| issue.dep.package_name == "lodash")
+        .expect("the import the parser never reached leaves the package looking unused");
+    assert_eq!(
+        lodash.reachability_caveats,
+        vec![ReachabilityCaveat::IncompleteImportGraph],
+        "the verdict rests on a specifier list fallow knows is incomplete"
+    );
+    assert!(
+        !lodash
+            .reachability_caveats
+            .contains(&ReachabilityCaveat::IncompleteFileAnalysis),
+        "the file a dependency finding names is a package.json, never a parsed module"
     );
 }

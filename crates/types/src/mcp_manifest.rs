@@ -539,6 +539,17 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         code_mode_alias: None,
     },
     McpToolInfo {
+        name: "trace_error",
+        kind: "trace",
+        description: "Resolve a runtime stack trace's frames against the project graph",
+        cli_command: Some("fallow trace-error - --format json --quiet"),
+        key_params: &["trace"],
+        license: McpToolLicense::Free,
+        license_note: None,
+        read_only: true,
+        code_mode_alias: None,
+    },
+    McpToolInfo {
         name: "impact_closure",
         kind: "trace",
         description: "Trace the transitive affected-but-not-in-diff set and coordination gaps for one file",
@@ -932,6 +943,15 @@ pub const CAPABILITY_PARITY: &[CapabilityParityRow] = &[
         mcp_tool: Some("trace_import_path"),
         omission_note: Some(
             "Shortest import path between two modules. No napi export; the trace family is CLI, MCP, and api only.",
+        ),
+    },
+    CapabilityParityRow {
+        capability: "stack-trace frame resolution",
+        api_runner: Some("run_trace_error"),
+        napi_export: None,
+        mcp_tool: Some("trace_error"),
+        omission_note: Some(
+            "Runtime stack-trace frame resolution. No napi export; the trace family is CLI, MCP, and api only.",
         ),
     },
     CapabilityParityRow {

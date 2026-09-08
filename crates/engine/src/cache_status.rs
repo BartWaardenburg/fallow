@@ -1,9 +1,15 @@
-//! Read-only inspection of the persisted extraction cache.
+//! Read-only inspection of the persisted caches.
 //!
 //! Exists for `fallow doctor`, which diagnoses project readiness without
 //! running an analysis. A refused cache is invisible in every other read-only
 //! surface: the run that pays for it is the one that reports it, and doctor
 //! never starts one.
+//!
+//! Both persisted caches are inspected. A warm run reuses the extraction blob
+//! and the module graph independently, and the graph blob is the larger of the
+//! two on a real project, so reporting only the extraction cache told a user
+//! their caches were healthy while the expensive half was being discarded on
+//! every run.
 
 use std::path::Path;
 
@@ -49,8 +55,42 @@ pub fn inspect_parse_cache(config: &ResolvedConfig) -> ParseCacheStatus {
     }
 }
 
+/// On-disk state of the persisted module graph for one project.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GraphCacheStatus {
+    /// Why the persisted graph could not be loaded, or `None` when it decodes
+    /// into the current shape.
+    ///
+    /// Loading is all this can answer. Whether a run would REUSE the graph also
+    /// depends on the resolver options, entry points, and per-file
+    /// fingerprints, and comparing those means running discovery and
+    /// extraction, which doctor deliberately does not do.
+    pub rejection: Option<CacheRejection>,
+    /// Size of `graph-cache.bin` on disk, when the file exists.
+    pub size_bytes: Option<u64>,
+}
+
+/// Inspect the persisted module graph the way an analysis run would load it.
+///
+/// Read-only: no analysis, no writes, no network. `config.no_cache` is ignored
+/// for the same reason as in [`inspect_parse_cache`]: the question is what
+/// state the cache is in, not whether this invocation would consult it.
+#[must_use]
+pub fn inspect_graph_cache(config: &ResolvedConfig) -> GraphCacheStatus {
+    let size_bytes = cache_entry_size(&config.cache_dir, fallow_graph::cache::GRAPH_CACHE_FILE);
+    let rejection = fallow_graph::cache::GraphCacheStore::load(&config.cache_dir).err();
+    GraphCacheStatus {
+        rejection,
+        size_bytes,
+    }
+}
+
 fn cache_file_size(cache_dir: &Path) -> Option<u64> {
-    std::fs::metadata(cache_dir.join("cache.bin"))
+    cache_entry_size(cache_dir, "cache.bin")
+}
+
+fn cache_entry_size(cache_dir: &Path, file_name: &str) -> Option<u64> {
+    std::fs::metadata(cache_dir.join(file_name))
         .ok()
         .map(|metadata| metadata.len())
 }
@@ -104,16 +144,45 @@ mod tests {
         assert!(status.size_bytes.is_some_and(|bytes| bytes > 0));
     }
 
+    /// A blob this binary cannot frame was written by a build with a different
+    /// cache format. Reporting that as a decode failure told upgrading users
+    /// their cache was corrupt.
     #[test]
-    fn an_undecodable_cache_reports_its_reason_and_size() {
+    fn a_cache_from_another_build_reports_a_format_change_with_its_size() {
         let root = tempfile::tempdir().expect("temp root");
         let config = config_for(root.path(), true);
         std::fs::create_dir_all(&config.cache_dir).expect("cache dir");
-        std::fs::write(config.cache_dir.join("cache.bin"), b"garbage").expect("corrupt cache");
+        std::fs::write(config.cache_dir.join("cache.bin"), b"garbage").expect("foreign cache");
 
         let status = inspect_parse_cache(&config);
 
-        assert_eq!(status.rejection, Some(CacheRejection::Undecodable));
+        assert_eq!(status.rejection, Some(CacheRejection::VersionMismatch));
+        assert_eq!(status.size_bytes, Some(7));
+    }
+
+    #[test]
+    fn an_absent_graph_cache_reports_absent_with_no_size() {
+        let root = tempfile::tempdir().expect("temp root");
+        let status = inspect_graph_cache(&config_for(root.path(), true));
+
+        assert_eq!(status.rejection, Some(CacheRejection::Absent));
+        assert_eq!(status.size_bytes, None);
+    }
+
+    #[test]
+    fn a_graph_cache_from_another_build_reports_a_format_change_with_its_size() {
+        let root = tempfile::tempdir().expect("temp root");
+        let config = config_for(root.path(), true);
+        std::fs::create_dir_all(&config.cache_dir).expect("cache dir");
+        std::fs::write(
+            config.cache_dir.join(fallow_graph::cache::GRAPH_CACHE_FILE),
+            b"garbage",
+        )
+        .expect("foreign graph cache");
+
+        let status = inspect_graph_cache(&config);
+
+        assert_eq!(status.rejection, Some(CacheRejection::VersionMismatch));
         assert_eq!(status.size_bytes, Some(7));
     }
 }

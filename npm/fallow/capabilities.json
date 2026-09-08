@@ -1351,7 +1351,7 @@
           "name": "--top",
           "type": "string",
           "required": false,
-          "description": "Show only the N highest-ranked clone groups. Ranking combines clone size, occurrence count, and capped directory or line spread. `stats` keeps describing the whole corpus; `clone_groups_shown` and `clone_groups_omitted` report the split"
+          "description": "Show only the N highest-ranked clone groups. Ranking combines clone size, occurrence count, and capped directory or line spread. `clone_families[]` is rebuilt from the groups that survive, so it narrows too. `stats` keeps describing the whole corpus; `clone_groups_shown` / `clone_groups_omitted` and `clone_families_shown` / `clone_families_omitted` report the split. Refused with exit code 2 alongside `--group-by`: grouped output reports per-bucket stats over every clone group in the bucket, which a global top-N truncation would silently contradict"
         },
         {
           "name": "--no-fragments",
@@ -7030,6 +7030,19 @@
         "key_params": [
           "from",
           "to"
+        ],
+        "license": "free",
+        "license_note": null,
+        "read_only": true,
+        "code_mode_alias": null
+      },
+      {
+        "name": "trace_error",
+        "kind": "trace",
+        "description": "Resolve a runtime stack trace's frames against the project graph",
+        "cli_command": "fallow trace-error - --format json --quiet",
+        "key_params": [
+          "trace"
         ],
         "license": "free",
         "license_note": null,

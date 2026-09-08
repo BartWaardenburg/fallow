@@ -100,11 +100,14 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
     "total_tokens": 25000,
     "duplicated_tokens": 86,
     "clone_groups": 2,
+    "clone_families": 0,
     "clone_instances": 5,
     "duplication_percentage": 0.7
   },
   "clone_groups_shown": 2,
   "clone_groups_omitted": 0,
+  "clone_families_shown": 0,
+  "clone_families_omitted": 0,
   "grouped_by": "directory",
   "total_issues": 2,
   "next_steps": [
@@ -125,6 +128,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
         "total_tokens": 25000,
         "duplicated_tokens": 18,
         "clone_groups": 1,
+        "clone_families": 0,
         "clone_instances": 2,
         "duplication_percentage": 0.32
       },
@@ -182,6 +186,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
         "total_tokens": 25000,
         "duplicated_tokens": 50,
         "clone_groups": 1,
+        "clone_families": 0,
         "clone_instances": 3,
         "duplication_percentage": 0.66
       },

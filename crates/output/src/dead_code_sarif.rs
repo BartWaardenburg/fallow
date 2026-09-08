@@ -166,6 +166,18 @@ fn sarif_member_fields(
     }
 }
 
+/// Append the degraded-parse caveat to a SARIF result message, so a reviewer
+/// reading an annotation in CI sees the same qualifier the JSON envelope and
+/// the human report carry. Byte-identical when the finding has no caveat.
+fn with_caveats(mut fields: SarifFields, caveats: &[ReachabilityCaveat]) -> SarifFields {
+    if let Some(labels) = caveat_labels(caveats) {
+        fields.message.push_str(" (caveat: ");
+        fields.message.push_str(&labels);
+        fields.message.push(')');
+    }
+    fields
+}
+
 fn sarif_unused_file_fields(file: &UnusedFile, root: &Path, level: &'static str) -> SarifFields {
     SarifFields {
         rule_id: "fallow/unused-file",
@@ -1101,10 +1113,13 @@ fn push_primary_dead_code_sarif_results(
     } = *ctx;
 
     push_sarif_results(sarif_results, &results.unused_files, snippets, |finding| {
-        sarif_unused_file_fields(
-            &finding.file,
-            root,
-            severity_to_sarif_level(rules.unused_files),
+        with_caveats(
+            sarif_unused_file_fields(
+                &finding.file,
+                root,
+                severity_to_sarif_level(rules.unused_files),
+            ),
+            &finding.reachability_caveats,
         )
     });
     push_sarif_results(
@@ -1112,13 +1127,16 @@ fn push_primary_dead_code_sarif_results(
         &results.unused_exports,
         snippets,
         |finding| {
-            sarif_export_fields(
-                &finding.export,
-                root,
-                "fallow/unused-export",
-                severity_to_sarif_level(rules.unused_exports),
-                "Export",
-                "Re-export",
+            with_caveats(
+                sarif_export_fields(
+                    &finding.export,
+                    root,
+                    "fallow/unused-export",
+                    severity_to_sarif_level(rules.unused_exports),
+                    "Export",
+                    "Re-export",
+                ),
+                &finding.reachability_caveats,
             )
         },
     );
@@ -1179,12 +1197,15 @@ fn push_unused_dependency_sarif_results(
     } = *ctx;
 
     push_sarif_results(sarif_results, &results.unused_dependencies, snippets, |d| {
-        sarif_dep_fields(
-            &d.dep,
-            root,
-            "fallow/unused-dependency",
-            severity_to_sarif_level(rules.unused_dependencies),
-            "dependencies",
+        with_caveats(
+            sarif_dep_fields(
+                &d.dep,
+                root,
+                "fallow/unused-dependency",
+                severity_to_sarif_level(rules.unused_dependencies),
+                "dependencies",
+            ),
+            &d.reachability_caveats,
         )
     });
     push_sarif_results(
@@ -1192,12 +1213,15 @@ fn push_unused_dependency_sarif_results(
         &results.unused_dev_dependencies,
         snippets,
         |d| {
-            sarif_dep_fields(
-                &d.dep,
-                root,
-                "fallow/unused-dev-dependency",
-                severity_to_sarif_level(rules.unused_dev_dependencies),
-                "devDependencies",
+            with_caveats(
+                sarif_dep_fields(
+                    &d.dep,
+                    root,
+                    "fallow/unused-dev-dependency",
+                    severity_to_sarif_level(rules.unused_dev_dependencies),
+                    "devDependencies",
+                ),
+                &d.reachability_caveats,
             )
         },
     );
@@ -1206,12 +1230,15 @@ fn push_unused_dependency_sarif_results(
         &results.unused_optional_dependencies,
         snippets,
         |d| {
-            sarif_dep_fields(
-                &d.dep,
-                root,
-                "fallow/unused-optional-dependency",
-                severity_to_sarif_level(rules.unused_optional_dependencies),
-                "optionalDependencies",
+            with_caveats(
+                sarif_dep_fields(
+                    &d.dep,
+                    root,
+                    "fallow/unused-optional-dependency",
+                    severity_to_sarif_level(rules.unused_optional_dependencies),
+                    "optionalDependencies",
+                ),
+                &d.reachability_caveats,
             )
         },
     );
@@ -1872,6 +1899,55 @@ mod tests {
             "shortDescription": { "text": description },
             "defaultConfiguration": { "level": level }
         })
+    }
+
+    /// A SARIF consumer reads the message text, not the JSON envelope, so the
+    /// degraded-parse caveat has to travel in the message. A clean finding
+    /// keeps the previous text byte-for-byte.
+    #[test]
+    fn sarif_messages_name_the_degraded_parse_caveat() {
+        let mut results = AnalysisResults::default();
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: Path::new("/p/src/clean.ts").to_path_buf(),
+            }));
+        let mut flagged = UnusedFileFinding::with_actions(UnusedFile {
+            path: Path::new("/p/src/orphan.ts").to_path_buf(),
+        });
+        flagged.reachability_caveats = vec![ReachabilityCaveat::IncompleteImportGraph];
+        results.unused_files.push(flagged);
+
+        let sarif = build_dead_code_sarif(
+            &results,
+            Path::new("/p"),
+            &RulesConfig::default(),
+            &test_rule_builder,
+        );
+        let messages: Vec<String> = sarif
+            .pointer("/runs/0/results")
+            .and_then(serde_json::Value::as_array)
+            .expect("SARIF results")
+            .iter()
+            .filter_map(|entry| {
+                entry
+                    .pointer("/message/text")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_owned)
+            })
+            .collect();
+
+        assert!(
+            messages.contains(&"File is not reachable from any entry point".to_owned()),
+            "a clean finding keeps its exact message: {messages:?}"
+        );
+        assert!(
+            messages.contains(
+                &"File is not reachable from any entry point (caveat: incomplete import graph)"
+                    .to_owned()
+            ),
+            "a caveated finding names it in the message: {messages:?}"
+        );
     }
 
     #[test]

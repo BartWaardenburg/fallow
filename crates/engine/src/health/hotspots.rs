@@ -3,7 +3,7 @@
     reason = "human stderr notes (no-git, bot patterns, CODEOWNERS) preserved verbatim from the CLI health path"
 )]
 
-use fallow_output::{FileHealthScore, HotspotEntry, HotspotSummary};
+use fallow_output::{ClockProvenance, ClockSource, FileHealthScore, HotspotEntry, HotspotSummary};
 
 use super::HealthOptions;
 use super::ownership::{OwnershipContext, compile_bot_globs, compute_ownership};
@@ -379,6 +379,7 @@ pub(super) fn compute_hotspots(
         files_analyzed,
         files_excluded,
         shallow_clone,
+        clock: Some(clock_provenance(churn_result.clock)),
     };
 
     if let Some(top) = opts.top {
@@ -386,6 +387,23 @@ pub(super) fn compute_hotspots(
     }
 
     (hotspot_entries, Some(summary))
+}
+
+/// Describe the run clock on the wire, so a JSON consumer can tell a
+/// reproducible churn number from a drifting one.
+///
+/// [`warn_unpinned_clock`] says the same thing on stderr, where `--quiet`
+/// removes it and a machine consumer never sees it at all.
+fn clock_provenance(clock: crate::clock::AnalysisClock) -> ClockProvenance {
+    ClockProvenance {
+        source: match clock.source() {
+            crate::clock::AnalysisClockSource::Environment => ClockSource::Environment,
+            crate::clock::AnalysisClockSource::HeadCommit => ClockSource::HeadCommit,
+            crate::clock::AnalysisClockSource::WallClock => ClockSource::WallClock,
+        },
+        epoch_secs: clock.epoch_secs(),
+        reproducible: clock.is_reproducible(),
+    }
 }
 
 /// Warn when churn numbers were measured against the wall clock.

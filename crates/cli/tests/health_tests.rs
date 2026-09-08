@@ -9,7 +9,7 @@ mod common;
 
 use common::{
     fixture_path, parse_json, redact_all, run_fallow, run_fallow_combined, run_fallow_in_root,
-    run_fallow_raw,
+    run_fallow_raw, run_fallow_raw_with_env,
 };
 use std::fmt::Write as _;
 use std::path::Path;
@@ -4521,6 +4521,94 @@ fn health_min_score_gate_fails_below_threshold() {
         "fallow health --score --min-score 100 should fail the gate: stdout={}\nstderr={}",
         output.stdout, output.stderr
     );
+}
+
+/// Churn recency weighting and ownership staleness are measured against one
+/// instant, and whether that instant is reproducible decides whether the
+/// numbers mean anything across two runs. The human report says so in a warning
+/// that `--quiet` removes; a JSON consumer never sees stderr at all, so the
+/// answer has to be on the wire.
+///
+/// Imported churn on a directory with no git history is the case the warning
+/// exists for: nothing supplies a commit timestamp, so the run falls back to
+/// the wall clock and says so.
+#[test]
+fn health_hotspot_summary_reports_the_clock_the_numbers_were_measured_against() {
+    let dir = tempdir().unwrap();
+    write_file(
+        &dir.path().join("package.json"),
+        r#"{"name":"clock-provenance","type":"module"}"#,
+    );
+    write_file(
+        &dir.path().join("src/hot.ts"),
+        r#"export function classify(n: number, mode: string): string {
+  let out = "";
+  if (mode === "a") { if (n > 10) out = "big"; else if (n > 5) out = "mid"; else out = "small"; }
+  else if (mode === "b") { for (let i = 0; i < n; i++) { if (i % 2 === 0) out += "x"; else out += "y"; } }
+  else { out = n > 0 ? (n > 100 ? "huge" : "pos") : "neg"; }
+  return out;
+}
+"#,
+    );
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let day = 86_400;
+    let churn = serde_json::json!({
+        "schema": "fallow-churn/v1",
+        "events": [
+            { "path": "src/hot.ts", "timestamp": now - day, "author": "alice@corp", "added": 40, "deleted": 12 },
+            { "path": "src/hot.ts", "timestamp": now - 2 * day, "author": "alice@corp", "added": 20, "deleted": 5 },
+            { "path": "src/hot.ts", "timestamp": now - 4 * day, "author": "bob@corp", "added": 10, "deleted": 3 }
+        ]
+    });
+    write_file(
+        &dir.path().join("churn.json"),
+        &serde_json::to_string(&churn).unwrap(),
+    );
+
+    let root = dir.path().to_str().expect("temp path is UTF-8");
+    let args = [
+        "--root",
+        root,
+        "health",
+        "--hotspots",
+        "--churn-file",
+        "churn.json",
+        "--format",
+        "json",
+        "--quiet",
+    ];
+
+    let drifting = run_fallow_raw_with_env(&args, &[("FALLOW_CLOCK_EPOCH", "")]);
+    assert_eq!(drifting.code, 0, "stderr: {}", drifting.stderr);
+    let clock = parse_json(&drifting)["hotspot_summary"]["clock"].clone();
+    assert_eq!(
+        clock["source"].as_str(),
+        Some("wall_clock"),
+        "no commit timestamp is reachable here: {clock}"
+    );
+    assert_eq!(
+        clock["reproducible"].as_bool(),
+        Some(false),
+        "a wall-clock run drifts between runs: {clock}"
+    );
+    assert!(
+        clock["epoch_secs"].as_u64().unwrap_or(0) > 0,
+        "the epoch itself is reported so a consumer can pin it: {clock}"
+    );
+
+    let pinned = run_fallow_raw_with_env(&args, &[("FALLOW_CLOCK_EPOCH", "1788782400")]);
+    assert_eq!(pinned.code, 0, "stderr: {}", pinned.stderr);
+    let clock = parse_json(&pinned)["hotspot_summary"]["clock"].clone();
+    assert_eq!(
+        clock["source"].as_str(),
+        Some("environment"),
+        "the pinned epoch is reported as such: {clock}"
+    );
+    assert_eq!(clock["epoch_secs"].as_u64(), Some(1_788_782_400));
+    assert_eq!(clock["reproducible"].as_bool(), Some(true));
 }
 
 #[test]

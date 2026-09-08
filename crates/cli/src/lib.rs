@@ -1200,8 +1200,13 @@ enum Command {
 
         /// Show only the N highest-ranked clone groups. Ranking combines clone
         /// size, occurrence count, and capped directory or line spread.
-        /// `stats` keeps describing the whole corpus; `clone_groups_shown` and
-        /// `clone_groups_omitted` report the split.
+        /// `clone_families[]` is rebuilt from the groups that survive, so it
+        /// narrows too. `stats` keeps describing the whole corpus;
+        /// `clone_groups_shown` / `clone_groups_omitted` and
+        /// `clone_families_shown` / `clone_families_omitted` report the split.
+        /// Refused with exit code 2 alongside `--group-by`: grouped output
+        /// reports per-bucket stats over every clone group in the bucket, which
+        /// a global top-N truncation would silently contradict.
         #[arg(long)]
         top: Option<usize>,
 

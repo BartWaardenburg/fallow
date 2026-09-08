@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use fallow_config::{CatalogPrecedingCommentPolicy, OutputFormat};
+use fallow_types::output_dead_code::ReachabilityCaveat;
 
 mod catalog;
 mod class_members;
@@ -253,6 +254,7 @@ fn finalize_fix_run(
             content_changed_count: skip_counts.content_changed,
             mixed_line_endings_count: skip_counts.mixed_line_endings,
             low_confidence_count: skip_counts.low_confidence,
+            low_confidence_dependency_count: count_withheld_dependency_fixes(fixes),
         })
     {
         return code;
@@ -311,6 +313,7 @@ fn apply_all_fixes(input: ApplyAllFixesInput<'_>) -> (bool, CatalogFixTotals) {
         plan: &mut *plan,
         output: opts.output,
         dry_run: opts.dry_run,
+        quiet: opts.quiet,
         fixes: &mut *fixes,
     });
 
@@ -362,6 +365,7 @@ fn emit_empty_fix_output(opts: &FixOptions<'_>) -> ExitCode {
             skipped_content_changed: 0,
             skipped_mixed_line_endings: 0,
             skipped_low_confidence_exports: 0,
+            skipped_low_confidence_dependencies: 0,
         }) {
             Ok(envelope) if matches!(opts.output, OutputFormat::GithubSummary) => {
                 return crate::report::github_summary::print_fix_summary(&envelope);
@@ -412,11 +416,24 @@ fn apply_unused_export_fixes(input: &mut FixApplicationInput<'_>) {
         .iter()
         .map(|finding| finding.import.path.clone())
         .collect();
+    let caveats_by_file: FxHashMap<PathBuf, Vec<ReachabilityCaveat>> = input
+        .results
+        .unused_exports
+        .iter()
+        .filter(|finding| !finding.reachability_caveats.is_empty())
+        .map(|finding| {
+            (
+                finding.export.path.clone(),
+                finding.reachability_caveats.clone(),
+            )
+        })
+        .collect();
     exports::apply_export_fixes(&mut exports::ExportFixInput {
         root: input.root,
         exports_by_file: &exports_by_file,
         hashes: input.file_hashes,
         unresolved_import_files: &unresolved_import_files,
+        caveats_by_file: &caveats_by_file,
         plan: input.plan,
         output: input.output,
         dry_run: input.dry_run,
@@ -474,6 +491,7 @@ struct FixOutputInput<'a> {
     content_changed_count: usize,
     mixed_line_endings_count: usize,
     low_confidence_count: usize,
+    low_confidence_dependency_count: usize,
 }
 
 struct CatalogFixTotals {
@@ -519,7 +537,11 @@ fn count_fix_skips(records: &[serde_json::Value]) -> FixSkipCounts {
                 record
                     .get("skip_reason")
                     .and_then(serde_json::Value::as_str),
-                Some("low_confidence_off_graph" | "low_confidence_unresolved_imports")
+                Some(
+                    "low_confidence_off_graph"
+                        | "low_confidence_unresolved_imports"
+                        | "low_confidence_incomplete_analysis"
+                )
             )
         })
         .count();
@@ -528,6 +550,20 @@ fn count_fix_skips(records: &[serde_json::Value]) -> FixSkipCounts {
         mixed_line_endings: count_reason("mixed_line_endings"),
         low_confidence,
     }
+}
+
+/// Count the `remove-dependency` writes withheld because the finding carried a
+/// reachability caveat. These never reach the plan (the withholding is per
+/// package, not per file), so they are counted off the emitted entries.
+fn count_withheld_dependency_fixes(fixes: &[serde_json::Value]) -> usize {
+    fixes
+        .iter()
+        .filter(|fix| {
+            fix.get("type").and_then(serde_json::Value::as_str) == Some("remove_dependency")
+                && fix.get("skip_reason").and_then(serde_json::Value::as_str)
+                    == Some("low_confidence_incomplete_analysis")
+        })
+        .count()
 }
 
 fn apply_catalog_fixes(request: &mut CatalogFixRequest<'_>) -> CatalogFixTotals {
@@ -586,6 +622,7 @@ fn emit_fix_output(input: &FixOutputInput<'_>) -> Result<(), ExitCode> {
             skipped_content_changed: input.content_changed_count,
             skipped_mixed_line_endings: input.mixed_line_endings_count,
             skipped_low_confidence_exports: input.low_confidence_count,
+            skipped_low_confidence_dependencies: input.low_confidence_dependency_count,
         }) {
             Ok(envelope) if matches!(input.output, OutputFormat::GithubSummary) => {
                 let _ = crate::report::github_summary::print_fix_summary(&envelope);
@@ -615,6 +652,7 @@ fn emit_fix_output(input: &FixOutputInput<'_>) -> Result<(), ExitCode> {
             content_changed_count: input.content_changed_count,
             mixed_line_endings_count: input.mixed_line_endings_count,
             low_confidence_count: input.low_confidence_count,
+            low_confidence_dependency_count: input.low_confidence_dependency_count,
         });
     }
     Ok(())
@@ -642,12 +680,21 @@ fn build_skipped_records(
             if !quiet {
                 eprintln!("{}", skip.reason.human_message(relative));
             }
-            serde_json::json!({
+            let mut record = serde_json::json!({
                 "type": "skipped",
                 "path": relative.display().to_string(),
                 "skipped": true,
                 "skip_reason": skip.reason.as_wire_str(),
-            })
+            });
+            if !skip.caveats.is_empty() {
+                let tokens: Vec<&str> = skip
+                    .caveats
+                    .iter()
+                    .map(|caveat| ReachabilityCaveat::token(*caveat))
+                    .collect();
+                record["reachability_caveats"] = serde_json::json!(tokens);
+            }
+            record
         })
         .collect()
 }
@@ -707,6 +754,7 @@ struct HumanSummaryInput<'a> {
     content_changed_count: usize,
     mixed_line_endings_count: usize,
     low_confidence_count: usize,
+    low_confidence_dependency_count: usize,
 }
 
 fn emit_human_summary(input: &HumanSummaryInput<'_>) {
@@ -817,8 +865,19 @@ fn emit_residual_skip_warnings(input: &HumanSummaryInput<'_>) {
             "files"
         };
         eprintln!(
-            "Kept unused exports in {} {files_word} where consumers may be invisible to fallow (test, mock, and fixture directories, or files with unresolved imports). Still listed by `fallow dead-code`; remove by hand if you have confirmed they are unused.",
+            "Kept unused exports in {} {files_word} where consumers may be invisible to fallow (test, mock, and fixture directories, files with unresolved imports, or files whose verdict rests on a source the run did not fully analyze). Still listed by `fallow dead-code`; remove by hand if you have confirmed they are unused.",
             input.low_confidence_count,
+        );
+    }
+    if input.low_confidence_dependency_count > 0 {
+        let package_word = if input.low_confidence_dependency_count == 1 {
+            "package"
+        } else {
+            "packages"
+        };
+        eprintln!(
+            "Kept {} declared {package_word} whose only import may sit in a file that did not parse cleanly. Fix the parse errors reported above, then re-run `fallow fix`.",
+            input.low_confidence_dependency_count,
         );
     }
 }

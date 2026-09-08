@@ -14,6 +14,7 @@
 #[path = "common/mod.rs"]
 mod common;
 
+use std::fmt::Write as _;
 use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -87,6 +88,17 @@ fn write_project(root: &Path) {
     )
     .unwrap();
     std::fs::write(root.join("dist/bundle.js"), "console.log(1);\n").unwrap();
+    // Two short definitions far apart, and one long one, so a frame's line can
+    // be checked against the definition its identifier matched: line 6 belongs
+    // to `second`, while line 26 is still inside `long`.
+    let mut wide = String::from(
+        "export const first = (): number => {\n  return 0;\n};\n\nexport const second = (): number => {\n  throw new Error('boom');\n};\n\nexport const long = (): number => {\n",
+    );
+    for index in 0..16 {
+        writeln!(wide, "  const value{index} = {index};").unwrap();
+    }
+    wide.push_str("  throw new Error('deep');\n};\n");
+    std::fs::write(root.join("src/wide.ts"), wide).unwrap();
 }
 
 #[test]
@@ -260,13 +272,30 @@ fn a_trace_with_no_recognisable_frames_reports_the_lines_it_could_not_read() {
         "the first line is reported as the header, the rest are counted"
     );
     assert_eq!(value["header"], "something went wrong");
-    assert!(
-        value["reason"]
-            .as_str()
-            .unwrap()
-            .contains("no stack frames recognised"),
-        "reason was {}",
-        value["reason"]
+    // The sentence describes the INPUT, so it counts the header line back in:
+    // three lines were pasted and `unparsed_lines` deliberately excludes the
+    // one reported under `header`.
+    assert_eq!(
+        value["reason"], "no stack frames recognised in 3 non-blank input lines",
+        "the count must describe the input the caller pasted"
+    );
+}
+
+/// A one-line input that is not a frame reports one input line, not zero.
+#[test]
+fn a_single_unrecognisable_line_is_counted_as_input() {
+    let dir = tempdir().unwrap();
+    write_project(dir.path());
+
+    let output = run_trace_error_stdin(dir.path(), "boom\n", &["--format", "json"]);
+
+    assert_eq!(output.code, 0, "stderr:\n{}", output.stderr);
+    let value = parse_json(&output);
+    assert_eq!(value["counts"]["unparsed_lines"], 0);
+    assert_eq!(value["header"], "boom");
+    assert_eq!(
+        value["reason"],
+        "no stack frames recognised in 1 non-blank input line"
     );
 }
 
@@ -394,4 +423,186 @@ fn a_relative_trace_path_resolves_against_the_project_root() {
         "the reported source keeps the caller's spelling, not the resolved path"
     );
     assert_eq!(value["frames"][0]["resolution"], "resolved");
+}
+
+#[test]
+fn a_frame_spelled_through_a_symlinked_root_resolves_like_the_canonical_path() {
+    let dir = tempdir().unwrap();
+    let real = dir.path().join("real");
+    std::fs::create_dir_all(&real).unwrap();
+    write_project(&real);
+    let linked = dir.path().join("linked");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&real, &linked).unwrap();
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_dir(&real, &linked).unwrap();
+
+    // A runtime prints the path ITS process saw, so a project reached through
+    // a symlink yields absolute frame paths no module path carries verbatim.
+    let frame_path = linked.join("src/services/user.ts");
+    let trace = format!(
+        "TypeError: helper is not a function\n    at loadUser ({}:2:32)\n",
+        frame_path.display()
+    );
+    let output = run_trace_error_stdin(&linked, &trace, &["--format", "json"]);
+
+    assert_eq!(output.code, 0, "stderr:\n{}", output.stderr);
+    let value = parse_json(&output);
+    assert_eq!(
+        value["frames"][0]["origin"], "in_project",
+        "a frame naming a real project file must not be reported out of corpus \
+         because the root was reached through a symlink; frame was {}",
+        value["frames"][0]
+    );
+    assert_eq!(value["frames"][0]["resolution"], "resolved");
+    assert_eq!(
+        value["frames"][0]["candidates"][0]["file"],
+        "src/services/user.ts"
+    );
+    assert_eq!(
+        value["frames"][0]["file"],
+        frame_path.to_string_lossy().replace('\\', "/"),
+        "the frame still reports the path as the runtime spelled it"
+    );
+}
+
+#[test]
+fn an_absolute_frame_path_outside_the_project_stays_out_of_corpus() {
+    let dir = tempdir().unwrap();
+    write_project(dir.path());
+    let elsewhere = tempdir().unwrap();
+    let outside = elsewhere.path().join("outside.ts");
+    std::fs::write(&outside, "export const loadUser = () => 0;\n").unwrap();
+
+    let trace = format!("Error: boom\n    at loadUser ({}:1:1)\n", outside.display());
+    let output = run_trace_error_stdin(dir.path(), &trace, &["--format", "json"]);
+
+    assert_eq!(output.code, 0, "stderr:\n{}", output.stderr);
+    let value = parse_json(&output);
+    assert_eq!(
+        value["frames"][0]["origin"], "out_of_corpus",
+        "resolving a symlinked spelling must not turn a file outside the corpus \
+         into a match; frame was {}",
+        value["frames"][0]
+    );
+    assert_eq!(value["frames"][0]["resolution"], "not_attempted");
+}
+
+#[test]
+fn a_resolved_frame_whose_line_sits_at_another_definition_says_so() {
+    let dir = tempdir().unwrap();
+    write_project(dir.path());
+
+    let output = run_trace_error_stdin(
+        dir.path(),
+        "Error: boom\n    at first (src/wide.ts:6:9)\n",
+        &["--format", "json"],
+    );
+
+    assert_eq!(output.code, 0, "stderr:\n{}", output.stderr);
+    let value = parse_json(&output);
+    assert_eq!(
+        value["frames"][0]["resolution"], "resolved",
+        "the identifier IS one the graph knows, so the frame stays resolved"
+    );
+    assert_eq!(
+        value["frames"][0]["line_mismatch"], true,
+        "line 6 is declared by `second`, not by the matched `first`; frame was {}",
+        value["frames"][0]
+    );
+    let reason = value["frames"][0]["reason"].as_str().unwrap();
+    assert!(
+        reason.contains("'second'") && reason.contains("line 5"),
+        "reason was {reason}"
+    );
+}
+
+#[test]
+fn a_frame_deep_inside_a_long_definition_is_not_flagged() {
+    let dir = tempdir().unwrap();
+    write_project(dir.path());
+
+    let output = run_trace_error_stdin(
+        dir.path(),
+        "Error: deep\n    at long (src/wide.ts:26:9)\n",
+        &["--format", "json"],
+    );
+
+    assert_eq!(output.code, 0, "stderr:\n{}", output.stderr);
+    let value = parse_json(&output);
+    assert_eq!(value["frames"][0]["resolution"], "resolved");
+    assert!(
+        value["frames"][0].get("line_mismatch").is_none(),
+        "a line 17 rows below its own declaration is still inside it; frame was {}",
+        value["frames"][0]
+    );
+}
+
+#[test]
+fn quiet_human_output_keeps_the_unparsed_line_count() {
+    let dir = tempdir().unwrap();
+    write_project(dir.path());
+
+    let output = run_trace_error_stdin(
+        dir.path(),
+        "something went wrong\nsee the logs\nand the dashboard\n",
+        &["--quiet"],
+    );
+
+    assert_eq!(output.code, 0, "stderr:\n{}", output.stderr);
+    assert!(
+        output.stdout.contains("unparsed lines 2"),
+        "--quiet must not hide the lines that were not read, or an unrecognised \
+         input looks exactly like an empty trace; stdout:\n{}",
+        output.stdout
+    );
+}
+
+#[test]
+fn quiet_human_output_keeps_the_omitted_frame_count() {
+    let dir = tempdir().unwrap();
+    write_project(dir.path());
+
+    let mut trace = String::from("Error: boom\n");
+    for _ in 0..300 {
+        trace.push_str("    at loadUser (src/services/user.ts:2:32)\n");
+    }
+    let output = run_trace_error_stdin(dir.path(), &trace, &["--quiet"]);
+
+    assert_eq!(output.code, 0, "stderr:\n{}", output.stderr);
+    assert!(
+        output.stdout.contains("frames omitted 44"),
+        "--quiet must not hide the frames the cap withheld, or a truncated trace \
+         looks complete; stdout:\n{}",
+        output.stdout
+    );
+}
+
+#[test]
+fn the_counts_line_stays_clean_when_nothing_was_omitted() {
+    let dir = tempdir().unwrap();
+    write_project(dir.path());
+
+    let output = run_trace_error_stdin(
+        dir.path(),
+        "Error: boom\n    at loadUser (src/services/user.ts:2:32)\n",
+        &["--quiet"],
+    );
+
+    assert_eq!(output.code, 0, "stderr:\n{}", output.stderr);
+    assert!(
+        output.stdout.contains("frames 1 | resolved 1"),
+        "stdout:\n{}",
+        output.stdout
+    );
+    assert!(
+        !output.stdout.contains("frames omitted"),
+        "a zero omission count is not a measurement worth a permanent column; stdout:\n{}",
+        output.stdout
+    );
+    assert!(
+        !output.stdout.contains("unparsed lines"),
+        "stdout:\n{}",
+        output.stdout
+    );
 }

@@ -166,6 +166,7 @@ fn push_ready_project_checks<F>(
 
     checks.push(dependencies_check(root));
     checks.push(cache_check(&project.config));
+    checks.push(graph_cache_check(&project.config));
 }
 
 /// Report whether the project has an installed dependency tree.
@@ -232,6 +233,57 @@ fn cache_check(config: &fallow_config::ResolvedConfig) -> DoctorCheck {
             false,
             format!(
                 "Extraction cache{size} would not be reused: {}. The next run parses every file.",
+                rejection.describe()
+            ),
+            Some(remediation("fallow dead-code --quiet", false)),
+        ),
+    }
+}
+
+/// Report whether the persisted module graph would load.
+///
+/// Advisory for the same reason as the extraction-cache check, and reported
+/// separately because the two blobs are reused independently: a project whose
+/// extraction cache is perfectly healthy can still rebuild the whole graph on
+/// every run, and the graph is the larger file of the two.
+///
+/// This answers whether the blob LOADS, not whether a run would reuse it. The
+/// reuse decision also compares resolver options, entry points, and per-file
+/// content hashes, and computing those means running discovery and extraction,
+/// which doctor deliberately does not do.
+fn graph_cache_check(config: &fallow_config::ResolvedConfig) -> DoctorCheck {
+    let status = fallow_engine::cache_status::inspect_graph_cache(config);
+    let size = status
+        .size_bytes
+        .map_or_else(String::new, |bytes| format!(" ({})", format_size_mb(bytes)));
+    match status.rejection {
+        None => check(
+            DoctorCheckId::GraphCache,
+            DoctorCheckCategory::Cache,
+            DoctorCheckStatus::Pass,
+            false,
+            format!(
+                "Module-graph cache{size} loads; a run reuses it when the analysed files and \
+                 options are unchanged."
+            ),
+            None,
+        ),
+        Some(fallow_types::cache_rejection::CacheRejection::Absent) => check(
+            DoctorCheckId::GraphCache,
+            DoctorCheckCategory::Cache,
+            DoctorCheckStatus::Pass,
+            false,
+            "No module-graph cache yet; the next run writes one.",
+            None,
+        ),
+        Some(rejection) => check(
+            DoctorCheckId::GraphCache,
+            DoctorCheckCategory::Cache,
+            DoctorCheckStatus::Warn,
+            false,
+            format!(
+                "Module-graph cache{size} would not be reused: {}. The next run resolves imports \
+                 and rebuilds the graph.",
                 rejection.describe()
             ),
             Some(remediation("fallow dead-code --quiet", false)),
@@ -436,6 +488,11 @@ fn push_project_failure_checks(
         DoctorCheckCategory::Cache,
         "Configuration readiness did not establish which cache this project uses.",
     ));
+    checks.push(skipped(
+        DoctorCheckId::GraphCache,
+        DoctorCheckCategory::Cache,
+        "Configuration readiness did not establish which cache this project uses.",
+    ));
 }
 
 fn type_aware_check<F>(
@@ -604,6 +661,7 @@ fn push_prerequisite_skips(checks: &mut Vec<DoctorCheck>, message: &str) {
         (DoctorCheckId::TypeAware, DoctorCheckCategory::Companion),
         (DoctorCheckId::Dependencies, DoctorCheckCategory::Project),
         (DoctorCheckId::Cache, DoctorCheckCategory::Cache),
+        (DoctorCheckId::GraphCache, DoctorCheckCategory::Cache),
     ] {
         checks.push(skipped(id, category, message));
     }
@@ -712,6 +770,7 @@ mod tests {
                 DoctorCheckId::TypeAware,
                 DoctorCheckId::Dependencies,
                 DoctorCheckId::Cache,
+                DoctorCheckId::GraphCache,
             ]
         );
         assert_eq!(
@@ -797,13 +856,19 @@ mod tests {
         assert!(!cache.required);
     }
 
+    /// The message a user reads after upgrading. It used to say the cache
+    /// "could not be decoded", which describes corruption; the truth is a
+    /// format bump that costs one rebuild.
     #[test]
-    fn undecodable_cache_warns_with_its_reason_and_size() {
+    fn a_cache_from_another_build_warns_with_a_format_reason_and_its_size() {
         let root = tempfile::tempdir().expect("temp root");
         let cache_dir = root.path().join(".fallow");
         std::fs::create_dir_all(&cache_dir).expect("create cache dir");
-        std::fs::write(cache_dir.join("cache.bin"), b"not-a-valid-bitcode-payload")
-            .expect("write corrupt cache");
+        std::fs::write(
+            cache_dir.join("cache.bin"),
+            b"not-a-payload-this-build-wrote",
+        )
+        .expect("write foreign cache");
 
         let output = run_doctor_with_discovery(
             &DoctorOptions {
@@ -821,11 +886,84 @@ mod tests {
         assert_eq!(cache.status, DoctorCheckStatus::Warn);
         assert!(!cache.required);
         assert!(
-            cache.message.contains("could not be decoded"),
+            cache.message.contains("cache format version changed"),
             "{}",
             cache.message
         );
+        assert!(
+            !cache.message.contains("could not be decoded"),
+            "an upgrade must not be reported as corruption: {}",
+            cache.message
+        );
         assert!(cache.message.contains("MB"), "{}", cache.message);
+        assert_ne!(
+            output.status,
+            DoctorStatus::Fail,
+            "a refused cache costs time, not correctness"
+        );
+    }
+
+    /// The graph blob is the larger of the two persisted caches and is reused
+    /// independently of the extraction blob, so a doctor that only looked at
+    /// the extraction cache called a project healthy while the expensive half
+    /// was discarded on every run.
+    #[test]
+    fn absent_graph_cache_passes_its_own_check() {
+        let root = tempfile::tempdir().expect("temp root");
+
+        let output = run_doctor_with_discovery(
+            &DoctorOptions {
+                root: root.path(),
+                config_path: None,
+            },
+            &|_| Err("missing companion".to_string()),
+        );
+
+        let graph_cache = output
+            .checks
+            .iter()
+            .find(|check| check.id == DoctorCheckId::GraphCache)
+            .expect("graph cache check is reported");
+        assert_eq!(graph_cache.status, DoctorCheckStatus::Pass);
+        assert!(!graph_cache.required);
+    }
+
+    #[test]
+    fn a_graph_cache_from_another_build_warns_with_its_reason_and_size() {
+        let root = tempfile::tempdir().expect("temp root");
+        let cache_dir = root.path().join(".fallow");
+        std::fs::create_dir_all(&cache_dir).expect("create cache dir");
+        std::fs::write(
+            cache_dir.join("graph-cache.bin"),
+            b"not-a-payload-this-build-wrote",
+        )
+        .expect("write foreign graph cache");
+
+        let output = run_doctor_with_discovery(
+            &DoctorOptions {
+                root: root.path(),
+                config_path: None,
+            },
+            &|_| Err("missing companion".to_string()),
+        );
+
+        let graph_cache = output
+            .checks
+            .iter()
+            .find(|check| check.id == DoctorCheckId::GraphCache)
+            .expect("graph cache check is reported");
+        assert_eq!(graph_cache.status, DoctorCheckStatus::Warn);
+        assert!(!graph_cache.required);
+        assert!(
+            graph_cache.message.contains("cache format version changed"),
+            "{}",
+            graph_cache.message
+        );
+        assert!(
+            graph_cache.message.contains("MB"),
+            "{}",
+            graph_cache.message
+        );
         assert_ne!(
             output.status,
             DoctorStatus::Fail,
@@ -847,7 +985,7 @@ mod tests {
         );
 
         assert_eq!(output.status, DoctorStatus::Fail);
-        assert_eq!(output.checks.len(), 7);
+        assert_eq!(output.checks.len(), 8);
         assert_eq!(output.checks[1].status, DoctorCheckStatus::Fail);
         assert_eq!(output.checks[2].status, DoctorCheckStatus::Skipped);
         assert!(

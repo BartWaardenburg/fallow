@@ -121,6 +121,8 @@ pub(super) fn run_duplication_report_with_session(
             report: payload,
             clone_groups_shown: report.clone_groups_shown(),
             clone_groups_omitted: report.clone_groups_omitted(),
+            clone_families_shown: report.clone_families_shown(),
+            clone_families_omitted: report.clone_families_omitted(),
             grouped_by: None,
             total_issues: None,
             groups: None,

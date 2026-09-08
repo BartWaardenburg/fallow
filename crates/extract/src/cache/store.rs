@@ -6,7 +6,6 @@ use std::path::Path;
 use std::cell::Cell;
 
 use fallow_types::cache_rejection::CacheRejection;
-use fallow_types::source_fingerprint::SourceFingerprint;
 use rustc_hash::FxHashMap;
 
 use bitcode::{Decode, Encode};
@@ -66,6 +65,15 @@ impl CacheStore {
     /// config-hash branch in particular said nothing whatsoever. Callers carry
     /// the reason into the perf table and `fallow doctor`.
     ///
+    /// The version is read from the file header BEFORE the payload is
+    /// decoded, because the two are decided by different things. A format bump
+    /// changes the encoded shape, so decoding a blob from the previous release
+    /// fails outright and never reaches a version comparison made afterwards:
+    /// the most ordinary event there is (upgrading fallow) then reported
+    /// "cache file could not be decoded", which reads as corruption and sent
+    /// people looking for a damaged disk. With the version in front, an upgrade
+    /// says the format changed and `Undecodable` means what it says.
+    ///
     /// Every branch that refuses a file that DID exist logs at warn, because
     /// the user paid the read and got nothing back. Only the missing-file case
     /// stays quiet.
@@ -89,20 +97,24 @@ impl CacheStore {
                 ceiling_bytes: safety_ceiling as u64,
             });
         }
-        let mut store: Self = match bitcode::decode(&data) {
+        let payload = read_header(&data)?;
+        let mut store: Self = match bitcode::decode(payload) {
             Ok(s) => s,
             Err(_) => {
                 tracing::warn!(
-                    "Cache file could not be decoded, rebuilding (one-time cost after version bump)"
+                    "Cache file carries the current format version but its payload could not be \
+                     decoded, rebuilding"
                 );
                 return Err(CacheRejection::Undecodable);
             }
         };
+        // The header already agreed with `CACHE_VERSION`, so this catches only a
+        // file whose header and payload disagree: a spliced or hand-edited blob.
         if store.version != CACHE_VERSION {
             tracing::warn!(
                 cached_version = store.version,
                 expected_version = CACHE_VERSION,
-                "Cache format upgraded, rebuilding (one-time cost after version bump)"
+                "Cache header and payload declare different format versions, rebuilding"
             );
             return Err(CacheRejection::VersionMismatch);
         }
@@ -139,8 +151,12 @@ impl CacheStore {
         let mut encoded = self.encode();
 
         let trigger = (max_size_bytes / 10_000).saturating_mul(EVICTION_TRIGGER_BPS);
-        if encoded.len() > trigger {
-            let target = (max_size_bytes / 10_000).saturating_mul(EVICTION_TARGET_BPS);
+        if encoded.len().saturating_add(CACHE_HEADER_LEN) > trigger {
+            // The cap is a promise about the file, and the file carries the
+            // header as well as the payload, so eviction aims below both.
+            let target = (max_size_bytes / 10_000)
+                .saturating_mul(EVICTION_TARGET_BPS)
+                .saturating_sub(CACHE_HEADER_LEN);
             encoded = self.evict_lru_to_target(target, encoded);
             let evicted = initial_entries.saturating_sub(self.entries.len());
             let final_size = encoded.len();
@@ -166,7 +182,7 @@ impl CacheStore {
         }
 
         let cache_file = cache_dir.join("cache.bin");
-        atomic_write(&cache_file, &encoded)?;
+        atomic_write(&cache_file, &framed(self.version, &encoded))?;
         Ok(())
     }
 
@@ -322,21 +338,6 @@ impl CacheStore {
         self.entries.insert(key, module);
     }
 
-    /// Fast cache lookup using only file metadata (mtime + size).
-    #[must_use]
-    pub fn get_by_metadata(
-        &self,
-        path: &Path,
-        fingerprint: SourceFingerprint,
-    ) -> Option<&CachedModule> {
-        let entry = self.entries.get(&self.key_for(path))?;
-        if entry.source_fingerprint() == fingerprint && fingerprint.has_known_mtime() {
-            Some(entry)
-        } else {
-            None
-        }
-    }
-
     /// Look up a cached module by path only (ignoring hash).
     #[must_use]
     pub fn get_by_path_only(&self, path: &Path) -> Option<&CachedModule> {
@@ -386,6 +387,68 @@ impl CacheStore {
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
+}
+
+/// Marker written ahead of every cache payload so the format version can be
+/// read without decoding the payload it describes.
+///
+/// A blob without it was written by a build that predates the framing, which is
+/// a different format version by definition, so it is reported as one instead
+/// of as a decode failure.
+pub(super) const CACHE_MAGIC: [u8; 4] = *b"FLWX";
+
+/// Bytes the framing adds ahead of the payload: the magic plus a little-endian
+/// `u32` format version.
+pub(super) const CACHE_HEADER_LEN: usize = CACHE_MAGIC.len() + 4;
+
+/// Prepend the format header to an encoded payload.
+///
+/// The version comes from the store being written rather than from the
+/// constant, so the header always describes the payload behind it.
+pub(super) fn framed(version: u32, payload: &[u8]) -> Vec<u8> {
+    let mut framed = Vec::with_capacity(CACHE_HEADER_LEN + payload.len());
+    framed.extend_from_slice(&CACHE_MAGIC);
+    framed.extend_from_slice(&version.to_le_bytes());
+    framed.extend_from_slice(payload);
+    framed
+}
+
+/// Split a cache file into its declared version and its payload, refusing
+/// anything this binary cannot read WITHOUT decoding it first.
+///
+/// The version check has to come first: a format bump changes the encoded
+/// shape, so a blob from the previous release fails to decode and a version
+/// comparison made after the decode is unreachable on the one event that
+/// triggers it most, an upgrade.
+fn read_header(data: &[u8]) -> Result<&[u8], CacheRejection> {
+    let Some((header, payload)) = data.split_at_checked(CACHE_HEADER_LEN) else {
+        tracing::warn!(
+            "Cache file is too short to carry a format header, rebuilding (one-time cost after \
+             version bump)"
+        );
+        return Err(CacheRejection::VersionMismatch);
+    };
+    let (declared_magic, declared_version) = header.split_at(CACHE_MAGIC.len());
+    if declared_magic != CACHE_MAGIC {
+        tracing::warn!(
+            "Cache file was written by a build with a different cache format, rebuilding \
+             (one-time cost after version bump)"
+        );
+        return Err(CacheRejection::VersionMismatch);
+    }
+    // The slice is exactly four bytes; the fallback only has to be a version
+    // this binary never writes, so an impossible header is refused rather than
+    // trusted.
+    let declared = declared_version.try_into().map_or(0, u32::from_le_bytes);
+    if declared != CACHE_VERSION {
+        tracing::warn!(
+            cached_version = declared,
+            expected_version = CACHE_VERSION,
+            "Cache format upgraded, rebuilding (one-time cost after version bump)"
+        );
+        return Err(CacheRejection::VersionMismatch);
+    }
+    Ok(payload)
 }
 
 pub(super) fn estimated_eviction_budget(

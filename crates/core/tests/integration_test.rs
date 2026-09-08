@@ -127,6 +127,8 @@ mod safe_analysis;
 mod sfc_parsing;
 #[path = "integration_test/size_limit_plugin.rs"]
 mod size_limit_plugin;
+#[path = "integration_test/skipped_file_reachability_caveat.rs"]
+mod skipped_file_reachability_caveat;
 #[path = "integration_test/svelte_dead_event.rs"]
 mod svelte_dead_event;
 #[path = "integration_test/symlink_root_containment.rs"]

@@ -202,23 +202,44 @@ fn print_human(trace: &ErrorTrace, quiet: bool) {
                 frame.candidates_omitted
             );
         }
-        if frame.resolution != FrameResolution::Resolved {
+        // A resolved frame normally needs no explanation, but one whose own
+        // line disagrees with the definition it matched does: the note is the
+        // only place that disagreement is written out.
+        if frame.resolution != FrameResolution::Resolved || frame.line_mismatch {
             outln!("        {}", frame.reason);
         }
     }
     outln!();
-    outln!(
-        "  frames {} | resolved {} | ambiguous {} | not found {} | not attempted {}",
-        trace.counts.frames,
-        trace.counts.resolved,
-        trace.counts.ambiguous,
-        trace.counts.not_found,
-        trace.counts.not_attempted
-    );
+    outln!("{}", counts_line(&trace.counts));
     // Prose, like the other trace surfaces: `--quiet` drops the explanation from
     // human output while the JSON payload keeps it either way.
     if !quiet {
         outln!();
         outln!("{}", trace.reason);
     }
+}
+
+/// The always-printed counts line.
+///
+/// `frames_omitted` and `unparsed_lines` are MEASUREMENTS, not progress, so
+/// they belong here rather than in the prose `--quiet` drops. Without them a
+/// capped trace looks complete and an input in which nothing was recognised
+/// looks like an empty trace, which is exactly the overclaim this payload is
+/// built to refuse. They print only when non-zero: zero omissions is the
+/// ordinary case and a permanent column of zeroes would bury the run where the
+/// number is not zero.
+fn counts_line(counts: &fallow_types::trace_error::ErrorTraceCounts) -> String {
+    use std::fmt::Write as _;
+
+    let mut line = format!(
+        "  frames {} | resolved {} | ambiguous {} | not found {} | not attempted {}",
+        counts.frames, counts.resolved, counts.ambiguous, counts.not_found, counts.not_attempted
+    );
+    if counts.frames_omitted > 0 {
+        let _ = write!(line, " | frames omitted {}", counts.frames_omitted);
+    }
+    if counts.unparsed_lines > 0 {
+        let _ = write!(line, " | unparsed lines {}", counts.unparsed_lines);
+    }
+    line
 }

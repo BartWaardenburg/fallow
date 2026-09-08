@@ -463,9 +463,11 @@ pub struct FindDupesParams {
     /// Human-format only (human/markdown CLI output); MCP JSON responses suppress the note.
     pub explain_skipped: Option<bool>,
 
-    /// Show only the N highest-ranked clone groups. `stats` keeps describing
-    /// the whole corpus; read `clone_groups_shown` and `clone_groups_omitted`
-    /// for the split.
+    /// Show only the N highest-ranked clone groups. `clone_families[]` is
+    /// rebuilt from the groups that survive, so it narrows too. `stats` keeps
+    /// describing the whole corpus; read `clone_groups_shown` /
+    /// `clone_groups_omitted` and `clone_families_shown` /
+    /// `clone_families_omitted` for the split.
     pub top: Option<usize>,
 
     /// Include the verbatim source text on each clone instance. Defaults to
@@ -886,6 +888,38 @@ pub struct TraceImportPathParams {
     /// Project-relative path of the module the walk is looking for.
     #[schemars(length(min = 1))]
     pub to: String,
+
+    /// Project root; defaults to the working directory.
+    pub root: Option<String>,
+
+    /// Path to a fallow config file.
+    pub config: Option<String>,
+
+    /// Allow trusted HTTPS config `extends` for this request.
+    pub allow_remote_extends: Option<bool>,
+
+    /// Production mode: exclude test, story, and dev files, only start/build
+    /// scripts, and report type-only dependencies.
+    pub production: Option<bool>,
+
+    /// Workspace packages to analyze: name, comma-separated list, globs, `!` negation.
+    pub workspace: Option<String>,
+
+    /// Disable the incremental parse cache.
+    pub no_cache: Option<bool>,
+
+    /// Parser thread count; defaults to CPU cores.
+    pub threads: Option<usize>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct TraceErrorParams {
+    /// The runtime stack trace text, pasted verbatim.
+    #[schemars(length(min = 1))]
+    pub trace: String,
+
+    /// Where the trace came from, echoed back as the payload's `source`.
+    pub source: Option<String>,
 
     /// Project root; defaults to the working directory.
     pub root: Option<String>,

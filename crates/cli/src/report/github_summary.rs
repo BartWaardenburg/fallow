@@ -2280,9 +2280,14 @@ fn render_security_summary(env: &Value) -> String {
 // summary-fix.jq
 // ---------------------------------------------------------------------------
 
+/// The entries of one fix type that actually landed (or, in a dry run, would).
+/// A withheld entry keeps its `type` so a caller can see which finding was
+/// declined, so the skipped flag is what separates the two; listing a withheld
+/// removal under "Dependencies removed" would report a write that never
+/// happened.
 fn fix_entries<'v>(env: &'v Value, entry_type: &str) -> Vec<&'v Value> {
     arr(env, "fixes")
-        .filter(|fix| s(fix, "type") == entry_type)
+        .filter(|fix| s(fix, "type") == entry_type && !b(fix, "skipped"))
         .collect()
 }
 
@@ -2310,9 +2315,15 @@ pub fn render_fix_summary(env: &Value) -> String {
     let content_changed = u(env, "skipped_content_changed") as usize;
     let mixed_eol = u(env, "skipped_mixed_line_endings") as usize;
     let low_confidence = u(env, "skipped_low_confidence_exports") as usize;
+    let low_confidence_deps = u(env, "skipped_low_confidence_dependencies") as usize;
     let dry_run = b(env, "dry_run");
 
-    if fix_attempts == 0 && content_changed == 0 && mixed_eol == 0 && low_confidence == 0 {
+    if fix_attempts == 0
+        && content_changed == 0
+        && mixed_eol == 0
+        && low_confidence == 0
+        && low_confidence_deps == 0
+    {
         return "## Fallow - Auto-fix\n\nNo fixable issues found.".to_owned();
     }
 
@@ -2340,6 +2351,12 @@ pub fn render_fix_summary(env: &Value) -> String {
         let _ = write!(
             out,
             ", kept exports in {low_confidence} file(s) where consumers may be hidden from static analysis"
+        );
+    }
+    if low_confidence_deps > 0 {
+        let _ = write!(
+            out,
+            ", kept {low_confidence_deps} declared package(s) whose only import may sit in a file that did not parse cleanly"
         );
     }
     out.push_str("\n\n| Type | Count |\n|------|-------|\n");

@@ -8,7 +8,6 @@ use crate::*;
 use fallow_types::cache_rejection::CacheRejection;
 use fallow_types::discover::FileId;
 use fallow_types::extract::{SkippedSecurityCalleeExpressionKind, SkippedSecurityCalleeReason};
-use fallow_types::source_fingerprint::SourceFingerprint;
 
 use super::*;
 
@@ -1743,8 +1742,10 @@ fn cache_save_and_load_roundtrip() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A file whose format marker does not match what this binary writes is a
+/// different format, not a cold run and not a corrupt payload.
 #[test]
-fn cache_version_mismatch_returns_none() {
+fn cache_load_refuses_a_blob_whose_format_marker_was_mangled() {
     let dir = test_cache_dir("version_mismatch");
     let mut store = CacheStore::new(Path::new(""));
     let module = CachedModule {
@@ -1836,14 +1837,14 @@ fn cache_version_mismatch_returns_none() {
     let cache_file = dir.join("cache.bin");
     let mut data = std::fs::read(&cache_file).unwrap();
     assert!(!data.is_empty());
-    data[0] = 255; // Corrupt the version byte
+    data[0] = 255; // Mangle the format marker the header opens with.
     std::fs::write(&cache_file, &data).unwrap();
 
     let result = CacheStore::load(&dir, Path::new(""), 0, DEFAULT_CACHE_MAX_SIZE);
     assert_eq!(
         result.err(),
-        Some(CacheRejection::Undecodable),
-        "a corrupted blob names its refusal instead of reading as a cold run"
+        Some(CacheRejection::VersionMismatch),
+        "a blob this binary did not frame names its refusal instead of reading as a cold run"
     );
 
     let _ = std::fs::remove_dir_all(&dir);
@@ -2282,389 +2283,6 @@ fn retain_paths_with_empty_files_clears_cache() {
     assert!(store.retain_paths(&[]));
     assert!(store.is_empty());
     assert!(!store.retain_paths(&[]));
-}
-
-#[test]
-fn get_by_metadata_returns_entry_on_match() {
-    let mut store = CacheStore::new(Path::new(""));
-    let module = CachedModule {
-        content_hash: 42,
-        mtime_ns: 1000,
-        ctime_ns: 0,
-        file_size: 500,
-        last_access_secs: 0,
-        exports: vec![],
-        imports: vec![],
-        re_exports: vec![],
-        dynamic_imports: vec![],
-        require_calls: vec![],
-        package_path_references: Box::default(),
-        member_accesses: vec![],
-        semantic_facts: None,
-        whole_object_uses: Box::default(),
-        dynamic_import_patterns: vec![],
-        parse_error_count: 0,
-        parse_panicked: false,
-        has_cjs_exports: false,
-        has_angular_component_template_url: false,
-        unused_import_bindings: vec![],
-        type_referenced_import_bindings: vec![],
-        value_referenced_import_bindings: vec![],
-        suppressions: vec![],
-        unknown_suppression_kinds: vec![],
-        line_offsets: vec![],
-        complexity: vec![],
-        complexity_extracted: false,
-        flag_uses: vec![],
-        class_heritage: vec![],
-        exported_factory_returns: None,
-        exported_factory_return_object_shapes: None,
-        type_member_types: None,
-        injection_tokens: vec![],
-        local_type_declarations: Vec::new(),
-        public_signature_type_references: Vec::new(),
-        namespace_object_aliases: Vec::new(),
-        iconify_prefixes: Vec::new(),
-        iconify_icon_names: Vec::new(),
-        auto_import_candidates: Vec::new(),
-        directives: Vec::new(),
-        client_only_dynamic_import_spans: Vec::new(),
-        security_sinks: Vec::new(),
-        security_sinks_skipped: 0,
-        security_unresolved_callee_sites: Vec::new(),
-        tainted_bindings: Vec::new(),
-        sanitized_sink_args: Vec::new(),
-        security_control_sites: Vec::new(),
-        callee_uses: Vec::new(),
-        misplaced_directives: Vec::new(),
-        inline_server_action_exports: Vec::new(),
-        di_key_sites: Vec::new(),
-        has_dynamic_provide: false,
-        component_props: Vec::new(),
-        has_props_attrs_fallthrough: false,
-        has_define_expose: false,
-        has_define_model: false,
-        has_unharvestable_props: false,
-        component_emits: Vec::new(),
-        angular_inputs: Vec::new(),
-        angular_outputs: Vec::new(),
-        has_unharvestable_emits: false,
-        has_dynamic_emit: false,
-        has_emit_whole_object_use: false,
-        load_return_keys: Vec::new(),
-        has_unharvestable_load: false,
-        has_load_data_whole_use: false,
-        component_functions: Vec::new(),
-        react_props: Vec::new(),
-        hook_uses: Vec::new(),
-        render_edges: Vec::new(),
-        svelte_dispatched_events: Vec::new(),
-        svelte_listened_events: Vec::new(),
-        angular_component_selectors: Vec::new(),
-        registered_custom_elements: Vec::new(),
-        used_custom_element_tags: Vec::new(),
-        angular_used_selectors: Vec::new(),
-        angular_entry_component_refs: Vec::new(),
-        has_dynamic_component_render: false,
-        has_dynamic_dispatch: false,
-    };
-    store.insert(Path::new("test.ts"), module);
-
-    let result = store.get_by_metadata(Path::new("test.ts"), SourceFingerprint::new(1000, 500));
-    assert!(result.is_some());
-    assert_eq!(result.unwrap().content_hash, 42);
-}
-
-#[test]
-fn get_by_metadata_returns_none_on_mtime_mismatch() {
-    let mut store = CacheStore::new(Path::new(""));
-    let module = CachedModule {
-        content_hash: 42,
-        mtime_ns: 1000,
-        ctime_ns: 0,
-        file_size: 500,
-        last_access_secs: 0,
-        exports: vec![],
-        imports: vec![],
-        re_exports: vec![],
-        dynamic_imports: vec![],
-        require_calls: vec![],
-        package_path_references: Box::default(),
-        member_accesses: vec![],
-        semantic_facts: None,
-        whole_object_uses: Box::default(),
-        dynamic_import_patterns: vec![],
-        parse_error_count: 0,
-        parse_panicked: false,
-        has_cjs_exports: false,
-        has_angular_component_template_url: false,
-        unused_import_bindings: vec![],
-        type_referenced_import_bindings: vec![],
-        value_referenced_import_bindings: vec![],
-        suppressions: vec![],
-        unknown_suppression_kinds: vec![],
-        line_offsets: vec![],
-        complexity: vec![],
-        complexity_extracted: false,
-        flag_uses: vec![],
-        class_heritage: vec![],
-        exported_factory_returns: None,
-        exported_factory_return_object_shapes: None,
-        type_member_types: None,
-        injection_tokens: vec![],
-        local_type_declarations: Vec::new(),
-        public_signature_type_references: Vec::new(),
-        namespace_object_aliases: Vec::new(),
-        iconify_prefixes: Vec::new(),
-        iconify_icon_names: Vec::new(),
-        auto_import_candidates: Vec::new(),
-        directives: Vec::new(),
-        client_only_dynamic_import_spans: Vec::new(),
-        security_sinks: Vec::new(),
-        security_sinks_skipped: 0,
-        security_unresolved_callee_sites: Vec::new(),
-        tainted_bindings: Vec::new(),
-        sanitized_sink_args: Vec::new(),
-        security_control_sites: Vec::new(),
-        callee_uses: Vec::new(),
-        misplaced_directives: Vec::new(),
-        inline_server_action_exports: Vec::new(),
-        di_key_sites: Vec::new(),
-        has_dynamic_provide: false,
-        component_props: Vec::new(),
-        has_props_attrs_fallthrough: false,
-        has_define_expose: false,
-        has_define_model: false,
-        has_unharvestable_props: false,
-        component_emits: Vec::new(),
-        angular_inputs: Vec::new(),
-        angular_outputs: Vec::new(),
-        has_unharvestable_emits: false,
-        has_dynamic_emit: false,
-        has_emit_whole_object_use: false,
-        load_return_keys: Vec::new(),
-        has_unharvestable_load: false,
-        has_load_data_whole_use: false,
-        component_functions: Vec::new(),
-        react_props: Vec::new(),
-        hook_uses: Vec::new(),
-        render_edges: Vec::new(),
-        svelte_dispatched_events: Vec::new(),
-        svelte_listened_events: Vec::new(),
-        angular_component_selectors: Vec::new(),
-        registered_custom_elements: Vec::new(),
-        used_custom_element_tags: Vec::new(),
-        angular_used_selectors: Vec::new(),
-        angular_entry_component_refs: Vec::new(),
-        has_dynamic_component_render: false,
-        has_dynamic_dispatch: false,
-    };
-    store.insert(Path::new("test.ts"), module);
-
-    assert!(
-        store
-            .get_by_metadata(Path::new("test.ts"), SourceFingerprint::new(2000, 500))
-            .is_none()
-    );
-}
-
-#[test]
-fn get_by_metadata_returns_none_on_size_mismatch() {
-    let mut store = CacheStore::new(Path::new(""));
-    let module = CachedModule {
-        content_hash: 42,
-        mtime_ns: 1000,
-        ctime_ns: 0,
-        file_size: 500,
-        last_access_secs: 0,
-        exports: vec![],
-        imports: vec![],
-        re_exports: vec![],
-        dynamic_imports: vec![],
-        require_calls: vec![],
-        package_path_references: Box::default(),
-        member_accesses: vec![],
-        semantic_facts: None,
-        whole_object_uses: Box::default(),
-        dynamic_import_patterns: vec![],
-        parse_error_count: 0,
-        parse_panicked: false,
-        has_cjs_exports: false,
-        has_angular_component_template_url: false,
-        unused_import_bindings: vec![],
-        type_referenced_import_bindings: vec![],
-        value_referenced_import_bindings: vec![],
-        suppressions: vec![],
-        unknown_suppression_kinds: vec![],
-        line_offsets: vec![],
-        complexity: vec![],
-        complexity_extracted: false,
-        flag_uses: vec![],
-        class_heritage: vec![],
-        exported_factory_returns: None,
-        exported_factory_return_object_shapes: None,
-        type_member_types: None,
-        injection_tokens: vec![],
-        local_type_declarations: Vec::new(),
-        public_signature_type_references: Vec::new(),
-        namespace_object_aliases: Vec::new(),
-        iconify_prefixes: Vec::new(),
-        iconify_icon_names: Vec::new(),
-        auto_import_candidates: Vec::new(),
-        directives: Vec::new(),
-        client_only_dynamic_import_spans: Vec::new(),
-        security_sinks: Vec::new(),
-        security_sinks_skipped: 0,
-        security_unresolved_callee_sites: Vec::new(),
-        tainted_bindings: Vec::new(),
-        sanitized_sink_args: Vec::new(),
-        security_control_sites: Vec::new(),
-        callee_uses: Vec::new(),
-        misplaced_directives: Vec::new(),
-        inline_server_action_exports: Vec::new(),
-        di_key_sites: Vec::new(),
-        has_dynamic_provide: false,
-        component_props: Vec::new(),
-        has_props_attrs_fallthrough: false,
-        has_define_expose: false,
-        has_define_model: false,
-        has_unharvestable_props: false,
-        component_emits: Vec::new(),
-        angular_inputs: Vec::new(),
-        angular_outputs: Vec::new(),
-        has_unharvestable_emits: false,
-        has_dynamic_emit: false,
-        has_emit_whole_object_use: false,
-        load_return_keys: Vec::new(),
-        has_unharvestable_load: false,
-        has_load_data_whole_use: false,
-        component_functions: Vec::new(),
-        react_props: Vec::new(),
-        hook_uses: Vec::new(),
-        render_edges: Vec::new(),
-        svelte_dispatched_events: Vec::new(),
-        svelte_listened_events: Vec::new(),
-        angular_component_selectors: Vec::new(),
-        registered_custom_elements: Vec::new(),
-        used_custom_element_tags: Vec::new(),
-        angular_used_selectors: Vec::new(),
-        angular_entry_component_refs: Vec::new(),
-        has_dynamic_component_render: false,
-        has_dynamic_dispatch: false,
-    };
-    store.insert(Path::new("test.ts"), module);
-
-    assert!(
-        store
-            .get_by_metadata(Path::new("test.ts"), SourceFingerprint::new(1000, 999))
-            .is_none()
-    );
-}
-
-#[test]
-fn get_by_metadata_returns_none_for_zero_mtime() {
-    let mut store = CacheStore::new(Path::new(""));
-    let module = CachedModule {
-        content_hash: 42,
-        mtime_ns: 0,
-        ctime_ns: 0,
-        file_size: 500,
-        last_access_secs: 0,
-        exports: vec![],
-        imports: vec![],
-        re_exports: vec![],
-        dynamic_imports: vec![],
-        require_calls: vec![],
-        package_path_references: Box::default(),
-        member_accesses: vec![],
-        semantic_facts: None,
-        whole_object_uses: Box::default(),
-        dynamic_import_patterns: vec![],
-        parse_error_count: 0,
-        parse_panicked: false,
-        has_cjs_exports: false,
-        has_angular_component_template_url: false,
-        unused_import_bindings: vec![],
-        type_referenced_import_bindings: vec![],
-        value_referenced_import_bindings: vec![],
-        suppressions: vec![],
-        unknown_suppression_kinds: vec![],
-        line_offsets: vec![],
-        complexity: vec![],
-        complexity_extracted: false,
-        flag_uses: vec![],
-        class_heritage: vec![],
-        exported_factory_returns: None,
-        exported_factory_return_object_shapes: None,
-        type_member_types: None,
-        injection_tokens: vec![],
-        local_type_declarations: Vec::new(),
-        public_signature_type_references: Vec::new(),
-        namespace_object_aliases: Vec::new(),
-        iconify_prefixes: Vec::new(),
-        iconify_icon_names: Vec::new(),
-        auto_import_candidates: Vec::new(),
-        directives: Vec::new(),
-        client_only_dynamic_import_spans: Vec::new(),
-        security_sinks: Vec::new(),
-        security_sinks_skipped: 0,
-        security_unresolved_callee_sites: Vec::new(),
-        tainted_bindings: Vec::new(),
-        sanitized_sink_args: Vec::new(),
-        security_control_sites: Vec::new(),
-        callee_uses: Vec::new(),
-        misplaced_directives: Vec::new(),
-        inline_server_action_exports: Vec::new(),
-        di_key_sites: Vec::new(),
-        has_dynamic_provide: false,
-        component_props: Vec::new(),
-        has_props_attrs_fallthrough: false,
-        has_define_expose: false,
-        has_define_model: false,
-        has_unharvestable_props: false,
-        component_emits: Vec::new(),
-        angular_inputs: Vec::new(),
-        angular_outputs: Vec::new(),
-        has_unharvestable_emits: false,
-        has_dynamic_emit: false,
-        has_emit_whole_object_use: false,
-        load_return_keys: Vec::new(),
-        has_unharvestable_load: false,
-        has_load_data_whole_use: false,
-        component_functions: Vec::new(),
-        react_props: Vec::new(),
-        hook_uses: Vec::new(),
-        render_edges: Vec::new(),
-        svelte_dispatched_events: Vec::new(),
-        svelte_listened_events: Vec::new(),
-        angular_component_selectors: Vec::new(),
-        registered_custom_elements: Vec::new(),
-        used_custom_element_tags: Vec::new(),
-        angular_used_selectors: Vec::new(),
-        angular_entry_component_refs: Vec::new(),
-        has_dynamic_component_render: false,
-        has_dynamic_dispatch: false,
-    };
-    store.insert(Path::new("test.ts"), module);
-
-    assert!(
-        store
-            .get_by_metadata(Path::new("test.ts"), SourceFingerprint::new(0, 500))
-            .is_none()
-    );
-}
-
-#[test]
-fn get_by_metadata_returns_none_for_missing_file() {
-    let store = CacheStore::new(Path::new(""));
-    assert!(
-        store
-            .get_by_metadata(
-                Path::new("nonexistent.ts"),
-                SourceFingerprint::new(1000, 500)
-            )
-            .is_none()
-    );
 }
 
 #[test]
@@ -4600,11 +4218,65 @@ fn cache_load_honors_user_max_size_above_default() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A format bump changes the encoded shape, so the blob the previous release
+/// wrote cannot be decoded at all. When the version was compared AFTER the
+/// decode, that comparison was unreachable on the most ordinary event there is
+/// (upgrading fallow) and every upgrade reported "cache file could not be
+/// decoded", which reads as a damaged disk rather than a one-time rebuild.
 #[test]
-fn cache_load_reports_undecodable_on_bitcode_decode_failure() {
+fn cache_load_reports_a_version_change_for_a_blob_from_an_older_format() {
+    let dir = test_cache_dir("older_format_blob");
+    std::fs::create_dir_all(&dir).unwrap();
+    // A previous release wrote an unframed payload whose shape this binary
+    // cannot decode; only the framing tells the two apart without decoding.
+    std::fs::write(dir.join("cache.bin"), bitcode::encode(&(7_u32, "legacy"))).unwrap();
+
+    assert_eq!(
+        CacheStore::load(&dir, Path::new(""), 0, DEFAULT_CACHE_MAX_SIZE).err(),
+        Some(CacheRejection::VersionMismatch)
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The declared version decides before the payload is read, so a blob written
+/// for another version is refused whether or not it would have decoded.
+#[test]
+fn cache_load_refuses_a_declared_version_it_does_not_write() {
+    let dir = test_cache_dir("declared_version_mismatch");
+    let mut store = CacheStore::new(Path::new(""));
+    store.insert(Path::new("test.ts"), synthetic_module(1, 0, 1));
+    store
+        .save(&dir, 0, DEFAULT_CACHE_MAX_SIZE)
+        .expect("save current cache");
+    let on_disk = std::fs::read(dir.join("cache.bin")).unwrap();
+    let payload = on_disk[super::store::CACHE_HEADER_LEN..].to_vec();
+    std::fs::write(
+        dir.join("cache.bin"),
+        super::store::framed(super::types::CACHE_VERSION + 1, &payload),
+    )
+    .unwrap();
+
+    assert_eq!(
+        CacheStore::load(&dir, Path::new(""), 0, DEFAULT_CACHE_MAX_SIZE).err(),
+        Some(CacheRejection::VersionMismatch)
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `Undecodable` keeps its meaning: a file this binary framed itself, at the
+/// version it writes, whose payload is damaged.
+#[test]
+fn cache_load_reports_undecodable_for_a_damaged_payload_at_the_current_version() {
     let dir = test_cache_dir("decode_fail_info");
     std::fs::create_dir_all(&dir).unwrap();
-    std::fs::write(dir.join("cache.bin"), b"not-a-valid-bitcode-payload").unwrap();
+    std::fs::write(
+        dir.join("cache.bin"),
+        super::store::framed(super::types::CACHE_VERSION, b"not-a-valid-bitcode-payload"),
+    )
+    .unwrap();
+
     assert_eq!(
         CacheStore::load(&dir, Path::new(""), 0, DEFAULT_CACHE_MAX_SIZE).err(),
         Some(CacheRejection::Undecodable)

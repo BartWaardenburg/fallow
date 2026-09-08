@@ -226,6 +226,41 @@ impl WorkspaceDiagnosticKind {
         }
     }
 
+    /// Whether this diagnostic is worth a `tracing::warn!` line on stderr, on
+    /// top of its permanent entry in `workspace_diagnostics[]`.
+    ///
+    /// A warning is for a run whose RESULTS are degraded: something the user
+    /// installed, wrote, or expected did not reach the analysis. The two
+    /// unconfigured-check kinds are not that. They fire in the product's
+    /// default state, on every project that never opted into boundaries or
+    /// rule packs, and they will keep firing forever, because the remedy they
+    /// offer is to write configuration in order to silence a warning about not
+    /// having written configuration. They stay in the structured array, where a
+    /// consumer that wants to distinguish "measured zero" from "measured
+    /// nothing" can read them, and off the stderr surface that every other
+    /// command shares.
+    #[must_use]
+    pub const fn warns_on_stderr(&self) -> bool {
+        match self {
+            Self::BoundariesNotConfigured | Self::RulePacksNotConfigured => false,
+            Self::UndeclaredWorkspace
+            | Self::MalformedPackageJson { .. }
+            | Self::GlobMatchedNoPackageJson { .. }
+            | Self::MalformedTsconfig { .. }
+            | Self::TsconfigReferenceDirMissing
+            | Self::MalformedPnpmWorkspaceYaml { .. }
+            | Self::SkippedLargeFile { .. }
+            | Self::SkippedMinifiedFile { .. }
+            | Self::SkippedSourceDotdir
+            | Self::SourceReadFailure { .. }
+            | Self::SourceParseDegraded { .. }
+            | Self::BunLockbOverrideResolutionSkipped
+            | Self::BunLockOverrideResolutionSkipped
+            | Self::BunResolutionsShadowedByOverrides
+            | Self::NodeModulesMissing => true,
+        }
+    }
+
     /// Whether this diagnostic is produced by SOURCE discovery (the file walk in
     /// `discover_files`) rather than WORKSPACE discovery (config load). Source-
     /// discovery diagnostics are APPENDED to the registry after config load, so
@@ -268,6 +303,64 @@ impl WorkspaceDiagnosticKind {
                 | Self::SkippedSourceDotdir
                 | Self::NodeModulesMissing
         )
+    }
+
+    /// Whether this diagnostic reports a source file whose contents this run
+    /// never analyzed, so every import and export the file holds is invisible
+    /// to the module graph.
+    ///
+    /// This is the class `reachability_caveats[]` exists for. A file the run
+    /// never read credits nothing, so the modules it imports surface as
+    /// confident `unused-file` and `unused-export` findings carrying
+    /// `delete-file` and `remove-export` actions, and `fallow fix` would
+    /// otherwise apply the removal against source that still imports the
+    /// target.
+    ///
+    /// All four discovery-side kinds qualify, for the same reason and with the
+    /// same consequence:
+    ///
+    /// - `skipped-large-file` and `skipped-minified-file`: the file is in the
+    ///   project tree and was never opened, so its import list is unknown.
+    /// - `skipped-source-dotdir`: the directory holds at least one source file
+    ///   the project did not exclude, and none of them were traversed. The
+    ///   diagnostic is capped, so it under-reports rather than over-reports;
+    ///   its presence still proves unseen source exists.
+    /// - `source-read-failure`: the file was discovered and then could not be
+    ///   read, so nothing was extracted from it at all.
+    ///
+    /// `source-parse-degraded` is deliberately NOT one of these, though it
+    /// belongs to the same family. That file WAS read, so it has a module and
+    /// a graph node and its reachability is observable, which lets the caveat
+    /// pass narrow it: a degraded module that is itself unreachable cannot
+    /// change a reachability verdict. Every kind above has no node to ask (a
+    /// read failure has one with nothing extracted into it), so no narrowing
+    /// is available and the caveat they raise is run-level.
+    ///
+    /// The match is exhaustive on purpose: a new "the run did not see this
+    /// file" kind has to be classified here, and answering `true` is the only
+    /// wiring its findings need in order to inherit both the caveat and the
+    /// `fallow fix` withholding that follows it.
+    #[must_use]
+    pub const fn source_never_analyzed(&self) -> bool {
+        match self {
+            Self::SkippedLargeFile { .. }
+            | Self::SkippedMinifiedFile { .. }
+            | Self::SkippedSourceDotdir
+            | Self::SourceReadFailure { .. } => true,
+            Self::UndeclaredWorkspace
+            | Self::MalformedPackageJson { .. }
+            | Self::GlobMatchedNoPackageJson { .. }
+            | Self::MalformedTsconfig { .. }
+            | Self::TsconfigReferenceDirMissing
+            | Self::MalformedPnpmWorkspaceYaml { .. }
+            | Self::SourceParseDegraded { .. }
+            | Self::BunLockbOverrideResolutionSkipped
+            | Self::BunLockOverrideResolutionSkipped
+            | Self::BunResolutionsShadowedByOverrides
+            | Self::NodeModulesMissing
+            | Self::BoundariesNotConfigured
+            | Self::RulePacksNotConfigured => false,
+        }
     }
 
     /// Whether this diagnostic is recorded by the ANALYZE stage (the
@@ -1126,6 +1219,69 @@ mod tests {
             ],
             "the duplicate spelling folds away and the overlapping glob stays"
         );
+    }
+
+    /// The class `reachability_caveats[]` is computed from. Every kind here
+    /// means the run never read a file that is part of the project, so its
+    /// imports credit nothing and the modules it imports can be reported
+    /// unused with a removal action on them. Classifying a kind `true` is the
+    /// only wiring its findings need to inherit the caveat and the `fallow fix`
+    /// withholding that follows it.
+    #[test]
+    fn source_never_analyzed_covers_every_file_the_run_did_not_read() {
+        for kind in [
+            WorkspaceDiagnosticKind::SkippedLargeFile { size_bytes: 1 },
+            WorkspaceDiagnosticKind::SkippedMinifiedFile { size_bytes: 1 },
+            WorkspaceDiagnosticKind::SkippedSourceDotdir,
+            WorkspaceDiagnosticKind::SourceReadFailure {
+                error: "permission denied".to_owned(),
+            },
+        ] {
+            assert!(
+                kind.source_never_analyzed(),
+                "{} names a source file this run never read",
+                kind.id()
+            );
+        }
+
+        let degraded = WorkspaceDiagnosticKind::SourceParseDegraded {
+            error_count: 3,
+            panicked: false,
+        };
+        assert!(
+            !degraded.source_never_analyzed(),
+            "a degraded parse read the file, so it has a graph node and its reachability is \
+             observable; the caveat pass narrows it instead of treating it as unread"
+        );
+
+        for kind in [
+            WorkspaceDiagnosticKind::UndeclaredWorkspace,
+            WorkspaceDiagnosticKind::MalformedPackageJson {
+                error: "trailing comma".to_owned(),
+            },
+            WorkspaceDiagnosticKind::GlobMatchedNoPackageJson {
+                pattern: "packages/*".to_owned(),
+            },
+            WorkspaceDiagnosticKind::MalformedTsconfig {
+                error: "unexpected token".to_owned(),
+            },
+            WorkspaceDiagnosticKind::TsconfigReferenceDirMissing,
+            WorkspaceDiagnosticKind::MalformedPnpmWorkspaceYaml {
+                error: "bad indent".to_owned(),
+            },
+            WorkspaceDiagnosticKind::BunLockbOverrideResolutionSkipped,
+            WorkspaceDiagnosticKind::BunLockOverrideResolutionSkipped,
+            WorkspaceDiagnosticKind::BunResolutionsShadowedByOverrides,
+            WorkspaceDiagnosticKind::NodeModulesMissing,
+            WorkspaceDiagnosticKind::BoundariesNotConfigured,
+            WorkspaceDiagnosticKind::RulePacksNotConfigured,
+        ] {
+            assert!(
+                !kind.source_never_analyzed(),
+                "{} says nothing about a source file's imports going unseen",
+                kind.id()
+            );
+        }
     }
 
     #[test]

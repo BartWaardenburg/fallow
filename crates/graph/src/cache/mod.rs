@@ -21,7 +21,7 @@ use crate::resolve::{
 
 mod store;
 
-pub use store::GraphCacheStore;
+pub use store::{GRAPH_CACHE_FILE, GraphCacheStore};
 
 /// Persisted graph cache schema version.
 ///

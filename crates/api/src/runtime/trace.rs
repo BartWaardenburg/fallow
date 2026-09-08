@@ -5,9 +5,9 @@ use rustc_hash::FxHashSet;
 use crate::{
     ProgrammaticAnalysisContext, ProgrammaticError, TraceCloneOptions,
     TraceCloneProgrammaticOutput, TraceCloneTarget, TraceDependencyOptions,
-    TraceDependencyProgrammaticOutput, TraceExportOptions, TraceExportProgrammaticOutput,
-    TraceExportTargetOutput, TraceFileOptions, TraceFileProgrammaticOutput, TraceImportPathOptions,
-    TraceImportPathProgrammaticOutput,
+    TraceDependencyProgrammaticOutput, TraceErrorOptions, TraceErrorProgrammaticOutput,
+    TraceExportOptions, TraceExportProgrammaticOutput, TraceExportTargetOutput, TraceFileOptions,
+    TraceFileProgrammaticOutput, TraceImportPathOptions, TraceImportPathProgrammaticOutput,
 };
 
 use super::{ProgrammaticResult, duplication, resolve_programmatic_analysis_context};
@@ -145,6 +145,50 @@ pub fn run_trace_import_path(
                 .with_context("trace_import_path")
         })?;
         Ok(TraceImportPathProgrammaticOutput { output })
+    })
+}
+
+/// Resolve a runtime stack trace's frames against the project graph.
+///
+/// A trace in which nothing resolves is a RESULT, not an error: the output
+/// reports every frame with the origin and resolution that explain why. Only
+/// an empty trace argument, a config load failure, or a failed analysis is an
+/// error.
+///
+/// # Errors
+///
+/// Returns a structured programmatic error for an empty or oversized trace,
+/// config load failures, or graph construction failures.
+pub fn run_trace_error(
+    options: &TraceErrorOptions,
+) -> ProgrammaticResult<TraceErrorProgrammaticOutput> {
+    validate_non_empty("trace", &options.trace)?;
+    if options.trace.len() as u64 > fallow_engine::trace_error::MAX_STACK_TRACE_BYTES {
+        let limit = fallow_engine::trace_error::MAX_STACK_TRACE_BYTES;
+        return Err(ProgrammaticError::new(
+            format!("stack trace exceeds the {limit}-byte limit"),
+            2,
+        )
+        .with_code("FALLOW_INVALID_OPTIONS")
+        .with_help(
+            "A stack trace is a handful of kilobytes. Pass the trace itself rather than a              redirected log file, and cut it to the frames that matter.",
+        )
+        .with_context("trace_error"));
+    }
+    let resolved = resolve_programmatic_analysis_context(&options.analysis)?;
+    resolved.install(|| {
+        let session = load_trace_session(&resolved)?;
+        let output = fallow_engine::trace_error::trace_error_with_session(
+            &session,
+            &options.trace,
+            options.source.clone(),
+        )
+        .map_err(|err| {
+            ProgrammaticError::new(format!("stack-trace resolution failed: {err}"), 2)
+                .with_code("FALLOW_ANALYSIS_FAILED")
+                .with_context("trace_error")
+        })?;
+        Ok(TraceErrorProgrammaticOutput { output })
     })
 }
 

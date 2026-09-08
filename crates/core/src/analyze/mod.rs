@@ -4,13 +4,13 @@ mod boundary_coverage;
 mod duplicate_prop_shape;
 mod dynamic_segment_name_conflict;
 pub mod feature_flags;
+mod graph_confidence;
 mod iconify;
 mod invalid_client_exports;
 mod members;
 mod misplaced_directive;
 mod mixed_barrel;
 mod package_json_utils;
-mod parse_confidence;
 mod policy;
 mod predicates;
 mod prop_drilling;
@@ -841,7 +841,15 @@ pub(crate) fn find_dead_code_full(
     // Last, so every finding the detectors and the post-detection passes put
     // into the two arrays carries the caveat, including ones moved between
     // arrays by reclassification.
-    parse_confidence::DegradedParseContext::new(graph, modules).annotate(&mut results);
+    //
+    // The diagnostics come from the process registry rather than from a
+    // parameter because a file discovery skipped has no `ModuleInfo` and no
+    // graph node: the registry is the only record this pass can reach that the
+    // run failed to read it at all. `clear_analysis_stage_diagnostics` above
+    // touches only analyze-stage kinds, so the walk's skip list is intact here.
+    let diagnostics = fallow_config::workspace_diagnostics_for(&config.root);
+    graph_confidence::GraphConfidenceContext::new(graph, modules, &diagnostics)
+        .annotate(&mut results);
 
     results.sort();
 

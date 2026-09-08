@@ -428,17 +428,28 @@ fn push_suppressed_count_note(lines: &mut Vec<String>, suppressed: usize) {
     );
 }
 
-fn format_unused_export(e: &UnusedExport) -> String {
+/// The compact dimmed parenthetical a finding line carries when a degraded
+/// parse could have distorted its verdict, matching how `(re-export)` and the
+/// other per-finding annotations render. Empty when there is no caveat, so a
+/// project that parses cleanly renders byte-identically.
+fn dimmed_caveat_suffix(caveats: &[ReachabilityCaveat]) -> String {
+    caveat_suffix(caveats)
+        .map(|suffix| suffix.dimmed().to_string())
+        .unwrap_or_default()
+}
+
+fn format_unused_export(e: &UnusedExport, caveats: &[ReachabilityCaveat]) -> String {
     let tag = if e.is_re_export {
         " (re-export)".dimmed().to_string()
     } else {
         String::new()
     };
     format!(
-        "{} {}{}",
+        "{} {}{}{}",
         format!(":{}", e.line).dimmed(),
         e.export_name.bold(),
-        tag
+        tag,
+        dimmed_caveat_suffix(caveats),
     )
 }
 
@@ -500,6 +511,12 @@ trait NamedPkgDep {
     fn used_in_workspaces(&self) -> &[PathBuf] {
         &[]
     }
+    /// Degraded-parse caveats on the verdict behind this finding. Only the
+    /// three unused-dependency arrays carry them; every other dep finding
+    /// answers the question from a manifest rather than from the import graph.
+    fn caveats(&self) -> &[ReachabilityCaveat] {
+        &[]
+    }
 }
 
 impl NamedPkgDep for UnusedDependency {
@@ -542,6 +559,9 @@ impl NamedPkgDep for UnusedDependencyFinding {
     fn used_in_workspaces(&self) -> &[PathBuf] {
         &self.dep.used_in_workspaces
     }
+    fn caveats(&self) -> &[ReachabilityCaveat] {
+        &self.reachability_caveats
+    }
 }
 
 impl NamedPkgDep for UnusedDevDependencyFinding {
@@ -554,6 +574,9 @@ impl NamedPkgDep for UnusedDevDependencyFinding {
     fn used_in_workspaces(&self) -> &[PathBuf] {
         &self.dep.used_in_workspaces
     }
+    fn caveats(&self) -> &[ReachabilityCaveat] {
+        &self.reachability_caveats
+    }
 }
 
 impl NamedPkgDep for UnusedOptionalDependencyFinding {
@@ -565,6 +588,9 @@ impl NamedPkgDep for UnusedOptionalDependencyFinding {
     }
     fn used_in_workspaces(&self) -> &[PathBuf] {
         &self.dep.used_in_workspaces
+    }
+    fn caveats(&self) -> &[ReachabilityCaveat] {
+        &self.reachability_caveats
     }
 }
 
@@ -617,13 +643,14 @@ fn push_human_pkg_dep_section<T: NamedPkgDep>(input: &mut HumanPkgDepSectionInpu
         },
         |dep| {
             vec![format!(
-                "  {}",
+                "  {}{}",
                 format_dep_with_pkg(
                     dep.pkg_name(),
                     dep.pkg_path(),
                     dep.used_in_workspaces(),
                     input.root
-                )
+                ),
+                dimmed_caveat_suffix(dep.caveats()),
             )]
         },
     );
@@ -717,7 +744,11 @@ fn push_unused_files_section(input: &mut UnusedCodeSectionInput<'_>) {
                 let path_str = relative_path(&file.file.path, input.root)
                     .display()
                     .to_string();
-                vec![format!("  {}", format_path(&path_str))]
+                vec![format!(
+                    "  {}{}",
+                    format_path(&path_str),
+                    dimmed_caveat_suffix(&file.reachability_caveats),
+                )]
             },
         );
     }
@@ -745,7 +776,9 @@ fn push_unused_export_sections(
             root: input.root,
             max_files: input.max_grouped_files,
             get_path: |e| e.export.path.as_path(),
-            format_detail: &|e: &UnusedExportFinding| format_unused_export(&e.export),
+            format_detail: &|e: &UnusedExportFinding| {
+                format_unused_export(&e.export, &e.reachability_caveats)
+            },
         },
         has_fixable_export,
     );
@@ -765,7 +798,7 @@ fn push_unused_export_sections(
             root: input.root,
             max_files: input.max_grouped_files,
             get_path: |e| e.export.path.as_path(),
-            format_detail: &|e: &UnusedTypeFinding| format_unused_export(&e.export),
+            format_detail: &|e: &UnusedTypeFinding| format_unused_export(&e.export, &[]),
         },
         has_fixable_type,
     );
@@ -2134,8 +2167,38 @@ fn build_dir_rollup_section(
         unused_file_display_entries(unused_files, root, &dir_counts, dominant.as_deref());
 
     render_dir_rollup_entries(lines, &display_entries, total_issues);
+    push_rollup_caveat_note(lines, unused_files);
     push_section_footer_rollup(lines, title, unused_files.len());
     lines.push(String::new());
+}
+
+/// The directory rollup collapses the per-file lines the flat section carries
+/// a caveat suffix on, so the caveat is stated once for the section instead.
+/// Silent when nothing degraded, keeping a clean project byte-identical.
+fn push_rollup_caveat_note(
+    lines: &mut Vec<String>,
+    unused_files: &[fallow_types::output_dead_code::UnusedFileFinding],
+) {
+    let caveated = unused_files
+        .iter()
+        .filter(|finding| !finding.reachability_caveats.is_empty())
+        .count();
+    if caveated == 0 {
+        return;
+    }
+    let mut present: Vec<ReachabilityCaveat> = unused_files
+        .iter()
+        .flat_map(|finding| finding.reachability_caveats.iter().copied())
+        .collect();
+    present.sort_unstable();
+    present.dedup();
+    let Some(labels) = caveat_labels(&present) else {
+        return;
+    };
+    lines.push(format!(
+        "  {}",
+        format!("({caveated} of these carry a caveat: {labels})").dimmed()
+    ));
 }
 
 fn unused_file_dir_counts(
@@ -3921,6 +3984,124 @@ mod tests {
         let text = plain(&lines);
 
         assert!(text.contains("2 in src, 3 in test directories"));
+    }
+
+    /// The `source-parse-degraded` diagnostic sits at the top of the JSON
+    /// envelope, and the human report never showed it next to the finding it
+    /// distorts. A person reading `src/helper.ts` under a `delete-file`
+    /// heading has to see that the verdict rests on an incomplete parse.
+    #[test]
+    fn a_caveated_finding_carries_a_compact_suffix_in_the_human_report() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        let mut file = UnusedFileFinding::with_actions(UnusedFile {
+            path: root.join("src/helper.ts"),
+        });
+        file.reachability_caveats = vec![ReachabilityCaveat::IncompleteImportGraph];
+        results.unused_files.push(file);
+
+        let mut export = UnusedExportFinding::with_actions(UnusedExport {
+            path: root.join("src/lib.ts"),
+            export_name: "needed".to_string(),
+            is_type_only: false,
+            line: 1,
+            col: 13,
+            span_start: 13,
+            is_re_export: false,
+        });
+        export.reachability_caveats = vec![
+            ReachabilityCaveat::IncompleteFileAnalysis,
+            ReachabilityCaveat::IncompleteImportGraph,
+        ];
+        results.unused_exports.push(export);
+
+        let mut dep = UnusedDependencyFinding::with_actions(UnusedDependency {
+            package_name: "lodash".to_string(),
+            location: fallow_types::results::DependencyLocation::Dependencies,
+            path: root.join("package.json"),
+            line: 5,
+            used_in_workspaces: Vec::new(),
+        });
+        dep.reachability_caveats = vec![ReachabilityCaveat::IncompleteImportGraph];
+        results.unused_dependencies.push(dep);
+
+        let rules = RulesConfig::default();
+        let text = plain(&build_human_lines(&results, &root, &rules, None));
+
+        assert!(
+            text.contains("src/helper.ts (caveat: incomplete import graph)"),
+            "the unused-file line must name the caveat: {text}"
+        );
+        assert!(
+            text.contains(":1 needed (caveat: incomplete file analysis, incomplete import graph)"),
+            "the unused-export line must name both caveats: {text}"
+        );
+        assert!(
+            text.contains("lodash (caveat: incomplete import graph)"),
+            "the dependency line must name the caveat: {text}"
+        );
+    }
+
+    /// A project that parses cleanly must render exactly as before.
+    #[test]
+    fn an_uncaveated_finding_renders_without_a_suffix() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: root.join("src/helper.ts"),
+            }));
+        results
+            .unused_dependencies
+            .push(UnusedDependencyFinding::with_actions(UnusedDependency {
+                package_name: "lodash".to_string(),
+                location: fallow_types::results::DependencyLocation::Dependencies,
+                path: root.join("package.json"),
+                line: 5,
+                used_in_workspaces: Vec::new(),
+            }));
+
+        let rules = RulesConfig::default();
+        let text = plain(&build_human_lines(&results, &root, &rules, None));
+
+        assert!(
+            !text.contains("caveat"),
+            "clean output must not change: {text}"
+        );
+    }
+
+    /// Above the rollup threshold the per-file lines collapse into directory
+    /// counts, so the caveat is stated once for the section instead of being
+    /// silently dropped.
+    #[test]
+    fn the_directory_rollup_states_the_caveat_once() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        for index in 0..=DIR_ROLLUP_THRESHOLD {
+            let mut file = UnusedFileFinding::with_actions(UnusedFile {
+                path: root.join(format!("src/dead{index}.ts")),
+            });
+            if index % 2 == 0 {
+                file.reachability_caveats = vec![ReachabilityCaveat::IncompleteImportGraph];
+            }
+            results.unused_files.push(file);
+        }
+        let expected = results
+            .unused_files
+            .iter()
+            .filter(|finding| !finding.reachability_caveats.is_empty())
+            .count();
+
+        let rules = RulesConfig::default();
+        let text = plain(&build_human_lines(&results, &root, &rules, None));
+
+        assert!(
+            text.contains(&format!(
+                "({expected} of these carry a caveat: incomplete import graph)"
+            )),
+            "the rollup must still surface the caveat: {text}"
+        );
     }
 
     #[test]

@@ -73,7 +73,7 @@ const MAX_TOOL_DESCRIPTION_BYTES: usize = 2_000;
 /// This is the ratchet's high-water mark, not the assertion: the target is
 /// 35_000, reached by moving one tool's per-flag prose into its
 /// `fallow://tools/{name}` guide at a time.
-const RECORDED_TOTAL_DESCRIPTION_BYTES: usize = 52_276;
+const RECORDED_TOTAL_DESCRIPTION_BYTES: usize = 54_016;
 
 /// Deliberate headroom over [`RECORDED_TOTAL_DESCRIPTION_BYTES`].
 ///
@@ -81,14 +81,21 @@ const RECORDED_TOTAL_DESCRIPTION_BYTES: usize = 52_276;
 /// which reads as a break rather than as a budget and teaches the next
 /// maintainer to raise the number reflexively. A kilobyte absorbs ordinary
 /// rewording (a clarified sentence, a corrected flag name) while still
-/// catching what the budget exists for: prose that grows by a paragraph. It is
-/// not a spending allowance, because the re-pin check below reclaims it.
+/// catching what the budget exists for: prose that grows by a paragraph.
+///
+/// It is spendable, and nothing reclaims it on its own. The re-pin check below
+/// fires only when the live total drops well BELOW the recorded mark, so growth
+/// that stays inside this kilobyte is permanent until the mark is re-pinned by
+/// hand. Re-pin it in the same change that spends part of it, or the next
+/// author inherits headroom that is already gone.
 const TOTAL_DESCRIPTION_SLACK_BYTES: usize = 1_024;
 
 /// Total wire-description ceiling across every registered tool. The binding
 /// constraint. A NEW capability is the one thing that may raise the recorded
-/// mark, and only by its own routing summary: the new tool's description
-/// carries no per-flag detail (that goes straight into its guide).
+/// mark by a whole description, and only by its own routing summary: the new
+/// tool's description carries no per-flag detail (that goes straight into its
+/// guide). Re-pinning after a change that spent slack is the other, smaller
+/// reason the mark moves up.
 const MAX_TOTAL_DESCRIPTION_BYTES: usize =
     RECORDED_TOTAL_DESCRIPTION_BYTES + TOTAL_DESCRIPTION_SLACK_BYTES;
 
@@ -116,7 +123,12 @@ const MAX_EXCEPTION_SLACK_BYTES: usize = 128;
 /// contract, the host-call allowlist, and the output and timeout bounds
 /// before an agent runs JavaScript in this process; `fix_apply` states the
 /// dry-run-first mutation contract, and it is the only tool that writes to
-/// the project.
+/// the project. `fix_apply`'s allowance last moved for a write fallow now
+/// declines: a finding whose verdict rests on a source file the run did not
+/// fully analyze. That is the one kind of growth this row exists to allow,
+/// and it is not per-flag prose;
+/// an agent that does not know a removal was withheld reads the run as a
+/// clean no-op.
 ///
 /// Temporary: every other row. Those descriptions still carry per-flag detail
 /// that belongs in a `fallow://tools/{name}` guide; each is scheduled for the
@@ -124,7 +136,7 @@ const MAX_EXCEPTION_SLACK_BYTES: usize = 128;
 /// that split.
 const DESCRIPTION_BUDGET_EXCEPTIONS: &[(&str, usize)] = &[
     ("code_execute", 4_600),
-    ("fix_apply", 3_800),
+    ("fix_apply", 4_200),
     ("check_health", 5_500),
     ("audit", 5_150),
     ("fix_preview", 2_750),

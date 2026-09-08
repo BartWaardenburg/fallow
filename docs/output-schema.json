@@ -885,7 +885,7 @@
           "items": {
             "$ref": "#/definitions/WorkspaceDiagnostic"
           },
-          "description": "Non-fatal diagnostics about the project itself, from all three stages\nthat record them (issue #473):\n\n- workspace discovery, at config load: `undeclared-workspace`,\n  `malformed-package-json`, `glob-matched-no-package-json`,\n  `malformed-tsconfig`, `tsconfig-reference-dir-missing`;\n- source discovery, during the file walk: `skipped-large-file`,\n  `skipped-minified-file`, `skipped-source-dotdir`,\n  `source-read-failure`, `source-parse-degraded`;\n- dead-code analysis, from the dependency-catalog and override\n  detectors: `malformed-pnpm-workspace-yaml`,\n  `bun-lockb-override-resolution-skipped`.\n\nAnalysis-stage kinds therefore reach only the envelopes whose run\nincludes a dead-code analyze pass, never a standalone\n`fallow dupes --format json`. `path` is project-root-relative with\nforward slashes; the array is omitted when empty. The same list is\nrepeated on each top-level command's envelope so single-command\nconsumers see it without having to look at a separate top-level field.\n\nA diagnostic here is advisory and never withholds a finding. Where a\n`source-parse-degraded` entry can distort a reachability verdict, the\naffected `unused_files[]` and `unused_exports[]` entries additionally\ncarry the caveat themselves in their own optional `confidence[]` array,\nso a reader who never scrolls back up to this list still sees it."
+          "description": "Non-fatal diagnostics about the project itself, from all three stages\nthat record them (issue #473):\n\n- workspace discovery, at config load: `undeclared-workspace`,\n  `malformed-package-json`, `glob-matched-no-package-json`,\n  `malformed-tsconfig`, `tsconfig-reference-dir-missing`;\n- source discovery, during the file walk: `skipped-large-file`,\n  `skipped-minified-file`, `skipped-source-dotdir`,\n  `source-read-failure`, `source-parse-degraded`;\n- dead-code analysis, from the dependency-catalog and override\n  detectors: `malformed-pnpm-workspace-yaml`,\n  `bun-lockb-override-resolution-skipped`.\n\nAnalysis-stage kinds therefore reach only the envelopes whose run\nincludes a dead-code analyze pass, never a standalone\n`fallow dupes --format json`. `path` is project-root-relative with\nforward slashes; the array is omitted when empty. The same list is\nrepeated on each top-level command's envelope so single-command\nconsumers see it without having to look at a separate top-level field.\n\nA diagnostic here is advisory and never withholds a finding. Where an\nentry reports a source file this run never fully analyzed\n(`source-parse-degraded`, `source-read-failure`, `skipped-large-file`,\n`skipped-minified-file`, `skipped-source-dotdir`) it can distort a\nverdict, so the affected `unused_files[]`, `unused_exports[]`, and\ndependency entries additionally carry the caveat themselves in their own\noptional `reachability_caveats[]` array, and a reader who never scrolls\nback up to this list still sees it. `fallow fix` reads the same array\nand withholds the removal while a caveat stands."
         },
         "next_steps": {
           "type": "array",
@@ -2747,6 +2747,14 @@
           "type": "integer",
           "description": "Number of scoped-corpus clone groups withheld from `clone_groups[]` by\na presentation cap such as `--top`. `0` on an untruncated run, so\n`clone_groups_shown + clone_groups_omitted == stats.clone_groups`\nalways holds and `stats` keeps describing the whole measured corpus."
         },
+        "clone_families_shown": {
+          "type": "integer",
+          "description": "Number of clone families carried in `clone_families[]`."
+        },
+        "clone_families_omitted": {
+          "type": "integer",
+          "description": "Number of scoped-corpus clone families withheld from `clone_families[]`\nby a presentation cap such as `--top`, which rebuilds the families from\nthe groups that survived the cap. `0` on an untruncated run, so\n`clone_families_shown + clone_families_omitted == stats.clone_families`\nalways holds and `stats` keeps describing the whole measured corpus."
+        },
         "grouped_by": {
           "anyOf": [
             {
@@ -2809,7 +2817,9 @@
         "clone_families",
         "stats",
         "clone_groups_shown",
-        "clone_groups_omitted"
+        "clone_groups_omitted",
+        "clone_families_shown",
+        "clone_families_omitted"
       ],
       "description": "Envelope emitted by `fallow dupes --format json`.\n\n`Report` and `Group` are generic so the envelope can live in\n`fallow-output` while duplication report wrappers and grouped output\ninternals continue to migrate out of CLI/API-specific crates.",
       "title": "fallow dupes --format json"
@@ -3505,6 +3515,17 @@
         "shallow_clone": {
           "type": "boolean",
           "description": "True when the repository is a shallow clone, so churn counts are\ntruncated."
+        },
+        "clock": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ClockProvenance"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Provenance of the instant every churn and staleness number was measured\nagainst. Absent only when a caller assembled a summary without one."
         }
       },
       "required": [
@@ -5388,6 +5409,10 @@
           "type": "integer",
           "description": "Number of clone groups the scoped corpus contains after filtering.\n`--top` does not change it; compare it with `clone_groups_shown` on the\nenvelope to see how much of the corpus the array carries."
         },
+        "clone_families": {
+          "type": "integer",
+          "description": "Number of clone families the scoped corpus contains after filtering.\n`--top` truncates `clone_families[]` along with `clone_groups[]` but\ndoes not change this counter; compare it with `clone_families_shown` on\nthe envelope to see how much of the corpus the array carries."
+        },
         "clone_instances": {
           "type": "integer",
           "description": "Total clone instances across the scoped corpus after filtering.\n`--top` does not change it."
@@ -5417,6 +5442,7 @@
         "total_tokens",
         "duplicated_tokens",
         "clone_groups",
+        "clone_families",
         "clone_instances",
         "duplication_percentage"
       ],
@@ -9539,12 +9565,12 @@
           ],
           "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base. `None` when serialized directly from Rust."
         },
-        "confidence": {
+        "reachability_caveats": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/ReachabilityConfidenceFlag"
+            "$ref": "#/definitions/ReachabilityCaveat"
           },
-          "description": "Advisory caveats on the reachability verdict behind this finding.\nSorted, deduplicated, and omitted from the wire when empty, so a run\nover a project that parses cleanly is byte-identical. Never gates the\nfinding or the `delete-file` action."
+          "description": "Advisory caveats on the reachability verdict behind this finding.\nSorted, deduplicated, and omitted from the wire when empty, so a run\nthat analyzed every discovered file is byte-identical. Never gates the\nfinding or the `delete-file` action, though `fallow fix` does withhold\nthe removal of a caveated finding as low confidence."
         }
       },
       "required": [
@@ -9613,12 +9639,12 @@
           ],
           "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
         },
-        "confidence": {
+        "reachability_caveats": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/ReachabilityConfidenceFlag"
+            "$ref": "#/definitions/ReachabilityCaveat"
           },
-          "description": "Advisory caveats on the reachability verdict behind this finding.\nSorted, deduplicated, and omitted from the wire when empty. Never gates\nthe finding or the `remove-export` action."
+          "description": "Advisory caveats on the reachability verdict behind this finding.\nSorted, deduplicated, and omitted from the wire when empty. Never gates\nthe finding or the `remove-export` action, though `fallow fix` does\nwithhold the removal of a caveated export as low confidence."
         }
       },
       "required": [
@@ -9817,6 +9843,13 @@
             }
           ],
           "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        },
+        "reachability_caveats": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ReachabilityCaveat"
+          },
+          "description": "Advisory caveats on the verdict behind this finding. A dependency is\nreported unused when NO module in the project imports its specifier,\nso a module that parsed with errors can hide the import that would\nhave credited the package. Sorted, deduplicated, and omitted from the\nwire when empty. Never gates the finding, though `fallow fix`\nwithholds the `remove-dependency` write while a caveat stands."
         }
       },
       "required": [
@@ -9871,6 +9904,13 @@
             }
           ],
           "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        },
+        "reachability_caveats": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ReachabilityCaveat"
+          },
+          "description": "Advisory caveats on the verdict behind this finding. A dependency is\nreported unused when NO module in the project imports its specifier,\nso a module that parsed with errors can hide the import that would\nhave credited the package. Sorted, deduplicated, and omitted from the\nwire when empty. Never gates the finding, though `fallow fix`\nwithholds the `remove-dependency` write while a caveat stands."
         }
       },
       "required": [
@@ -9925,6 +9965,13 @@
             }
           ],
           "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        },
+        "reachability_caveats": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ReachabilityCaveat"
+          },
+          "description": "Advisory caveats on the verdict behind this finding. A dependency is\nreported unused when NO module in the project imports its specifier,\nso a module that parsed with errors can hide the import that would\nhave credited the package. Sorted, deduplicated, and omitted from the\nwire when empty. Never gates the finding, though `fallow fix`\nwithholds the `remove-dependency` write while a caveat stands."
         }
       },
       "required": [
@@ -19568,6 +19615,13 @@
           "type": "integer",
           "description": "Number of entries in `feature_flags`."
         },
+        "workspace_diagnostics": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/WorkspaceDiagnostic"
+          },
+          "description": "Workspace-discovery and source-discovery diagnostics for the run. See\n`CheckOutput::workspace_diagnostics` for the full contract.\n\nA flags run walks and parses the project like every other analysis, so\nit records the same discovery kinds: a `skipped-large-file`,\n`skipped-minified-file`, or `source-read-failure` file was never\nscanned for flags, and a `source-parse-degraded` file was scanned from\na partial module. Each is a reason a flag can be missing from\n`feature_flags[]`, which is exactly what a consumer reading a\nzero-result run needs to know. The analysis-stage kinds appear here\ntoo: the scan correlates flags with dead exports, so it runs the\ndead-code analyze pass that records them.\n\nOmitted when empty, so a project with no discovery noise sees no\nchange."
+        },
         "_meta": {
           "anyOf": [
             {
@@ -25134,6 +25188,11 @@
           "type": "string",
           "const": "cache",
           "description": "Persisted extraction-cache reuse."
+        },
+        {
+          "type": "string",
+          "const": "graph-cache",
+          "description": "Persisted module-graph reuse.\n\nSeparate from [`Cache`](Self::Cache) because a warm run reuses the two\nblobs independently: the extraction cache can be perfectly reusable\nwhile the graph is discarded on every run, and the graph is the larger\nof the two on a real project."
         }
       ],
       "description": "Stable identifier for a doctor check. Declaration order is output order."
@@ -25354,21 +25413,6 @@
       ],
       "description": "One import edge on an [`ImportPathTrace`]."
     },
-    "ReachabilityConfidenceFlag": {
-      "oneOf": [
-        {
-          "type": "string",
-          "const": "source-parse-degraded",
-          "description": "This finding's own file is the subject of a `source-parse-degraded`\nworkspace diagnostic: it was read but did not parse cleanly, so the\nexport and import lists extracted from it may stop short of the real\nones. That reaches an `unused-file` verdict directly, because the\n\"is any export of this file referenced from a reachable module\" test\nreads exactly that truncated export list."
-        },
-        {
-          "type": "string",
-          "const": "incomplete-import-graph",
-          "description": "At least one module that IS reachable from an entry point parsed with\nerrors, so its import list is incomplete and an import that would have\ncredited this path may never have been seen.\n\nThe limit, stated because an approximation presented as exact is worse\nthan nothing: this is a RUN-level condition, not proof that a degraded\nmodule imports this path. An import the parser never saw cannot be\nattributed to a target, so the link cannot be narrowed further without\nre-reading the source. It does narrow in one direction, and soundly:\nwhen every degraded module is itself unreachable, no missing edge\nattributable to a degraded parse can change a reachability verdict,\nbecause the first missing edge on any entry-point path leaves from a\nmodule that is observed reachable. The flag is then absent. Read\n`workspace_diagnostics[]` for which files degraded."
-        }
-      ],
-      "description": "A per-finding confidence flag on a dead-code reachability verdict.\n\nAdvisory provenance, in the same spirit as the fix path's\n`low_confidence_off_graph` / `low_confidence_unresolved_imports` skip\nreasons and the focus map's per-unit confidence flags: a flag NEVER\nwithholds, reorders, downgrades, or re-severities the finding, and never\nchanges an exit code. It records that the verdict was computed over an\nimport graph fallow already knows is incomplete, so a reader who sees the\nfinding also sees the caveat instead of having to notice a diagnostic at\nthe other end of the envelope.\n\nEmitted only on the two verdicts a lost import edge can distort:\n`unused_files[]` and `unused_exports[]`. Sorted and deduplicated, absent\nfrom the wire when empty. The set is open in the same sense\n`workspace_diagnostics[].kind` is: treat an unrecognised value as \"some\nconfidence caveat\" rather than as an error."
-    },
     "ErrorTrace": {
       "type": "object",
       "properties": {
@@ -25488,6 +25532,10 @@
         "candidates_omitted": {
           "type": "integer",
           "description": "How many further candidates a presentation cap withheld.\n`candidates.len() + candidates_omitted` is the true match count, so an\n`ambiguous` frame never understates how ambiguous it is."
+        },
+        "line_mismatch": {
+          "type": "boolean",
+          "description": "Set when this frame's own line disagrees with the definition its\nidentifier matched: some OTHER definition in the same file is declared\ncloser above the line the runtime reported.\n\nThe look-up matches on the identifier alone, so a `resolved` frame is\nresolved however far its line sits from the match. That is honest about\nthe question asked and silent about a question a reader would ask next,\nwhich is why the disagreement is published instead of left to be\nnoticed. The frame is NOT reclassified: the graph does know a\ndefinition under this identifier, and only the caller can say whether\nthe runtime ran that one or a same-named definition elsewhere.\n`reason` names the declaration that sits closer. Only set on a\n`resolved` frame that carried a line and matched a definition whose own\nline could be read."
         },
         "reason": {
           "type": "string",
@@ -25644,6 +25692,64 @@
         "unparsed_lines"
       ],
       "description": "Per-outcome totals for an [`ErrorTrace`].\n\n`resolved + ambiguous + not_found + not_attempted == frames`, and\n`in_project + node_modules + out_of_corpus == frames`. Both identities hold\non every run, so a caller can verify that nothing was dropped."
+    },
+    "ReachabilityCaveat": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "incomplete-file-analysis",
+          "description": "This finding's own file is one the run did not fully analyze, so the\nexport and import lists extracted from it may stop short of the real\nones. That reaches an `unused-file` verdict directly, because the\n\"is any export of this file referenced from a reachable module\" test\nreads exactly that truncated export list.\n\nTwo workspace diagnostics put a file in this state: it was read but did\nnot parse cleanly (`source-parse-degraded`), or it could not be read at\nall (`source-read-failure`). The token names the consequence rather than\neither cause, so a future kind that leaves a discovered file partially\nextracted carries the same value.\n\nDependency findings never carry this value: the file they name is a\n`package.json`, not a parsed source module."
+        },
+        {
+          "type": "string",
+          "const": "incomplete-import-graph",
+          "description": "A module whose import list feeds this verdict was not analyzed, so the\nimport that would have credited this finding may never have been seen.\n\nThe cause is any workspace diagnostic that leaves a source file's\nimports unseen: a degraded parse (`source-parse-degraded`), a file that\ncould not be read (`source-read-failure`), or a file discovery skipped\nbefore reading it (`skipped-large-file`, `skipped-minified-file`,\n`skipped-source-dotdir`). The token names the class rather than any one\ncause.\n\nWhich modules feed the verdict differs by array, and the caveat is\nemitted only when a degraded module is actually one of them:\n\n- `unused_files[]` and `unused_exports[]` rest on reachability, so only\n  a degraded module that is itself observed reachable can change the\n  verdict. When every degraded module is unreachable the caveat is\n  absent, and soundly: the FIRST missing edge on any entry-point path\n  leaves from a module whose every predecessor edge was observed, so\n  that module is observed reachable. A file the run never read has no\n  module and no graph node, so its reachability is not observable at\n  all and that narrowing cannot be applied: any skipped or unreadable\n  source caveats every reachability verdict in the run.\n- the dependency arrays rest on whether ANY module in the project\n  imports the package specifier, reachable or not, so any degraded\n  parse anywhere can hide the import that would have credited the\n  package. Reachability does not narrow that one.\n\nThe limit, stated because an approximation presented as exact is worse\nthan nothing: this is a RUN-level condition, not proof that a degraded\nmodule imports this path or package. An import the parser never saw\ncannot be attributed to a target, so the link cannot be narrowed\nfurther without re-reading the source. Read `workspace_diagnostics[]`\nfor which files degraded."
+        }
+      ],
+      "description": "A per-finding caveat on a dead-code verdict that a file this run never\nfully analyzed can distort.\n\nAdvisory provenance, in the same spirit as the fix path's\n`low_confidence_off_graph` / `low_confidence_unresolved_imports` skip\nreasons: a caveat NEVER withholds, reorders, downgrades, or re-severities\nthe finding, and never changes an exit code. It records that the verdict\nwas computed over an import graph fallow already knows is incomplete, so a\nreader who sees the finding also sees the caveat instead of having to\nnotice a diagnostic at the other end of the envelope.\n\nDeliberately NOT named `confidence`: `health --targets` already emits a\n`confidence` key holding an enum string, and a shared consumer helper that\nmet both would see the same key change type. Emitted on the four verdicts a\nlost import edge can distort: `unused_files[]`, `unused_exports[]`, and the\nthree dependency arrays. Sorted and deduplicated, absent from the wire when\nempty. The set is open in the same sense `workspace_diagnostics[].kind` is:\ntreat an unrecognised value as \"some caveat\" rather than as an error."
+    },
+    "ClockProvenance": {
+      "type": "object",
+      "properties": {
+        "source": {
+          "description": "Which of the three sources supplied the epoch.",
+          "$ref": "#/definitions/ClockSource"
+        },
+        "epoch_secs": {
+          "type": "integer",
+          "description": "The reference epoch itself, in unix seconds. Pass it back as\n`FALLOW_CLOCK_EPOCH` to reproduce this run's churn-derived numbers."
+        },
+        "reproducible": {
+          "type": "boolean",
+          "description": "False only for `wall_clock`, where the numbers drift between runs."
+        }
+      },
+      "required": [
+        "source",
+        "epoch_secs",
+        "reproducible"
+      ],
+      "description": "The instant a run measured commit ages and staleness against.\n\nA consumer reading `weighted_commits`, `stale_days`, or anything derived\nfrom them needs to know whether re-running over the same commit yields the\nsame number. The human report says so in a warning that `--quiet` removes,\nwhich left the JSON consumer, who cannot see stderr at all, with no way to\nfind out."
+    },
+    "ClockSource": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "environment",
+          "description": "Pinned by the `FALLOW_CLOCK_EPOCH` environment variable."
+        },
+        {
+          "type": "string",
+          "const": "head_commit",
+          "description": "HEAD's committer timestamp."
+        },
+        {
+          "type": "string",
+          "const": "wall_clock",
+          "description": "The system wall clock, because no commit timestamp was readable."
+        }
+      ],
+      "description": "Where the run's reference epoch came from.\n\nChurn recency weighting and ownership staleness are measured against one\ninstant. `head_commit` and `environment` resolve to the same value on every\nrun over the same commit; `wall_clock` does not."
     }
   }
 }

@@ -17,7 +17,9 @@ Use this file when editing `crates/extract/**`.
 - Keep extraction syntactic. Do not introduce TypeScript compiler dependence.
 - Preserve byte and line mapping when transforming embedded source.
 - The cache version in `cache/types.rs` must change when cached facts or parsed
-  semantics change.
+  semantics change. It is written into the cache file header and compared before
+  the payload is decoded, so a bumped version reports a format change instead of
+  a decode failure. Keep the header ahead of the payload.
 - Avoid panics on malformed user input. Return partial extraction plus diagnostics where possible.
 - Keep fixtures minimal, especially for SFC and embedded-language cases.
 - Template usage fixes should cover both value references and type-only references when the syntax supports them.

@@ -31,18 +31,6 @@ pub enum AnalysisClockSource {
     WallClock,
 }
 
-impl AnalysisClockSource {
-    /// Stable token for the `_meta.clock.source` wire field.
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Environment => "environment",
-            Self::HeadCommit => "head_commit",
-            Self::WallClock => "wall_clock",
-        }
-    }
-}
-
 /// The single instant a run measures commit ages and staleness against.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AnalysisClock {
@@ -305,7 +293,5 @@ mod tests {
         assert_eq!(clock.epoch_secs(), NOON);
         assert_eq!(clock.source(), AnalysisClockSource::Environment);
         assert!(clock.is_reproducible());
-        assert_eq!(AnalysisClockSource::HeadCommit.as_str(), "head_commit");
-        assert_eq!(AnalysisClockSource::WallClock.as_str(), "wall_clock");
     }
 }

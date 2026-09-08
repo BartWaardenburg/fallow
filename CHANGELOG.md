@@ -21,17 +21,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   payload carries its own `schema_version`, and the question is reachable over
   MCP as `trace_import_path`.
 
-- **`fallow doctor` checks installed dependencies and cache reuse.** Two
+- **`fallow trace-error [FILE|-]` resolves a runtime stack trace against the
+  project graph.** It reads a trace from a file or stdin, recognises the
+  V8 / Node and SpiderMonkey / JavaScriptCore frame forms, and reports, per
+  frame, which definitions in the project that frame's identifier names. It is
+  built to refuse overclaiming: a frame matching several definitions is
+  `ambiguous` and lists all of them, a frame matching none stays visible as
+  `not_found`, and a frame the graph was never asked about is `not_attempted`.
+  Absolute frame paths are resolved with symlinks followed on both sides, so a
+  project reached through a symlink resolves the same frames as the canonical
+  spelling. A `resolved` frame whose own line sits at a different declaration
+  carries `line_mismatch`, because the look-up matches on the identifier alone.
+  No source maps are read. The question is reachable over MCP as `trace_error`.
+
+- **`fallow doctor` checks installed dependencies and cache reuse.** Three
   advisory checks are appended after the existing five, so the earlier checks
   keep their positions. `dependencies` warns when the project has no
   `node_modules` tree and is not a Deno project that runs without one, which
   is the state where package `exports` cannot be read, plugins that activate
   on an installed package stay inactive, and dependency classification
   degrades. `cache` warns when a persisted extraction cache exists but would
-  not be reused, naming the reason and the on-disk size; a project with no
-  cache yet passes. Neither check can fail, so a project without installed
-  dependencies now reports the aggregate `warn` where it reported `pass`,
-  still exiting 0. The envelope moves to `schema_version` 2.
+  not be reused, and `graph-cache` warns when a persisted module graph exists
+  but could not be loaded; both name the reason and the on-disk size. The two
+  caches are reported separately because a run reuses them independently. A
+  project with no cache yet passes. None of the three can fail, so a project
+  without installed dependencies now reports the aggregate `warn` where it
+  reported `pass`, still exiting 0. The envelope moves to `schema_version` 2.
 
 - **Duplication output can leave the source text out.** `fallow dupes
   --no-fragments`, and the MCP `find_dupes` tool through its new
@@ -83,15 +98,77 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   metadata-only fast path is disabled and every entry is read and
   content-hashed before it is reused.
 
+- **`health --hotspots --format json` says which clock its churn numbers were
+  measured against.** Churn recency weighting, hotspot ranking, and ownership
+  `stale_days` are all measured against one instant, and whether that instant is
+  reproducible decides whether two runs over the same commit can be compared.
+  The only signal was a stderr warning that `--quiet` removes and a machine
+  consumer never sees. `hotspot_summary` now carries a `clock` object with
+  `source` (`head_commit`, `environment`, or `wall_clock`), the `epoch_secs` it
+  resolved to, and `reproducible`. Pass `epoch_secs` back as
+  `FALLOW_CLOCK_EPOCH` to reproduce a run. The field is additive and optional,
+  and `hotspot_summary` is emitted only with `--hotspots`, so a run without it
+  is byte-identical.
+
+- **The performance table's nested rows add up.** In the entry-point breakdown,
+  `compile` and `match` are the two measured halves of the `plugin globs` span
+  and the rest of it (merging matched entries into the entry set) was simply
+  missing, so two children visibly fell short of the parent they claimed to
+  divide with nothing to explain the gap. Both nested levels now close with
+  their own `(other)` row, to within the one-decimal display rounding, because
+  every span in this breakdown is carved from one entry-point clock. Each row is
+  printed to a tenth of a millisecond, so on a real project the visible child
+  rows can land a tenth either side of the parent they divide; the underlying
+  spans partition it. The outer table is a different case:
+  `discover files`, `workspaces`, `parse/extract` and `cache update` are all
+  measured before the clock `TOTAL` reads starts, so its rows are per-stage
+  costs rather than a partition of `TOTAL`, and its `(other)` row reads `0.0ms`
+  whenever they overshoot. That was true before this release too; the code now
+  documents it instead of implying the rows reconcile.
+  The stage row formerly labelled `plugins` is now `plugin detection`, and it
+  names the plugin-glob time that lands inside the entry-point stage
+  (`(+157.6ms plugin globs under entry points)` on a measured project), because
+  the two are different stretches of wall clock that cannot be summed into one
+  row without breaking the stage partition. A reader adding the two now sees the
+  real plugin bill instead of the detection half alone.
+
 - **A detector that found nothing says whether it was asked to look.** A run
   with no boundary zones and a run whose zones are all clean both reported
   zero boundary violations, and the same held for rule packs. Both now record
   a `boundaries-not-configured` or `rule-packs-not-configured` workspace
   diagnostic, so the zero can be read as "nothing configured" rather than
   "nothing found". A project that sets `boundary-violation` or
-  `policy-violation` to `off` chose that silence and is not reported. A
-  project with no installed dependency tree is reported the same way, as
-  `node-modules-missing`.
+  `policy-violation` to `off` chose that silence and is not reported. Neither
+  kind prints a stderr warning: they describe a check the project never
+  configured rather than a run whose results degraded, so on the default
+  configuration they would warn on every run forever and the only remedy on
+  offer would be to write config to silence a warning about not having written
+  config. A project with no installed dependency tree is reported the same way,
+  as `node-modules-missing`, and that one does warn on stderr, because it
+  changes what the analysis can see.
+
+- **`fallow flags --format json` reports what the run skipped.** The envelope
+  carried no `workspace_diagnostics[]` key at all, so on this one command a
+  skipped, unreadable, or degraded file was unreachable from both channels:
+  several kinds no longer print on stderr, and the JSON had nowhere to put
+  them. A flags run walks and parses the project like every other analysis, and
+  each of those kinds is a reason a flag is missing from `feature_flags[]`,
+  which is exactly what a consumer reading a zero-result run needs. The array
+  matches the one the `dead-code`, `dupes`, `health`, and `security` envelopes
+  carry, with project-relative paths, and is omitted when the run records
+  nothing, so a clean project sees no wire change and `schema_version` stays
+  at 8. The scan correlates flags with dead exports, so it runs the dead-code
+  analyze pass and reports that pass's diagnostics too, including the
+  unconfigured-detector kinds this release adds.
+
+- **`dupes --top N --group-by <mode>` is refused instead of dropping `--top`.**
+  The pair was accepted, `--top` was silently ignored, and the run exited 0
+  reporting every clone group with `clone_groups_omitted` at 0 to confirm
+  nothing had been withheld. The combination now exits 2 with a message naming
+  why: grouped output reports per-bucket stats computed over every clone group
+  in the bucket, so a global top-N truncation would leave those stats
+  describing groups the output no longer lists. Either flag on its own is
+  unchanged.
 
 - **`workspace_diagnostics[]` has a stable order.** Analysis-stage diagnostics
   are recorded from a parallel detector pool, so their arrival order followed
@@ -140,8 +217,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the snapshot back unchanged, as documented, sees no difference. The six
   parameters nearly every tool carries (`root`, `config`,
   `allow_remote_extends`, `workspace`, `no_cache`, `threads`) now describe
-  themselves in one sentence, worded identically everywhere they appear; only
-  the prose changed, and no request that was accepted before is refused now.
+  themselves in one sentence, worded identically wherever the parameter means
+  the same thing, which is nearly everywhere it appears. A handful of tools
+  keep their own sentence because the parameter does something different
+  there: `root` on `code_execute` is the default injected into host calls, on
+  `impact` it names the project whose value history is read from a store
+  outside the repo, and on `recommend` it drives framework and tooling
+  detection; `workspace` on `find_similar_code` and `security_candidates`
+  states its mutual exclusion with `changed_workspaces`. Only the prose
+  changed, and no request that was accepted before is refused now.
 
 - **An MCP response over the byte cap is a bounded answer, not an empty
   error.** It used to return a contentless tool error. It now returns a
@@ -153,12 +237,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   accept an optional `max_output_bytes` per call, which may only lower the
   default.
 
-- **The GitHub Action and the GitLab template scope their cache to the
-  analyzed root.** Two roots in one repository shared one cache entry, so a
-  matrix over roots could restore a sibling's cache. The cache key and the
-  restore keys now include the root.
+- **The GitHub Action and the GitLab template stop sharing one cache entry
+  between two roots.** A matrix over roots could restore a sibling's cache.
+  The Action's cache key and its restore keys now include the analyzed root.
+  The GitLab template reaches the same isolation differently, because GitLab
+  rejects a `/` inside a cache key and the root cannot be interpolated into
+  one: its key carries the job name slug, which every matrix arm already gets
+  a distinct value of, and the cached path is scoped to the root.
 
 ### Fixed
+
+- **`trace-error` counts the input lines it says it counted.** On a trace
+  where nothing parsed as a frame, the summary read "no stack frames recognised
+  in 2 non-blank input lines" for a three-line input: the first line is taken
+  as the error header and reported under `header`, so it was excluded from a
+  count whose sentence claimed to describe the input. The frameless summary now
+  counts the header line, and the sentence on a run that did recognise frames
+  says "further input lines", because the header and the frames are already
+  reported above it. `counts.unparsed_lines` is unchanged and still counts
+  lines that were neither a frame nor the header.
 
 - **A file that does not parse is reported instead of counted as empty.** A
   source file that failed to parse silently yielded zero imports, so a broken
@@ -169,13 +266,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   recoverable errors for valid syntax newer than it, so gating on a degraded
   parse would mute real findings project-wide.
 
-  Where a degraded parse can distort a reachability verdict, the affected
-  `unused_files[]` and `unused_exports[]` entries carry the caveat themselves,
-  in an optional `confidence[]` array, so a reader who never scrolls back to
-  the diagnostics list still sees it. The array is advisory: it never
-  withholds, filters, downgrades, or re-severities a finding, and never changes
-  an exit code. It is omitted when empty, so a project that parses cleanly is
-  byte-identical.
+  Where a file the run did not fully analyze can distort a verdict, the
+  affected `unused_files[]`, `unused_exports[]`, and unused-dependency entries
+  carry the caveat themselves, in an optional `reachability_caveats[]` array,
+  so a reader who never scrolls back to the diagnostics list still sees it. The
+  human report names it as a compact suffix on the finding line. A degraded
+  parse is one cause; the others are a file that could not be read
+  (`source-read-failure`) and a file discovery skipped before reading it
+  (`skipped-large-file`, `skipped-minified-file`, `skipped-source-dotdir`). A
+  6 MB file whose first line imports a module is the plainest case: the size
+  guard means that import is never seen, and the module it named reads as
+  unused at default settings. The dependency arrays do not get the reachability
+  narrowing the file and export verdicts do: a package is unused only when no
+  module imports it, and fallow credits an import from an unreachable module,
+  so any unseen import can hide it.
+
+  The array never withholds, filters, downgrades, or re-severities a finding,
+  and never changes an exit code. It is omitted when empty, so a run that
+  analyzed every file it discovered is byte-identical.
+
+- **`fallow fix` no longer applies a mutation it flagged as resting on an
+  incomplete import graph.** A syntax error on one line hid the import on the
+  next, the export it credited read as unused, and `fix` removed it, breaking
+  the build with a change fallow's own output had already marked as low
+  confidence. A file the size guard skipped hid the same import just as
+  effectively, at default settings and with no broken syntax anywhere. The most
+  destructive case was `remove-dependency`, which emptied `dependencies` for a
+  package whose only import sat in the file the run never read. All of them are
+  withheld now, in the same intentional family as the existing off-graph export
+  skip: `skip_reason: "low_confidence_incomplete_analysis"`, the caveat tokens
+  repeated on the entry so a caller can gate on the marker,
+  `skipped_low_confidence_exports` and the new
+  `skipped_low_confidence_dependencies` counting them, no exit-code change, and
+  the finding still reported by `fallow dead-code` for manual confirmation. The
+  withholding follows the caveat rather than its cause, so a future reason a
+  file goes unread inherits it.
 
 - **A size-preserving edit with a restored modification time no longer serves
   a stale warm result.** The extraction fingerprint compared modification time
@@ -199,11 +324,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   envelope moves to 11 and the bare combined envelope to 12; neither of those
   paths can suppress the text today, so their wire is byte-identical.
 
-  The human `--summary` block had the same split: `Clone families` and `Clone
-  groups` counted the rendered vectors while `Duplicated lines` and
-  `Duplication rate` beside them described the corpus. It now names how many
-  groups a display limit withheld and which total the two measured numbers
-  cover, so the four aligned numbers can no longer be read as one scope.
+  The family axis carried the identical defect and is fixed in the same
+  version, so nothing moves twice: `--top` rebuilt `clone_families[]` from the
+  groups that survived the cap with nothing on the envelope recording the
+  drop, and no corpus-wide family counter to compare it against. A new
+  required integer `stats.clone_families` counts the families the scoped
+  corpus holds after filtering, and `clone_families_shown` and
+  `clone_families_omitted` split it exactly as the group pair does.
+  `stats.clone_families` is present on every duplication `stats` object,
+  including each `--group-by` bucket.
+
+  The human report moved with the wire. The default `Duplicates (N clone
+  groups)` header and its `... and N more clone groups` footer name the
+  measured corpus instead of the capped listing, and the footer additionally
+  names the families a cap withheld. The `--summary` block had the same split:
+  `Clone families` and `Clone groups` counted the rendered vectors while
+  `Duplicated lines` and `Duplication rate` beside them described the corpus.
+  Its withheld-notice now covers both axes and states both corpus totals, so
+  the four aligned numbers can no longer be read as one scope. `--format
+  markdown` had the split in one sentence, its heading counting the listing
+  while the duplication rate beside it described the corpus; the heading now
+  counts the corpus and a separate line names what a display limit withheld.
+  An untruncated run renders byte-identically on every one of these surfaces.
 
 - **A complexity run after a dead-code run reuses the cache.** An empty
   complexity vector was treated as a not-cached sentinel, but a dead-code run

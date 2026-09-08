@@ -916,27 +916,32 @@ pub fn discover_dead_code_entry_points(
 }
 
 /// Try loading the graph cache for an engine-owned dead-code pipeline.
-#[must_use]
+///
+/// # Errors
+///
+/// Returns the reason the persisted graph was refused, the same way the
+/// owned-core path does. The engine pipeline reports it in the perf table, so
+/// collapsing a refusal into a bare miss here would make the only feature that
+/// explains a slow warm run unreachable from every engine-backed command.
+/// `Err(None)` means there was nothing to refuse: the run disabled caching.
 pub fn try_load_dead_code_graph_cache(
     prelude: &DeadCodeBackendPrelude<'_>,
     entry_points: &DeadCodeEntryPoints,
     modules: &[extract::ModuleInfo],
-) -> Option<(DeadCodeResolvedModules, DeadCodeGraphRun)> {
+) -> Result<(DeadCodeResolvedModules, DeadCodeGraphRun), Option<CacheRejection>> {
     let shared = prelude.shared_input();
-    try_load_analysis_graph_cache(&shared, &entry_points.inner, modules)
-        .ok()
-        .map(|hit| {
-            (
-                DeadCodeResolvedModules {
-                    project: hit.project,
-                    elapsed_ms: 0.0,
-                },
-                DeadCodeGraphRun {
-                    graph: hit.graph,
-                    elapsed_ms: hit.elapsed_ms,
-                },
-            )
-        })
+    try_load_analysis_graph_cache(&shared, &entry_points.inner, modules).map(|hit| {
+        (
+            DeadCodeResolvedModules {
+                project: hit.project,
+                elapsed_ms: 0.0,
+            },
+            DeadCodeGraphRun {
+                graph: hit.graph,
+                elapsed_ms: hit.elapsed_ms,
+            },
+        )
+    })
 }
 
 /// Resolve imports for an engine-owned dead-code pipeline.
@@ -1896,7 +1901,7 @@ fn trace_pipeline_profile(profile: &PipelineProfile) {
         "\n┌─ Pipeline Profile ─────────────────────────────\n\
          │  discover files:   {:>8.1}ms  ({} files)\n\
          │  workspaces:       {:>8.1}ms\n\
-         │  plugins:          {:>8.1}ms\n\
+         │  plugin detection: {:>8.1}ms\n\
          │  script analysis:  {:>8.1}ms\n\
          │  parse/extract:    {:>8.1}ms  ({} modules{})\n\
          │  cache update:     {:>8.1}ms\n\

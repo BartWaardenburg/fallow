@@ -14,8 +14,8 @@ Diagnose project readiness without analysis or mutation.
 
 Checks the root, config resolution, workspace discovery, external plugins, the
 optional type-aware companion, installed dependencies, and whether the
-persisted extraction cache would be reused. Uses only local reads and supports
-human and JSON output.
+persisted extraction and module-graph caches would be reused. Uses only local
+reads and supports human and JSON output.
 
 Usage: fallow doctor [OPTIONS]
 
@@ -128,6 +128,7 @@ const fn check_id(id: fallow_output::DoctorCheckId) -> &'static str {
         fallow_output::DoctorCheckId::TypeAware => "type-aware",
         fallow_output::DoctorCheckId::Dependencies => "dependencies",
         fallow_output::DoctorCheckId::Cache => "cache",
+        fallow_output::DoctorCheckId::GraphCache => "graph-cache",
     }
 }
 
@@ -150,6 +151,24 @@ mod tests {
             config_path: None,
         });
         assert_eq!(report_exit(&report), ExitCode::from(2));
-        assert_eq!(report.checks.len(), 7);
+        // A required failure still emits the complete envelope, in the stable
+        // order the compatibility contract documents.
+        assert_eq!(
+            report
+                .checks
+                .iter()
+                .map(|c| check_id(c.id))
+                .collect::<Vec<_>>(),
+            vec![
+                "root",
+                "config",
+                "workspaces",
+                "plugins",
+                "type-aware",
+                "dependencies",
+                "cache",
+                "graph-cache",
+            ]
+        );
     }
 }

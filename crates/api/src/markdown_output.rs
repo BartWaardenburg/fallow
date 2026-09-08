@@ -983,6 +983,42 @@ fn markdown_grouped_section<'a, T>(
     out.push('\n');
 }
 
+/// Name what a display limit withheld from the listing below, so the corpus
+/// counts in the heading and summary are not read as the size of the listing.
+///
+/// Emits nothing on an untruncated run, which keeps the default document
+/// byte-identical.
+fn write_duplication_omission_note(out: &mut String, report: &DuplicationReport) {
+    let groups_omitted = report.clone_groups_omitted();
+    let families_omitted = report.clone_families_omitted();
+    if groups_omitted == 0 && families_omitted == 0 {
+        return;
+    }
+
+    let mut withheld: Vec<String> = Vec::with_capacity(2);
+    if groups_omitted > 0 {
+        withheld.push(format!(
+            "{} more clone group{}",
+            groups_omitted,
+            plural(groups_omitted)
+        ));
+    }
+    if families_omitted > 0 {
+        withheld.push(format!(
+            "{} more clone famil{}",
+            families_omitted,
+            if families_omitted == 1 { "y" } else { "ies" }
+        ));
+    }
+
+    let _ = write!(
+        out,
+        "_Listing {} of them; {} withheld by a display limit._\n\n",
+        report.clone_groups_shown(),
+        withheld.join(" and "),
+    );
+}
+
 /// Build markdown output for duplication results.
 #[must_use]
 pub fn build_duplication_markdown(report: &DuplicationReport, root: &Path) -> String {
@@ -994,16 +1030,19 @@ pub fn build_duplication_markdown(report: &DuplicationReport, root: &Path) -> St
     }
 
     let stats = &report.stats;
-    // The heading counts the groups this document lists, which `--top` can
-    // narrow; `stats.clone_groups` stays on the whole measured corpus.
-    let shown = report.clone_groups_shown();
+    // The heading and the duplication rate beside it must describe one scope.
+    // `--top` narrows the listing below, never the corpus the run measured, so
+    // the heading counts the corpus and a separate note names what a display
+    // limit withheld.
+    let corpus_groups = report.clone_groups_total();
     let _ = write!(
         out,
         "## Fallow: {} clone group{} found ({:.1}% duplication)\n\n",
-        shown,
-        plural(shown),
+        corpus_groups,
+        plural(corpus_groups),
         stats.duplication_percentage,
     );
+    write_duplication_omission_note(&mut out, report);
 
     write_duplication_groups(&mut out, report, root);
     write_duplication_families(&mut out, report, root);
@@ -2485,6 +2524,88 @@ fn walkthrough_effort_label(effort: fallow_output::ReviewEffort) -> &'static str
         fallow_output::ReviewEffort::Glance => "glance",
         fallow_output::ReviewEffort::Review => "review",
         fallow_output::ReviewEffort::DeepDive => "deep-dive",
+    }
+}
+
+#[cfg(test)]
+mod duplication_markdown_tests {
+    use std::path::{Path, PathBuf};
+
+    use fallow_types::duplicates::{
+        CloneFamily, CloneGroup, CloneInstance, DuplicationReport, DuplicationStats,
+    };
+
+    use super::build_duplication_markdown;
+
+    fn capped_report(
+        shown: usize,
+        corpus_groups: usize,
+        corpus_families: usize,
+    ) -> DuplicationReport {
+        let group = |n: usize| CloneGroup {
+            instances: vec![CloneInstance {
+                file: PathBuf::from(format!("/project/src/a{n}.ts")),
+                start_line: 1,
+                end_line: 4,
+                start_col: 0,
+                end_col: 10,
+                fragment: "const a = 1;".to_string(),
+            }],
+            token_count: 8,
+            line_count: 4,
+            similarity: None,
+        };
+        let family = |n: usize| CloneFamily {
+            files: vec![PathBuf::from(format!("/project/src/a{n}.ts"))],
+            groups: vec![group(n)],
+            total_duplicated_lines: 4,
+            total_duplicated_tokens: 8,
+            suggestions: Vec::new(),
+        };
+        DuplicationReport {
+            clone_groups: (0..shown).map(group).collect(),
+            clone_families: (0..shown.min(corpus_families)).map(family).collect(),
+            mirrored_directories: Vec::new(),
+            stats: DuplicationStats {
+                clone_groups: corpus_groups,
+                clone_families: corpus_families,
+                clone_instances: corpus_groups,
+                total_files: 40,
+                files_with_clones: 12,
+                total_lines: 1000,
+                duplicated_lines: 252,
+                total_tokens: 5000,
+                duplicated_tokens: 1200,
+                duplication_percentage: 25.2,
+                ..DuplicationStats::default()
+            },
+        }
+    }
+
+    // The heading and the duplication rate beside it are read as one sentence
+    // about one scope, so a capped listing must not rewrite the heading.
+    #[test]
+    fn a_capped_listing_still_names_the_measured_corpus() {
+        let md = build_duplication_markdown(&capped_report(3, 251, 163), Path::new("/project"));
+        assert!(
+            md.starts_with("## Fallow: 251 clone groups found (25.2% duplication)"),
+            "got: {md}"
+        );
+        assert!(
+            md.contains("_Listing 3 of them; 248 more clone groups and 160 more clone families withheld by a display limit._"),
+            "got: {md}"
+        );
+    }
+
+    // An untruncated run must render exactly as before, note included.
+    #[test]
+    fn an_untruncated_listing_carries_no_omission_note() {
+        let md = build_duplication_markdown(&capped_report(3, 3, 0), Path::new("/project"));
+        assert!(
+            md.starts_with("## Fallow: 3 clone groups found (25.2% duplication)"),
+            "got: {md}"
+        );
+        assert!(!md.contains("withheld by a display limit"), "got: {md}");
     }
 }
 

@@ -2,17 +2,18 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use crate::params::{
-    TraceCloneParams, TraceDependencyParams, TraceExportParams, TraceFileParams,
+    TraceCloneParams, TraceDependencyParams, TraceErrorParams, TraceExportParams, TraceFileParams,
     TraceImportPathParams,
 };
 
 use fallow_api::{
     AnalysisOptions, DuplicationMode, DuplicationOptions, TraceCloneOptions, TraceCloneTarget,
-    TraceDependencyOptions, TraceExportOptions, TraceFileOptions, TraceImportPathOptions,
-    run_trace_clone, run_trace_dependency, run_trace_export, run_trace_file, run_trace_import_path,
+    TraceDependencyOptions, TraceErrorOptions, TraceExportOptions, TraceFileOptions,
+    TraceImportPathOptions, run_trace_clone, run_trace_dependency, run_trace_error,
+    run_trace_export, run_trace_file, run_trace_import_path,
     serialize_trace_clone_programmatic_json, serialize_trace_dependency_programmatic_json,
-    serialize_trace_export_programmatic_json, serialize_trace_file_programmatic_json,
-    serialize_trace_import_path_programmatic_json,
+    serialize_trace_error_programmatic_json, serialize_trace_export_programmatic_json,
+    serialize_trace_file_programmatic_json, serialize_trace_import_path_programmatic_json,
 };
 use rmcp::ErrorData as McpError;
 use rmcp::model::{CallToolResult, ContentBlock};
@@ -70,6 +71,23 @@ pub async fn run_trace_import_path_tool(
     };
     let result = run_api_blocking("trace_import_path", move || {
         run_trace_import_path(&options).and_then(serialize_trace_import_path_programmatic_json)
+    })
+    .await?
+    .map_or_else(
+        |err| CallToolResult::error(vec![ContentBlock::text(programmatic_error_body(&err))]),
+        |value| json_success(&value),
+    );
+    Ok(result)
+}
+
+/// Run `trace_error` through the typed API.
+pub async fn run_trace_error_tool(params: TraceErrorParams) -> Result<CallToolResult, McpError> {
+    let options = match trace_error_options_from_params(&params) {
+        Ok(options) => options,
+        Err(msg) => return Ok(CallToolResult::error(vec![ContentBlock::text(msg)])),
+    };
+    let result = run_api_blocking("trace_error", move || {
+        run_trace_error(&options).and_then(serialize_trace_error_programmatic_json)
     })
     .await?
     .map_or_else(
@@ -423,6 +441,34 @@ fn trace_import_path_options_from_params(
         }),
         from: params.from.clone(),
         to: params.to.clone(),
+    })
+}
+
+/// The `source` label reported back when the caller supplied none. An MCP
+/// caller pastes the trace itself rather than naming a file, so the honest
+/// label is where it arrived from, not a path that does not exist.
+const MCP_TRACE_SOURCE: &str = "mcp";
+
+fn trace_error_options_from_params(params: &TraceErrorParams) -> Result<TraceErrorOptions, String> {
+    require_non_empty("trace", &params.trace)?;
+    let source = params
+        .source
+        .as_deref()
+        .map(str::trim)
+        .filter(|source| !source.is_empty())
+        .unwrap_or(MCP_TRACE_SOURCE);
+    Ok(TraceErrorOptions {
+        analysis: dead_code_analysis_options(DeadCodeAnalysisInput {
+            root: params.root.as_deref(),
+            config: params.config.as_deref(),
+            allow_remote_extends: params.allow_remote_extends,
+            production: params.production,
+            workspace: params.workspace.as_deref(),
+            no_cache: params.no_cache,
+            threads: params.threads,
+        }),
+        trace: params.trace.clone(),
+        source: source.to_string(),
     })
 }
 
