@@ -350,6 +350,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--debug-unmatched` flag lists every remaining unmatched runtime function on
   stderr, highest traffic first, so a residue can be read without a debugger.
 
+- **`fallow license refresh` can recover from a stale stored license.** The
+  command sent the locally stored JWT as its only identity proof. A paid user
+  who had not run the CLI for weeks held a token the cloud refuses as
+  `token_stale`, and `license activate --trial` refuses an organisation that
+  already pays, which left no way back in from the CLI. Refresh now retries
+  with a full-access API key, taken from `--api-key` or `FALLOW_API_KEY`, when
+  the stored JWT is missing or the cloud reports it as stale; the endpoint
+  already accepted that bearer. The stored JWT is still tried first and a
+  rejection the key cannot fix is not retried. When no credential works, the
+  error names the API-key route instead of the trial flow
+  (Closes [#2595](https://github.com/fallow-rs/fallow/issues/2595)).
+
 - **A quoted jq filter in a CI `run:` block is no longer read as an entry
   glob.** A workflow line like `jq -r '[((.proposals // {}) | to_entries[]) |
   .value.pr_number] | unique | sort[]'` warned `invalid entry pattern ...

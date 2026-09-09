@@ -277,14 +277,33 @@ fn clamp_retry_delay(delay: Duration) -> Duration {
     delay.min(Duration::from_secs(RETRY_MAX_WAIT_SECONDS))
 }
 
+/// Backend error code for a stored license JWT the cloud considers too far
+/// past expiry to refresh. `fallow license refresh` retries such a response
+/// with a full-access API key before giving up.
+pub const TOKEN_STALE_CODE: &str = "token_stale";
+
+/// The recovery path for `fallow license refresh` when the stored license JWT
+/// cannot be exchanged for a fresh one. Declared as a macro so it can be
+/// `concat!`-ed into the `&'static str` hints below and still be referenced as
+/// a plain value through [`LICENSE_API_KEY_RECOVERY`].
+macro_rules! license_api_key_recovery {
+    () => {
+        "set FALLOW_API_KEY to a full-access key and run `fallow license refresh` again (generate one at https://fallow.cloud/settings#api-keys)"
+    };
+}
+
+/// See [`license_api_key_recovery`].
+pub const LICENSE_API_KEY_RECOVERY: &str = license_api_key_recovery!();
+
 /// Map a backend error-code + operation pair to an actionable user-facing
 /// hint. Returns `None` for unknown codes; callers fall back to the generic
 /// "HTTP N: body" shape produced by [`http_status_message`].
 pub fn actionable_error_hint(operation: &str, code: &str) -> Option<&'static str> {
     match (operation, code) {
-        ("refresh", "token_stale") => Some(
-            "your stored license is too stale to refresh. Reactivate with: fallow license activate --trial --email <addr>",
-        ),
+        ("refresh", "token_stale") => Some(concat!(
+            "your stored license is too stale to refresh: ",
+            license_api_key_recovery!()
+        )),
         ("refresh", "invalid_token") => Some(
             "your stored license token is missing required claims. Reactivate with: fallow license activate --trial --email <addr>",
         ),
@@ -440,23 +459,50 @@ const fn is_token_byte(byte: u8) -> bool {
     matches!(byte, b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'_' | b'.' | b'-' | b'=')
 }
 
-/// Format a non-2xx response into a user-facing error string.
+/// A non-2xx fallow-cloud response, split into the machine-readable backend
+/// code and the user-facing message rendered from it.
+///
+/// The body can only be read once, so callers that need to branch on the code
+/// (for example the license-refresh credential fallback) take both halves from
+/// a single [`http_status_failure`] call.
+#[derive(Debug)]
+pub struct HttpFailure {
+    /// Backend `code` from the error envelope, when the body carried one.
+    pub code: Option<String>,
+    /// User-facing message, identical to what [`http_status_message`] renders.
+    pub message: String,
+}
+
+/// Read a non-2xx response into its backend code plus a user-facing message.
 ///
 /// Tries to parse the body as an [`ErrorEnvelope`]. When the envelope has a
 /// known `code` for the given `operation`, the mapped hint is returned with
 /// the HTTP status and code appended. Otherwise the backend's `message`
 /// (or raw body) is appended to a generic "HTTP N" line.
-pub fn http_status_message(response: &mut impl ResponseBodyReader, operation: &str) -> String {
+pub fn http_status_failure(response: &mut impl ResponseBodyReader, operation: &str) -> HttpFailure {
     let status = response.status();
     let body = response.read_to_string().unwrap_or_default();
     let envelope = parse_error_envelope(&body);
-    if let Some(code) = envelope.code()
-        && let Some(hint) = actionable_error_hint(operation, code)
-    {
-        return format!("{hint} (HTTP {status}, code {code})");
-    }
-    let body_suffix = response_message_suffix(&body, &envelope);
-    format!("{operation} request failed with HTTP {status}{body_suffix}")
+    let code = envelope.code().map(str::to_owned);
+    let hint = code
+        .as_deref()
+        .and_then(|code| actionable_error_hint(operation, code).map(|hint| (hint, code)));
+    let message = match hint {
+        Some((hint, code)) => format!("{hint} (HTTP {status}, code {code})"),
+        None => {
+            let body_suffix = response_message_suffix(&body, &envelope);
+            format!("{operation} request failed with HTTP {status}{body_suffix}")
+        }
+    };
+    HttpFailure { code, message }
+}
+
+/// Format a non-2xx response into a user-facing error string.
+///
+/// Thin wrapper over [`http_status_failure`] for callers that do not branch on
+/// the backend code.
+pub fn http_status_message(response: &mut impl ResponseBodyReader, operation: &str) -> String {
+    http_status_failure(response, operation).message
 }
 
 #[cfg(test)]
@@ -483,17 +529,43 @@ mod tests {
     }
 
     #[test]
-    fn refresh_token_stale_hint_points_to_reactivation() {
+    fn refresh_token_stale_hint_points_to_the_api_key_route() {
         let mut response = StubResponse {
             status: 401,
             body: r#"{"error":true,"message":"token stale","code":"token_stale"}"#.to_owned(),
         };
         let message = http_status_message(&mut response, "refresh");
         assert!(
-            message.contains("Reactivate with: fallow license activate --trial"),
-            "expected reactivation hint, got: {message}"
+            message.contains(LICENSE_API_KEY_RECOVERY),
+            "expected the API-key recovery route, got: {message}"
+        );
+        assert!(
+            !message.contains("--trial"),
+            "a stale token cannot be recovered through the trial flow, got: {message}"
         );
         assert!(message.contains("token_stale"));
+    }
+
+    #[test]
+    fn http_status_failure_exposes_the_backend_code_with_the_message() {
+        let mut response = StubResponse {
+            status: 401,
+            body: r#"{"error":true,"code":"token_stale"}"#.to_owned(),
+        };
+        let failure = http_status_failure(&mut response, "refresh");
+        assert_eq!(failure.code.as_deref(), Some(TOKEN_STALE_CODE));
+        assert!(failure.message.contains(LICENSE_API_KEY_RECOVERY));
+    }
+
+    #[test]
+    fn http_status_failure_reports_no_code_when_the_body_carries_none() {
+        let mut response = StubResponse {
+            status: 500,
+            body: "upstream exploded".to_owned(),
+        };
+        let failure = http_status_failure(&mut response, "refresh");
+        assert!(failure.code.is_none());
+        assert!(failure.message.contains("HTTP 500"));
     }
 
     #[test]
@@ -786,6 +858,11 @@ mod tests {
             LICENSE,
             "ActivateArgs",
             r#".field("raw_jwt", &self.raw_jwt.as_ref().map(|_| "***"))"#,
+        );
+        assert_manual_debug_mask(
+            LICENSE,
+            "RefreshArgs",
+            r#".field("api_key", &self.api_key.as_ref().map(|_| "***"))"#,
         );
     }
 

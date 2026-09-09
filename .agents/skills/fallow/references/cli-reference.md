@@ -1112,7 +1112,7 @@ fallow license deactivate
 |------------|---------|
 | `activate` | Install a JWT or start a 30-day trial. JWT input precedence: positional arg > `--from-file` > `--stdin`. |
 | `status`   | Print tier, seats, features, days-until-expiry, and (when `refresh_after` has passed) a proactive refresh hint. |
-| `refresh`  | Fetch a fresh JWT using the currently stored one as identity proof. Exit 7 on network failure. |
+| `refresh`  | Fetch a fresh JWT using the currently stored one as identity proof, falling back to a full-access API key when that token is missing or too stale. Exit 7 on network failure. |
 | `deactivate` | Remove the local license file. |
 
 ### `activate` flags
@@ -1123,6 +1123,19 @@ fallow license deactivate
 | `--email <ADDR>` | string | Email for the trial flow. On success, `trialEndsAt` is printed to stdout so you can see the trial window without decoding the JWT. |
 | `--from-file <PATH>` | path | Read a JWT from a file. |
 | `--stdin` | bool | Read a JWT from stdin. Conflicts with `--from-file` and positional JWT. |
+
+### `refresh` flags
+
+| Flag | Type | Description |
+|------|------|-------------|
+| `--api-key <KEY>` | string | Full-access API key used as the bearer when the stored license JWT is missing or the cloud reports it as `token_stale`. Precedence: this flag > `$FALLOW_API_KEY`. Prefer the environment variable on shared runners so the key stays out of argv. |
+
+### Credential order for `refresh`
+
+1. The stored license JWT (`FALLOW_LICENSE`, `FALLOW_LICENSE_PATH`, or `~/.fallow/license.jwt`).
+2. A full-access API key, when the stored JWT is absent or the cloud answers `token_stale`.
+
+A machine that has not run fallow for weeks holds a JWT the cloud refuses, and the trial endpoint rejects an organisation that already pays, so the API key is the recovery path. With neither credential available, `refresh` names that route instead of the trial flow.
 
 ### Storage precedence
 
@@ -1144,7 +1157,7 @@ On HTTP error from `api.fallow.cloud`, fallow parses the `{error, message, code}
 
 | Operation + code | CLI message |
 |------------------|-------------|
-| `refresh` + `token_stale` | `your stored license is too stale to refresh. Reactivate with: fallow license activate --trial --email <addr>` |
+| `refresh` + `token_stale` | your stored license is too stale to refresh: set `FALLOW_API_KEY` to a full-access key and run `fallow license refresh` again (generate one at `https://fallow.cloud/settings#api-keys`) |
 | `refresh` + `invalid_token` | `your stored license token is missing required claims. Reactivate with: fallow license activate --trial --email <addr>` |
 | `refresh` or `trial` + `unauthorized` | `authentication failed. Reactivate with: fallow license activate --trial --email <addr>` |
 | `trial` + `rate_limit_exceeded` | `trial creation is rate-limited to 5 per hour per IP. Wait an hour or retry from a different network (in CI, start the trial locally and set FALLOW_LICENSE on the runner).` |

@@ -6055,7 +6055,7 @@
     "FALLOW_RUNTIME_COVERAGE_SOURCE": "Set to cloud to select cloud runtime coverage in fallow coverage analyze without passing --cloud.",
     "FALLOW_REPO": "owner/repo fallback for fallow coverage analyze --cloud when --repo is not passed (otherwise parsed from the git origin remote).",
     "FALLOW_API_URL": "Base URL override for fallow cloud API calls (license refresh, trial, coverage uploads).",
-    "FALLOW_API_KEY": "fallow cloud bearer token for coverage upload commands.",
+    "FALLOW_API_KEY": "fallow cloud bearer token for coverage upload commands, and the fallback bearer for fallow license refresh when the stored license JWT is missing or too stale.",
     "FALLOW_CA_BUNDLE": "Path to a PEM certificate bundle for fallow cloud and provider HTTP calls (replaces the default WebPKI roots).",
     "FALLOW_UPDATE_CHECK": "Set to off/0/false to disable the human-TTY upgrade nudge and its background version check.",
     "FALLOW_SUGGESTIONS": "Set to off/0/false/no/disabled to suppress the next_steps[] array of read-only follow-up commands in JSON output (and the human Next: line). Useful for CI consumers that snapshot-diff raw --format json output. Default on.",

@@ -600,14 +600,14 @@ Both require a `GITLAB_TOKEN` CI/CD variable (project access token with `api` sc
 `fallow license refresh` and `fallow license activate --trial` can fail with a backend error. The CLI always appends the raw HTTP status and the backend error code after the human hint, so scripts can grep for the code without parsing prose:
 
 ```
-fallow license refresh: your stored license is too stale to refresh. Reactivate with: fallow license activate --trial --email <addr> (HTTP 401, code token_stale)
+fallow license refresh: your stored license is too stale to refresh: set FALLOW_API_KEY to a full-access key and run `fallow license refresh` again (generate one at https://fallow.cloud/settings#api-keys) (HTTP 401, code token_stale)
 ```
 
 Stable codes the CLI surfaces today:
 
 | Code | Operation | Meaning |
 |------|-----------|---------|
-| `token_stale` | `refresh` | Stored JWT is more than 45 days past its `exp`. Reactivate. |
+| `token_stale` | `refresh` | Stored JWT is more than 45 days past its `exp`. Surfaced only when no full-access API key was available to retry with. |
 | `invalid_token` | `refresh` | Stored JWT is missing required claims (e.g. `sub`). Reactivate. |
 | `unauthorized` | `refresh` or `trial` | Auth failed. Reactivate. |
 | `rate_limit_exceeded` | `trial` | Trial endpoint is capped at 5 per hour per IP. Wait or use a different network. |

@@ -772,7 +772,7 @@ const ENVIRONMENT_VARIABLES: &[(&str, &str)] = &[
     ),
     (
         "FALLOW_API_KEY",
-        "fallow cloud bearer token for coverage upload commands.",
+        "fallow cloud bearer token for coverage upload commands, and the fallback bearer for fallow license refresh when the stored license JWT is missing or too stale.",
     ),
     (
         "FALLOW_CA_BUNDLE",
