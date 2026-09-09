@@ -320,6 +320,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unaffected; it keys on content hashes and deliberately avoids `ctime`, since
   `cp -Rp` and CI cache restores preserve mtime but reset it.
 
+- **The dashboard link printed after a coverage upload no longer 404s.**
+  `fallow coverage upload-inventory` and `fallow coverage upload-static-findings`
+  printed `https://fallow.cloud/<project-id>`, but the dashboard serves a
+  repository at `/repo/<project-id>`. Both commands now print that route, and
+  the project id is percent-encoded, so a slash-scoped id such as
+  `owner/my-service` becomes `owner%2Fmy-service` and resolves to the same page
+  a bare id does
+  (Closes [#2597](https://github.com/fallow-rs/fallow/issues/2597)).
+
 - **A quoted jq filter in a CI `run:` block is no longer read as an entry
   glob.** A workflow line like `jq -r '[((.proposals // {}) | to_entries[]) |
   .value.pr_number] | unique | sort[]'` warned `invalid entry pattern ...

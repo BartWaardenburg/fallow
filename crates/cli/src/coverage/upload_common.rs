@@ -161,6 +161,18 @@ pub fn url_encode_path_segment(value: &str) -> String {
     out
 }
 
+/// Build the dashboard URL for a repository page.
+///
+/// The dashboard serves a repository at `/repo/{repo}`, and the project id is a
+/// single route segment, so a slash-scoped id such as `owner/my-service` must be
+/// percent-encoded (`owner%2Fmy-service`) or the link resolves to a 404.
+pub(super) fn dashboard_repo_url(project_id: &str) -> String {
+    format!(
+        "https://fallow.cloud/repo/{}",
+        url_encode_path_segment(project_id)
+    )
+}
+
 pub(super) fn resolve_git_sha(
     explicit_git_sha: Option<&str>,
     root: &Path,
@@ -351,6 +363,22 @@ mod tests {
         assert!(validate_project_id("../etc/passwd").is_err());
         assert!(validate_project_id("acme/../secret").is_err());
         assert!(validate_project_id("").is_err());
+    }
+
+    #[test]
+    fn dashboard_repo_url_targets_the_repo_route() {
+        assert_eq!(
+            dashboard_repo_url("my-service"),
+            "https://fallow.cloud/repo/my-service"
+        );
+    }
+
+    #[test]
+    fn dashboard_repo_url_encodes_a_slash_scoped_project_id() {
+        assert_eq!(
+            dashboard_repo_url("owner/my-service"),
+            "https://fallow.cloud/repo/owner%2Fmy-service"
+        );
     }
 
     #[test]

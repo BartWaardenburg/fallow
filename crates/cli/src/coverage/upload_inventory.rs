@@ -947,7 +947,8 @@ fn upload(
             format_bytes(data.data.blob_size),
         );
         println!(
-            "  -> Inventory stored. The Untracked filter lights up once runtime coverage arrives for this SHA. Dashboard: https://fallow.cloud/{project_id}"
+            "  -> Inventory stored. The Untracked filter lights up once runtime coverage arrives for this SHA. Dashboard: {}",
+            upload_common::dashboard_repo_url(project_id)
         );
         if let Some(overlap) = data.data.path_overlap.as_ref() {
             print_overlap_warning_if_needed(overlap);

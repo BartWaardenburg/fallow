@@ -361,7 +361,8 @@ fn upload(
             data.data.git_sha,
         );
         println!(
-            "  -> Static findings stored. View them on the source-evidence viewer: https://fallow.cloud/{project_id}"
+            "  -> Static findings stored. View them on the source-evidence viewer: {}",
+            upload_common::dashboard_repo_url(project_id)
         );
         return Ok(());
     }
