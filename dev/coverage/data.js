@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788968810655,
+  "lastUpdate": 1788972345521,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "02b49a7c15f0bb3856afe0e2bc3bffc5e0a5c62a",
-          "message": "chore(hooks): skip node-dependent checks without node_modules\n\nA fresh worktree has no node_modules, so commit-msg aborted the commit on missing commitlint and pre-commit aborted on staged JS/TS. Both now warn and skip locally; CI still enforces commitlint, oxlint, and oxfmt. The VS Code integration test runner also honours FALLOW_VSCODE_TEST_CACHE_PATH.",
-          "timestamp": "2026-08-25T12:39:25+02:00",
-          "tree_id": "df7f6021b1a3fbaf4f68c1ee8939e76fd7d2328d",
-          "url": "https://github.com/fallow-rs/fallow/commit/02b49a7c15f0bb3856afe0e2bc3bffc5e0a5c62a"
-        },
-        "date": 1787654859069,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.7,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/3b7cb01a1e4cdff6f3a9d700c7cddce7178bebad"
         },
         "date": 1788968807539,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.5,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "4163a2a7664eee3bb37b371fa97bc1ad39156496",
+          "message": "fix(coverage): stop calling a test-only export safe to delete under --production\n\nCloses #2594",
+          "timestamp": "2026-09-09T18:36:40+02:00",
+          "tree_id": "4f0a6315d5dcd9ed69a1d13d618115155f6bb47f",
+          "url": "https://github.com/fallow-rs/fallow/commit/4163a2a7664eee3bb37b371fa97bc1ad39156496"
+        },
+        "date": 1788972341894,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
