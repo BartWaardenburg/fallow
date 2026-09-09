@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788954677816,
+  "lastUpdate": 1788958248321,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "174d025b6327ec3813face3fcb42b610a0c6d3c2",
-          "message": "fix(release): wait for exact VSIX targets",
-          "timestamp": "2026-08-25T02:44:18+02:00",
-          "tree_id": "523b9fd1e2a0c1ba5b926b3045e0ff501832cdd4",
-          "url": "https://github.com/fallow-rs/fallow/commit/174d025b6327ec3813face3fcb42b610a0c6d3c2"
-        },
-        "date": 1787618987161,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.7,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/0b2922747231a43c269b2e555e0f366f6025e294"
         },
         "date": 1788954674644,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.5,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "adeca23ebe17e714a27e7a4f57300cdefd3d283b",
+          "message": "fix: let license refresh fall back to a full-access API key\n\nCloses #2595",
+          "timestamp": "2026-09-09T14:43:18+02:00",
+          "tree_id": "888f0016c2a13aeacb9a60ab716f4e87e075cbe7",
+          "url": "https://github.com/fallow-rs/fallow/commit/adeca23ebe17e714a27e7a4f57300cdefd3d283b"
+        },
+        "date": 1788958244678,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
