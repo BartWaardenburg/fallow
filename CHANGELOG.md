@@ -307,6 +307,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The duplication token cache works on Windows again.** Adding `ctime` to the
+  extract fingerprint closed a real staleness bug, but the dupes token cache
+  reacted to a missing `ctime` by returning nothing rather than by falling back.
+  `ctime` is always absent on Windows, so that cache never hit there: a clean
+  miss with correct results, and a permanently cold cache on an entire platform.
+  It now takes the same fast-path and slow-path split the extract cache already
+  had, comparing content hashes when the timestamps cannot be trusted. The
+  invariant the `ctime` work exists to protect survives, because the fallback
+  trusts bytes rather than metadata: a size-preserving edit with a restored
+  mtime still misses, on every platform. The graph cache was checked and is
+  unaffected; it keys on content hashes and deliberately avoids `ctime`, since
+  `cp -Rp` and CI cache restores preserve mtime but reset it.
+
 - **A quoted jq filter in a CI `run:` block is no longer read as an entry
   glob.** A workflow line like `jq -r '[((.proposals // {}) | to_entries[]) |
   .value.pr_number] | unique | sort[]'` warned `invalid entry pattern ...
