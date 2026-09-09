@@ -5,6 +5,7 @@
 
 use std::fmt;
 
+use fallow_types::cloud::CLOUD_API_KEY_MISSING_MESSAGE;
 use serde::Deserialize;
 
 use super::upload_common::url_encode_path_segment;
@@ -342,9 +343,7 @@ pub fn fetch_runtime_context(request: &CloudRequest) -> Result<CloudRuntimeConte
 
 fn validate_request(request: &CloudRequest) -> Result<(), CloudError> {
     if request.api_key.trim().is_empty() {
-        return Err(CloudError::Auth(
-            "Cloud runtime coverage requires an API key.\n\nSet FALLOW_API_KEY or pass --api-key:\n\n  FALLOW_API_KEY=fallow_live_... fallow coverage analyze --cloud --repo owner/repo".to_owned(),
-        ));
+        return Err(CloudError::Auth(CLOUD_API_KEY_MISSING_MESSAGE.to_owned()));
     }
     if request.repo.trim().is_empty() {
         return Err(CloudError::Validation(

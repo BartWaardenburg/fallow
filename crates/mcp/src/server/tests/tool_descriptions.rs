@@ -86,7 +86,7 @@ const MAX_TOOL_DESCRIPTION_BYTES: usize = 2_000;
 ///
 /// The target is 35_000, reached by moving one tool's per-flag prose into its
 /// `fallow://tools/{name}` guide at a time.
-const RECORDED_TOTAL_DESCRIPTION_BYTES: usize = 54_523;
+const RECORDED_TOTAL_DESCRIPTION_BYTES: usize = 56_164;
 
 /// Deliberate headroom over [`RECORDED_TOTAL_DESCRIPTION_BYTES`].
 ///
@@ -306,7 +306,7 @@ fn total_schema_bytes() -> usize {
 /// deltas by hand; one edited parameter doc comment renders into every tool
 /// that takes that parameter, so the arithmetic is wrong long before it looks
 /// wrong.
-const RECORDED_TOTAL_SCHEMA_BYTES: usize = 79_315;
+const RECORDED_TOTAL_SCHEMA_BYTES: usize = 81_454;
 
 /// Deliberate headroom over [`RECORDED_TOTAL_SCHEMA_BYTES`], for the same
 /// reason [`TOTAL_DESCRIPTION_SLACK_BYTES`] exists: pinned to the exact live

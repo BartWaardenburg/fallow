@@ -115,6 +115,11 @@ pub fn code_mode_allowlist() -> Vec<(&'static str, &'static str)> {
 /// the `fallow schema` issue-type rows so the wording cannot drift.
 pub const RUNTIME_COVERAGE_LICENSE_NOTE: &str = "A single local runtime-coverage capture is free; continuous or multi-capture runtime monitoring requires an active license (fallow license activate).";
 
+/// Free/paid nuance for the cloud runtime-coverage pull. Distinct from
+/// [`RUNTIME_COVERAGE_LICENSE_NOTE`]: nothing local gates this one, the fallow
+/// cloud account behind the API key does.
+pub const CLOUD_RUNTIME_COVERAGE_LICENSE_NOTE: &str = "Reading runtime coverage from fallow cloud needs a FALLOW_API_KEY for an org on the Team tier; the cloud refuses the request otherwise. No local license is involved.";
+
 /// All tools exposed by the fallow MCP server, in registration order.
 pub const MCP_TOOLS: &[McpToolInfo] = &[
     McpToolInfo {
@@ -313,6 +318,19 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         license_note: Some(RUNTIME_COVERAGE_LICENSE_NOTE),
         read_only: true,
         code_mode_alias: Some("getCleanupCandidates"),
+    },
+    McpToolInfo {
+        name: "get_cloud_runtime_context",
+        kind: "runtime-coverage",
+        description: "Runtime coverage pulled from fallow cloud for a repository, merged into the same runtime_coverage block the local runtime-coverage tools return",
+        cli_command: Some(
+            "fallow coverage analyze --cloud --repo <owner/repo> --format json --quiet",
+        ),
+        key_params: &["repo", "period_days", "environment", "commit_sha", "top"],
+        license: McpToolLicense::Freemium,
+        license_note: Some(CLOUD_RUNTIME_COVERAGE_LICENSE_NOTE),
+        read_only: true,
+        code_mode_alias: None,
     },
     McpToolInfo {
         name: "get_token_blast_radius",
@@ -1057,6 +1075,15 @@ pub const CAPABILITY_PARITY: &[CapabilityParityRow] = &[
         ),
     },
     CapabilityParityRow {
+        capability: "cloud runtime context",
+        api_runner: None,
+        napi_export: None,
+        mcp_tool: Some("get_cloud_runtime_context"),
+        omission_note: Some(
+            "Runtime coverage read from fallow cloud. MCP shells out to `fallow coverage analyze --cloud`; no dedicated run_* runner and no napi export, and the pull is the CLI's only networked coverage path.",
+        ),
+    },
+    CapabilityParityRow {
         capability: "runtime-coverage hot paths",
         api_runner: None,
         napi_export: None,
@@ -1267,6 +1294,7 @@ mod tests {
                 "get_blast_radius",
                 "get_importance",
                 "get_cleanup_candidates",
+                "get_cloud_runtime_context",
             ],
             "freemium marking must cover exactly the runtime-coverage family"
         );

@@ -6783,6 +6783,23 @@
         "code_mode_alias": "getCleanupCandidates"
       },
       {
+        "name": "get_cloud_runtime_context",
+        "kind": "runtime-coverage",
+        "description": "Runtime coverage pulled from fallow cloud for a repository, merged into the same runtime_coverage block the local runtime-coverage tools return",
+        "cli_command": "fallow coverage analyze --cloud --repo <owner/repo> --format json --quiet",
+        "key_params": [
+          "repo",
+          "period_days",
+          "environment",
+          "commit_sha",
+          "top"
+        ],
+        "license": "freemium",
+        "license_note": "Reading runtime coverage from fallow cloud needs a FALLOW_API_KEY for an org on the Team tier; the cloud refuses the request otherwise. No local license is involved.",
+        "read_only": true,
+        "code_mode_alias": null
+      },
+      {
         "name": "get_token_blast_radius",
         "kind": "analysis",
         "description": "Design-token blast radius for Tailwind v4 @theme tokens AND CSS-in-JS defineVars/createTheme-family token definitions: per token, a consumer_count (static lower bound) and a capped located consumers[] sample tagged theme-var/css-var/utility/apply (Tailwind), js-member (CSS-in-JS member access), or js-call (StyleX theme-group and Panda token calls); descriptive context for sizing a token change, never a deletion gate",
