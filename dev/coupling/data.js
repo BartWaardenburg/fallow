@@ -1,57 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788949384382,
+  "lastUpdate": 1788951332320,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Module Coupling": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "dc03fd1484261a623e044e1dbe97378095bae4ac",
-          "message": "fix(core): analyze package.json resolutions as a bun dependency-override source\n\n## What was broken\n\nbun honours Yarn-style `resolutions` in `package.json` as an alias of `overrides`, but the dependency-override analyzer only read the top-level `overrides` object, `pnpm.overrides`, and `pnpm-workspace.yaml`. A bun repository that pins transitive versions under `resolutions` was never analyzed: no `unused-dependency-overrides` or `misconfigured-dependency-overrides` findings with any lockfile, and since #2362 no `bun-lockb-override-resolution-skipped` diagnostic next to a `bun.lockb` either, because no override state was gathered. Both repros from the issue (a `resolutions` manifest next to a `bun.lockb`, and a `resolutions` manifest next to a text `bun.lock` that resolves only `ws`) produced nothing: no findings, no diagnostic, no stderr warning.\n\n## Root cause\n\n`gather_pnpm_override_state` builds its state from three parsers (`pnpm-workspace.yaml`, `pnpm.overrides`, and the npm `overrides` object) and returns `None` when all three are empty, so the detectors and the bun.lockb skip path never ran for a `resolutions`-only manifest. The npm parser also hard-codes the `overrides` key and flattens nested objects, and it does not understand yarn's `parent/child` and `**/child` path keys, which bun accepts under `resolutions`.\n\n## The fix\n\n- `fallow_config::parse_bun_package_json_resolutions` parses the top-level `resolutions` object through the shared override entry shape. It reuses the npm line scanner (now parameterised by section key, recording only direct keys for `resolutions` so a nested object bun rejects cannot shift a later key's line) and maps bun's key dialect: bare packages, `@scope/pkg`, `pkg@<2`, the yarn paths `parent/child`, `**/child`, and `parent/**/child` (with `@scope/name` spanning two segments), and the pnpm `parent>child` form, using bun's delimiter rule so `pkg@>=1` keeps its selector. Shapes bun warns about and skips (more than one parent level, a bare scope, a trailing `**`, a non-string value) stay entries without a parsed key or value so the misconfigured detector reports them. `//` comment keys are skipped.\n- The core analyzer gathers `resolutions` only for bun repositories: the root `packageManager` names bun, or no recognised `packageManager` is declared and a `bun.lock` or `bun.lockb` sits at the root (a manifest naming npm, pnpm, or yarn is never a bun repository, even next to a leftover bun lockfile, mirroring the packageManager-first rule the transitive hint already uses).\n- bun precedence, cited in a code comment: `OverrideMap::parse_append` in bun's `src/install/lockfile/OverrideMap.rs` takes the `overrides` property when it exists, whatever its value, and falls through to `resolutions` only when `overrides` is absent. The analyzer therefore ignores `resolutions` whenever the manifest has an `overrides` key, including an empty one.\n- `resolutions` entries run through both detectors with `source: \"package.json\"` (the declaring-file label the field is documented as), the entry's line, and a bun hint that names `resolutions`: `declared under `resolutions`, which bun applies as an alias of `overrides`; may target a transitive dependency; bun install --frozen-lockfile is the ground truth`. A `resolutions`-only manifest next to a `bun.lockb` without a parseable text lockfile now records the existing skip diagnostic.\n- yarn repositories keep the current stance, documented in the module docs: `resolutions` is not parsed, and the inert-`overrides` hint is unchanged.\n- The root manifest is parsed once in `gather_pnpm_override_state` and the declared package manager is passed into `collect_lockfile_packages` instead of being re-derived from the source string.\n\n## Behavior change\n\nAdditive findings only, for bun repositories that declare `resolutions` without `overrides`: new `unused-dependency-overrides` and `misconfigured-dependency-overrides` entries, and the `bun-lockb-override-resolution-skipped` diagnostic next to a `bun.lockb`. npm, pnpm, and yarn repositories, and bun repositories with an `overrides` key, are unchanged. No contract change: `DependencyOverrideSource` keeps its two values (the policy in `docs/backwards-compatibility.md` bumps the envelope for a value added to an existing enum-valued required field, and `source` is documented as the declaring-file label, which `package.json` already is), so only the rustdoc descriptions of `DependencyOverrideSource::PnpmPackageJson` and `UnusedDependencyOverride` changed and `docs/output-schema.json` was regenerated from them. Suppression works with the existing `ignoreDependencyOverrides: [{ \"package\": \"...\", \"source\": \"package.json\" }]` rule.\n\n## Cache invalidation\n\nNone. Override analysis reads the manifest and lockfiles on every run; nothing about it is persisted in the extract or graph caches. Warm-cache proof on the fixture: baseline binary cold run writes `.fallow` and reports nothing, the fixed binary on that warm cache reports `left-pad` and `**/trim-newlines`, and a second warm run is stable.\n\n## How it was tested\n\n- Config unit tests (`npm_overrides::tests`): flat entries with lines; every yarn path shape and the pnpm delimiter form; shapes bun rejects are unparsable or valueless and a nested object does not shift a later key's line; comment keys are skipped; the `resolutions` parser ignores `overrides` and nested `resolutions`, and the npm parser ignores `resolutions`.\n- Core unit tests (`unused_overrides::tests`, mirroring the #2362 set): resolutions-only next to `bun.lockb` records the skip diagnostic once and stays deduplicated; resolutions resolve against a text `bun.lock` (left-pad flagged, `source`, `path`, line, hint); an `overrides` key (even empty) shadows `resolutions`; yarn, npm (with a leftover `bun.lock`), pnpm, and lockfile-less repositories ignore `resolutions`; a root bun lockfile without a `packageManager` field enables them; yarn path keys credit a declared parent and the shapes bun rejects reach the misconfigured detector.\n- Integration test on fixture `tests/fixtures/issue-2367-bun-resolutions` (bun repo, `resolutions` with `ws`, `left-pad`, and `**/trim-newlines`, text `bun.lock` resolving `ws`): both unresolved pins report at their lines with the `package.json` source and the resolutions hint, no misconfigured findings, no skip diagnostic; the `ignoreDependencyOverrides` rule with `source: \"package.json\"` suppresses an entry.\n- CLI test: `dead-code --format json` on the fixture carries both findings with `source` and `path` `package.json` and the resolutions hint, and no workspace diagnostics.\n- Issue repros through the baseline binary (built from e65a9083e) and the fixed binary: the `bun.lockb` repro reports the skip diagnostic in JSON and on stderr on the fixed binary only; the text `bun.lock` repro reports `left-pad` with the bun hint on the fixed binary only; a manifest with both `overrides` and `resolutions` reports nothing on either.\n- Real-project parity: `dead-code --format json --no-cache` on the in-repo `viz-frontend` (package-lock.json) and `editors/vscode` (pnpm-lock.yaml); outputs identical apart from `analysis_run_id` and `elapsed_ms`, stderr identical apart from timestamps.\n- Mutation matrix: with the non-test hunks of `unused_overrides.rs` reverted, the core unit tests, the integration test, and the CLI test fail; with the non-test hunks of the config parser reverted, the config tests and the core crate fail to compile on the missing parser.\n- Gates: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace --lib --bins --tests --examples`, `cargo check --workspace --benches`, `RUSTDOCFLAGS=\"-D warnings\" cargo doc --workspace --no-deps --document-private-items`, `typos`, the hidden-unicode scan, the comment-quality check, and `npm run generate:contracts:check`.\n\nFixes #2367",
-          "timestamp": "2026-08-23T01:33:15+02:00",
-          "tree_id": "a771091012a3f984217d960a2cfd23f1c0a4e4b1",
-          "url": "https://github.com/fallow-rs/fallow/commit/dc03fd1484261a623e044e1dbe97378095bae4ac"
-        },
-        "date": 1787442571265,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Max Fan-In (non-framework)",
-            "value": 47,
-            "unit": "deps"
-          },
-          {
-            "name": "Max Fan-Out (non-framework)",
-            "value": 28,
-            "unit": "deps"
-          },
-          {
-            "name": "Modules >20 Fan-In (%)",
-            "value": 1.32,
-            "unit": "%"
-          },
-          {
-            "name": "Total Modules",
-            "value": 456,
-            "unit": "count"
-          },
-          {
-            "name": "Total Edges",
-            "value": 1237,
-            "unit": "count"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4874,6 +4825,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/85615b646a1adb45a30bf24a45ffa55dfa088737"
         },
         "date": 1788949379505,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Max Fan-In (non-framework)",
+            "value": 54,
+            "unit": "deps"
+          },
+          {
+            "name": "Max Fan-Out (non-framework)",
+            "value": 29,
+            "unit": "deps"
+          },
+          {
+            "name": "Modules >20 Fan-In (%)",
+            "value": 1.26,
+            "unit": "%"
+          },
+          {
+            "name": "Total Modules",
+            "value": 476,
+            "unit": "count"
+          },
+          {
+            "name": "Total Edges",
+            "value": 1302,
+            "unit": "count"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "9dc043deca19489fdbc7dfd382e53d95c5c8e114",
+          "message": "fix(coverage): point the post-upload dashboard link at the repository route\n\nCloses #2597",
+          "timestamp": "2026-09-09T12:49:28+02:00",
+          "tree_id": "c1144f3de6279ebaf6a926203038832f530859fa",
+          "url": "https://github.com/fallow-rs/fallow/commit/9dc043deca19489fdbc7dfd382e53d95c5c8e114"
+        },
+        "date": 1788951328888,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
