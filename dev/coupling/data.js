@@ -1,57 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788954483950,
+  "lastUpdate": 1788958145538,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Module Coupling": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "2862dbe4f96a2e801a576b63028da97c73b8f6b9",
-          "message": "fix(graph): credit the default export however each side spells the specifier\n\n## What was broken\n\n`default` is one importable name that either side may spell two ways, and no pairing that mixed the two spellings ever met, so the target's default export kept reporting as unused:\n\n- `import { default as X } from './impl'` (the issue's reproduction).\n- `declare module 'pkg' { export { default } from './impl' }`, and the mixed `export { default as Impl, Y as Z } from './impl'` inside an ambient body, where `Y` was credited and the default was not.\n- A plain `import x from './impl'` against a module whose default is written `export { x as default }`, which the extractor keeps under its written name. This is the mirror image of the first case and reproduces on the same lookup.\n- The same mirror for CommonJS: `exports.default = x` is recorded under its written name too, so the default of every transpiled CommonJS module reported as unused against a plain default import.\n- Two further producers of a named `default` specifier: a JSDoc `import('./impl').default` type reference, and a destructured `const { default: X } = require('./impl')`.\n\nA `export { default } from` chain consumed by a `default` specifier lost the credit at every hop, so a two-hop chain reported three unused defaults instead of none.\n\n## Root cause\n\n`ExportNameIndex` (`crates/graph/src/graph/build.rs`) is the per-module lookup Phase 2 uses to find the exports an incoming edge symbol references. It keyed on the spelling rather than on the name: `ExportName::Default` went into a dedicated slot, `ExportName::Named(\"default\")` into the string map, and `matches` read the slot only for `ImportedName::Default`. Several producers record a `default` specifier as `ImportedName::Named(\"default\")`: `handle_import_specifier` for a plain import, the ambient named re-export branch of `visit_export_named_declaration` (which records one named type-space import per specifier, #2349), the JSDoc `import()` member path, and the destructured-`require` path. None could reach a slot the index never filled from their side.\n\n## The fix\n\nOne default slot, read and written under both spellings. `sync` routes `ExportName::Named(\"default\")` into the slot instead of the string map, so the slot holds every declaration form in ascending export order and the named map never carries a `\"default\"` key; `matches` reads the slot for `ImportedName::Named(\"default\")` as well as for `ImportedName::Default`.\n\nThe index is the right layer, not the extractor:\n\n- Every other `ImportedName` consumer in the graph already collapses `Default` and `Named(\"default\")` to the same string key `\"default\"` (`imported_name_label`, the consumer and whole-object maps in `re_exports`, `reference_reaches_surface`, and `attach_direct_export_references`'s own `imported_name` binding). This lookup was the one that did not, so it is the defect site.\n- Normalising the two producers to `ImportedName::Default` instead would make an ambient `export { default } from` byte-identical to the `export * as ns` default-member import #2357 records (`ImportedSymbol::is_ambient_star` is type-only plus an empty local name plus `Namespace | Default`), silently promoting the named ambient form from type-space credit to both-namespace credit. That is exactly the regression #2357 fixed. It would also flip `reference_kind_for` and `narrowable_import_locals` for a CSS-module default alias.\n\n### The collapse is scoped to modules whose `default` is a default export\n\n`NamedDefaultSpelling` picks the rule per target module from its path. A CSS Module exports one `ExportName::Named` per class and never an `ExportName::Default` (`crates/extract/src/css.rs` even asserts it), so for a stylesheet a class spelled `.default` is an ordinary class, not a module default. Folding there let any plain `import styles from './x.module.css'` credit that class unconditionally, before the CSS member narrowing that owns crediting for that import ever ran, and a genuinely unused class silently stopped reporting. Stylesheets keep an empty default slot and `narrow_css_module_references` remains the only thing that credits their classes, from the member accesses the consumer actually writes.\n\nThe stylesheet side is decided by `is_css_module_stylesheet`, which tracks the extractor's own CSS Module set: `.module.css`, `.module.scss`, `.module.sass` and `.module.less`. It is deliberately a separate predicate from `is_css_module_path`, which gates CSS member narrowing on the `.css` / `.scss` pair alone and is left untouched, so `.less` and `.sass` class maps gain an empty default slot without gaining member narrowing (a behavior change well past this fix, and pinned as unchanged by the pre-existing `css_module_path_less_not_matched` test).\n\nA CommonJS `exports.default = x` keeps folding, deliberately. The extractor records it as `Named(\"default\")` exactly like `export { x as default }` and the graph cannot tell the two apart, so the choice is one or the other for both. Crediting is correct for the dominant shape (transpiled CommonJS carrying `__esModule`, where `import x from './m'` binds exactly that property) and leaving it uncredited was a measurable false positive on the baseline. The same fold reaches a hand-written `module.exports = { default: ... }` object key, which is defensible under the same interop rule and is disclosed in the changelog.\n\n## Behavior change\n\nUnused-export findings decrease. Repositories using any of the affected shapes lose unused-export findings on the target's default export, including every hop of a `export { default } from` chain.\n\nTotal finding count is not guaranteed to decrease. A default export credited for the first time becomes reachable, so member-level detectors can now report on it: a `export default class C { value = 1 }` reached only through `import { default as C }` swaps its `unused_exports ... default` row for an `unused_class_members ... value` row. Both rows are correct; the changelog says so.\n\nThree neighbours are deliberately untouched and pinned by fixtures:\n\n- A plain `export * from './impl'` still does not forward `default`, however the target spells it. Two negative controls cover both spellings: `export default fn` in the main fixture, and `export { hidden as default }` (the spelling the fold actually relocates) in `issue-2374-star-named-default`. Each proves the star edge is live by keeping the target's named export credited.\n- A named re-export chain still forwards exactly the specifiers written on it: the sibling next to the default in `chain-deep.ts` keeps reporting.\n- A CSS Module class named `.default` still reports when no consumer accesses it, in all four stylesheet syntaxes, while a `.module.css` class the consumer does access stays credited.\n\nThe #2357, #2372, and #2373 fixtures keep their exact verdicts.\n\n## Cache invalidation\n\n`GRAPH_CACHE_VERSION` 39 to 40. Unused-export verdicts are read off the persisted graph and reference attachment bakes the credited references into it at graph build, so a warm 39 `.fallow` would replay the uncredited verdict verbatim. The extract cache is untouched: this change records nothing new during extraction, so `CACHE_VERSION` stays at 276.\n\nWarm-cache proof on the crediting fixture:\n\n1. Baseline binary (graph v39, no fix), cold run: 12 unused exports, writes the cache.\n2. Patched binary on that warm v39 cache: 5 unused exports, the fixed verdict.\n3. Second patched run on the now-v40 cache: identical to step 2.\n\nThe same three steps on a `.module.less` plus `.module.sass` project hold the verdict at the baseline's 5 unused exports throughout, so the stylesheet guard survives a cache round trip.\n\n## How it was tested\n\n- Graph unit tests on `ExportNameIndex`: both spellings read the same slot, in ascending order, with an unrelated name unaffected; a module that only declares `export { x as default }` answers a plain default import; a CSS-module index keeps `default` in the string map with an empty default slot; `is_css_module_stylesheet` covers all four CSS Module extensions and stays wider than the narrowing gate; and `NamedDefaultSpelling::for_target` classifies `.module.css`, `.module.scss`, `.module.sass` and `.module.less` apart from ordinary source paths (`.css`, `.less`, `.sass` and `.module.ts` included).\n- Extract unit test pinning that both producers keep recording the written name `Named(\"default\")`, which is the shape the index fix reads. Deliberately passes on both sides of the fix.\n- Integration tests on fixture `issue-2374-default-specifier` covering `import { default as X }`, the two ambient forms, the two-hop chain, the `export { x as default }` mirror, and the negative controls. Three boundary fixtures hold the cases that each declare a further `Named(\"default\")`, which the pre-existing `duplicate_exports` grouping would otherwise report as a collision against the main fixture's `export { inner as default }`: `issue-2374-css-module-default-class` (now carrying `.module.css`, `.module.less` and `.module.sass` siblings), `issue-2374-cjs-default-property`, and `issue-2374-star-named-default`.\n- Mutation matrix. Reverting the whole `build.rs` source change fails the three crediting integration tests and leaves the negative controls passing. Pointing `for_target` back at `is_css_module_path` fails the `.module.sass` case of the `for_target` unit test and the CSS integration test on `classes.module.less`. Forcing `for_target` never to fold fails the same two.\n- Differential run of the baseline and patched binaries over every top-level fixture project (505 with a `package.json`, `dead-code --format json --no-cache`): exactly two differ, the crediting fixture (12 findings to 5) and the CommonJS boundary fixture (2 to 1). The CSS-module fixtures, the new star fixture, and the #2355 / #2357 / #2372 / #2373 pins are byte-identical.\n- Real-project runs, baseline versus patched, `dead-code --format json --no-cache`: `viz-frontend` and `editors/vscode` are byte-identical, as is a third real project that uses `export { default as X } from`. None of them uses the affected shapes.\n- Scratch-project probes on both binaries for each reported shape: a `.module.less` and a `.module.sass` each carrying a `.default` class (the branch before this round dropped both findings; patched output is now byte-identical to the baseline), `.module.css` and `.module.scss` equivalents, the counter-case where the consumer writes `styles.default` (credited on both), `exports.default = fn` (baseline false positive, cured), a `module.exports = { default: ... }` object key, a JSDoc `import('./m').default`, a destructured `const { default: X } = require('./m')`, and a class default reached through `import { default as C }` (the unused-export row becomes an unused-class-member row).\n- The issue's own reproduction through the patched binary: `src/impl.ts:default` is gone, the genuinely unused `untouched` still reports.\n- Gates: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace --lib --bins --tests --examples`, `cargo check --workspace --benches`, `RUSTDOCFLAGS=\"-D warnings\" cargo doc --workspace --no-deps --document-private-items`, `typos`, `scripts/scan-hidden-unicode.py --mode committed --staged`, `scripts/check-comment-quality.mjs --staged`.\n\n## Known gap, not in scope\n\n`narrow_css_module_references` is gated on `is_css_module_path`, so it never runs for `.module.less` or `.module.sass`: every class in such a stylesheet reports as unused even when the consumer accesses it. Identical on the baseline and patched binaries, so pre-existing and untouched here. Tracked as a separate follow-up.\n\nFixes #2374",
-          "timestamp": "2026-08-23T15:00:28+02:00",
-          "tree_id": "c9491d5c6fdee45adc600453e01e2e1ccb010920",
-          "url": "https://github.com/fallow-rs/fallow/commit/2862dbe4f96a2e801a576b63028da97c73b8f6b9"
-        },
-        "date": 1787490358199,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Max Fan-In (non-framework)",
-            "value": 47,
-            "unit": "deps"
-          },
-          {
-            "name": "Max Fan-Out (non-framework)",
-            "value": 28,
-            "unit": "deps"
-          },
-          {
-            "name": "Modules >20 Fan-In (%)",
-            "value": 1.32,
-            "unit": "%"
-          },
-          {
-            "name": "Total Modules",
-            "value": 456,
-            "unit": "count"
-          },
-          {
-            "name": "Total Edges",
-            "value": 1239,
-            "unit": "count"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4874,6 +4825,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/0b2922747231a43c269b2e555e0f366f6025e294"
         },
         "date": 1788954480635,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Max Fan-In (non-framework)",
+            "value": 54,
+            "unit": "deps"
+          },
+          {
+            "name": "Max Fan-Out (non-framework)",
+            "value": 29,
+            "unit": "deps"
+          },
+          {
+            "name": "Modules >20 Fan-In (%)",
+            "value": 1.26,
+            "unit": "%"
+          },
+          {
+            "name": "Total Modules",
+            "value": 476,
+            "unit": "count"
+          },
+          {
+            "name": "Total Edges",
+            "value": 1302,
+            "unit": "count"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "adeca23ebe17e714a27e7a4f57300cdefd3d283b",
+          "message": "fix: let license refresh fall back to a full-access API key\n\nCloses #2595",
+          "timestamp": "2026-09-09T14:43:18+02:00",
+          "tree_id": "888f0016c2a13aeacb9a60ab716f4e87e075cbe7",
+          "url": "https://github.com/fallow-rs/fallow/commit/adeca23ebe17e714a27e7a4f57300cdefd3d283b"
+        },
+        "date": 1788958140922,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
