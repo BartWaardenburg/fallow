@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788967640170,
+  "lastUpdate": 1788968810655,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "1edd39e794b2c16dbc64fedda368c3df1ff903bc",
-          "message": "fix(impact): name a newer store in the statusline\n\nAn older fallow reading an Impact store written by a newer release printed the generic data-unavailable line, which read as lost history. The statusline now prints data from newer fallow with an upgrade hint for that case; corrupt or unreadable stores keep the data-unavailable line.",
-          "timestamp": "2026-08-25T11:29:38+02:00",
-          "tree_id": "5ac3f059ffa9b0ec43bd3637213d3dbdff380b0b",
-          "url": "https://github.com/fallow-rs/fallow/commit/1edd39e794b2c16dbc64fedda368c3df1ff903bc"
-        },
-        "date": 1787650585351,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.7,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/5cd805c63be517cecff3e0ddcc7c52e7422555b7"
         },
         "date": 1788967635934,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.5,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "3b7cb01a1e4cdff6f3a9d700c7cddce7178bebad",
+          "message": "ci: narrow the apt freshness exemption to the frozen security suite",
+          "timestamp": "2026-09-09T17:36:51+02:00",
+          "tree_id": "c7a13975adfb045d61873173f0cf95438448383a",
+          "url": "https://github.com/fallow-rs/fallow/commit/3b7cb01a1e4cdff6f3a9d700c7cddce7178bebad"
+        },
+        "date": 1788968807539,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
