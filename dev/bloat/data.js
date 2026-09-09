@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788955097568,
+  "lastUpdate": 1788959598059,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Binary Size": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "1380b8d61a8e874f8d7368ae0b88aff15edf36cc",
-          "message": "perf(benchmarks): cover derived security outputs\n\nAdd stable CodSpeed coverage for survivors verdict joins and unresolved-callee blind-spot grouping.",
-          "timestamp": "2026-08-20T15:41:34+02:00",
-          "tree_id": "bbd2cdf817c722b6e5173159b821a190e61d61ed",
-          "url": "https://github.com/fallow-rs/fallow/commit/1380b8d61a8e874f8d7368ae0b88aff15edf36cc"
-        },
-        "date": 1787233954438,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Binary Size (fallow)",
-            "value": 513814672,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-lsp)",
-            "value": 20204896,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-mcp)",
-            "value": 25602120,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-multicall)",
-            "value": 38888872,
-            "unit": "bytes"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Binary Size (fallow-multicall)",
             "value": 43194056,
+            "unit": "bytes"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "4e9a9c39b74edaacd7945addb493ec35f9287d28",
+          "message": "fix(dupes): let content settle a cache lookup the timestamps cannot\n\nThe first pass gave the token cache a content fallback only when the\nfingerprint was untrustworthy, which fixed Windows and left the two platforms\nbehaving differently: a touch re-tokenized on Unix and hit on Windows.\n\nMetadata is the fast path, not the verdict. A match settles the lookup without\ntouching the disk; a mismatch only means the timestamps cannot settle it, so\ncontent decides, on every platform. A file whose bytes never moved now survives\na touch or a checkout that rewrites timestamps.\n\nThe staleness invariant is unchanged because content is the authority in both\nbranches: a size-preserving edit with a restored mtime still misses.\n\nOne test asserted the old rule, that a metadata mismatch means a miss. It is\nreplaced by the two properties that are actually worth holding: timestamps\nmoving alone hits, timestamps and content moving together misses.",
+          "timestamp": "2026-09-09T14:51:53+02:00",
+          "tree_id": "c79a453c179bbba0c3304652645d9a19f31bec2b",
+          "url": "https://github.com/fallow-rs/fallow/commit/4e9a9c39b74edaacd7945addb493ec35f9287d28"
+        },
+        "date": 1788959594485,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Binary Size (fallow)",
+            "value": 570111488,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-lsp)",
+            "value": 21564536,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-mcp)",
+            "value": 28476392,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-multicall)",
+            "value": 43197160,
             "unit": "bytes"
           }
         ]
