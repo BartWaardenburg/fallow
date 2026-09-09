@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.24.1] - 2026-09-09
+
 ### Fixed
 
 - **`fallow coverage analyze --production` no longer calls a test-only export
@@ -8565,7 +8567,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[unreleased]: https://github.com/fallow-rs/fallow/compare/v3.24.0...HEAD
+[unreleased]: https://github.com/fallow-rs/fallow/compare/v3.24.1...HEAD
+[3.24.1]: https://github.com/fallow-rs/fallow/compare/v3.24.0...v3.24.1
 [3.24.0]: https://github.com/fallow-rs/fallow/compare/v3.23.0...v3.24.0
 [3.23.0]: https://github.com/fallow-rs/fallow/compare/v3.22.0...v3.23.0
 [3.22.0]: https://github.com/fallow-rs/fallow/compare/v3.21.0...v3.22.0
