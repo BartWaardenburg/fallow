@@ -1,6 +1,6 @@
 FROM debian:bookworm-slim AS download
 
-ARG FALLOW_VERSION=3.23.0
+ARG FALLOW_VERSION=3.24.0
 ARG TARGETARCH
 
 RUN apt-get update \
@@ -8,18 +8,18 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 
 # The sha256 pins below are bound to FALLOW_VERSION above; bump both together.
-# release.yml's docker-lockstep job keeps them in sync automatically after
-# every release by opening a PR here; a manual edit only needs to preserve
-# the lockstep rule for local review.
+# The maintainer release flow refreshes all three after publication, via
+# .github/scripts/update-dockerfile-pins.mjs. There is no CI job that does it:
+# the docker-lockstep job that used to open a PR here was removed in v3.7.1.
 RUN set -eux; \
   case "${TARGETARCH}" in \
     amd64) \
       asset="fallow-linux-x64-musl"; \
-      sha256="2a781303a039b3b2d93e90bff9ec8374329e328012e6ac73536a4506538eaf77"; \
+      sha256="d6c6f3b77c535137d7d8d8d76ad48bda0b2a5a1c5a0b3fdb7ba4cd43cfeef6a4"; \
       ;; \
     arm64) \
       asset="fallow-linux-arm64-musl"; \
-      sha256="a7899bad5b2307a0f47d6e07108ab3d567ca3af96871b87277299c8a5eb4d2d7"; \
+      sha256="7715812444cbfb3070f29458445b84754e2c0ef6dc1694874306196df34992b0"; \
       ;; \
     *) \
       echo "unsupported TARGETARCH: ${TARGETARCH}" >&2; \
