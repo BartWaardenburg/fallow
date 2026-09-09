@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.24.0] - 2026-09-09
+
 ### Added
 
 - **`fallow trace --path <FROM> <TO>` reports how one module reaches
@@ -8530,7 +8532,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[Unreleased]: https://github.com/fallow-rs/fallow/compare/v3.23.0...HEAD
+[unreleased]: https://github.com/fallow-rs/fallow/compare/v3.24.0...HEAD
+[3.24.0]: https://github.com/fallow-rs/fallow/compare/v3.23.0...v3.24.0
 [3.23.0]: https://github.com/fallow-rs/fallow/compare/v3.22.0...v3.23.0
 [3.22.0]: https://github.com/fallow-rs/fallow/compare/v3.21.0...v3.22.0
 [3.21.0]: https://github.com/fallow-rs/fallow/compare/v3.20.0...v3.21.0
