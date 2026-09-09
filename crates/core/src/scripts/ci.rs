@@ -693,6 +693,60 @@ jobs:
         }
     }
 
+    /// Regression test for issue #2592: a quoted jq filter passed as a shell
+    /// argument to `jq -r` (the alternative operator `//` gives it a `/`)
+    /// must not be harvested as an entry pattern. Reported against the exact
+    /// `mapfile < <(jq ...)` shape from a real workflow.
+    #[test]
+    fn jq_alternative_operator_filter_not_entry_file() {
+        let content = r#"
+jobs:
+  process:
+    steps:
+      - name: List proposal PRs
+        run: |
+          state=".github/state.json"
+          mapfile -t proposal_prs < <(jq -r '[((.proposals // {}) | to_entries[]) | .value.pr_number] | unique | sort[]' "$state")
+"#;
+        let analysis = analyze_content(content);
+        assert!(
+            analysis.entry_files.is_empty(),
+            "jq filter must not become an entry pattern, got: {:?}",
+            analysis.entry_files
+        );
+    }
+
+    /// A `run:` block invoking a real script by path is genuine dependency
+    /// evidence and must still be harvested, even next to a `run:` block
+    /// whose quoted jq filter must be dropped (issue #2592).
+    #[test]
+    fn genuine_script_path_alongside_jq_filter_still_harvested() {
+        let content = r#"
+jobs:
+  process:
+    steps:
+      - name: List proposal PRs
+        run: |
+          state=".github/state.json"
+          mapfile -t proposal_prs < <(jq -r '[((.proposals // {}) | to_entries[]) | .value.pr_number] | unique | sort[]' "$state")
+      - name: Run real script
+        run: node scripts/deploy.js --env production
+"#;
+        let analysis = analyze_content(content);
+        assert!(
+            analysis
+                .entry_files
+                .contains(&"scripts/deploy.js".to_string()),
+            "genuine script path must still be harvested, got: {:?}",
+            analysis.entry_files
+        );
+        assert!(
+            !analysis.entry_files.iter().any(|f| f.contains("proposals")),
+            "jq filter must not leak into entry_files, got: {:?}",
+            analysis.entry_files
+        );
+    }
+
     #[test]
     fn strip_yaml_key_basic() {
         assert_eq!(strip_yaml_key("run: npm test", "run"), Some(" npm test"));

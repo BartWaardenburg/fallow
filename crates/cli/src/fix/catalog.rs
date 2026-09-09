@@ -223,7 +223,7 @@ fn commit_catalog_entry_removals(input: &mut CatalogEntryCommitInput<'_, '_>) {
         input.summary.write_error = true;
         eprintln!(
             "Error: refusing to write {}: post-edit content failed YAML reparse. The file was not modified.",
-            input.relative_path.display(),
+            input.relative_path.to_string_lossy().replace('\\', "/"),
         );
         return;
     }
@@ -321,7 +321,7 @@ fn record_catalog_removal_dry_run(
         if !matches!(output, OutputFormat::Json) {
             eprintln!(
                 "Would remove catalog entry from {}:{} `{}` (catalog: {})",
-                relative_path.display(),
+                relative_path.to_string_lossy().replace('\\', "/"),
                 range.start + 1,
                 entry.entry_name,
                 entry.catalog_name,
@@ -653,7 +653,7 @@ fn commit_empty_catalog_group_removals(input: &mut EmptyCatalogGroupCommitInput<
         input.summary.write_error = true;
         eprintln!(
             "Error: refusing to write {}: post-edit content failed YAML reparse. The file was not modified.",
-            input.relative_path.display(),
+            input.relative_path.to_string_lossy().replace('\\', "/"),
         );
         return;
     }
@@ -722,7 +722,7 @@ fn record_empty_catalog_group_dry_run(
         if !matches!(output, OutputFormat::Json) {
             eprintln!(
                 "Would remove empty catalog group from {}:{} `{}`",
-                relative_path.display(),
+                relative_path.to_string_lossy().replace('\\', "/"),
                 line_idx + 1,
                 group.catalog_name,
             );
@@ -969,7 +969,7 @@ fn skip_record(
     if !matches!(output, OutputFormat::Json) {
         eprintln!(
             "Skipped catalog entry {}:{} `{}` ({skip_reason})",
-            relative_path.display(),
+            relative_path.to_string_lossy().replace('\\', "/"),
             entry.line,
             entry.entry_name,
         );
@@ -1037,7 +1037,7 @@ fn skip_group_record(
     if !matches!(output, OutputFormat::Json) {
         eprintln!(
             "Skipped empty catalog group {}:{} `{}` ({skip_reason})",
-            relative_path.display(),
+            relative_path.to_string_lossy().replace('\\', "/"),
             group.line,
             group.catalog_name,
         );
@@ -1074,17 +1074,18 @@ fn remove_group_record(
 }
 
 fn format_consumer_summary(consumers: &[std::path::PathBuf]) -> String {
+    let display = |p: &std::path::Path| p.to_string_lossy().replace('\\', "/");
     match consumers.len() {
         0 => String::new(),
-        1 => format!("`{}`", consumers[0].display()),
+        1 => format!("`{}`", display(&consumers[0])),
         2 => format!(
             "`{}` and `{}`",
-            consumers[0].display(),
-            consumers[1].display()
+            display(&consumers[0]),
+            display(&consumers[1])
         ),
         _ => format!(
             "`{}` and {} other consumer(s)",
-            consumers[0].display(),
+            display(&consumers[0]),
             consumers.len() - 1,
         ),
     }
@@ -1128,6 +1129,28 @@ mod tests {
             line,
             hardcoded_consumers: vec![],
         })
+    }
+
+    #[test]
+    fn format_consumer_summary_normalizes_backslash_separators() {
+        let one = format_consumer_summary(&[PathBuf::from("packages\\a\\package.json")]);
+        assert_eq!(one, "`packages/a/package.json`");
+
+        let two = format_consumer_summary(&[
+            PathBuf::from("packages\\a\\package.json"),
+            PathBuf::from("packages\\b\\package.json"),
+        ]);
+        assert_eq!(
+            two,
+            "`packages/a/package.json` and `packages/b/package.json`"
+        );
+
+        let many = format_consumer_summary(&[
+            PathBuf::from("packages\\a\\package.json"),
+            PathBuf::from("packages\\b\\package.json"),
+            PathBuf::from("packages\\c\\package.json"),
+        ]);
+        assert_eq!(many, "`packages/a/package.json` and 2 other consumer(s)");
     }
 
     fn make_group(name: &str, line: u32) -> EmptyCatalogGroupFinding {

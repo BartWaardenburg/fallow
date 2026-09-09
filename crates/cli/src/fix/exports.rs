@@ -161,17 +161,16 @@ fn remove_specifiers_from_export_list(line: &str, names_to_remove: &[&str]) -> O
 }
 
 fn emit_dry_run_export_fix(relative: &Path, fix: &ExportFix) {
+    let relative_display = relative.to_string_lossy().replace('\\', "/");
     if fix.enum_declaration.is_some() {
         eprintln!(
-            "Would remove enum declaration from {}:{} `{}`",
-            relative.display(),
+            "Would remove enum declaration from {relative_display}:{} `{}`",
             fix.line_idx + 1,
             fix.export_name,
         );
     } else {
         eprintln!(
-            "Would remove export from {}:{} `{}`",
-            relative.display(),
+            "Would remove export from {relative_display}:{} `{}`",
             fix.line_idx + 1,
             fix.export_name,
         );
@@ -187,7 +186,7 @@ fn push_export_fix_json(
 ) {
     let mut value = serde_json::json!({
         "type": "remove_export",
-        "path": relative.display().to_string(),
+        "path": relative.to_string_lossy().replace('\\', "/"),
         "line": fix.line_idx + 1,
         "name": fix.export_name,
     });
@@ -1090,6 +1089,32 @@ mod tests {
 
         let path_str = fixes[0]["path"].as_str().unwrap().replace('\\', "/");
         assert_eq!(path_str, "src/utils.ts");
+    }
+
+    /// Windows-only CI produced `src\util.ts` because `push_export_fix_json`
+    /// rendered the relative path with `.display()`, which emits the
+    /// platform separator (issue caught in the v3.24.0 release run). This
+    /// constructs the backslash directly instead of relying on the host
+    /// OS to produce one, so the assertion pins the invariant on every
+    /// platform, not only on Windows.
+    #[test]
+    fn push_export_fix_json_normalizes_backslash_separators() {
+        let relative = Path::new("src\\util.ts");
+        let absolute = Path::new("/project/src\\util.ts");
+        let fix = ExportFix {
+            line_idx: 1,
+            export_name: "removable".to_owned(),
+            enum_declaration: None,
+        };
+
+        let mut fixes = Vec::new();
+        push_export_fix_json(&mut fixes, relative, absolute, &fix, None);
+
+        let path = fixes[0]["path"].as_str().unwrap();
+        assert_eq!(
+            path, "src/util.ts",
+            "the reported path must use forward slashes on every platform: {path}"
+        );
     }
 
     #[test]

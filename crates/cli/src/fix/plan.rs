@@ -68,26 +68,22 @@ impl SkipReason {
     }
 
     pub(super) fn human_message(self, path: &Path) -> String {
+        let display = path.to_string_lossy().replace('\\', "/");
         match self {
             Self::ContentChanged => format!(
-                "Skipping {}: file content changed since `fallow dead-code` ran. Re-run `fallow fix` to refresh the analysis first.",
-                path.display(),
+                "Skipping {display}: file content changed since `fallow dead-code` ran. Re-run `fallow fix` to refresh the analysis first.",
             ),
             Self::MixedLineEndings => format!(
-                "Skipping {}: file has mixed CRLF/LF line endings. Normalize it, then re-run `fallow fix`.",
-                path.display(),
+                "Skipping {display}: file has mixed CRLF/LF line endings. Normalize it, then re-run `fallow fix`.",
             ),
             Self::LowConfidenceOffGraph => format!(
-                "Kept unused export(s) in {}: consumer coverage is incomplete, so the export was preserved.",
-                path.display(),
+                "Kept unused export(s) in {display}: consumer coverage is incomplete, so the export was preserved.",
             ),
             Self::LowConfidenceUnresolvedImports => format!(
-                "Kept unused export(s) in {}: unresolved imports make the usage graph incomplete.",
-                path.display(),
+                "Kept unused export(s) in {display}: unresolved imports make the usage graph incomplete.",
             ),
             Self::LowConfidenceIncompleteAnalysis => format!(
-                "Kept unused export(s) in {}: a source file was not fully analyzed, so this run flagged the verdict itself as resting on an incomplete import graph.",
-                path.display(),
+                "Kept unused export(s) in {display}: a source file was not fully analyzed, so this run flagged the verdict itself as resting on an incomplete import graph.",
             ),
         }
     }
@@ -434,8 +430,8 @@ fn ensure_within_root(canonical_root: &Path, target: &Path) -> std::io::Result<(
         std::io::ErrorKind::PermissionDenied,
         format!(
             "fix plan target {} resolves outside project root {}",
-            target.display(),
-            canonical_root.display()
+            target.to_string_lossy().replace('\\', "/"),
+            canonical_root.to_string_lossy().replace('\\', "/")
         ),
     ))
 }
@@ -958,6 +954,17 @@ mod tests {
             SkipReason::MixedLineEndings.as_wire_str(),
             "mixed_line_endings"
         );
+    }
+
+    #[test]
+    fn human_message_normalizes_backslash_separators() {
+        let path = Path::new("src\\util.ts");
+        let message = SkipReason::ContentChanged.human_message(path);
+        assert!(
+            !message.contains('\\'),
+            "the human-facing skip message must use forward slashes: {message}"
+        );
+        assert!(message.contains("src/util.ts"), "{message}");
     }
 
     #[test]

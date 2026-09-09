@@ -227,7 +227,10 @@ fn stage_package_dependency_edit(
             );
         }
         Err(e) => {
-            eprintln!("Error: failed to serialize {}: {e}", pkg_path.display());
+            eprintln!(
+                "Error: failed to serialize {}: {e}",
+                relative_package_path(input.root, pkg_path)
+            );
             for entry in input.fixes.iter_mut() {
                 let matches = entry
                     .get("__target")

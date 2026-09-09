@@ -296,7 +296,7 @@ fn record_fix(
         let action = if dry_run { "Would remove" } else { "Removed" };
         eprintln!(
             "{action} class member from {}:{} `{}.{}`: {}",
-            relative.display(),
+            relative.to_string_lossy().replace('\\', "/"),
             finding.member.line,
             finding.member.parent_name,
             finding.member.member_name,

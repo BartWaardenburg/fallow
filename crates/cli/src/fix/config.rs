@@ -132,8 +132,7 @@ fn apply_edit(
         Ok(content) => content,
         Err(error) => {
             eprintln!(
-                "Error: failed to read config file {} before adding ignoreExports rules: {error}",
-                config_path.display()
+                "Error: failed to read config file {config_file} before adding ignoreExports rules: {error}"
             );
             return true;
         }
@@ -156,10 +155,7 @@ fn apply_edit(
             false
         }
         Err(e) => {
-            eprintln!(
-                "Error: failed to add ignoreExports rules to {}: {e}",
-                config_path.display()
-            );
+            eprintln!("Error: failed to add ignoreExports rules to {config_file}: {e}");
             true
         }
     }
@@ -297,15 +293,13 @@ fn emit_blocked_monorepo(
     let target_display = display_path(root, &root.join(".fallowrc.json"));
     let workspace_relative = display_workspace_path(root, workspace_root);
     if !matches!(output, OutputFormat::Json) {
-        let absolute = workspace_root.display();
+        let root_display = root.to_string_lossy().replace('\\', "/");
+        let workspace_display = workspace_root.to_string_lossy().replace('\\', "/");
         eprintln!(
-            "Skipped duplicate-export config fix: no fallow config file at {} \
-             and the directory is inside a monorepo (workspace root: {}). \
+            "Skipped duplicate-export config fix: no fallow config file at {root_display} \
+             and the directory is inside a monorepo (workspace root: {workspace_display}). \
              Run `fallow init` at the workspace root, or invoke `fallow fix` \
-             from {} instead of from a subpackage.",
-            root.display(),
-            absolute,
-            absolute,
+             from {workspace_display} instead of from a subpackage.",
         );
     }
     fixes.push(serde_json::json!({
@@ -330,7 +324,7 @@ fn emit_blocked_monorepo(
 /// keeps the function total).
 fn display_workspace_path(root: &Path, workspace_root: &Path) -> String {
     ancestor_distance(root, workspace_root).map_or_else(
-        || workspace_root.display().to_string(),
+        || workspace_root.to_string_lossy().replace('\\', "/"),
         |depth| {
             if depth == 0 {
                 ".".to_owned()
@@ -369,7 +363,7 @@ fn emit_blocked_no_create(
             "Skipped duplicate-export config fix: no fallow config file at {} \
              and --no-create-config was passed. Either re-run `fallow fix` \
              without --no-create-config, or run `fallow init` first.",
-            root.display()
+            root.to_string_lossy().replace('\\', "/")
         );
     }
     fixes.push(serde_json::json!({

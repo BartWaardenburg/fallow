@@ -371,8 +371,15 @@ pub fn normalize_script_entry_pattern(ws_prefix: &str, raw: &str) -> Option<Stri
     };
 
     let mut stack: Vec<&str> = Vec::new();
-    for segment in combined.split('/') {
+    let mut segments = combined.split('/').peekable();
+    while let Some(segment) = segments.next() {
         match segment {
+            // A trailing slash is tolerated (`scripts/deploy/`), but an
+            // internal empty segment means a doubled separator that is not
+            // real path syntax (issue #2592: a jq filter's `//` operator
+            // misclassified as a file path must not have it silently
+            // collapsed into a single `/` here).
+            "" if segments.peek().is_some() => return None,
             "" | "." => {}
             ".." => {
                 stack.pop()?;
@@ -1226,9 +1233,17 @@ fn looks_like_file_path(token: &str) -> bool {
     if EXTENSIONS.iter().any(|ext| token.ends_with(ext)) {
         return true;
     }
-    token.starts_with("./")
-        || token.starts_with("../")
-        || (token.contains('/') && !token.starts_with('@') && !token.contains("://"))
+    if token.starts_with("./") || token.starts_with("../") {
+        return true;
+    }
+    // A bare positional token is never whitespace-internal: the shell word
+    // splitter only produces a multi-word value when the source was quoted
+    // (issue #2592: a quoted jq filter such as `.proposals // {}` contains a
+    // path separator but is shell/filter syntax, not a file path).
+    token.contains('/')
+        && !token.contains(char::is_whitespace)
+        && !token.starts_with('@')
+        && !token.contains("://")
 }
 
 /// Check if a command is a shell built-in (not an npm package).
@@ -1360,6 +1375,29 @@ mod tests {
     #[test]
     fn normalize_absolute_path_skipped() {
         assert_eq!(normalize_script_entry_pattern("", "/etc/passwd"), None);
+    }
+
+    /// Regression test for issue #2592: an internal doubled separator (`//`)
+    /// must not be silently collapsed into a single `/`, which is exactly
+    /// what turned a jq filter's `//` alternative operator into what looked
+    /// like a truncated, malformed path in the reported warning.
+    #[test]
+    fn normalize_rejects_internal_double_slash_instead_of_silently_collapsing_it() {
+        assert_eq!(
+            normalize_script_entry_pattern(
+                "",
+                "[((.proposals // {}) | to_entries[]) | .value.pr_number] | unique | sort[]"
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn normalize_tolerates_trailing_slash() {
+        assert_eq!(
+            normalize_script_entry_pattern("", "scripts/deploy/").as_deref(),
+            Some("scripts/deploy")
+        );
     }
 
     #[test]
@@ -2418,6 +2456,17 @@ mod tests {
     fn looks_like_file_path_jq_array_iterator_not_file() {
         assert!(!super::looks_like_file_path(".[]"));
         assert!(!super::looks_like_file_path("'.[]'"));
+    }
+
+    /// Regression test for issue #2592: a quoted jq filter using the `//`
+    /// alternative operator was picked up as a file path candidate purely
+    /// because it contains a `/`, and its whitespace-separated words are the
+    /// distinguishing signal that it is shell/filter syntax, not a path.
+    #[test]
+    fn looks_like_file_path_jq_alternative_operator_not_file() {
+        assert!(!super::looks_like_file_path(
+            "[((.proposals // {}) | to_entries[]) | .value.pr_number] | unique | sort[]"
+        ));
     }
 
     #[test]

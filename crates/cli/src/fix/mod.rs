@@ -501,7 +501,7 @@ fn push_withheld_enum_member_entry(
         .collect();
     input.fixes.push(serde_json::json!({
         "type": "remove_enum_member",
-        "path": relative.display().to_string(),
+        "path": relative.to_string_lossy().replace('\\', "/"),
         "line": finding.member.line,
         "parent": finding.member.parent_name,
         "name": finding.member.member_name,
@@ -757,7 +757,7 @@ fn build_skipped_records(
             }
             let mut record = serde_json::json!({
                 "type": "skipped",
-                "path": relative.display().to_string(),
+                "path": relative.to_string_lossy().replace('\\', "/"),
                 "skipped": true,
                 "skip_reason": skip.reason.as_wire_str(),
             });
@@ -791,7 +791,10 @@ fn patch_applied_field_on_failure(
         failed.iter().map(|(p, _)| p.clone()).collect();
     for (path, err) in failed {
         let relative = path.strip_prefix(root).unwrap_or(path);
-        eprintln!("Error: failed to write {}: {err}", relative.display());
+        eprintln!(
+            "Error: failed to write {}: {err}",
+            relative.to_string_lossy().replace('\\', "/")
+        );
     }
     for entry in fixes.iter_mut() {
         let target = entry.get("__target").and_then(|v| v.as_str());

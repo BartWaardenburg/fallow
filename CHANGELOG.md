@@ -250,7 +250,97 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   one: its key carries the job name slug, which every matrix arm already gets
   a distinct value of, and the cached path is scoped to the root.
 
+- Health reports expose the authored-function, module-scope, and template
+  populations behind cyclomatic averages and percentiles. Each population has
+  a count, sum, and maximum, so module-scope branching can explain a high
+  aggregate even when no function exceeds its threshold (#2519).
+
+- **The rest of the human review brief holds to eighty columns too.** The
+  decision surface printed its question, trade-off and expert list on single
+  unbounded lines, and the focus map put an un-elided path and an unbounded
+  reason on one row. On a real project a decision question naming every widened
+  export ran to 159 columns and a focus entry to 103, so the two sections the
+  brief leads with were the two that wrapped unpredictably in a terminal. Both
+  now wrap under a hanging indent. Prose is re-flowed rather than cut: a
+  decision question ends in the actual ask, so truncating it would drop the
+  question. Only a single word that alone overruns its line is shortened, from
+  whichever end identifies it: a path keeps its file name, an owner identity
+  keeps its head.
+
+- **The human review brief's coordination-gap lines are bounded.** The brief
+  printed one line per gap, joining every consumed symbol and both full paths.
+  On a change to a barrel-adjacent module that rendered a single line 955
+  columns wide, and a project with thirty out-of-diff consumers produced sixty
+  lines, directly under a summary that holds to eighty. The section now names
+  how many consumers sit outside the diff, walks the three that take the most
+  symbols (the consumer on its own line, the contract it consumes on the next),
+  and closes with the remainder and where to read it. Paths are shortened from the left and the
+  symbol list is cut with a `+N more` suffix, so every line fits eighty
+  columns. `fallow review --format json` still carries every gap with every
+  symbol; only the terminal rendering is capped.
+
+- **The review brief no longer spends half its bytes on one list, printed
+  twice.** `fallow review --format json` and `fallow audit --brief --format
+  json` carried the impact closure's affected-but-not-in-diff paths in two
+  places, `graph_facts.reachable_from` and `impact_closure.affected_not_shown`,
+  with identical contents and no cap on either. On a one-file change to a
+  mid-sized project those two lists were more than half the envelope while the
+  focus map and the decision surface, the judgement the brief exists to
+  deliver, were under three percent of it. The brief is read into an agent's
+  context, so those bytes came straight out of the reviewing budget.
+
+  `graph_facts.reachable_from` is gone. `impact_closure` now reports
+  `affected_count`, the exact number of affected files, alongside a capped
+  ten-path sample and `affected_by_dir`, a rollup of the affected files by
+  parent directory with an exact count per directory, heaviest first. The
+  rollup is the part worth reading: it says whether a change stayed inside the
+  module it touched or leaked into somewhere new, which a truncated list of
+  paths cannot, and it does so in a fraction of the bytes the full list took.
+  The human brief reports the same shape: the file and directory totals, then
+  the heaviest directory with its exact share, then a pointer at the rest.
+
+  Decisions, ranks, verdicts, and exit codes are unchanged; the decision
+  surface takes its blast metric from the graph, not from this envelope. The
+  brief `schema_version` moves to 9. See
+  [backwards compatibility](docs/backwards-compatibility.md) for the field-level
+  contract.
+
 ### Fixed
+
+- **A quoted jq filter in a CI `run:` block is no longer read as an entry
+  glob.** A workflow line like `jq -r '[((.proposals // {}) | to_entries[]) |
+  .value.pr_number] | unique | sort[]'` warned `invalid entry pattern ...
+  unclosed character class`, on `dead-code` and `health` as well as `audit`.
+  Two defects met there. The path harvester treated any non-flag token
+  containing a slash as a file path, and a jq filter contains one from the `//`
+  alternative operator alone; it now also requires the token to carry no
+  internal whitespace, which a real positional path argument never does. And
+  the dot-segment normalizer silently dropped empty segments, so `//` collapsed
+  to `/` and corrupted the string on its way to the globber; a doubled
+  separator is not path syntax, so the candidate is now dropped rather than
+  rewritten. Script paths named in `run:` blocks are still harvested, because
+  ignoring `.github/**` would lose that dependency evidence. Thanks
+  [@carlrannaberg](https://github.com/carlrannaberg) for the report
+  (Closes [#2592](https://github.com/fallow-rs/fallow/issues/2592)).
+
+- **`fallow fix` prints forward slashes on Windows.** Its human lines and its
+  JSON `path` and `file` fields rendered the platform separator, so a Windows
+  user was told `Would remove export from src\util.ts` while every other
+  fallow surface reported `src/util.ts`. Thirty-eight sites across the fix
+  module now normalize the way the rest of the CLI already did. The private
+  `__target` correlation field a fixer later opens on disk stays native, since
+  that path is handed back to the operating system rather than to a reader.
+
+- **A class member read through a destructure counts as used.**
+  `const { method } = instance` reads the member directly, but the binding is a
+  plain identifier, so no later `method` access could be resolved back to the
+  class and the member was reported unused. The access is now recorded at the
+  destructuring site, which is the object-pattern parity of the existing
+  `instance.member` path. Thanks
+  [@Ha1baraA11](https://github.com/Ha1baraA11) for the patch in
+  [#2567](https://github.com/fallow-rs/fallow/pull/2567), and
+  [@kristersd](https://github.com/kristersd) for the report
+  (Closes [#2560](https://github.com/fallow-rs/fallow/issues/2560)).
 
 - **`dupes --top 0` no longer reports a clean project.** Both human surfaces
   tested the length of `clone_groups[]` for their empty state, and `--top 0`
@@ -542,64 +632,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   still split on the last colon, so Windows drive letters and
   workspace-qualified paths keep theirs, and surviving halves are still passed
   through verbatim.
-
-### Changed
-
-- Health reports expose the authored-function, module-scope, and template
-  populations behind cyclomatic averages and percentiles. Each population has
-  a count, sum, and maximum, so module-scope branching can explain a high
-  aggregate even when no function exceeds its threshold (#2519).
-
-- **The rest of the human review brief holds to eighty columns too.** The
-  decision surface printed its question, trade-off and expert list on single
-  unbounded lines, and the focus map put an un-elided path and an unbounded
-  reason on one row. On a real project a decision question naming every widened
-  export ran to 159 columns and a focus entry to 103, so the two sections the
-  brief leads with were the two that wrapped unpredictably in a terminal. Both
-  now wrap under a hanging indent. Prose is re-flowed rather than cut: a
-  decision question ends in the actual ask, so truncating it would drop the
-  question. Only a single word that alone overruns its line is shortened, from
-  whichever end identifies it: a path keeps its file name, an owner identity
-  keeps its head.
-
-- **The human review brief's coordination-gap lines are bounded.** The brief
-  printed one line per gap, joining every consumed symbol and both full paths.
-  On a change to a barrel-adjacent module that rendered a single line 955
-  columns wide, and a project with thirty out-of-diff consumers produced sixty
-  lines, directly under a summary that holds to eighty. The section now names
-  how many consumers sit outside the diff, walks the three that take the most
-  symbols (the consumer on its own line, the contract it consumes on the next),
-  and closes with the remainder and where to read it. Paths are shortened from the left and the
-  symbol list is cut with a `+N more` suffix, so every line fits eighty
-  columns. `fallow review --format json` still carries every gap with every
-  symbol; only the terminal rendering is capped.
-
-- **The review brief no longer spends half its bytes on one list, printed
-  twice.** `fallow review --format json` and `fallow audit --brief --format
-  json` carried the impact closure's affected-but-not-in-diff paths in two
-  places, `graph_facts.reachable_from` and `impact_closure.affected_not_shown`,
-  with identical contents and no cap on either. On a one-file change to a
-  mid-sized project those two lists were more than half the envelope while the
-  focus map and the decision surface, the judgement the brief exists to
-  deliver, were under three percent of it. The brief is read into an agent's
-  context, so those bytes came straight out of the reviewing budget.
-
-  `graph_facts.reachable_from` is gone. `impact_closure` now reports
-  `affected_count`, the exact number of affected files, alongside a capped
-  ten-path sample and `affected_by_dir`, a rollup of the affected files by
-  parent directory with an exact count per directory, heaviest first. The
-  rollup is the part worth reading: it says whether a change stayed inside the
-  module it touched or leaked into somewhere new, which a truncated list of
-  paths cannot, and it does so in a fraction of the bytes the full list took.
-  The human brief reports the same shape: the file and directory totals, then
-  the heaviest directory with its exact share, then a pointer at the rest.
-
-  Decisions, ranks, verdicts, and exit codes are unchanged; the decision
-  surface takes its blast metric from the graph, not from this envelope. The
-  brief `schema_version` moves to 9. See
-  [backwards compatibility](docs/backwards-compatibility.md) for the field-level
-  contract.
-
 ## [3.23.0] - 2026-09-07
 
 ### Added
