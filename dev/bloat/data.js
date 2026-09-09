@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788963519004,
+  "lastUpdate": 1788967927506,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Binary Size": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "f83974cf024b987f2f4dc5ba51a5a83fa6744976",
-          "message": "fix(extract): record JSX namespace member tags as member accesses\n\nThe syntactic dead-code scan only recorded plain-expression member accesses, so a namespace import rendered exclusively through JSX member tags (<SC.Wrapper />) kept its exports reported as unused, and in entry-point files every sibling export of the namespace target was falsely flagged. JSX member-expression tags now record member accesses like their plain-expression spelling, covering nested receivers, this receivers, and star re-export resolution. Behavior change: namespace imports in non-entry consumers narrow to the members actually used instead of marking every export used, so genuinely unused siblings surface for the first time. Extraction and graph cache versions were bumped, so the first run after upgrading performs one cold re-analysis.\n\nFixes #2348",
-          "timestamp": "2026-08-21T22:14:36+02:00",
-          "tree_id": "1b98e2f31f26ddbfb312439022ea6a7c60ca9c0e",
-          "url": "https://github.com/fallow-rs/fallow/commit/f83974cf024b987f2f4dc5ba51a5a83fa6744976"
-        },
-        "date": 1787345330300,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Binary Size (fallow)",
-            "value": 513919104,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-lsp)",
-            "value": 20208096,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-mcp)",
-            "value": 25608904,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-multicall)",
-            "value": 38896616,
-            "unit": "bytes"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Binary Size (fallow-multicall)",
             "value": 43169768,
+            "unit": "bytes"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "5cd805c63be517cecff3e0ddcc7c52e7422555b7",
+          "message": "feat(mcp): read runtime coverage from fallow cloud\n\nAdds get_cloud_runtime_context, an MCP tool that pulls a repository's runtime facts from fallow cloud and returns the same runtime_coverage block the local runtime-coverage tools return, backed by fallow coverage analyze --cloud --format json. The API key is read from FALLOW_API_KEY in the server environment and is never a tool parameter; a call without one is refused before any subprocess starts with code cloud_api_key_missing and the CLI's own remediation sentence, now shared through fallow-types.\n\nCloses #2596",
+          "timestamp": "2026-09-09T17:16:46+02:00",
+          "tree_id": "4050e0734283a649176268b4df2849375a2863d8",
+          "url": "https://github.com/fallow-rs/fallow/commit/5cd805c63be517cecff3e0ddcc7c52e7422555b7"
+        },
+        "date": 1788967923824,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Binary Size (fallow)",
+            "value": 570733032,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-lsp)",
+            "value": 21536952,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-mcp)",
+            "value": 28489832,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-multicall)",
+            "value": 43210888,
             "unit": "bytes"
           }
         ]
