@@ -1996,7 +1996,23 @@ enum LicenseCli {
     /// Show the active license tier, seats, features, and days remaining.
     Status,
     /// Fetch a fresh JWT from `api.fallow.cloud` (network-only).
-    Refresh,
+    ///
+    /// The stored license JWT is the primary identity proof. When it is
+    /// missing, or the cloud reports it as too stale to exchange, the request
+    /// is retried with a full-access API key.
+    Refresh {
+        /// Fallow cloud API key (bearer token) used when the stored license
+        /// JWT cannot be refreshed.
+        ///
+        /// Precedence: this flag > $FALLOW_API_KEY. Generate at
+        /// <https://fallow.cloud/settings#api-keys>.
+        ///
+        /// Security: prefer $FALLOW_API_KEY on shared CI runners. Passing a
+        /// secret on the command line may be visible to other processes via
+        /// `ps` and can leak into shell history or process audit logs.
+        #[arg(long, value_name = "KEY")]
+        api_key: Option<String>,
+    },
     /// Remove the local license file.
     Deactivate,
 }
@@ -4933,7 +4949,9 @@ fn map_license_subcommand(sub: LicenseCli) -> license::LicenseSubcommand {
             email,
         }),
         LicenseCli::Status => license::LicenseSubcommand::Status,
-        LicenseCli::Refresh => license::LicenseSubcommand::Refresh,
+        LicenseCli::Refresh { api_key } => {
+            license::LicenseSubcommand::Refresh(license::RefreshArgs { api_key })
+        }
         LicenseCli::Deactivate => license::LicenseSubcommand::Deactivate,
     }
 }

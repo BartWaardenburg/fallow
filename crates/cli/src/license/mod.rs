@@ -24,7 +24,8 @@ use fallow_license::{
 use serde::{Deserialize, Serialize};
 
 use crate::api::{
-    NETWORK_EXIT_CODE, api_url, http_status_message, sanitize_network_error, try_api_agent,
+    LICENSE_API_KEY_RECOVERY, NETWORK_EXIT_CODE, TOKEN_STALE_CODE, api_url, http_status_failure,
+    http_status_message, sanitize_network_error, try_api_agent,
 };
 use crate::exit_codes::RESOURCE_UNAVAILABLE_EXIT_CODE as LICENSE_UNAVAILABLE_EXIT_CODE;
 use crate::json_style::JsonStyle;
@@ -54,7 +55,7 @@ pub enum LicenseSubcommand {
     Status,
     /// Fetch a fresh JWT from `api.fallow.cloud`, verify it offline, and
     /// persist it to the active license path.
-    Refresh,
+    Refresh(RefreshArgs),
     /// Remove the local license file.
     Deactivate,
 }
@@ -84,6 +85,23 @@ impl std::fmt::Debug for ActivateArgs {
             .field("from_stdin", &self.from_stdin)
             .field("trial", &self.trial)
             .field("email", &self.email)
+            .finish()
+    }
+}
+
+/// Arguments for `fallow license refresh`.
+#[derive(Clone, Default)]
+pub struct RefreshArgs {
+    /// Full-access API key used as the bearer when the stored license JWT is
+    /// missing or too stale to refresh. Overrides `$FALLOW_API_KEY`.
+    pub api_key: Option<String>,
+}
+
+// Manual `Debug` masks the API key in logs.
+impl std::fmt::Debug for RefreshArgs {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RefreshArgs")
+            .field("api_key", &self.api_key.as_ref().map(|_| "***"))
             .finish()
     }
 }
@@ -140,7 +158,7 @@ pub fn run(
     match subcommand {
         LicenseSubcommand::Activate(args) => run_activate(args, json, json_style),
         LicenseSubcommand::Status => run_status(json, json_style),
-        LicenseSubcommand::Refresh => run_refresh(json, json_style),
+        LicenseSubcommand::Refresh(args) => run_refresh(args, json, json_style),
         LicenseSubcommand::Deactivate => run_deactivate(json, json_style),
     }
 }
@@ -243,8 +261,8 @@ fn run_status(json: bool, json_style: JsonStyle) -> ExitCode {
     }
 }
 
-fn run_refresh(json: bool, json_style: JsonStyle) -> ExitCode {
-    match refresh_active_license(json) {
+fn run_refresh(args: &RefreshArgs, json: bool, json_style: JsonStyle) -> ExitCode {
+    match refresh_active_license(args.api_key.as_deref(), json) {
         Ok(status) => {
             emit_status(&status, LicenseKind::Refresh, json, json_style);
             ExitCode::SUCCESS
@@ -396,31 +414,115 @@ pub fn activate_trial(email: &str, json: bool) -> Result<LicenseStatus, String> 
     store_verified_jwt(&mut response, "trial", json)
 }
 
-pub fn refresh_active_license(json: bool) -> Result<LicenseStatus, String> {
-    let current = load_current_jwt()?;
-    let mut response = try_api_agent()
-        .map_err(|err| err.to_string())?
-        .post(&api_url("/v1/auth/license/refresh"))
-        .header("Authorization", &format!("Bearer {current}"))
-        .send_empty()
-        .map_err(|err| {
-            sanitize_network_error(&format!("failed to refresh the current license: {err}"))
-        })?;
-    if !response.status().is_success() {
-        return Err(http_status_message(&mut response, "refresh"));
-    }
-    store_verified_jwt(&mut response, "refresh", json)
+/// Outcome of a single refresh call, seen from the credential that was sent.
+enum RefreshAttempt<T> {
+    /// The cloud accepted the credential and returned a fresh license.
+    Accepted(T),
+    /// The credential is too stale to exchange; another credential may still
+    /// work, so the caller may retry.
+    Stale(String),
+    /// The attempt failed for a reason no other credential can fix.
+    Rejected(String),
 }
 
-fn load_current_jwt() -> Result<String, String> {
-    match fallow_license::load_raw_jwt() {
-        Ok(Some(jwt)) => Ok(jwt),
-        Ok(None) => Err(
-            "no license found. Run: fallow license activate --trial --email you@company.com"
-                .to_owned(),
-        ),
-        Err(err) => Err(format!("failed to read the current license: {err}")),
+/// Exchange the machine's credentials for a fresh license JWT.
+///
+/// The stored license JWT is the primary identity proof. It stops working once
+/// the cloud considers it stale, and it is absent on a machine that never
+/// activated, so both cases fall back to a full-access API key (`--api-key`,
+/// otherwise `$FALLOW_API_KEY`) which the refresh endpoint accepts as an
+/// equivalent bearer.
+pub fn refresh_active_license(api_key: Option<&str>, json: bool) -> Result<LicenseStatus, String> {
+    let stored = load_stored_jwt()?;
+    let api_key = resolve_refresh_api_key(api_key);
+    refresh_with_credentials(stored.as_deref(), api_key.as_deref(), |bearer| {
+        attempt_refresh(bearer, json)
+    })
+}
+
+/// Drive the credential order: stored JWT first, API key second.
+///
+/// Split from the transport so the order and the terminal error text are unit
+/// testable without a network round-trip.
+fn refresh_with_credentials<T>(
+    stored_jwt: Option<&str>,
+    api_key: Option<&str>,
+    mut attempt: impl FnMut(&str) -> RefreshAttempt<T>,
+) -> Result<T, String> {
+    let stale = match stored_jwt {
+        Some(jwt) => match attempt(jwt) {
+            RefreshAttempt::Accepted(status) => return Ok(status),
+            RefreshAttempt::Rejected(message) => return Err(message),
+            RefreshAttempt::Stale(message) => Some(message),
+        },
+        None => None,
+    };
+    let Some(api_key) = api_key else {
+        return Err(
+            stale.unwrap_or_else(|| format!("no license found: {LICENSE_API_KEY_RECOVERY}"))
+        );
+    };
+    match attempt(api_key) {
+        RefreshAttempt::Accepted(status) => Ok(status),
+        RefreshAttempt::Stale(message) | RefreshAttempt::Rejected(message) => Err(message),
     }
+}
+
+/// Send one refresh request with `bearer` as the credential.
+fn attempt_refresh(bearer: &str, json: bool) -> RefreshAttempt<LicenseStatus> {
+    let agent = match try_api_agent() {
+        Ok(agent) => agent,
+        Err(err) => return RefreshAttempt::Rejected(err.to_string()),
+    };
+    let sent = agent
+        .post(&api_url("/v1/auth/license/refresh"))
+        .header("Authorization", &format!("Bearer {bearer}"))
+        .send_empty();
+    let mut response = match sent {
+        Ok(response) => response,
+        Err(err) => return RefreshAttempt::Rejected(refresh_transport_error(&err)),
+    };
+    if !response.status().is_success() {
+        let failure = http_status_failure(&mut response, "refresh");
+        return if failure.code.as_deref() == Some(TOKEN_STALE_CODE) {
+            RefreshAttempt::Stale(failure.message)
+        } else {
+            RefreshAttempt::Rejected(failure.message)
+        };
+    }
+    match store_verified_jwt(&mut response, "refresh", json) {
+        Ok(status) => RefreshAttempt::Accepted(status),
+        Err(message) => RefreshAttempt::Rejected(message),
+    }
+}
+
+/// Render a refresh transport failure with any bearer token redacted.
+fn refresh_transport_error(err: &ureq::Error) -> String {
+    sanitize_network_error(&format!("failed to refresh the current license: {err}"))
+}
+
+/// Read the stored license JWT. A machine with no license at all is a
+/// recoverable absence (the API key can still refresh), while an unreadable
+/// license file is a local problem no credential fixes.
+fn load_stored_jwt() -> Result<Option<String>, String> {
+    fallow_license::load_raw_jwt()
+        .map_err(|err| format!("failed to read the current license: {err}"))
+}
+
+/// Resolve the fallback API key: `--api-key` first, then `$FALLOW_API_KEY`.
+fn resolve_refresh_api_key(explicit: Option<&str>) -> Option<String> {
+    select_api_key(explicit, std::env::var("FALLOW_API_KEY").ok().as_deref())
+}
+
+/// [`resolve_refresh_api_key`] over injected values, so the precedence and the
+/// blank-value handling are testable without mutating the process environment.
+fn select_api_key(explicit: Option<&str>, from_env: Option<&str>) -> Option<String> {
+    [explicit, from_env]
+        .into_iter()
+        .flatten()
+        .map(str::trim)
+        .find(|value| !value.is_empty())
+        .map(str::to_owned)
 }
 
 fn store_verified_jwt(
@@ -795,6 +897,116 @@ mod tests {
         let bare = ActivateArgs::default();
         assert!(format!("{bare:?}").contains("raw_jwt: None"));
         assert!(formatted.contains("email: Some(\"alice@example.com\")"));
+    }
+
+    #[test]
+    fn refresh_args_debug_masks_the_api_key() {
+        let args = RefreshArgs {
+            api_key: Some("fallow_live_secret".to_owned()),
+        };
+        let formatted = format!("{args:?}");
+        assert!(
+            !formatted.contains("fallow_live_secret"),
+            "api_key leaked through Debug: {formatted}"
+        );
+        assert!(formatted.contains("api_key: Some(\"***\")"));
+        assert!(format!("{:?}", RefreshArgs::default()).contains("api_key: None"));
+    }
+
+    #[test]
+    fn refresh_sends_the_stored_jwt_first() {
+        let mut sent = Vec::new();
+        let result = refresh_with_credentials(Some("stored-jwt"), Some("api-key"), |bearer| {
+            sent.push(bearer.to_owned());
+            RefreshAttempt::Accepted("fresh")
+        });
+
+        assert_eq!(result, Ok("fresh"));
+        assert_eq!(sent, ["stored-jwt"], "the API key must stay unused");
+    }
+
+    #[test]
+    fn refresh_falls_back_to_the_api_key_when_the_stored_jwt_is_stale() {
+        let mut sent = Vec::new();
+        let result = refresh_with_credentials(Some("stored-jwt"), Some("api-key"), |bearer| {
+            sent.push(bearer.to_owned());
+            if bearer == "stored-jwt" {
+                RefreshAttempt::Stale("stale".to_owned())
+            } else {
+                RefreshAttempt::Accepted("fresh")
+            }
+        });
+
+        assert_eq!(result, Ok("fresh"));
+        assert_eq!(sent, ["stored-jwt", "api-key"]);
+    }
+
+    #[test]
+    fn refresh_uses_the_api_key_when_no_license_is_stored() {
+        let mut sent = Vec::new();
+        let result = refresh_with_credentials(None, Some("api-key"), |bearer| {
+            sent.push(bearer.to_owned());
+            RefreshAttempt::Accepted("fresh")
+        });
+
+        assert_eq!(result, Ok("fresh"));
+        assert_eq!(sent, ["api-key"]);
+    }
+
+    #[test]
+    fn refresh_does_not_retry_a_credential_the_cloud_rejected() {
+        let mut sent = Vec::new();
+        let result = refresh_with_credentials(Some("stored-jwt"), Some("api-key"), |bearer| {
+            sent.push(bearer.to_owned());
+            RefreshAttempt::<&str>::Rejected("server error".to_owned())
+        });
+
+        assert_eq!(result, Err("server error".to_owned()));
+        assert_eq!(sent, ["stored-jwt"], "only a stale token earns a retry");
+    }
+
+    #[test]
+    fn refresh_without_a_license_or_an_api_key_names_the_api_key_route() {
+        let result =
+            refresh_with_credentials(None, None, |_| RefreshAttempt::Accepted("unreachable"));
+
+        let error = result.expect_err("no credential can refresh");
+        assert!(
+            error.contains(LICENSE_API_KEY_RECOVERY),
+            "expected the API-key recovery route, got: {error}"
+        );
+        assert!(
+            !error.contains("--trial"),
+            "the trial flow does not recover a paid license, got: {error}"
+        );
+    }
+
+    #[test]
+    fn refresh_reports_the_stale_response_when_no_api_key_is_available() {
+        let stale = format!("too stale: {LICENSE_API_KEY_RECOVERY}");
+        let result = refresh_with_credentials(Some("stored-jwt"), None, |_| {
+            RefreshAttempt::<&str>::Stale(stale.clone())
+        });
+
+        assert_eq!(result, Err(stale));
+    }
+
+    #[test]
+    fn api_key_selection_prefers_the_flag_over_the_environment() {
+        assert_eq!(
+            select_api_key(Some("from-flag"), Some("from-env")).as_deref(),
+            Some("from-flag")
+        );
+    }
+
+    #[test]
+    fn api_key_selection_falls_through_blank_values() {
+        assert_eq!(
+            select_api_key(Some("  "), Some(" from-env ")).as_deref(),
+            Some("from-env")
+        );
+        assert_eq!(select_api_key(None, Some("   ")), None);
+        assert_eq!(select_api_key(None, None), None);
     }
 
     #[test]
