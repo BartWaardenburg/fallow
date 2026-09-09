@@ -337,7 +337,15 @@ jobs:
           if command -v sudo >/dev/null 2>&1; then
             apt_get="sudo apt-get"
           fi
-          $apt_get update
+          # The gnu leg runs in the pinned bullseye container, which the
+          # published linux-gnu binaries take their glibc floor from. Debian 11
+          # has left LTS, so bullseye-security now serves an InRelease whose
+          # Valid-Until has passed and `apt-get update` exits 100 on it. A
+          # frozen suite carries no freshness information to enforce, so the
+          # retry drops that one check and nothing else: the archive signature
+          # is still verified, and the first attempt keeps full enforcement for
+          # every case where the archives are current.
+          $apt_get update || $apt_get -o Acquire::Check-Valid-Until=false update
           $apt_get install -y gcc-aarch64-linux-gnu
 
       # fallow-mcp pulls rquickjs (QuickJS, a C library). On aarch64-musl the
