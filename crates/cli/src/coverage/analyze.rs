@@ -413,6 +413,12 @@ struct StaticFunctionInfo {
     start_line: u32,
     end_line: u32,
     static_used: bool,
+    /// `Some(true)` when production mode dropped the only files that reference
+    /// this function, so `static_used` reads `false` purely because the test,
+    /// story, or fixture side of the tree is missing from the graph.
+    /// `Some(false)` when both graphs were built and no such reference exists,
+    /// `None` when the run was not filtered and there is no second answer.
+    test_only_reference: Option<bool>,
     test_covered: bool,
     cyclomatic: u32,
     caller_count: u32,
@@ -448,7 +454,19 @@ struct StaticIndex {
     paths_by_file_name: FxHashMap<String, Vec<String>>,
 }
 
-fn build_static_index(ctx: &RunContext<'_>, production: bool) -> Result<StaticIndex, ExitCode> {
+/// One dead-code analysis run, kept together with the session so callers can
+/// still read the resolved root and config after the artifacts are produced.
+struct StaticAnalysisRun {
+    session: fallow_engine::session::AnalysisSession,
+    artifacts: fallow_engine::dead_code::DeadCodeAnalysisArtifacts,
+}
+
+/// Run dead-code analysis over the project, with or without the production
+/// file filter.
+fn run_static_analysis(
+    ctx: &RunContext<'_>,
+    production: bool,
+) -> Result<StaticAnalysisRun, ExitCode> {
     let config = crate::load_config_for_analysis(
         ctx.root,
         ctx.config_path,
@@ -464,9 +482,28 @@ fn build_static_index(ctx: &RunContext<'_>, production: bool) -> Result<StaticIn
     )?;
     let session = fallow_engine::session::AnalysisSession::from_resolved_config(config)
         .map_err(|err| emit_error(&format!("analysis failed: {err}"), 2, ctx.output))?;
-    let analysis_output = session
+    let artifacts = session
         .analyze_dead_code_with_artifacts(true, true)
         .map_err(|err| emit_error(&format!("analysis failed: {err}"), 2, ctx.output))?;
+    Ok(StaticAnalysisRun { session, artifacts })
+}
+
+fn build_static_index(ctx: &RunContext<'_>, production: bool) -> Result<StaticIndex, ExitCode> {
+    // Production mode drops test, spec, story, and fixture files from
+    // discovery, so an export that only a test references reads as statically
+    // unused and, with zero production invocations, as safe to delete. A
+    // second unfiltered run answers "is anything left referencing it", which
+    // separates a genuinely dead export from a test-only one. It runs only in
+    // production mode, where the first answer is the ambiguous one.
+    let full_tree = if production {
+        Some(UnusedStaticSets::from_analysis(
+            &run_static_analysis(ctx, false)?.artifacts,
+        ))
+    } else {
+        None
+    };
+    let run = run_static_analysis(ctx, production)?;
+    let analysis_output = &run.artifacts;
     let Some(modules) = analysis_output.modules.as_deref() else {
         return Err(emit_error(
             "analysis failed: engine did not retain parsed modules",
@@ -482,15 +519,18 @@ fn build_static_index(ctx: &RunContext<'_>, production: bool) -> Result<StaticIn
         ));
     };
     let file_paths: FxHashMap<_, _> = files.iter().map(|file| (file.id, &file.path)).collect();
-    let codeowners =
-        crate::codeowners::CodeOwners::load(session.root(), session.config().codeowners.as_deref())
-            .ok();
+    let codeowners = crate::codeowners::CodeOwners::load(
+        run.session.root(),
+        run.session.config().codeowners.as_deref(),
+    )
+    .ok();
     Ok(build_index_from_analysis(
-        session.root(),
+        run.session.root(),
         modules,
-        &analysis_output,
+        analysis_output,
         &file_paths,
         codeowners.as_ref(),
+        full_tree.as_ref(),
     ))
 }
 
@@ -500,8 +540,12 @@ fn build_index_from_analysis(
     analysis_output: &fallow_engine::dead_code::DeadCodeAnalysisArtifacts,
     file_paths: &FxHashMap<fallow_types::discover::FileId, &PathBuf>,
     codeowners: Option<&crate::codeowners::CodeOwners>,
+    full_tree: Option<&UnusedStaticSets>,
 ) -> StaticIndex {
-    let unused = UnusedStaticSets::from_analysis(analysis_output);
+    let reachability = Reachability {
+        analysed: UnusedStaticSets::from_analysis(analysis_output),
+        full_tree,
+    };
     let mut out = StaticIndex::default();
     let graph = analysis_output.graph.as_ref();
     for module in modules {
@@ -517,7 +561,7 @@ fn build_index_from_analysis(
                 function,
                 path.as_path(),
                 &rel,
-                &unused,
+                &reachability,
                 caller_count,
                 owner_count,
             );
@@ -578,21 +622,36 @@ impl UnusedStaticSets {
     }
 }
 
+/// The reachability answers a function is scored against: the sets the run's
+/// own analysis produced, plus the unfiltered sets when that analysis applied
+/// the production file filter.
+struct Reachability<'a> {
+    analysed: UnusedStaticSets,
+    full_tree: Option<&'a UnusedStaticSets>,
+}
+
 /// Build a `StaticFunctionInfo` for one extracted function.
 fn static_function_info(
     function: &fallow_types::extract::FunctionComplexity,
     path: &Path,
     rel: &str,
-    unused: &UnusedStaticSets,
+    reachability: &Reachability<'_>,
     caller_count: u32,
     owner_count: Option<u32>,
 ) -> StaticFunctionInfo {
+    let static_used =
+        reachability
+            .analysed
+            .function_is_used(path, function.name.as_str(), function.line);
     StaticFunctionInfo {
         path: PathBuf::from(rel),
         name: function.name.clone(),
         start_line: function.line,
         end_line: function.line.saturating_add(function.line_count),
-        static_used: unused.function_is_used(path, function.name.as_str(), function.line),
+        static_used,
+        test_only_reference: reachability.full_tree.map(|full| {
+            !static_used && full.function_is_used(path, function.name.as_str(), function.line)
+        }),
         test_covered: false,
         cyclomatic: u32::from(function.cyclomatic),
         caller_count,
@@ -1016,12 +1075,13 @@ fn cloud_finding(
                 "not_covered"
             }
             .to_owned(),
+            test_only_reference: local.test_only_reference,
             v8_tracking: cloud_v8_tracking(function.tracking_state).to_owned(),
             untracked_reason: function.untracked_reason.clone(),
             observation_days,
             deployments_observed: function.deployments_observed,
         },
-        actions: runtime_actions(verdict),
+        actions: runtime_actions(verdict, local.test_only_reference == Some(true)),
         // The cloud-join path (analyze --cloud) does not carry the window
         // trace_count + thresholds here, so it omits the #321 discriminator
         // block; that surface's discriminator contract is #328 territory.
@@ -1128,7 +1188,11 @@ fn cloud_finding_decision(
     match function.tracking_state {
         CloudTrackingState::NeverCalled => match function.never_called_source {
             CloudNeverCalledSource::RuntimeObserved => (
-                if local.static_used {
+                // A function that only a test file reaches is statically
+                // unused in the production graph, but deleting it breaks that
+                // test, so it is never safe to delete on runtime evidence
+                // alone.
+                if local.static_used || local.test_only_reference == Some(true) {
                     RuntimeCoverageVerdict::ReviewRequired
                 } else {
                     RuntimeCoverageVerdict::SafeToDelete
@@ -1434,13 +1498,28 @@ fn normalize_runtime_path(path: &Path) -> String {
         .replace('\\', "/")
 }
 
-fn runtime_actions(verdict: RuntimeCoverageVerdict) -> Vec<RuntimeCoverageAction> {
+/// Follow-up actions for a finding. `test_only_reference` narrows the
+/// review-required advice to the case where the only remaining callers live in
+/// files production mode excluded, because there the reviewer has a concrete
+/// choice to make rather than a general "look at this".
+fn runtime_actions(
+    verdict: RuntimeCoverageVerdict,
+    test_only_reference: bool,
+) -> Vec<RuntimeCoverageAction> {
     match verdict {
         RuntimeCoverageVerdict::SafeToDelete => vec![RuntimeCoverageAction {
             kind: "delete-cold-code".to_owned(),
             description: "Remove cold code after confirming ownership.".to_owned(),
             auto_fixable: false,
         }],
+        RuntimeCoverageVerdict::ReviewRequired if test_only_reference => {
+            vec![RuntimeCoverageAction {
+                kind: "review-runtime".to_owned(),
+                description: "Only tests reference this export; delete the test usage together with the function or keep it."
+                    .to_owned(),
+                auto_fixable: false,
+            }]
+        }
         RuntimeCoverageVerdict::ReviewRequired => vec![RuntimeCoverageAction {
             kind: "review-runtime".to_owned(),
             description: "Review runtime-cold code before changing it.".to_owned(),
@@ -1621,17 +1700,7 @@ fn print_runtime_human(
         report.summary.trace_count, report.summary.period_days, report.summary.deployments_seen
     );
     for finding in report.findings.iter().take(display_limit) {
-        println!(
-            "  {}:{} {} [{}, {}]",
-            finding.path.display(),
-            finding.line,
-            finding.function,
-            finding.invocations.map_or_else(
-                || "untracked".to_owned(),
-                |hits| format!("{hits} invocations")
-            ),
-            finding.verdict.human_label(),
-        );
+        println!("{}", human_finding_line(finding));
     }
     if args.blast_radius {
         print_runtime_blast_radius(report, display_limit);
@@ -1647,6 +1716,28 @@ fn print_runtime_human(
     }
     eprintln!("runtime coverage analyzed in {:.2}s", elapsed.as_secs_f64());
     ExitCode::SUCCESS
+}
+
+/// One human-output finding row. A test-only reference is called out inline
+/// because the verdict alone ("review required") does not say why the function
+/// looks dead, and that is exactly the case where deleting it breaks the suite.
+fn human_finding_line(finding: &RuntimeCoverageFinding) -> String {
+    format!(
+        "  {}:{} {} [{}, {}{}]",
+        finding.path.display(),
+        finding.line,
+        finding.function,
+        finding.invocations.map_or_else(
+            || "untracked".to_owned(),
+            |hits| format!("{hits} invocations")
+        ),
+        finding.verdict.human_label(),
+        if finding.evidence.test_only_reference == Some(true) {
+            ", referenced only from tests"
+        } else {
+            ""
+        },
+    )
 }
 
 /// Print the human-format blast-radius section, capped at `display_limit`.
@@ -1839,6 +1930,7 @@ mod tests {
             start_line: 10,
             end_line: 20,
             static_used: false,
+            test_only_reference: None,
             test_covered: false,
             cyclomatic: 4,
             caller_count: 0,
@@ -2037,6 +2129,137 @@ export const register = (app: { get: (path: string, handler: () => string) => vo
         (dir, index)
     }
 
+    /// A module with three exports: one only a test file references, one the
+    /// production entry point references, and one nothing references at all.
+    const TEST_ONLY_EXPORT_SOURCE: &str = r"export const resetForTests = () => {
+  return 'reset';
+};
+
+export const handler = (input: string) => {
+  return input.trim();
+};
+
+export const orphan = () => {
+  return 'orphan';
+};
+";
+
+    /// Build a static index for a project whose only reference to
+    /// `resetForTests` comes from a `*.test.ts` file, analysed with the
+    /// production filter on (the mode that drops that test file).
+    fn test_only_export_index() -> (tempfile::TempDir, StaticIndex) {
+        let dir = tempfile::TempDir::new().expect("temp dir should be created");
+        std::fs::create_dir_all(dir.path().join("src")).expect("src should be created");
+        std::fs::write(dir.path().join("src/helpers.ts"), TEST_ONLY_EXPORT_SOURCE)
+            .expect("helpers source should be written");
+        std::fs::write(
+            dir.path().join("src/helpers.test.ts"),
+            "import { resetForTests } from './helpers';\n\nresetForTests();\n",
+        )
+        .expect("test source should be written");
+        std::fs::write(
+            dir.path().join("src/index.ts"),
+            "import { handler } from './helpers';\n\nexport const main = (input: string) => handler(input);\n",
+        )
+        .expect("entry source should be written");
+        std::fs::write(
+            dir.path().join("package.json"),
+            r#"{"name":"fixture","version":"0.0.0","type":"module","main":"src/index.ts"}"#,
+        )
+        .expect("package.json should be written");
+        let config_path = None;
+        let ctx = RunContext {
+            root: dir.path(),
+            config_path: &config_path,
+            output: OutputFormat::Json,
+            json_style: crate::json_style::JsonStyle::Compact,
+            quiet: true,
+            no_cache: true,
+            threads: 1,
+            explain: false,
+            allow_remote_extends: false,
+        };
+        let index = build_static_index(&ctx, true).expect("static index should build");
+        (dir, index)
+    }
+
+    fn never_called_cloud_function(
+        name: &str,
+        start_line: u32,
+        end_line: u32,
+    ) -> CloudRuntimeFunction {
+        let mut function = cloud_function(
+            "src/helpers.ts",
+            name,
+            Some(start_line),
+            Some(start_line),
+            Some(end_line),
+        );
+        function.tracking_state = CloudTrackingState::NeverCalled;
+        function.never_called_source = CloudNeverCalledSource::RuntimeObserved;
+        function.hit_count = Some(0);
+        function
+    }
+
+    #[test]
+    fn production_test_only_export_never_reaches_safe_to_delete() {
+        let (_dir, static_index) = test_only_export_index();
+        let mut snapshot = cloud_context(2, 0);
+        snapshot.functions = vec![
+            never_called_cloud_function("resetForTests", 1, 3),
+            never_called_cloud_function("orphan", 9, 11),
+        ];
+
+        let CloudMergeOutput { report, .. } = merge_cloud_snapshot(&snapshot, &static_index, 100);
+
+        let reset = report
+            .findings
+            .iter()
+            .find(|finding| finding.function == "resetForTests")
+            .expect("the test-only export must produce a finding");
+        assert_eq!(
+            reset.verdict,
+            RuntimeCoverageVerdict::ReviewRequired,
+            "an export a test file references must never read as safe to delete"
+        );
+        assert_eq!(reset.evidence.test_only_reference, Some(true));
+        assert_eq!(reset.evidence.static_status, "unused");
+        assert_eq!(
+            reset
+                .actions
+                .first()
+                .map(|action| action.description.as_str()),
+            Some(
+                "Only tests reference this export; delete the test usage together with the function or keep it."
+            )
+        );
+
+        let orphan = report
+            .findings
+            .iter()
+            .find(|finding| finding.function == "orphan")
+            .expect("the unreferenced export must produce a finding");
+        assert_eq!(
+            orphan.verdict,
+            RuntimeCoverageVerdict::SafeToDelete,
+            "an export nothing references at all stays deletable"
+        );
+        assert_eq!(orphan.evidence.test_only_reference, Some(false));
+
+        let reset_line = human_finding_line(reset);
+        assert!(
+            reset_line.ends_with(", referenced only from tests]"),
+            "{reset_line}"
+        );
+        assert!(!human_finding_line(orphan).contains("referenced only from tests"));
+
+        let json = serde_json::to_value(&reset.evidence).expect("evidence should serialize");
+        assert_eq!(
+            json.get("test_only_reference"),
+            Some(&serde_json::json!(true))
+        );
+    }
+
     fn prefixed_cloud_function(
         name: &str,
         start_line: u32,
@@ -2179,7 +2402,7 @@ export const register = (app: { get: (path: string, handler: () => string) => vo
 
     #[test]
     fn cloud_never_called_static_used_emits_review_runtime_action() {
-        let actions = runtime_actions(RuntimeCoverageVerdict::ReviewRequired);
+        let actions = runtime_actions(RuntimeCoverageVerdict::ReviewRequired, false);
         assert_eq!(actions.len(), 1);
         assert_eq!(actions[0].kind, "review-runtime");
     }
@@ -2506,11 +2729,11 @@ export const register = (app: { get: (path: string, handler: () => string) => vo
 
     #[test]
     fn runtime_helper_tables_cover_actions_ranks_tracking_and_paths() {
-        let delete_actions = runtime_actions(RuntimeCoverageVerdict::SafeToDelete);
+        let delete_actions = runtime_actions(RuntimeCoverageVerdict::SafeToDelete, false);
         assert_eq!(delete_actions.len(), 1);
         assert_eq!(delete_actions[0].kind, "delete-cold-code");
-        assert!(runtime_actions(RuntimeCoverageVerdict::Active).is_empty());
-        assert!(runtime_actions(RuntimeCoverageVerdict::Unknown).is_empty());
+        assert!(runtime_actions(RuntimeCoverageVerdict::Active, false).is_empty());
+        assert!(runtime_actions(RuntimeCoverageVerdict::Unknown, false).is_empty());
 
         assert!(
             runtime_verdict_rank(RuntimeCoverageVerdict::SafeToDelete)
@@ -2579,6 +2802,7 @@ export const register = (app: { get: (path: string, handler: () => string) => vo
             evidence: RuntimeCoverageEvidence {
                 static_status: "used".to_owned(),
                 test_coverage: "not_covered".to_owned(),
+                test_only_reference: None,
                 v8_tracking: "tracked".to_owned(),
                 untracked_reason: None,
                 observation_days: 0,
@@ -2597,6 +2821,7 @@ export const register = (app: { get: (path: string, handler: () => string) => vo
             start_line,
             end_line,
             static_used: false,
+            test_only_reference: None,
             test_covered: false,
             cyclomatic: 1,
             caller_count: 0,

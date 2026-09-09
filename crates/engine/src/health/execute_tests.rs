@@ -1373,6 +1373,7 @@ fn fx_evidence(
     fallow_output::RuntimeCoverageEvidence {
         static_status: static_status.to_owned(),
         test_coverage: test_coverage.to_owned(),
+        test_only_reference: None,
         v8_tracking: v8_tracking.to_owned(),
         untracked_reason: None,
         observation_days: 7,

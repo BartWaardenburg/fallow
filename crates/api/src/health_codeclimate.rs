@@ -586,6 +586,7 @@ mod tests {
                         evidence: RuntimeCoverageEvidence {
                             static_status: "unused".to_string(),
                             test_coverage: "not_covered".to_string(),
+                            test_only_reference: None,
                             v8_tracking: "tracked".to_string(),
                             untracked_reason: None,
                             observation_days: 30,

@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`fallow coverage analyze --production` no longer calls a test-only export
+  safe to delete.** Production mode drops test, spec, story, and fixture files
+  from discovery, so an export whose only callers live in those files read as
+  statically unused; combined with zero production invocations that satisfied
+  the `safe_to_delete` rule, and following the verdict broke the test suite.
+  The run now keeps a second, unfiltered reachability answer and reports it as
+  `evidence.test_only_reference`. A function that is unreachable in the
+  production graph but still referenced from an excluded file is downgraded to
+  `review_required` and carries the action "Only tests reference this export;
+  delete the test usage together with the function or keep it". An export
+  nothing references at all is unaffected and stays deletable. The new evidence
+  bit is emitted in the JSON, human, and GitHub review output; it is omitted
+  where no production filter was applied, since there is no second answer to
+  report (Closes [#2594](https://github.com/fallow-rs/fallow/issues/2594)).
+
 ## [3.24.0] - 2026-09-09
 
 ### Added

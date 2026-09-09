@@ -378,6 +378,32 @@ fn annotations_use_the_finding_effective_threshold() {
     assert!(!rendered.contains("(threshold: 30)"), "{rendered}");
 }
 
+/// A statically-unused function that only test files still reference must say
+/// so in the annotation, otherwise a reviewer reads a bare "unused" and deletes
+/// code the test suite depends on (issue #2594).
+#[test]
+fn annotations_mark_a_test_only_reference() {
+    let mut envelope = health_envelope();
+    envelope["runtime_coverage"]["findings"] = json!([
+        {
+            "path": "src/helpers.ts", "line": 4, "function": "resetForTests",
+            "verdict": "review_required", "invocations": 0, "confidence": "high",
+            "evidence": {
+                "static_status": "unused", "test_coverage": "not_covered",
+                "test_only_reference": true, "v8_tracking": "tracked"
+            },
+            "actions": [ { "description": "Only tests reference this export; delete the test usage together with the function or keep it." } ]
+        }
+    ]);
+
+    let rendered = render_annotations(EnvelopeKind::Health, &envelope, &plain_options());
+
+    assert!(
+        rendered.contains("Static: unused (referenced only from tests)"),
+        "{rendered}"
+    );
+}
+
 #[test]
 fn github_annotations_audit_snapshot() {
     let rendered = render_annotations(EnvelopeKind::Audit, &audit_envelope(), &plain_options());

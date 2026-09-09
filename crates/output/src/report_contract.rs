@@ -255,6 +255,7 @@ pub fn coverage_analyze_meta() -> Value {
             "runtime_coverage._matching": "Function-identity fallback order when joining runtime evidence to local static analysis: (1) exact stable_id match (fallow:fn:<hash>) when both sides carry one; (2) exact (path, name, start_line); (3) fuzzy nearest candidate within a line tolerance. Baseline suppression accepts BOTH the stable_id and the legacy fallow:prod: id during the grace window, so baselines written before this version keep suppressing.",
             "runtime_coverage.findings[].evidence.static_status": "used = the function is reachable in the AST module graph; unused = it is dead by static analysis.",
             "runtime_coverage.findings[].evidence.test_coverage": "covered = the local test suite hits the function; not_covered otherwise.",
+            "runtime_coverage.findings[].evidence.test_only_reference": "true = the function is unreachable in the production module graph but still referenced from a file production mode excludes (test, spec, story, fixture, benchmark), so it is not dead code and never earns safe_to_delete; false = both graphs were compared and no such reference exists. Omitted from the JSON entirely when the run applied no production filter or the producing surface carries no second reachability answer.",
             "runtime_coverage.findings[].evidence.v8_tracking": "tracked = V8 observed the function during the capture window; untracked otherwise.",
             "runtime_coverage.findings[].actions[].type": "Suggested follow-up identifier. delete-cold-code is emitted on safe_to_delete; review-runtime on review_required.",
             "runtime_coverage.blast_radius[]": "First-class blast-radius entries with stable fallow:blast IDs, static caller count, traffic-weighted caller reach, optional cloud deploy touch count, and low/medium/high risk band.",
@@ -266,6 +267,7 @@ pub fn coverage_analyze_meta() -> Value {
             "report_verdict": ["clean", "hot-path-touched", "cold-code-detected", "license-expired-grace", "unknown"],
             "finding_verdict": ["safe_to_delete", "review_required", "coverage_unavailable", "low_traffic", "active", "unknown"],
             "static_status": ["used", "unused"],
+            "test_only_reference": [true, false],
             "test_coverage": ["covered", "not_covered"],
             "v8_tracking": ["tracked", "untracked"],
             "action_type": ["delete-cold-code", "review-runtime"]

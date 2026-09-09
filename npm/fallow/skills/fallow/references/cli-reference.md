@@ -1709,6 +1709,8 @@ Cloud analysis emits the same `runtime_coverage` JSON block as local mode. Its s
 
 Each finding's `actions[].type` uses the canonical kebab-case vocabulary: `delete-cold-code` is emitted on `verdict=safe_to_delete`, `review-runtime` on `verdict=review_required`. The sidecar may emit additional protocol-specific identifiers, so consumers should treat unknown values as forward-compat extensions rather than schema violations.
 
+Under `--production` the evidence block also carries `test_only_reference`. It is `true` when the function is unreachable in the production module graph but still referenced from a file production mode excludes (test, spec, story, fixture, benchmark). Such a function is never `safe_to_delete`: it is reported as `review_required` with the action "Only tests reference this export; delete the test usage together with the function or keep it". The field is absent when no production filter was applied, because there is no second reachability answer to report.
+
 ### `upload-inventory` flags
 
 | Flag | Type | Default | Description |

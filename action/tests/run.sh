@@ -1910,6 +1910,9 @@ OUT_PROD_ANN=$(jq '.runtime_coverage = {"verdict":"cold-code-detected","summary"
 assert_contains "$OUT_PROD_ANN" "Runtime coverage" "prod annotation: title present"
 assert_contains "$OUT_PROD_ANN" "coldPath" "prod annotation: function name present"
 
+OUT_TEST_ONLY_ANN=$(jq '.runtime_coverage = {"verdict":"cold-code-detected","summary":{"functions_tracked":1,"functions_hit":0,"functions_unhit":1,"functions_untracked":0,"coverage_percent":0,"trace_count":1200,"period_days":7,"deployments_seen":2},"findings":[{"path":"src/helpers.ts","function":"resetForTests","line":4,"verdict":"review_required","invocations":0,"confidence":"high","evidence":{"static_status":"unused","test_coverage":"not_covered","test_only_reference":true,"v8_tracking":"tracked"},"actions":[{"description":"Only tests reference this export; delete the test usage together with the function or keep it."}]}]}' "$FIXTURES/health-clean.json" | jq -r -f "$JQ_DIR/annotations-health.jq" 2>&1)
+assert_contains "$OUT_TEST_ONLY_ANN" "Static: unused (referenced only from tests)" "prod annotation: a test-only reference is named next to the static verdict"
+
 render_direct_annotations() {
   local kind="$1" input="$2"
   case "$kind" in

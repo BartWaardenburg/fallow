@@ -2268,6 +2268,7 @@ fn map_evidence(evidence: Evidence) -> RuntimeCoverageEvidence {
     RuntimeCoverageEvidence {
         static_status: evidence.static_status,
         test_coverage: evidence.test_coverage,
+        test_only_reference: None,
         v8_tracking: evidence.v8_tracking,
         untracked_reason: evidence.untracked_reason,
         observation_days: evidence.observation_days,

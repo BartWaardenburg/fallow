@@ -2665,6 +2665,7 @@ fn health_report_with_runtime_coverage(root: &Path) -> HealthReport {
                 evidence: RuntimeCoverageEvidence {
                     static_status: "used".to_string(),
                     test_coverage: "not_covered".to_string(),
+                    test_only_reference: None,
                     v8_tracking: "tracked".to_string(),
                     untracked_reason: None,
                     observation_days: 30,
@@ -2690,6 +2691,7 @@ fn health_report_with_runtime_coverage(root: &Path) -> HealthReport {
                 evidence: RuntimeCoverageEvidence {
                     static_status: "used".to_string(),
                     test_coverage: "not_covered".to_string(),
+                    test_only_reference: None,
                     v8_tracking: "untracked".to_string(),
                     untracked_reason: Some("lazy_parsed".to_string()),
                     observation_days: 30,
