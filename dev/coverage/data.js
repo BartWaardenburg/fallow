@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788978893752,
+  "lastUpdate": 1788991675132,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "346cb87affc0f96ea4681f59efeabc5faae8d7d1",
-          "message": "chore(claude): drop duplicate workflow rule and unload the agent template\n\nThe workflow rule restated every line of the root CLAUDE.md, so both\nwere always loaded. The agent template carried a live name and showed\nup as an agent named agent-name; it now lives under docs/development.",
-          "timestamp": "2026-08-25T15:45:36+02:00",
-          "tree_id": "a13ed3e3efea2c5d055fb85eb60f0afee1e7ce66",
-          "url": "https://github.com/fallow-rs/fallow/commit/346cb87affc0f96ea4681f59efeabc5faae8d7d1"
-        },
-        "date": 1787666176228,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.7,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/3628395fb2a16a1fd8edf83eb459ac6f45d17723"
         },
         "date": 1788978889536,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.5,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "c2da9fcae5388226a87e986b1812f9c872d288c6",
+          "message": "chore: release v3.24.1",
+          "timestamp": "2026-09-09T21:36:33+02:00",
+          "tree_id": "082d4b12b54247a074954b50c7c31d0af8936e9b",
+          "url": "https://github.com/fallow-rs/fallow/commit/c2da9fcae5388226a87e986b1812f9c872d288c6"
+        },
+        "date": 1788991671065,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
