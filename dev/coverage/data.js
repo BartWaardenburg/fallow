@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788937520441,
+  "lastUpdate": 1788949452030,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "2262b4b6321374ae91ae6c4ae8df046035a83210",
-          "message": "fix(engine): detach Git probes from MCP stdin\n\n* test(mcp): serialize env route servers\n\n* test(mcp): allow nested env route work\n\n* fix(mcp): isolate typed analysis workers\n\n* test(mcp): preserve default threads in env routes\n\n* test(mcp): isolate type-aware sidecar fixture\n\n* fix(ci): isolate Windows MCP test suite\n\n* style: format workflow policy test\n\n* test(mcp): trace Windows typed worker phases\n\n* test(ci): run MCP diagnostics first\n\n* test(ci): build CLI before MCP diagnostics\n\n* test(mcp): compare debug and release worker entry\n\n* fix(ci): order Windows MCP process suites\n\n* fix(api): prepare discovery outside analysis pools\n\n* test(api): diagnose Windows analysis pool stall\n\n* test(api): isolate Windows output assembly stall\n\n* fix(engine): detach Git probes from protocol stdin",
-          "timestamp": "2026-08-24T22:58:11+02:00",
-          "tree_id": "92426dbdfcd76bfeaa7bf4c6de4da080769c1e75",
-          "url": "https://github.com/fallow-rs/fallow/commit/2262b4b6321374ae91ae6c4ae8df046035a83210"
-        },
-        "date": 1787605547535,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.7,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/c716033fb8a61549d7b801a97bbcbd7cac643038"
         },
         "date": 1788937516892,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.5,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "85615b646a1adb45a30bf24a45ffa55dfa088737",
+          "message": "fix(dupes): fall back to content when the fingerprint cannot be trusted\n\nAdding ctime to the extract fingerprint closed a real staleness bug, but the\nduplication token cache reacted to a missing ctime by returning nothing rather\nthan by falling back. ctime is always absent on Windows, so that cache never\nhit there: correct results, and a permanently cold cache on an entire platform.\nThe release validation caught it; a reviewer had noted the behaviour earlier as\na clean miss, which is true and was too light a reading.\n\nIt now takes the same fast-path and slow-path split the extract cache already\nhad. When the timestamps can be trusted, an exact match or a miss, unchanged.\nWhen they cannot, read the file and compare content hashes against the source\nthe entry already stores, so no cache version moves.\n\nThe invariant the ctime work exists to protect survives, because the fallback\ntrusts bytes rather than metadata: a size-preserving edit with a restored mtime\nstill misses, on every platform. The new tests build a fingerprint without a\nctime directly, so a macOS run proves the Windows path rather than skipping it.\n\nThe graph cache was checked and is unaffected: it keys on content hashes and\ndeliberately avoids ctime, since cp -Rp and CI cache restores preserve mtime\nbut reset it.",
+          "timestamp": "2026-09-09T12:16:58+02:00",
+          "tree_id": "58042834076bade476e9312b54f764a1dd71f3f8",
+          "url": "https://github.com/fallow-rs/fallow/commit/85615b646a1adb45a30bf24a45ffa55dfa088737"
+        },
+        "date": 1788949448323,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
