@@ -56,7 +56,13 @@ jobs:
       - name: Install aarch64 cross-compilation tools
         if: matrix.target == 'aarch64-unknown-linux-gnu'
         run: |
-          sudo apt-get update
+          # The runner image carries third-party apt sources this job never
+          # installs from, and one of them serving a mismatched index fails
+          # `apt-get update` for every source at once. Let the refresh report
+          # and continue: apt still verifies and uses only what it fetched, and
+          # the install below is the real gate, so a genuinely broken Ubuntu
+          # index still fails the job loudly.
+          sudo apt-get update || echo "apt-get update reported errors on at least one source"
           sudo apt-get install -y gcc-aarch64-linux-gnu
 
       - name: Check compilation

@@ -327,7 +327,12 @@ jobs:
           if command -v sudo >/dev/null 2>&1; then
             apt_get="sudo apt-get"
           fi
-          $apt_get update
+          # This leg runs on the hosted runner, whose image carries third-party
+          # apt sources this job never installs from; one of them serving a
+          # mismatched index fails the refresh for every source at once. Let it
+          # report and continue: apt uses only what it verified and fetched, and
+          # the install is the real gate.
+          $apt_get update || echo "apt-get update reported errors on at least one source"
           $apt_get install -y musl-tools
 
       - name: Install aarch64 cross-compilation tools
@@ -355,7 +360,10 @@ jobs:
             grep -q 'check-valid-until=no' /etc/apt/sources.list \
               || { echo "could not scope the freshness exemption to bullseye-security"; exit 1; }
           fi
-          $apt_get update
+          # The musl leg of this step runs on the hosted runner, where a
+          # third-party source in the image can fail the refresh for every
+          # source at once; the install below is the real gate either way.
+          $apt_get update || echo "apt-get update reported errors on at least one source"
           $apt_get install -y gcc-aarch64-linux-gnu
 
       # fallow-mcp pulls rquickjs (QuickJS, a C library). On aarch64-musl the
