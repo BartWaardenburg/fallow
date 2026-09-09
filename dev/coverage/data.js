@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788949452030,
+  "lastUpdate": 1788951548218,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "536f96da2ec0b83aa5ee676fd2a2cdd56c124139",
-          "message": "chore: release v3.18.0",
-          "timestamp": "2026-08-25T00:00:27+02:00",
-          "tree_id": "a7c5e143f1b082b6655fc9afc2c4031b47a825e0",
-          "url": "https://github.com/fallow-rs/fallow/commit/536f96da2ec0b83aa5ee676fd2a2cdd56c124139"
-        },
-        "date": 1787609288023,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.7,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/85615b646a1adb45a30bf24a45ffa55dfa088737"
         },
         "date": 1788949448323,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.5,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "9dc043deca19489fdbc7dfd382e53d95c5c8e114",
+          "message": "fix(coverage): point the post-upload dashboard link at the repository route\n\nCloses #2597",
+          "timestamp": "2026-09-09T12:49:28+02:00",
+          "tree_id": "c1144f3de6279ebaf6a926203038832f530859fa",
+          "url": "https://github.com/fallow-rs/fallow/commit/9dc043deca19489fdbc7dfd382e53d95c5c8e114"
+        },
+        "date": 1788951545138,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
