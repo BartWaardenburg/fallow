@@ -2122,6 +2122,10 @@ enum CoverageCli {
         /// Show the first-class importance section in human output.
         #[arg(long)]
         importance: bool,
+
+        /// List cloud runtime functions with no local counterpart on stderr.
+        #[arg(long)]
+        debug_unmatched: bool,
     },
     /// Upload a static function inventory to fallow cloud (Production
     /// Coverage, paid). Unlocks the `untracked` filter on the dashboard by
@@ -5136,6 +5140,7 @@ fn map_coverage_analyze(sub: &CoverageCli) -> coverage::CoverageSubcommand {
         top,
         blast_radius,
         importance,
+        debug_unmatched,
     } = sub
     else {
         unreachable!("coverage analyze mapper called with non-analyze variant");
@@ -5157,6 +5162,7 @@ fn map_coverage_analyze(sub: &CoverageCli) -> coverage::CoverageSubcommand {
         top: *top,
         blast_radius: *blast_radius,
         importance: *importance,
+        debug_unmatched: *debug_unmatched,
     })
 }
 

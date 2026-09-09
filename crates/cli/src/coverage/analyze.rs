@@ -47,6 +47,10 @@ pub struct AnalyzeArgs {
     pub top: Option<usize>,
     pub blast_radius: bool,
     pub importance: bool,
+    /// List every cloud runtime function that found no local counterpart on
+    /// stderr, instead of only counting them in the `cloud_functions_unmatched`
+    /// warning.
+    pub debug_unmatched: bool,
 }
 
 impl fmt::Debug for AnalyzeArgs {
@@ -68,6 +72,7 @@ impl fmt::Debug for AnalyzeArgs {
             .field("top", &self.top)
             .field("blast_radius", &self.blast_radius)
             .field("importance", &self.importance)
+            .field("debug_unmatched", &self.debug_unmatched)
             .finish()
     }
 }
@@ -294,9 +299,43 @@ fn run_cloud(args: &AnalyzeArgs, ctx: &RunContext<'_>) -> ExitCode {
         Ok(index) => index,
         Err(code) => return code,
     };
-    let mut report = merge_cloud_snapshot(&snapshot, &static_index, args.min_invocations_hot);
+    let CloudMergeOutput {
+        mut report,
+        unmatched,
+    } = merge_cloud_snapshot(&snapshot, &static_index, args.min_invocations_hot);
+    if args.debug_unmatched {
+        print_unmatched_cloud_functions(&unmatched);
+    }
     apply_top_limit(&mut report, args.top);
     print_runtime_report(&report, ctx, start.elapsed(), args)
+}
+
+/// Print the unmatched cloud runtime functions on stderr, highest traffic
+/// first, so the class of misses is visible without a debugger. Kept off
+/// stdout so `--format json` stays machine-readable.
+fn print_unmatched_cloud_functions(unmatched: &[UnmatchedCloudFunction]) {
+    if unmatched.is_empty() {
+        eprintln!("unmatched cloud functions: none");
+        return;
+    }
+    let mut sorted: Vec<&UnmatchedCloudFunction> = unmatched.iter().collect();
+    sorted.sort_by(|left, right| {
+        right
+            .invocations
+            .cmp(&left.invocations)
+            .then_with(|| left.path.cmp(&right.path))
+            .then_with(|| left.name.cmp(&right.name))
+    });
+    eprintln!("unmatched cloud functions: {}", sorted.len());
+    for function in sorted {
+        let line = function
+            .line
+            .map_or_else(|| "?".to_owned(), |line| line.to_string());
+        eprintln!(
+            "  {}:{} {} ({} invocations)",
+            function.path, line, function.name, function.invocations
+        );
+    }
 }
 
 fn runtime_coverage_source_env_is_cloud() -> bool {
@@ -392,16 +431,22 @@ struct StaticFunctionInfo {
 }
 
 #[derive(Default)]
-#[expect(
-    clippy::struct_field_names,
-    reason = "the `by_<key>` prefix names the lookup dimension of each index map; it is the clearest convention for a multi-index struct"
-)]
 struct StaticIndex {
     by_key: FxHashMap<(String, String, u32), StaticFunctionInfo>,
     by_path_name: FxHashMap<(String, String), Vec<StaticFunctionInfo>>,
     /// Stable-id join tier: the strongest match, tried before
     /// `(path, name, line)` and the fuzzy line fallback.
     by_stable_id: FxHashMap<String, StaticFunctionInfo>,
+    /// Positional join tier, keyed by `(path, start_line)` and deliberately
+    /// name-free. Runtime instrumentation names a function from its
+    /// surroundings (an anonymous callback takes the callee's name, an
+    /// accessor keeps its `get`/`set` prefix), so a name comparison drops
+    /// exactly the callback-heavy, high-traffic functions. Position is the
+    /// part both sides agree on.
+    by_path_line: FxHashMap<(String, u32), Vec<StaticFunctionInfo>>,
+    /// File name to repo-relative paths, used to rebase a runtime path that
+    /// carries a container or bundle prefix onto the local tree.
+    paths_by_file_name: FxHashMap<String, Vec<String>>,
 }
 
 fn build_static_index(ctx: &RunContext<'_>, production: bool) -> Result<StaticIndex, ExitCode> {
@@ -558,7 +603,7 @@ fn static_function_info(
     }
 }
 
-/// Insert a function's static info into all three lookup tiers of the index.
+/// Insert a function's static info into every lookup tier of the index.
 fn index_static_function(out: &mut StaticIndex, rel: &str, info: StaticFunctionInfo) {
     out.by_key.insert(
         (rel.to_string(), info.name.clone(), info.start_line),
@@ -566,17 +611,38 @@ fn index_static_function(out: &mut StaticIndex, rel: &str, info: StaticFunctionI
     );
     out.by_stable_id
         .insert(info.stable_id.clone(), info.clone());
+    out.by_path_line
+        .entry((rel.to_string(), info.start_line))
+        .or_default()
+        .push(info.clone());
+    let file_name = path_file_name(rel).to_owned();
+    let paths = out.paths_by_file_name.entry(file_name).or_default();
+    if !paths.iter().any(|path| path == rel) {
+        paths.push(rel.to_string());
+    }
     out.by_path_name
         .entry((rel.to_string(), info.name.clone()))
         .or_default()
         .push(info);
 }
 
+/// Last `/`-separated segment of an already normalized path.
+fn path_file_name(path: &str) -> &str {
+    path.rsplit('/').next().unwrap_or(path)
+}
+
+/// The merged report plus the runtime functions that found no local
+/// counterpart, kept alongside the report so `--debug-unmatched` can list them.
+struct CloudMergeOutput {
+    report: RuntimeCoverageReport,
+    unmatched: Vec<UnmatchedCloudFunction>,
+}
+
 fn merge_cloud_snapshot(
     snapshot: &CloudRuntimeContext,
     static_index: &StaticIndex,
     min_invocations_hot: u64,
-) -> RuntimeCoverageReport {
+) -> CloudMergeOutput {
     let CloudMergeEntries {
         mut findings,
         mut hot_paths,
@@ -589,10 +655,10 @@ fn merge_cloud_snapshot(
     let blast_radius = cloud_blast_radius_entries(snapshot, synthesized_blast_radius);
     let importance = cloud_importance_entries(snapshot, synthesized_importance);
 
-    let warnings = cloud_warnings(snapshot, unmatched_cloud_functions);
+    let warnings = cloud_warnings(snapshot, unmatched_cloud_functions.len());
     let trust_output = cloud_runtime_trust_output(snapshot);
 
-    RuntimeCoverageReport {
+    let report = RuntimeCoverageReport {
         schema_version: RuntimeCoverageSchemaVersion::V1,
         verdict: cloud_report_verdict(&findings),
         signals: Vec::new(),
@@ -607,6 +673,10 @@ fn merge_cloud_snapshot(
         actionability_reason: trust_output.actionability_reason,
         actionability_verdict: trust_output.actionability_verdict,
         provenance: trust_output.provenance,
+    };
+    CloudMergeOutput {
+        report,
+        unmatched: unmatched_cloud_functions,
     }
 }
 
@@ -742,7 +812,17 @@ struct CloudMergeEntries {
     hot_paths: Vec<RuntimeCoverageHotPath>,
     synthesized_blast_radius: Vec<fallow_output::RuntimeCoverageBlastRadiusEntry>,
     synthesized_importance: Vec<(fallow_output::RuntimeCoverageImportanceEntry, Option<u32>)>,
-    unmatched_cloud_functions: usize,
+    unmatched_cloud_functions: Vec<UnmatchedCloudFunction>,
+}
+
+/// One cloud runtime function with no local counterpart, kept so the drop is
+/// inspectable instead of only counted.
+#[derive(Debug, Clone)]
+pub struct UnmatchedCloudFunction {
+    pub path: String,
+    pub name: String,
+    pub line: Option<u32>,
+    pub invocations: u64,
 }
 
 fn collect_cloud_merge_entries(
@@ -755,11 +835,26 @@ fn collect_cloud_merge_entries(
         hot_paths: Vec::new(),
         synthesized_blast_radius: Vec::new(),
         synthesized_importance: Vec::new(),
-        unmatched_cloud_functions: 0,
+        unmatched_cloud_functions: Vec::new(),
     };
     for function in &snapshot.functions {
         let Some(local) = match_cloud_function(function, static_index) else {
-            entries.unmatched_cloud_functions = entries.unmatched_cloud_functions.saturating_add(1);
+            let line = function.start_line.or(function.line_number);
+            tracing::debug!(
+                path = %function.file_path,
+                function = %function.function_name,
+                line = ?line,
+                invocations = function.hit_count.unwrap_or(0),
+                "cloud runtime function has no local counterpart; omitted from findings"
+            );
+            entries
+                .unmatched_cloud_functions
+                .push(UnmatchedCloudFunction {
+                    path: function.file_path.clone(),
+                    name: function.function_name.clone(),
+                    line,
+                    invocations: function.hit_count.unwrap_or(0),
+                });
             continue;
         };
         if matches!(function.tracking_state, CloudTrackingState::Called) {
@@ -1166,7 +1261,8 @@ fn match_cloud_function(
     {
         return Some(info.clone());
     }
-    let path = normalize_runtime_path(Path::new(&function.file_path));
+    let runtime_path = normalize_runtime_path(Path::new(&function.file_path));
+    let path = resolve_cloud_path(static_index, &runtime_path)?.to_owned();
     let line = function.start_line.or(function.line_number)?;
     if let Some(info) =
         static_index
@@ -1186,10 +1282,104 @@ fn match_cloud_function(
         }
         return Some(info.clone());
     }
-    static_index
+    if let Some(info) = static_index
         .by_path_name
-        .get(&(path, function.function_name.clone()))
+        .get(&(path.clone(), function.function_name.clone()))
         .and_then(|candidates| nearest_cloud_candidate(candidates, line, function.end_line))
+    {
+        return Some(info);
+    }
+    static_index
+        .by_path_line
+        .get(&(path, line))
+        .and_then(|candidates| positional_cloud_candidate(candidates, function.end_line))
+}
+
+/// Rebase a runtime file path onto the repo-relative path the static index is
+/// keyed by.
+///
+/// A runtime path is whatever the process saw: a containerized service reports
+/// `/app/src/a.ts`, a bundled worker reports a path below its output root. None
+/// of those equal the repo-relative path, so comparing the full string drops
+/// every function in the file. Candidates are looked up by file name and
+/// accepted when one path is a segment-wise suffix of the other; the longest
+/// such overlap wins, and a tie between two different local files is left
+/// unmatched rather than guessed.
+fn resolve_cloud_path<'index>(
+    static_index: &'index StaticIndex,
+    runtime_path: &str,
+) -> Option<&'index str> {
+    let candidates = static_index
+        .paths_by_file_name
+        .get(path_file_name(runtime_path))?;
+    let runtime_segments: Vec<&str> = runtime_path.split('/').filter(|s| !s.is_empty()).collect();
+    let mut best: Option<(&str, usize)> = None;
+    let mut tied = false;
+    for candidate in candidates {
+        let candidate_segments: Vec<&str> =
+            candidate.split('/').filter(|s| !s.is_empty()).collect();
+        let overlap = candidate_segments.len().min(runtime_segments.len());
+        if runtime_segments[runtime_segments.len() - overlap..]
+            != candidate_segments[candidate_segments.len() - overlap..]
+        {
+            continue;
+        }
+        match best {
+            None => {
+                best = Some((candidate.as_str(), overlap));
+                tied = false;
+            }
+            Some((_, current)) if overlap > current => {
+                best = Some((candidate.as_str(), overlap));
+                tied = false;
+            }
+            Some((_, current)) if overlap == current => tied = true,
+            Some(_) => {}
+        }
+    }
+    if tied {
+        None
+    } else {
+        best.map(|(path, _)| path)
+    }
+}
+
+/// Pick the one static function that starts on the runtime function's line.
+///
+/// Reached only after the name tiers missed, so the name is known to disagree.
+/// A single candidate on the line is that function; several mean nested
+/// definitions opening on one line, and the end line breaks the tie when the
+/// runtime reported one. Anything still ambiguous stays unmatched.
+fn positional_cloud_candidate(
+    candidates: &[StaticFunctionInfo],
+    end_line: Option<u32>,
+) -> Option<StaticFunctionInfo> {
+    if let [only] = candidates {
+        return Some(only.clone());
+    }
+    let end_line = end_line?;
+    let mut best: Option<(&StaticFunctionInfo, u32)> = None;
+    let mut tied = false;
+    for candidate in candidates {
+        let distance = candidate.end_line.abs_diff(end_line);
+        match best {
+            None => {
+                best = Some((candidate, distance));
+                tied = false;
+            }
+            Some((_, current)) if distance < current => {
+                best = Some((candidate, distance));
+                tied = false;
+            }
+            Some((_, current)) if distance == current => tied = true,
+            Some(_) => {}
+        }
+    }
+    if tied {
+        None
+    } else {
+        best.map(|(candidate, _)| candidate.clone())
+    }
 }
 
 fn nearest_cloud_candidate(
@@ -1553,6 +1743,7 @@ mod tests {
             top: Some(5),
             blast_radius: true,
             importance: true,
+            debug_unmatched: true,
         };
 
         let formatted = format!("{args:?}");
@@ -1574,6 +1765,7 @@ mod tests {
             "top: Some(5)",
             "blast_radius: true",
             "importance: true",
+            "debug_unmatched: true",
         ] {
             assert!(
                 formatted.contains(expected),
@@ -1655,18 +1847,7 @@ mod tests {
             stable_id: function_identity_id("src/a.ts", "oldFlow", 10),
             source_hash: None,
         };
-        static_index.by_key.insert(
-            ("src/a.ts".to_owned(), "oldFlow".to_owned(), 10),
-            info.clone(),
-        );
-        static_index
-            .by_stable_id
-            .insert(info.stable_id.clone(), info.clone());
-        static_index
-            .by_path_name
-            .entry(("src/a.ts".to_owned(), "oldFlow".to_owned()))
-            .or_default()
-            .push(info);
+        index_static_function(&mut static_index, "src/a.ts", info);
         let mut snapshot = cloud_context(1, 0);
         snapshot.summary.trace_count = 100;
         snapshot.summary.deployments_seen = 2;
@@ -1681,7 +1862,7 @@ mod tests {
             cloud_function("src/missing.ts", "missingInAst", Some(1), Some(1), Some(3));
         unmatched.deployments_observed = 2;
         snapshot.functions = vec![matched, unmatched];
-        let report = merge_cloud_snapshot(&snapshot, &static_index, 100);
+        let report = merge_cloud_snapshot(&snapshot, &static_index, 100).report;
         assert_eq!(report.findings.len(), 1);
         assert_eq!(
             report.findings[0].verdict,
@@ -1748,7 +1929,7 @@ mod tests {
             warnings: vec![],
         };
 
-        let report = merge_cloud_snapshot(&snapshot, &static_index, 100);
+        let report = merge_cloud_snapshot(&snapshot, &static_index, 100).report;
 
         assert_eq!(report.verdict, RuntimeCoverageReportVerdict::Clean);
         assert!(report.findings.is_empty());
@@ -1806,6 +1987,195 @@ mod tests {
         let function = cloud_function("src/api.ts", "handler", Some(12), Some(12), Some(20));
 
         assert!(match_cloud_function(&function, &static_index).is_none());
+    }
+
+    /// Fixture project mirroring the shapes a containerized service reports:
+    /// a top-level arrow, an object-literal method, an accessor, and two
+    /// anonymous callbacks that runtime instrumentation names after the callee
+    /// they were passed to.
+    const CLOUD_FIXTURE_SOURCE: &str = r"export const createClient = (url: string) => {
+  const rows = [1, 2, 3];
+  return {
+    execute: async (sql: string) => {
+      return rows.map((row) => row + sql.length);
+    },
+    get closed() {
+      return url.length === 0;
+    },
+  };
+};
+
+export const register = (app: { get: (path: string, handler: () => string) => void }) => {
+  app.get('/health', () => {
+    return 'ok';
+  });
+};
+";
+
+    fn fixture_static_index(source: &str) -> (tempfile::TempDir, StaticIndex) {
+        let dir = tempfile::TempDir::new().expect("temp dir should be created");
+        std::fs::create_dir_all(dir.path().join("src/db")).expect("src/db should be created");
+        std::fs::write(dir.path().join("src/db/file-client.ts"), source)
+            .expect("fixture source should be written");
+        std::fs::write(
+            dir.path().join("package.json"),
+            r#"{"name":"fixture","version":"0.0.0","type":"module"}"#,
+        )
+        .expect("package.json should be written");
+        let config_path = None;
+        let ctx = RunContext {
+            root: dir.path(),
+            config_path: &config_path,
+            output: OutputFormat::Json,
+            json_style: crate::json_style::JsonStyle::Compact,
+            quiet: true,
+            no_cache: true,
+            threads: 1,
+            explain: false,
+            allow_remote_extends: false,
+        };
+        let index = build_static_index(&ctx, false).expect("static index should build");
+        (dir, index)
+    }
+
+    fn prefixed_cloud_function(
+        name: &str,
+        start_line: u32,
+        end_line: u32,
+        hits: u64,
+    ) -> CloudRuntimeFunction {
+        let mut function = cloud_function(
+            "/app/src/db/file-client.ts",
+            name,
+            Some(start_line),
+            Some(start_line),
+            Some(end_line),
+        );
+        function.tracking_state = CloudTrackingState::Called;
+        function.hit_count = Some(hits);
+        function
+    }
+
+    #[test]
+    fn cloud_functions_match_through_container_prefix_and_runtime_names() {
+        let (_dir, static_index) = fixture_static_index(CLOUD_FIXTURE_SOURCE);
+        let functions = vec![
+            prefixed_cloud_function("createClient", 1, 11, 611),
+            prefixed_cloud_function("execute", 4, 6, 100_000),
+            prefixed_cloud_function("map", 5, 5, 833_000_000),
+            prefixed_cloud_function("get closed", 7, 9, 2),
+            prefixed_cloud_function("register", 13, 17, 400),
+            prefixed_cloud_function("get", 14, 16, 379_000),
+        ];
+        let mut snapshot = cloud_context(functions.len(), 0);
+        snapshot.functions = functions;
+
+        let CloudMergeOutput { report, unmatched } =
+            merge_cloud_snapshot(&snapshot, &static_index, 100);
+
+        assert!(
+            unmatched.is_empty(),
+            "every fixture function has a local counterpart, got {unmatched:?}"
+        );
+        assert!(
+            !report
+                .warnings
+                .iter()
+                .any(|warning| warning.code == "cloud_functions_unmatched")
+        );
+        assert_eq!(
+            report.hot_paths.first().map(|hot| hot.invocations),
+            Some(833_000_000),
+            "the busiest runtime function must lead the hot paths"
+        );
+        for hot_path in &report.hot_paths {
+            assert_eq!(hot_path.path, PathBuf::from("src/db/file-client.ts"));
+        }
+        let mut hot_lines: Vec<u32> = report.hot_paths.iter().map(|hot| hot.line).collect();
+        hot_lines.sort_unstable();
+        assert_eq!(
+            hot_lines,
+            vec![1, 4, 5, 13, 14],
+            "the callback and object-method functions must reach the hot paths"
+        );
+    }
+
+    #[test]
+    fn cloud_function_without_local_counterpart_stays_unmatched() {
+        let (_dir, static_index) = fixture_static_index(CLOUD_FIXTURE_SOURCE);
+        let mut snapshot = cloud_context(1, 0);
+        let mut absent = cloud_function(
+            "/app/src/db/gone.ts",
+            "removedFlow",
+            Some(3),
+            Some(3),
+            Some(9),
+        );
+        absent.tracking_state = CloudTrackingState::Called;
+        absent.hit_count = Some(12);
+        snapshot.functions = vec![absent];
+
+        let CloudMergeOutput { report, unmatched } =
+            merge_cloud_snapshot(&snapshot, &static_index, 100);
+
+        assert_eq!(unmatched.len(), 1);
+        assert_eq!(unmatched[0].name, "removedFlow");
+        assert!(report.hot_paths.is_empty());
+        assert!(
+            report
+                .warnings
+                .iter()
+                .any(|warning| warning.code == "cloud_functions_unmatched")
+        );
+    }
+
+    #[test]
+    fn resolve_cloud_path_rebases_container_prefix() {
+        let static_index =
+            static_index_with(vec![static_info("src/db/file-client.ts", "run", 1, 4)]);
+
+        assert_eq!(
+            resolve_cloud_path(&static_index, "app/src/db/file-client.ts"),
+            Some("src/db/file-client.ts")
+        );
+        assert_eq!(
+            resolve_cloud_path(&static_index, "src/db/file-client.ts"),
+            Some("src/db/file-client.ts")
+        );
+        assert_eq!(resolve_cloud_path(&static_index, "app/other.ts"), None);
+    }
+
+    #[test]
+    fn resolve_cloud_path_rejects_two_equally_deep_local_files() {
+        let static_index = static_index_with(vec![
+            static_info("packages/api/src/index.ts", "run", 1, 4),
+            static_info("packages/web/src/index.ts", "run", 1, 4),
+        ]);
+
+        assert_eq!(resolve_cloud_path(&static_index, "app/src/index.ts"), None);
+    }
+
+    #[test]
+    fn positional_match_rejects_two_functions_opening_on_one_line() {
+        let static_index = static_index_with(vec![
+            static_info("src/api.ts", "outer", 10, 14),
+            static_info("src/api.ts", "<arrow>", 10, 14),
+        ]);
+        let function = cloud_function("src/api.ts", "then", Some(10), Some(10), Some(14));
+
+        assert!(match_cloud_function(&function, &static_index).is_none());
+    }
+
+    #[test]
+    fn positional_match_breaks_a_line_tie_on_the_end_line() {
+        let static_index = static_index_with(vec![
+            static_info("src/api.ts", "outer", 10, 40),
+            static_info("src/api.ts", "<arrow>", 10, 14),
+        ]);
+        let function = cloud_function("src/api.ts", "then", Some(10), Some(10), Some(14));
+
+        let matched = match_cloud_function(&function, &static_index).expect("end line breaks tie");
+        assert_eq!(matched.end_line, 14);
     }
 
     #[test]
@@ -2025,7 +2395,7 @@ mod tests {
             stale_after_days: Some(14),
         });
 
-        let report = merge_cloud_snapshot(&snapshot, &StaticIndex::default(), 100);
+        let report = merge_cloud_snapshot(&snapshot, &StaticIndex::default(), 100).report;
 
         assert!(!report.actionable);
         assert_eq!(
@@ -2046,7 +2416,8 @@ mod tests {
 
     #[test]
     fn cloud_report_uses_legacy_actionability_fallback_when_fields_are_absent() {
-        let report = merge_cloud_snapshot(&cloud_context(1, 2), &StaticIndex::default(), 100);
+        let report =
+            merge_cloud_snapshot(&cloud_context(1, 2), &StaticIndex::default(), 100).report;
 
         assert!(report.actionable);
         assert_eq!(report.actionability_reason, None);
@@ -2240,18 +2611,7 @@ mod tests {
         let mut static_index = StaticIndex::default();
         for function in functions {
             let path = normalize_runtime_path(&function.path);
-            static_index.by_key.insert(
-                (path.clone(), function.name.clone(), function.start_line),
-                function.clone(),
-            );
-            static_index
-                .by_stable_id
-                .insert(function.stable_id.clone(), function.clone());
-            static_index
-                .by_path_name
-                .entry((path, function.name.clone()))
-                .or_default()
-                .push(function);
+            index_static_function(&mut static_index, &path, function);
         }
         static_index
     }

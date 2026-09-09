@@ -329,6 +329,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a bare id does
   (Closes [#2597](https://github.com/fallow-rs/fallow/issues/2597)).
 
+- **`fallow coverage analyze --cloud` keeps the functions the runtime actually
+  ran.** The join between cloud runtime functions and the local static index
+  compared the full runtime file path and required the two sides to agree on
+  the function name, and the busiest functions failed both tests. A
+  containerized service reports `/app/src/a.ts`, which never equals the
+  repo-relative `src/a.ts`, so entire files were dropped; and runtime
+  instrumentation names a function from its surroundings, so an anonymous
+  callback arrives under the name of the callee it was passed to (`map`,
+  `then`, `get`) and an accessor keeps its `get` prefix, none of which the
+  static index spells that way. On a service of a few thousand functions this
+  dropped the majority of the payload into the `cloud_functions_unmatched`
+  warning, and the hot-path list was led by whatever incidental helper happened
+  to survive. Runtime paths are now rebased onto the local tree by file name
+  plus a segment-wise suffix comparison, and a function whose name disagrees is
+  matched on position within the resolved file. Both tiers refuse an ambiguous
+  answer rather than guess: two local files equally entitled to a runtime path,
+  or two definitions opening on one line with no end line to separate them,
+  stay unmatched. Stable-id matching is unchanged and still runs first. The new
+  `--debug-unmatched` flag lists every remaining unmatched runtime function on
+  stderr, highest traffic first, so a residue can be read without a debugger.
+
 - **A quoted jq filter in a CI `run:` block is no longer read as an entry
   glob.** A workflow line like `jq -r '[((.proposals // {}) | to_entries[]) |
   .value.pr_number] | unique | sort[]'` warned `invalid entry pattern ...
