@@ -1,110 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788869172714,
+  "lastUpdate": 1788956256466,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Real-World Benchmarks": [
-      {
-        "commit": {
-          "author": {
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg",
-            "email": "bart@waardenburg.dev"
-          },
-          "committer": {
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg",
-            "email": "bart@waardenburg.dev"
-          },
-          "id": "d57b9ba37630c6b5f9cf748b6a25ae3bb9a6c6bb",
-          "message": "refactor(plugins): type config path parsing\n\nPath-shaped values extracted from JavaScript and TypeScript config files now flow through typed PathBuf helpers instead of plain strings. The parser keeps plugin output in forward-slash string form at the boundary, while webpack, Nuxt, Vite, SvelteKit, TypeScript, Wrangler, and Docusaurus consume filesystem paths internally where appropriate.\n\nThis keeps package-style alias semantics out of scope and preserves the existing PluginResult contract. Regression coverage now exercises mixed separators, project-root-style leading slashes, imported alias spread kind preservation, webpack context entries, and Nuxt srcDir normalization.\n\nFixes #448.",
-          "timestamp": "2026-06-01T11:39:26Z",
-          "url": "https://github.com/fallow-rs/fallow/commit/d57b9ba37630c6b5f9cf748b6a25ae3bb9a6c6bb"
-        },
-        "date": 1780317511063,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "preact (cold)",
-            "value": 140,
-            "unit": "ms"
-          },
-          {
-            "name": "preact (warm)",
-            "value": 137,
-            "unit": "ms"
-          },
-          {
-            "name": "fastify (cold)",
-            "value": 264,
-            "unit": "ms"
-          },
-          {
-            "name": "fastify (warm)",
-            "value": 238,
-            "unit": "ms"
-          },
-          {
-            "name": "zod (cold)",
-            "value": 148,
-            "unit": "ms"
-          },
-          {
-            "name": "zod (warm)",
-            "value": 133,
-            "unit": "ms"
-          },
-          {
-            "name": "vue-core (cold)",
-            "value": 426,
-            "unit": "ms"
-          },
-          {
-            "name": "vue-core (warm)",
-            "value": 379,
-            "unit": "ms"
-          },
-          {
-            "name": "svelte (cold)",
-            "value": 1277,
-            "unit": "ms"
-          },
-          {
-            "name": "svelte (warm)",
-            "value": 1058,
-            "unit": "ms"
-          },
-          {
-            "name": "query (cold)",
-            "value": 930,
-            "unit": "ms"
-          },
-          {
-            "name": "query (warm)",
-            "value": 1028,
-            "unit": "ms"
-          },
-          {
-            "name": "vite (cold)",
-            "value": 802,
-            "unit": "ms"
-          },
-          {
-            "name": "vite (warm)",
-            "value": 729,
-            "unit": "ms"
-          },
-          {
-            "name": "next.js (cold)",
-            "value": 7875,
-            "unit": "ms"
-          },
-          {
-            "name": "next.js (warm)",
-            "value": 7701,
-            "unit": "ms"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -9379,6 +9277,98 @@ window.BENCHMARK_DATA = {
           {
             "name": "vite (warm)",
             "value": 814,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg",
+            "email": "bart@waardenburg.dev"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "0b2922747231a43c269b2e555e0f366f6025e294",
+          "message": "fix(coverage): match cloud runtime functions through path prefixes and runtime names\n\nCloses #2593.\n\nThe cloud join compared the full runtime file path against the repo-relative\nstatic index and required both sides to spell the function name the same way.\nThe busiest functions failed both tests. A containerized service reports\n/app/src/a.ts, which never equals src/a.ts, so whole files were dropped; and\nruntime instrumentation names a function from its surroundings, so an anonymous\ncallback arrives under the name of the callee it was passed to and an accessor\nkeeps its get prefix, neither of which the static index spells that way. Most of\nthe payload landed in the cloud_functions_unmatched warning instead of in\nfindings, and the hot-path list was led by whatever incidental helper survived.\n\nRuntime paths are now rebased onto the local tree by file name plus a\nsegment-wise suffix comparison, and a function whose name disagrees is matched\non position within the resolved file. Both tiers refuse an ambiguous answer\nrather than guess: two local files equally entitled to one runtime path, or two\ndefinitions opening on one line with no end line to separate them, stay\nunmatched. Stable-id matching is unchanged and still runs first.\n\n--debug-unmatched lists what remains on stderr, highest traffic first, so the\nresidue can be read without a debugger; stdout stays machine-readable.\n\nThe fixture test builds a real static index from a project holding a top-level\narrow, an object-literal method, an accessor and two callee-named callbacks,\nthen merges a snapshot whose paths carry a container prefix. Without the path\nrebase all six functions are dropped; with the rebase alone the three\nruntime-named ones are still dropped.",
+          "timestamp": "2026-09-09T11:42:19Z",
+          "url": "https://github.com/fallow-rs/fallow/commit/0b2922747231a43c269b2e555e0f366f6025e294"
+        },
+        "date": 1788956251779,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "preact (cold)",
+            "value": 206,
+            "unit": "ms"
+          },
+          {
+            "name": "preact (warm)",
+            "value": 203,
+            "unit": "ms"
+          },
+          {
+            "name": "fastify (cold)",
+            "value": 306,
+            "unit": "ms"
+          },
+          {
+            "name": "fastify (warm)",
+            "value": 204,
+            "unit": "ms"
+          },
+          {
+            "name": "zod (cold)",
+            "value": 203,
+            "unit": "ms"
+          },
+          {
+            "name": "zod (warm)",
+            "value": 203,
+            "unit": "ms"
+          },
+          {
+            "name": "vue-core (cold)",
+            "value": 508,
+            "unit": "ms"
+          },
+          {
+            "name": "vue-core (warm)",
+            "value": 406,
+            "unit": "ms"
+          },
+          {
+            "name": "svelte (cold)",
+            "value": 1431,
+            "unit": "ms"
+          },
+          {
+            "name": "svelte (warm)",
+            "value": 1120,
+            "unit": "ms"
+          },
+          {
+            "name": "query (cold)",
+            "value": 1118,
+            "unit": "ms"
+          },
+          {
+            "name": "query (warm)",
+            "value": 915,
+            "unit": "ms"
+          },
+          {
+            "name": "vite (cold)",
+            "value": 1119,
+            "unit": "ms"
+          },
+          {
+            "name": "vite (warm)",
+            "value": 914,
             "unit": "ms"
           }
         ]
