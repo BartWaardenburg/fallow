@@ -1,57 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788958935811,
+  "lastUpdate": 1788962731463,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Module Coupling": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "02ea35062bf121e07f7404888a28c2c096284bb8",
-          "message": "fix(engine): report the type-lane credit of a value-only export in dead-code --trace\n\n`dead-code --trace` reported a value export as unused when its only credit was a bound `import type` of that export, contradicting the `dead-code` verdict on the same input.\n\n## The bug\n\n`dead-code` credits `export const helper` referenced through `import type { helper }`: the graph's type lane falls back to the value declaration when no type declaration of that name exists, and the unused-export analyzer counts the reference regardless of namespace. `trace_export` selected the value namespace for the value export, read only value-lane references, and printed `is_used: false` with an empty `direct_references`. An agent following the \"trace before deleting\" guidance got two contradictory answers for one symbol.\n\n## The fix\n\nThe trace now reports the references that credit the traced declaration. The preferred namespace wins whenever its lane carries a reference. When it carries none and the other namespace resolves to the **same effective binding**, the trace reports that lane's references and sets `namespace` to the lane that carries them.\n\nOn the repro, `--trace src/impl.ts:helper` returns `namespace: \"type\"`, `is_used: true`, and the `import type` consumer in `direct_references`; the human trace prints `USED` and `Namespace: type`.\n\nPreserved by construction and pinned by tests:\n\n- both lanes carrying references keeps the value namespace and the value consumer,\n- an unreferenced export still reports `is_used: false` and stays on its preferred lane,\n- a distinct same-name declaration in the other lane keeps the preferred lane, because its references credit that other declaration and `dead-code` still reports the traced one,\n- a declaration merge that stays one binding (`class Widget` next to `namespace Widget`) is covered; a merge that splits across lanes (`interface Foo` next to `class Foo`) is not, and is documented as a carve-out plus a follow-up.\n\n`is_used` keeps following the listed references alone, so file reachability stays a separate axis: an export in an unreachable file can read `is_used: true` next to `file_reachable: false`, exactly as the value lane already behaved. The rustdoc, the changelog and the compatibility note say so rather than claiming the trace always matches the verdict.\n\n## Consumers that inherit the correction\n\n`trace_export` (MCP), the typed API, the `trace_symbol` root trace, `fallow inspect --symbol` (its `identity.is_used` / `identity.reason` and its `evidence.trace_export` block, in the CLI and in the `inspect` MCP tool), and the class-member trace. The LSP reference lens already counted the type-only use.\n\n`ClassMemberTrace` gains an additive `owner_namespace` naming the lane that credits its owner (optional in the schema, like `ExportTrace.namespace`), and the human member trace prints an `Owner namespace:` line, so the member payload no longer hides the crediting lane from JSON consumers.\n\n## Keeping the type-aware payload readable\n\nThe checker proof beside a trace covers only the lane the declaration itself occupies, so it can report `no-references-found` for a credit the root trace lists. That is a pre-existing sidecar limitation, unchanged here. This PR makes the payload say so instead of contradicting itself:\n\n- `semantic.target.namespace` names the lane the proof covers,\n- both the export and the member human proof line append that lane (`value namespace only`) when such a proof lists no references of its own; a proof that carries its own evidence stays unqualified,\n- the in-band `_meta.field_definitions.semantic` note and the `trace_symbol` MCP tool description now state that a root trace listing a reference the proof omits is the wider evidence rather than a stale one. Without that, an agent obeying the in-band guidance would discard the corrected root evidence and delete a used export, which is exactly the reported failure.\n\n## Scope note\n\nAn earlier revision of this branch also changed the type-aware sidecar so the checker credited cross-lane imports. That moves the `--type-aware` finding counts on real projects and belongs in its own reviewed change; it has been removed here and the branch no longer touches `tools/type-aware-sidecar`. A `--type-aware --include-entry-exports` run on `editors/vscode` is byte-identical to the previous release apart from `elapsed_ms`.\n\n## Compatibility\n\n`namespace` may now be `type` for a value export; consumers should read it as the lane the listed references use. Both `namespace` and the new `owner_namespace` stay optional in the schema. No cache version changed: the trace is a read-only query over the graph, verified by running the corrected trace against a `.fallow` directory written by the previous release.\n\n## Verification\n\n- `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace --lib --bins --tests --examples`, `cargo check --workspace --benches`, `RUSTDOCFLAGS=\"-D warnings\" cargo doc --workspace --no-deps --document-private-items`, `typos`, hidden-unicode and comment-quality scans, `CI=true npm run generate:contracts:check`, `tsc --noEmit` on the VS Code extension: all pass.\n- The sidecar's own `node --test` suite passes unchanged.\n- Mutation matrix: reverting the engine fallback, the renderer qualifier, the member namespace threading, the in-band `_meta` carve-out or the tool-description carve-out each fails the matching test; forcing the qualifier on unconditionally fails the three negative controls.\n- Baseline versus branch on `viz-frontend` and `editors/vscode`: identical findings, only `elapsed_ms` differs.\n\nPlease squash-merge with an explicit body rather than the default commit concatenation.\n\nFixes #2371.",
-          "timestamp": "2026-08-23T17:58:24+02:00",
-          "tree_id": "1b427fd0be7fc93764f174d200fdd8c2cfd7b14c",
-          "url": "https://github.com/fallow-rs/fallow/commit/02ea35062bf121e07f7404888a28c2c096284bb8"
-        },
-        "date": 1787500917226,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Max Fan-In (non-framework)",
-            "value": 47,
-            "unit": "deps"
-          },
-          {
-            "name": "Max Fan-Out (non-framework)",
-            "value": 28,
-            "unit": "deps"
-          },
-          {
-            "name": "Modules >20 Fan-In (%)",
-            "value": 1.32,
-            "unit": "%"
-          },
-          {
-            "name": "Total Modules",
-            "value": 456,
-            "unit": "count"
-          },
-          {
-            "name": "Total Edges",
-            "value": 1240,
-            "unit": "count"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4874,6 +4825,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/4e9a9c39b74edaacd7945addb493ec35f9287d28"
         },
         "date": 1788958930855,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Max Fan-In (non-framework)",
+            "value": 54,
+            "unit": "deps"
+          },
+          {
+            "name": "Max Fan-Out (non-framework)",
+            "value": 29,
+            "unit": "deps"
+          },
+          {
+            "name": "Modules >20 Fan-In (%)",
+            "value": 1.26,
+            "unit": "%"
+          },
+          {
+            "name": "Total Modules",
+            "value": 476,
+            "unit": "count"
+          },
+          {
+            "name": "Total Edges",
+            "value": 1302,
+            "unit": "count"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "8b875bdf06105317ab1b94c4493cf639c9e4839b",
+          "message": "chore: release v3.24.0",
+          "timestamp": "2026-09-09T15:58:39+02:00",
+          "tree_id": "634fecbf4bb35acf7ebd8db7434cea2872ccce3b",
+          "url": "https://github.com/fallow-rs/fallow/commit/8b875bdf06105317ab1b94c4493cf639c9e4839b"
+        },
+        "date": 1788962727351,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
