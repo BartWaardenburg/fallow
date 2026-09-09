@@ -1,57 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788937202500,
+  "lastUpdate": 1788949384382,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Module Coupling": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "be0b5d7b4e51e2cee2d959f22e7f2e71cfa447c9",
-          "message": "fix(extract): record Astro and MDX member-expression tags as member accesses\n\n## What was broken\n\n#2348 taught the JSX visitor to record member-expression tags (`<SC.Wrapper />`) as member accesses, but two template pipelines never reached that visitor:\n\n- **Astro**: the markup scan credited only the tag root, so `<SC.Card />` kept `SC` alive as an import binding while the `SC.Card` access was never recorded. An entry-point `.astro` page with a namespace import still reported every export of the namespace target as unused (the pre-#2348 false-positive shape), and a non-entry `.astro` component fell back to crediting every export.\n- **MDX**: the extractor parsed only `import` / `export` lines, so JSX member tags in the prose body were invisible to usage crediting entirely.\n\n## Root cause\n\n`narrow_namespace_references` reads `ResolvedModule.member_accesses`, which the graph copies verbatim from `ModuleInfo.member_accesses`. Neither `parse_astro_to_module` nor `parse_mdx_to_module` ever populated it from markup, so the namespace binding arrived with an empty accessed-member list: entry consumers narrowed to nothing, non-entry consumers marked everything.\n\nNarrowing is only sound on a complete access stream, and a text scanner of a template cannot promise completeness shape by shape. Earlier revisions recorded dotted tags alone, then added the expression regions, then a structural guard over the template; review of that revision found two remaining gaps: the guard did not cover the script side (a namespace passed bare in the Astro frontmatter or on an MDX statement line still narrowed), and MDX prose recorded dotted chains for any root, so a documentation sentence naming `process.env.API_KEY` turned the MDX module into a secret source for `fallow security`. This revision closes both.\n\n## The fix\n\nThe guarantee, for Astro and MDX consumers: **a namespace import (or a CSS module default import, the other binding whose exports the graph narrows by member access) narrows only when every mention of the binding in the whole file was structurally understood; otherwise every export is credited.** Structurally understood means: in Astro markup a component tag root or a parsed `{ ... }` expression region; in MDX a prose line outside code; in the Astro frontmatter or on an MDX `import` / `export` line a static dotted access whose `(root, member)` pair the visitor recorded, or a JSX tag root.\n\n- `crates/extract/src/template_expression_scan.rs`\n  - `record_unexplained_mentions` (template side, unchanged): every identifier-boundary mention of an import binding outside the byte spans the structured template passes classified records a whole-object use.\n  - `record_unexplained_script_mentions` (new, script side): the visitor records a bare identifier as a whole-object use only for an allow-list of positions (spread, `Object.keys(NS)`, `for ... in`, computed non-string access, rest destructuring), so an alias (`const N = NS`), a cast (`NS as T`), a call argument (`pick(NS)`), `Object.assign({}, NS)`, an array literal (`[NS]`), a props object (`{ all: NS }`), `export const all = NS`, or a JSX attribute on a statement line (`<Callout all={NS} />`) left no trace. The guard walks the raw script text, skips the import declaration spans, and explains a mention only by a recorded static dotted access or a JSX tag root; everything else records a whole-object use. Set membership against the visitor's recorded pairs (instead of a mention count) keeps it independent of how many times one access is recorded and of the deduplication applied to template accesses. `narrowable_import_locals` scopes this guard to namespace imports and CSS-module default imports, so a class or enum named in a frontmatter type annotation or `new` expression keeps the visitor's member crediting (the markup guard still covers every import binding, as before).\n  - `scan_template_usage` in MDX prose mode records a dotted chain only when its root is an import local of the file. Every crediting consumer (namespace, CSS module, enum and class member) is keyed by import locals, so nothing is lost; the security secret-source index, which also reads member accesses, no longer sees `process.env.X` / `import.meta.env.X` pairs spelled in prose.\n- `crates/extract/src/astro.rs`: `extend_unexplained_frontmatter_mentions` runs the script guard over the frontmatter body after the template passes.\n- `crates/extract/src/mdx.rs`: the statement lines are kept with their source offsets and `collect_unexplained_statement_mentions` runs the script guard over them after the prose scan.\n- `crates/extract/src/visitor/mod.rs`: `extend_whole_object_uses` skips names already present, so the region pass, the template guard, and the script guard cannot grow duplicates in the persisted record.\n\n## Behavior change\n\n- A namespace import in a non-entry Astro or MDX consumer whose every mention is a dotted tag, a parsed expression, or a recorded dotted script access narrows to the members actually accessed (the same widening #2348 introduced for `.tsx`), so genuinely unused siblings surface. Every other mention keeps mark-all crediting: a `define:vars` or `set:html` directive on a `<style>` / `<script>` tag, an HTML comment, text content, an attribute string, an expression the parser rejects, an MDX fenced code block or inline code span, a template literal inside an MDX expression, and a script-side alias, cast, call argument, `Object.assign`, array or object literal element, or JSX attribute value. Mark-all can hide an unused sibling; it never reports a used one.\n- Entry-point pages follow the same rule: a dotted-only namespace narrows (the rendered members are credited, the rest report), and an unexplained mention credits every export.\n- Astro expression accesses reach the consumers that already read frontmatter accesses (CSS module default-import narrowing, enum and class member crediting), matching `.tsx`. The markup guard covers those bindings too: an enum or class mentioned in an HTML comment, text content, or an attribute string of an Astro or MDX template credits every member (the `.tsx` visitor would not). The script guard does not cover them, so class and enum member crediting on the frontmatter and statement side stays at `.tsx` parity.\n- MDX prose records dotted chains only for import locals, so `fallow security` no longer reports a `client-server-leak` for a `\"use client\"` file importing an MDX document whose prose mentions `process.env.API_KEY`.\n\n## Cache invalidation\n\n- `CACHE_VERSION` 274 -> 276 (`crates/extract/src/cache/types.rs`)\n- `GRAPH_CACHE_VERSION` 36 -> 38 (`crates/graph/src/cache/mod.rs`)\n\nRebased onto `main` after #2356 took 274 / 36 and again after #2357 took 275 / 37, so the final values are 276 / 38. Warm-cache proof (executed at the first rebase, before the second bump) on a copy of the fixture: the `main` binary (274 / 36) ran cold and wrote `.fallow/`, the rebased binary (275 / 37) on that cache reported the fixed set, a second warm run and a fresh `--no-cache` run were identical after dropping `analysis_run_id` / `elapsed_ms`.\n\n| run | unused exports |\n|---|---|\n| `main` cold and warm | every export of the entry pages' namespaces (65 findings, incl. `UsedStyle`, `Layout`, `UsedBlock`, and all `ea-*` / `em-*` shape members) |\n| rebased warm 1, warm 2, cold | `ActuallyUnusedStyle, UnusedSibling, UnusedMdBlock, UnusedDocSibling, AttrUnused, CallUnused, MdAttrUnused, MdCallUnused, MdMultiUnused` plus the four `DottedUnused` precision rows and the seven exports the two `script-shapes.mdx` documents declare themselves (`all`, `Demo`, `moon`, `default`; reported by `main` too), 20 findings |\n\n## How it was tested\n\n- Scan unit tests (`template_expression_scan.rs`): prose chains with a foreign root (`process.env.API_KEY`, `items.map`) record nothing while import-local roots still record; the script guard explains a mention only by a recorded dotted access or a tag root (alias, cast, call argument, `Object.assign`, literal element, property value, `export const all = NS`, JSX attribute, unrecorded `NS.Sun`, `NS?.Moon`, `NS[\"Moon\"]`, spread all keep mark-all; recorded `NS.Moon`, `NS.Star.Deep`, `<NS.Moon>`, `</NS.Moon>`, `outer.NS`, `NSX` do not); import declaration spans excluded in file coordinates; `narrowable_import_locals` covers namespace and CSS-module bindings only.\n- Astro unit test: alias, cast, call argument, `Object.assign`, array literal, props object, and a CSS module passed in an object each record one whole-object use; a dotted-only frontmatter use records none; a class in a type annotation and `new` expression is not guarded; `Object.keys(AL)` next to `const N = AL` records `AL` once.\n- MDX unit tests: `export const all = NS`, `<Callout all={NS} />` on an exported component, and a default-export layout each record a whole-object use while a dotted-only statement use stays precise; an unfenced prose `process.env.API_KEY` records no member access.\n- Integration fixture `tests/fixtures/issue-2355-astro-mdx-member-tags`: `astro_and_mdx_script_mentions_keep_mark_all` pins the six frontmatter shapes and the three statement shapes for an entry page and a non-entry consumer of each kind (no `Star` / `Moon` / `Shielded` reported), plus a dotted-only namespace per consumer whose `DottedUnused` sibling must still report. Fixture `tests/fixtures/issue-2355-mdx-prose-env-mention`: `mdx_prose_env_mention_is_not_a_secret_source` runs `client-server-leak` on a `\"use client\"` page importing an MDX document with an unfenced env mention (no finding) next to a control client importing a module that really reads `process.env.API_KEY` (finding).\n- Mutation evidence: six targeted neutralisations at HEAD (prose root filter off, script guard off, dotted mention always explained, import span not excluded, named imports guarded, whole-object dedup removed) each fail the tests that pin that piece; with every round-4 source hunk reverted the two new integration tests fail and the earlier ones pass.\n- Reviewer fixtures from the previous round (alias, as-cast, call-arg, Object.assign, array literal, props pass, MDX statement whole / attr whole / default whole): zero unused-export findings with the fixed binary where the baseline had zero; the `.tsx` twins are unchanged (pre-existing visitor gap, tracked as a follow-up). Security probe (Next.js `\"use client\"` page importing an MDX with `Set process.env.API_KEY before running`): baseline 0, previous revision 1, fixed 0.\n- Real-world runs, baseline vs fixed, `dead-code` and `security` with `--no-cache --format json`: Starlight `docs/` (25 `.astro`, 289 `.mdx`), `packages/starlight` (61 `.astro`, 12 `.mdx`), and the Docusaurus website (1326 `.mdx`) produce identical normalized output. None of the trees uses a namespace import or a CSS module from `.astro` / `.mdx`, and no `\"use client\"` module imports an MDX document there, so there is nothing for the narrowing, the guards, or the prose root filter to move.\n- Gates on the rebased tree: `cargo fmt --check`, `cargo clippy --workspace --all-targets -D warnings`, `cargo test --workspace --lib --bins --tests --examples`, `cargo check --workspace --benches`, `cargo doc` with `-D warnings`, `typos`, hidden-unicode scan, comment-quality check.\n\n## Known, deferred\n\n- `push_member_tag_accesses` is a third text-side dotted-chain splitter next to `glimmer::emit_chain_member_accesses` and the Vue/Svelte dotted-tag path; same per-hop semantics, left for a separate consolidation.\n- Pre-existing, to be filed as follow-ups: in `.ts` / `.tsx` a namespace passed whole through a JSX attribute, a plain call argument, or an assignment (`const N = NS`) is not a whole-object use in the visitor, so the namespace narrows to its dotted accesses (the Astro and MDX guards now cover those shapes on the template and script side); an MDX prose line that starts with `import ` or `export ` is classified as a statement and breaks the import parse of the file.\n\nFixes #2355",
-          "timestamp": "2026-08-22T15:09:03+02:00",
-          "tree_id": "927eccb97a6701dee89af76b0ad15d34d10d95d9",
-          "url": "https://github.com/fallow-rs/fallow/commit/be0b5d7b4e51e2cee2d959f22e7f2e71cfa447c9"
-        },
-        "date": 1787404328346,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Max Fan-In (non-framework)",
-            "value": 47,
-            "unit": "deps"
-          },
-          {
-            "name": "Max Fan-Out (non-framework)",
-            "value": 28,
-            "unit": "deps"
-          },
-          {
-            "name": "Modules >20 Fan-In (%)",
-            "value": 1.32,
-            "unit": "%"
-          },
-          {
-            "name": "Total Modules",
-            "value": 456,
-            "unit": "count"
-          },
-          {
-            "name": "Total Edges",
-            "value": 1237,
-            "unit": "count"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4874,6 +4825,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/c716033fb8a61549d7b801a97bbcbd7cac643038"
         },
         "date": 1788937199139,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Max Fan-In (non-framework)",
+            "value": 54,
+            "unit": "deps"
+          },
+          {
+            "name": "Max Fan-Out (non-framework)",
+            "value": 29,
+            "unit": "deps"
+          },
+          {
+            "name": "Modules >20 Fan-In (%)",
+            "value": 1.26,
+            "unit": "%"
+          },
+          {
+            "name": "Total Modules",
+            "value": 476,
+            "unit": "count"
+          },
+          {
+            "name": "Total Edges",
+            "value": 1302,
+            "unit": "count"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "85615b646a1adb45a30bf24a45ffa55dfa088737",
+          "message": "fix(dupes): fall back to content when the fingerprint cannot be trusted\n\nAdding ctime to the extract fingerprint closed a real staleness bug, but the\nduplication token cache reacted to a missing ctime by returning nothing rather\nthan by falling back. ctime is always absent on Windows, so that cache never\nhit there: correct results, and a permanently cold cache on an entire platform.\nThe release validation caught it; a reviewer had noted the behaviour earlier as\na clean miss, which is true and was too light a reading.\n\nIt now takes the same fast-path and slow-path split the extract cache already\nhad. When the timestamps can be trusted, an exact match or a miss, unchanged.\nWhen they cannot, read the file and compare content hashes against the source\nthe entry already stores, so no cache version moves.\n\nThe invariant the ctime work exists to protect survives, because the fallback\ntrusts bytes rather than metadata: a size-preserving edit with a restored mtime\nstill misses, on every platform. The new tests build a fingerprint without a\nctime directly, so a macOS run proves the Windows path rather than skipping it.\n\nThe graph cache was checked and is unaffected: it keys on content hashes and\ndeliberately avoids ctime, since cp -Rp and CI cache restores preserve mtime\nbut reset it.",
+          "timestamp": "2026-09-09T12:16:58+02:00",
+          "tree_id": "58042834076bade476e9312b54f764a1dd71f3f8",
+          "url": "https://github.com/fallow-rs/fallow/commit/85615b646a1adb45a30bf24a45ffa55dfa088737"
+        },
+        "date": 1788949379505,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
