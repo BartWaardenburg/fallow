@@ -334,18 +334,28 @@ jobs:
         if: contains(matrix.target, 'aarch64-unknown-linux')
         run: |
           apt_get="apt-get"
+          sed_i="sed -i"
           if command -v sudo >/dev/null 2>&1; then
             apt_get="sudo apt-get"
+            sed_i="sudo sed -i"
           fi
           # The gnu leg runs in the pinned bullseye container, which the
-          # published linux-gnu binaries take their glibc floor from. Debian 11
-          # has left LTS, so bullseye-security now serves an InRelease whose
-          # Valid-Until has passed and `apt-get update` exits 100 on it. A
-          # frozen suite carries no freshness information to enforce, so the
-          # retry drops that one check and nothing else: the archive signature
-          # is still verified, and the first attempt keeps full enforcement for
-          # every case where the archives are current.
-          $apt_get update || $apt_get -o Acquire::Check-Valid-Until=false update
+          # published linux-gnu binaries take their glibc floor from, so the
+          # container stays. Debian 11 has left LTS and bullseye-security now
+          # serves an InRelease whose Valid-Until has passed, which makes
+          # `apt-get update` exit 100. Exempt that one frozen suite from the
+          # freshness check rather than the whole run: bullseye main, where
+          # gcc-aarch64-linux-gnu is actually fetched from, keeps replay
+          # protection, and every archive signature is still verified. Refuse
+          # to continue if the exemption did not apply, so a future sources
+          # format cannot degrade this into a silent skip. The musl leg runs on
+          # the runner rather than in the container and matches nothing here.
+          if [ -f /etc/apt/sources.list ] && grep -q 'deb.debian.org/debian-security' /etc/apt/sources.list; then
+            $sed_i 's|^deb http://deb.debian.org/debian-security|deb [check-valid-until=no] http://deb.debian.org/debian-security|' /etc/apt/sources.list
+            grep -q 'check-valid-until=no' /etc/apt/sources.list \
+              || { echo "could not scope the freshness exemption to bullseye-security"; exit 1; }
+          fi
+          $apt_get update
           $apt_get install -y gcc-aarch64-linux-gnu
 
       # fallow-mcp pulls rquickjs (QuickJS, a C library). On aarch64-musl the
