@@ -11,6 +11,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The MCP server can read runtime coverage from fallow cloud.** A new
+  `get_cloud_runtime_context` tool pulls a repository's runtime facts from
+  fallow cloud and returns them as the same `runtime_coverage` block the
+  local runtime-coverage tools return, so an agent reads one shape whether the
+  evidence came from a V8 dump on disk or from production. It is backed by
+  `fallow coverage analyze --cloud`, which joins the cloud answer against the
+  static analysis of the checkout at `root`; `repo` is required, and
+  `project_id`, `period_days`, `environment`, and `commit_sha` narrow what the
+  cloud returns, alongside the familiar `production`, `top`, and
+  `min_invocations_hot`. The API key is read from `FALLOW_API_KEY` in the
+  server's environment and is never a call argument: a call made without one
+  is refused before anything runs, with `code: "cloud_api_key_missing"` and
+  the same remediation sentence the CLI prints. This is the only fallow MCP
+  tool that makes a network call. Per-parameter detail is in the
+  `fallow://tools/get_cloud_runtime_context` guide.
+
 - **`fallow trace --path <FROM> <TO>` reports how one module reaches
   another.** The symbol positional is now optional and mutually exclusive with
   `--path`, which walks the import graph and returns the shortest chain of

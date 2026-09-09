@@ -85,11 +85,40 @@ const CHECK_HEALTH_SECTIONS: &[ToolGuideSection] = &[
     },
 ];
 
+const GET_CLOUD_RUNTIME_CONTEXT_SECTIONS: &[ToolGuideSection] = &[
+    ToolGuideSection {
+        topic: "FALLOW_API_KEY",
+        summary: "Where the key comes from and what an absent one returns.",
+        detail: r#"The key is read from `FALLOW_API_KEY` in the environment of the MCP server process, so it is configured once where the server is launched and never travels in a tool call. A key set to whitespace counts as absent. A call made without one is refused before any subprocess starts, with `isError`, and a body carrying `error: true`, `exit_code: 2`, `code: "cloud_api_key_missing"`, and the same remediation sentence the CLI prints for `coverage analyze --cloud`. Restarting the server is what picks up a newly exported variable; nothing rereads it per call. The refusal is not a fallback signal to retry with different parameters: without a key this tool can answer nothing, and the local `check_runtime_coverage` with a `coverage` path is the alternative."#,
+    },
+    ToolGuideSection {
+        topic: "root",
+        summary: "Why the checkout matters as much as the repository name.",
+        detail: r"The cloud returns functions by file path and name, and those are joined against the static analysis of the project at `root` before anything is reported. A cloud function that no longer matches a definition in the checkout is dropped from the merge rather than reported, and counted in a `cloud_functions_unmatched` warning, so pointing `root` at an unrelated project, or at a checkout many commits away from what production runs, quietly empties the findings instead of failing. Pin `commit_sha` to the deployed revision, or check out that revision, when the answer has to line up with a specific deployment.",
+    },
+    ToolGuideSection {
+        topic: "period_days",
+        summary: "What the observation window changes, and its bounds.",
+        detail: r#"`period_days` selects how far back the cloud aggregates runtime observations, from 1 to 90, defaulting to 30. A value outside that range is refused locally with `code: "cloud_period_out_of_range"` rather than spending a round trip. The window is the denominator of the whole answer: a short window makes rarely-exercised code look never-called, which is the failure mode this tool has to be read carefully for, while a long window blends several deployments together. `summary.deployments_seen` and `summary.last_received_at` say what the window actually contained."#,
+    },
+    ToolGuideSection {
+        topic: "runtime_coverage.warnings",
+        summary: "The codes that explain a thin or surprising answer.",
+        detail: r"`no_runtime_data` means the cloud holds no observations for the selection at all, which is a configuration answer (wrong repository, wrong environment, no beacon reporting) and not evidence that the code is cold. `cloud_functions_unmatched` counts functions the cloud reported that the checkout no longer has, and is the signal that the two sides are on different revisions. Codes prefixed `cloud_warning_` are passed through from the cloud unchanged. Read these before acting on an empty or near-empty `findings` array.",
+    },
+];
+
 /// Every tool with a long-form guide, in catalogue order.
-pub const TOOL_GUIDES: &[ToolGuide] = &[ToolGuide {
-    tool: "check_health",
-    sections: CHECK_HEALTH_SECTIONS,
-}];
+pub const TOOL_GUIDES: &[ToolGuide] = &[
+    ToolGuide {
+        tool: "check_health",
+        sections: CHECK_HEALTH_SECTIONS,
+    },
+    ToolGuide {
+        tool: "get_cloud_runtime_context",
+        sections: GET_CLOUD_RUNTIME_CONTEXT_SECTIONS,
+    },
+];
 
 /// The guide for one wire tool name, if it has one.
 #[must_use]

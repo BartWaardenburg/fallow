@@ -4,12 +4,13 @@ use crate::tools::{
     build_check_changed_args, build_check_runtime_coverage_args, build_explain_args,
     build_feature_flags_args, build_find_dupes_args, build_find_similar_code_args,
     build_fix_apply_args, build_fix_preview_args, build_get_blast_radius_args,
-    build_get_cleanup_candidates_args, build_get_hot_paths_args, build_get_importance_args,
-    build_get_token_blast_radius_args, build_guard_args, build_health_args, build_impact_all_args,
-    build_impact_args, build_impact_closure_args, build_inspect_similar_code_args,
-    build_list_boundaries_args, build_list_suppressions_args, build_project_info_args,
-    build_security_candidates_args, build_trace_clone_args, build_trace_dependency_args,
-    build_trace_export_args, build_trace_file_args, parse_candidate_snapshot,
+    build_get_cleanup_candidates_args, build_get_cloud_runtime_context_args,
+    build_get_hot_paths_args, build_get_importance_args, build_get_token_blast_radius_args,
+    build_guard_args, build_health_args, build_impact_all_args, build_impact_args,
+    build_impact_closure_args, build_inspect_similar_code_args, build_list_boundaries_args,
+    build_list_suppressions_args, build_project_info_args, build_security_candidates_args,
+    build_trace_clone_args, build_trace_dependency_args, build_trace_export_args,
+    build_trace_file_args, parse_candidate_snapshot,
 };
 
 /// Parse a validation error body into its `message` field. Arg builders emit
@@ -2302,6 +2303,126 @@ fn runtime_context_split_tools_share_runtime_coverage_pipeline() {
     assert_eq!(build_get_blast_radius_args(&params), expected);
     assert_eq!(build_get_importance_args(&params), expected);
     assert_eq!(build_get_cleanup_candidates_args(&params), expected);
+}
+
+fn cloud_runtime_context(repo: &str) -> CloudRuntimeContextParams {
+    CloudRuntimeContextParams {
+        repo: repo.to_string(),
+        ..CloudRuntimeContextParams::default()
+    }
+}
+
+/// The refusal has to happen here, before a subprocess exists: the CLI would
+/// otherwise run a full static analysis of the project only to discover that
+/// it has nothing to join it against.
+#[test]
+fn get_cloud_runtime_context_without_a_key_refuses_before_building_args() {
+    let err = build_get_cloud_runtime_context_args(&cloud_runtime_context("acme/web"), false)
+        .expect_err("a missing key must refuse the call");
+    let body: serde_json::Value = serde_json::from_str(&err).expect("refusal is JSON");
+    assert_eq!(body["error"].as_bool(), Some(true));
+    assert_eq!(body["exit_code"].as_i64(), Some(2));
+    assert_eq!(body["code"].as_str(), Some("cloud_api_key_missing"));
+    assert_eq!(
+        body["message"].as_str(),
+        Some(fallow_types::cloud::CLOUD_API_KEY_MISSING_MESSAGE),
+        "the MCP refusal must read exactly as the CLI's does"
+    );
+}
+
+#[test]
+fn get_cloud_runtime_context_minimal_emits_the_cloud_pull() {
+    let args = build_get_cloud_runtime_context_args(&cloud_runtime_context("acme/web"), true)
+        .expect("a repo plus a key is enough");
+    assert_eq!(args[0], "coverage");
+    assert_eq!(args[1], "analyze");
+    assert!(args.contains(&"--cloud".to_string()));
+    assert!(args.windows(2).any(|pair| pair == ["--repo", "acme/web"]));
+    assert!(!args.contains(&"--coverage-period".to_string()));
+    assert!(!args.contains(&"--project-id".to_string()));
+    assert!(!args.contains(&"--environment".to_string()));
+    assert!(!args.contains(&"--commit-sha".to_string()));
+    assert!(
+        !args.contains(&"--runtime-coverage".to_string()),
+        "the cloud pull must never select a local artifact too: {args:?}"
+    );
+}
+
+#[test]
+fn get_cloud_runtime_context_forwards_every_selector() {
+    let params = CloudRuntimeContextParams {
+        repo: "  acme/web  ".to_string(),
+        project_id: Some("apps/dashboard".to_string()),
+        period_days: Some(7),
+        environment: Some("production".to_string()),
+        commit_sha: Some("abc123".to_string()),
+        root: Some("/my/project".to_string()),
+        config: Some(".fallowrc.json".to_string()),
+        allow_remote_extends: None,
+        production: Some(true),
+        min_invocations_hot: Some(500),
+        top: Some(10),
+        no_cache: Some(true),
+        threads: Some(8),
+        max_output_bytes: None,
+    };
+    let args = build_get_cloud_runtime_context_args(&params, true).expect("selectors are valid");
+    assert!(
+        args.windows(2).any(|pair| pair == ["--repo", "acme/web"]),
+        "a padded repo must reach the cloud trimmed: {args:?}"
+    );
+    for pair in [
+        ["--project-id", "apps/dashboard"],
+        ["--coverage-period", "7"],
+        ["--environment", "production"],
+        ["--commit-sha", "abc123"],
+        ["--min-invocations-hot", "500"],
+        ["--top", "10"],
+        ["--root", "/my/project"],
+        ["--config", ".fallowrc.json"],
+        ["--threads", "8"],
+    ] {
+        assert!(
+            args.windows(2).any(|window| window == pair),
+            "expected {pair:?} in {args:?}"
+        );
+    }
+    assert!(args.contains(&"--production".to_string()));
+    assert!(args.contains(&"--no-cache".to_string()));
+}
+
+#[test]
+fn get_cloud_runtime_context_rejects_an_empty_repo_and_an_unservable_window() {
+    let empty = build_get_cloud_runtime_context_args(&cloud_runtime_context("   "), true)
+        .expect_err("an empty repo must refuse");
+    assert_eq!(
+        parse_typed_validation_code(&empty).as_deref(),
+        Some("cloud_repo_missing")
+    );
+
+    let mut params = cloud_runtime_context("acme/web");
+    params.period_days = Some(91);
+    let too_wide = build_get_cloud_runtime_context_args(&params, true)
+        .expect_err("a window the cloud does not serve must refuse");
+    assert_eq!(
+        parse_typed_validation_code(&too_wide).as_deref(),
+        Some("cloud_period_out_of_range")
+    );
+
+    params.period_days = Some(0);
+    let zero = build_get_cloud_runtime_context_args(&params, true)
+        .expect_err("a zero-day window must refuse");
+    assert_eq!(
+        parse_typed_validation_code(&zero).as_deref(),
+        Some("cloud_period_out_of_range")
+    );
+}
+
+/// The `code` field of a typed refusal body, for tests that care which
+/// refusal fired rather than what its prose says.
+fn parse_typed_validation_code(err: &str) -> Option<String> {
+    let body: serde_json::Value = serde_json::from_str(err).ok()?;
+    body["code"].as_str().map(str::to_string)
 }
 
 #[test]

@@ -1389,6 +1389,62 @@ pub struct CheckRuntimeCoverageParams {
     pub max_output_bytes: Option<usize>,
 }
 
+/// Parameters for `get_cloud_runtime_context`, the cloud-backed sibling of
+/// `check_runtime_coverage`. There is no `coverage` path because the runtime
+/// facts come from fallow cloud, and no API-key field because the key is read
+/// from `FALLOW_API_KEY` in the server environment rather than crossing the
+/// wire on every call.
+#[derive(Default, Deserialize, JsonSchema)]
+pub struct CloudRuntimeContextParams {
+    /// Repository fallow cloud holds runtime facts for, as `owner/repo`.
+    /// Required.
+    pub repo: String,
+
+    /// Project disambiguator when one repository reports several projects.
+    pub project_id: Option<String>,
+
+    /// Runtime observation window in days, 1 to 90. Inherits the CLI default
+    /// (30) when omitted.
+    pub period_days: Option<u16>,
+
+    /// Runtime environment filter, for example `production`.
+    pub environment: Option<String>,
+
+    /// Commit SHA filter for the runtime facts the cloud returns.
+    pub commit_sha: Option<String>,
+
+    /// Project root; defaults to the working directory. It must be a checkout
+    /// of `repo`: cloud functions are joined against its static analysis.
+    pub root: Option<String>,
+
+    /// Path to a fallow config file.
+    pub config: Option<String>,
+
+    /// Allow trusted HTTPS config `extends` for this request. Defaults to false
+    /// and never grants process-global trust.
+    pub allow_remote_extends: Option<bool>,
+
+    /// Only analyze production code (excludes tests, stories, dev files).
+    pub production: Option<bool>,
+
+    /// Minimum invocation count for a function to be classified as a hot
+    /// path. Inherits the CLI default (100) when omitted.
+    pub min_invocations_hot: Option<u64>,
+
+    /// Show only the top N runtime findings and hot paths.
+    pub top: Option<usize>,
+
+    /// Disable the incremental parse cache.
+    pub no_cache: Option<bool>,
+
+    /// Parser thread count; defaults to CPU cores.
+    pub threads: Option<usize>,
+
+    /// Byte cap for this call's response. Lowers the 16 MiB default; over it
+    /// the call is REFUSED (`isError`, `exit_code: 2`) with only a preview.
+    pub max_output_bytes: Option<usize>,
+}
+
 #[derive(Default, Deserialize, JsonSchema)]
 pub struct AuditParams {
     /// Project root; defaults to the working directory.

@@ -8,6 +8,7 @@ use std::time::Instant;
 use fallow_config::OutputFormat;
 use fallow_cov_protocol::function_identity_id;
 use fallow_engine::changed_files::clear_ambient_git_env;
+use fallow_types::cloud::CLOUD_API_KEY_MISSING_MESSAGE;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::coverage::RunContext;
@@ -353,9 +354,7 @@ fn resolve_api_key(explicit: Option<&str>) -> Result<String, CloudError> {
             return Ok(trimmed.to_owned());
         }
     }
-    Err(CloudError::Auth(
-        "Cloud runtime coverage requires an API key.\n\nSet FALLOW_API_KEY or pass --api-key:\n\n  FALLOW_API_KEY=fallow_live_... fallow coverage analyze --cloud --repo owner/repo".to_owned(),
-    ))
+    Err(CloudError::Auth(CLOUD_API_KEY_MISSING_MESSAGE.to_owned()))
 }
 
 fn resolve_repo(explicit: Option<&str>, root: &Path) -> Result<String, CloudError> {

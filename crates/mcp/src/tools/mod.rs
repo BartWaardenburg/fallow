@@ -3,6 +3,7 @@ mod api_runtime;
 mod audit;
 mod check_changed;
 mod check_runtime_coverage;
+mod cloud_runtime_context;
 mod code_mode;
 #[cfg(test)]
 mod coverage_fixture;
@@ -36,6 +37,9 @@ pub use check_runtime_coverage::{
     run_check_runtime_coverage, run_get_blast_radius, run_get_cleanup_candidates,
     run_get_hot_paths, run_get_importance, run_get_token_blast_radius,
 };
+#[cfg(test)]
+pub use cloud_runtime_context::build_get_cloud_runtime_context_args;
+pub use cloud_runtime_context::run_get_cloud_runtime_context;
 #[cfg(test)]
 pub use code_mode::code_mode_subprocess_aliases;
 pub use code_mode::execute_code_mode;

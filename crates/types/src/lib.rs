@@ -20,6 +20,9 @@ pub mod audit_cache;
 pub mod cache_rejection;
 /// Shared churn output contracts.
 pub mod churn;
+/// Cross-surface strings for the cloud runtime-coverage path, shared by the
+/// CLI's `coverage analyze --cloud` and the MCP cloud runtime-context tool.
+pub mod cloud;
 /// File discovery types: discovered files, file IDs, and entry points.
 pub mod discover;
 /// Shared duplicate-code output contracts.
