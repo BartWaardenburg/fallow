@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788937265465,
+  "lastUpdate": 1788949281045,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "bfeee75e2d04e637a1bab843241eb988ebbe1f42",
-          "message": "fix(extract): credit ambient-module star re-exports without a file-level surface\n\n## What was broken\n\n`declare module 'pkg' { export * from './impl' }` (and the `export * as ns from './impl'` form) was still recorded as a file-level star re-export of the declaring file. Two shapes went wrong, both surfaced in the panel review of #2351:\n\n- When the declaring `.d.ts` was an entry point (a `package.json` `types` declaration), every export of `./impl` was laundered into that entry's public surface: `inspect --file src/ambient.d.ts` listed a `*` re-export edge the file does not have, and a genuinely unused `export const helperA` in `./impl` was credited through it.\n- When the declaring file was a reachable non-entry module (a `.ts` file carrying the augmentation), nothing in `./impl` was credited at all, so its exports were reported as unused even though the ambient declaration states that all of them are reachable through `pkg`.\n\nSeparately, `declare module 'shim' { export * from 'some-dep' }` counted as runtime usage of `some-dep`, while the named form (`export { A } from 'some-dep'`) has counted as type-only usage since #2349. The classification was undecided and untested.\n\nReview of the earlier versions of this change found defects in the credit shape, all reproduced with executed fixtures and fixed here:\n\n- The whole-module import credited the target only in the type namespace, so a value export sharing its name with a type (`interface User` plus `const User`, zod-style `const User` plus `type User`) lost its value credit.\n- Plain `export *` inside an ambient body credited the target's `export default`, which ES star re-exports never forward.\n- The both-namespace credit was then applied to every type-only import without a binding, so the named ambient form from #2349, explicitly type-only ambient re-exports (`export type { X } from`, `export { type X } from`), and `import('./impl').X` type references in TypeScript and JSDoc stopped reporting the value half of such a pair, a behaviour change outside the star forms.\n- The ambient star chain followed the target's `export *` sources but not its `export * as sub` sources, so an entry-point ambient `.d.ts` pointing at a barrel with `export * as sub from './sub'` newly reported every export of `sub.ts` (main credited them through laundering), and the non-entry shim variant stayed a false positive.\n\n## Root cause\n\n`visit_export_all_declaration` had no ambient-module guard: it pushed a `ReExportInfo` regardless of `ambient_module_depth`, so the graph built a `ReExportEdge` on the declaring module and routed the target's exports through entry-point star propagation (laundering) or through per-name consumer propagation (nothing credited, because an ambient body never imports a name).\n\nIn the graph, `desired_import_namespaces` restricts every `is_type_only` import to type space, which is right for every type-only form except the ambient star: the star forwards every export in both meanings. The namespace re-export phase (`propagate_namespace_re_exports`) credits every export of an `export * as sub` source only when the barrel is an entry point, and the star-chain seed only followed plain `export *` edges, so the `sub` namespace behind an ambient target was never treated as exposed.\n\n## The fix\n\nEarliest incorrect layer is extraction. Inside an ambient body, `export *` and `export * as ns` now record one type-space `ImportedName::Namespace` import with an empty local name and push no `ReExportInfo`. `export * as ns` additionally records one type-space `ImportedName::Default` import with the same span, because the namespace object it forwards exposes `ns.default`. `export type *` inside the body keeps the pre-existing file-level type-only star re-export: the whole-module shape carries no type modifier. A side-effect edge was deliberately not used: it carries no symbol and would have dropped the credit for every target export.\n\nIn the graph, `ImportedSymbol::is_ambient_star` names exactly that shape (type-only, no local binding, `Namespace` or `Default`). `desired_import_namespaces` credits both the type and the value namespace for it and for nothing else, so `import type { x }`, the ambient named form, explicitly type-only ambient re-exports, and `import()` type references keep their type-space credit exactly as on main. The empty-local-name namespace branch of `attach_symbol_reference` routes the ambient star to `mark_star_surface_referenced_at_site`, which skips `ExportName::Default`; runtime whole-module edges (dynamic-import patterns) keep the full `mark_all_exports_referenced_at_site` and behave exactly as on main.\n\n`ModuleGraph::collect_ambient_star_targets` computes the closure of modules an ambient star reaches through the target's own `export *` and `export * as sub` chains. Star propagation treats every member like an entry barrel for its `export *` sources (named exports in both namespaces, never `default`), and the namespace re-export phase treats every member as exposing its `export * as sub` sources, crediting every export of `sub`, `default` included, because `sub.default` is reachable. The entry-point closure and dynamic-import pattern targets are untouched.\n\nBare-specifier re-exports inside ambient bodies are type-only package usage for both the named and the star form (ambient bodies are erased at runtime). A production dependency referenced solely through such a re-export yields the existing type-only-dependency finding in `--production` mode.\n\n## Behavior change\n\n- Ambient star forms (`export *`, `export * as ns` inside `declare module '...'`) credit the target's full ES star surface in both namespaces without creating an export surface on the declaring file: every named export, including names reached through the target's `export *` and `export * as sub` chains, and every export (`default` included) of each such `sub` namespace. Plain `export *` never credits a `default` export (same as main); `export * as ns` does. Fewer unused-export findings for targets behind a non-entry ambient declaration and for `export * as sub` chains behind an entry-point ambient declaration; `inspect --file` and `dead-code --trace` no longer show a re-export edge on the declaring file.\n- An unreferenced `.ts` file whose only content is an ambient star declaration is now reported as an unused file, while its ambient star still credits the target's exports. On main the laundered star re-export edge kept such a shim off the unused-file list; the named ambient form from #2349 already reported this way, so the star form now matches it and the existing rule that references from an unreachable module never save a target's export.\n- Named and type-only ambient re-exports are unchanged from #2349, and `import()` type references in TypeScript and JSDoc are unchanged from main: the value half of a same-name type and value pair reached only that way keeps reporting.\n- `declare module 'x' { export * from 'some-dep' }` now classifies as type-only usage. A production dependency referenced only that way surfaces as a type-only-dependency finding in production mode (finding-count increase for that shape; `ignoreDependencies` or moving the package to `devDependencies` resolves it). Documented under Changed in the CHANGELOG.\n\n## Cache invalidation\n\n- extract `CACHE_VERSION` 274 -> 275: warm caches would replay the star `ReExportInfo` and the runtime classification of a bare-specifier ambient star.\n- `GRAPH_CACHE_VERSION` 36 -> 37: the persisted graph carries the old `ReExportEdge`, the laundered references, the runtime package usage, and type-lane-only credits; a graph-cache hit skips the build entirely.\n\nWhile this PR was in review, #2356 landed on main and took 274/36, the values this branch had chosen from 273/35. The branch is rebased onto current main and bumps past #2356; both doc comments name #2357 and state that #2356 took the previous values.\n\nWarm-cache proof on a scratch copy of the fixture sharing one `.fallow` directory: a binary built from current main (c3df8857e, cache versions 274/36) runs cold, writes `cache.bin` and `graph-cache.bin`, and reports the laundered and uncredited shapes; the rebased binary (275/37) on that warm cache reports exactly its own cold output, twice, with `inspect --file src/ambient-ns.d.ts` showing `export_count: 0` and `re_exports: []`, and production mode reporting `named-dep` and `star-dep` as type-only.\n\n## Known nit\n\n`ModuleGraph::collect_ambient_star_targets` is computed twice per graph build, once in Phase 2c (`propagate_namespace_re_exports`) and once in Phase 4 (`collect_entry_star_targets`). Each pass is linear in edges plus re-exports and returns an empty set on projects without an ambient star. Sharing one result needs the closure threaded through both phase signatures (the two call sites live in different build functions and the Phase 2c function has its own unit tests), so it is left as is here.\n\n## How it was tested\n\n- Extract-level tests: ambient `export *` records no file export, no `ReExportInfo`, and exactly one type-only `Namespace` import with an empty local name; `export * as ns` records that import plus one type-only `Default` import; `export type *` keeps the file-level type-only star re-export; ambient bare-specifier named and star re-exports are type-only imports of their package.\n- Graph unit tests: `desired_import_namespaces` returns both namespaces for the unbound type-only `Namespace` and `Default` symbols and type-only for an unbound `Named` symbol and for a bound type-only import; the ambient star credits `interface Foo` in type space and `const Foo` in value space and leaves `default` unreferenced; the extra default import credits `default`; an unbound named type-only import credits the interface half only; a non-entry ambient star into a barrel with `export * as sub` credits every export of `sub.ts` (`default` included) and the named exports of `sub.ts`'s own `export *` source, never that source's default.\n- Integration fixture `issue-2357-ambient-star-reexport` (seven tests): entry-point `ambient.d.ts` `export * from './impl'` where `impl.ts` is a star barrel with `export * as sub`; `ambient-ns.d.ts` `export * as impl`; reachable non-entry `shim.ts` whose target has `export * as shimSub`; `ambient-named.d.ts` `export { Pair }`; `ambient-typed.d.ts` with `export type { TypedPair }` and `export { type InlinePair }`; `import-type.ts` with a TS `import()` type and a JSDoc `@type {import()}`. Asserts: every name on the star surfaces is credited, both halves of the `Merged`, `DeepMerged`, `User`, and `SubPair` pairs keep their credit in their own namespace; the value halves of `Pair`, `TypedPair`, `InlinePair`, `ImportPair`, and `JsdocPair` keep reporting while their type halves are credited; the `impl.ts`, `impl-deep.ts`, and `sub-deep.ts` defaults keep reporting while the `ns-impl.ts`, `sub.ts`, `sub-nested.ts`, and `shim-sub.ts` defaults are credited; the three declaring files have empty `exports` and `re_exports`; `sub.ts` and `shim-sub.ts` exports carry namespace-import references from their barrels and `sub-deep.ts` carries the star-chain reference; `unusedSibling` and `namedSibling` keep reporting; production mode classifies `named-dep` and `star-dep` as type-only.\n- Mutation matrix: every test that pins new behaviour fails with the branch's non-test source hunks reverted to main; the tests that pin behaviour unchanged from main fail with only the last round's source hunks reverted and pass on main by design.\n- Review attack fixtures from all rounds re-run with the main and patched binaries: nested `export * as` chains behind an entry-point and a non-entry ambient star credit fully (main reported the `sub.ts` level on the non-entry shape and both deeper levels everywhere); the real-entry control, `import.meta.glob` barrels, bound `import type`, explicitly type-only ambient re-exports, `export type *`, and `import()` type references are identical to main; cycles through `export * as` terminate.\n- `dead-code --trace` on the fixture agrees with the findings: credited exports report their namespace-import or re-export reference, unused defaults and the value halves of the non-star pairs report no references.\n- Real-project smokes: `dead-code --format json` with the main and patched binaries on the in-repo `viz-frontend` and `editors/vscode`; normalized outputs identical.\n- Rebased onto main c3df8857e (#2356, #2358, #2359 and the Bun lock benchmark commit). The five conflicts (both cache constants, the integration test module list, the extract visitor tests, and extract-internals.md) were resolved by hand keeping both sides; `git range-diff` against the pre-rebase head differs only in the cache numbers, the #2356 context, and the placement of the #2357 entries after main's #2356 entries. The #2348, #2349, #2356 and #2357 integration fixtures all pass on the rebased head.\n- Gates: cargo fmt check, clippy workspace all-targets with warnings denied, full workspace test suite, bench check, cargo doc with warnings denied, typos, hidden-unicode scan, and comment-quality check, all green.\n\nFixes #2357",
-          "timestamp": "2026-08-22T15:02:35+02:00",
-          "tree_id": "e9e3eb60035a83893357d49e1052ef1c58d8bde8",
-          "url": "https://github.com/fallow-rs/fallow/commit/bfeee75e2d04e637a1bab843241eb988ebbe1f42"
-        },
-        "date": 1787404073275,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9737539,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 49209,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1203831,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8437,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8363,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "85615b646a1adb45a30bf24a45ffa55dfa088737",
+          "message": "fix(dupes): fall back to content when the fingerprint cannot be trusted\n\nAdding ctime to the extract fingerprint closed a real staleness bug, but the\nduplication token cache reacted to a missing ctime by returning nothing rather\nthan by falling back. ctime is always absent on Windows, so that cache never\nhit there: correct results, and a permanently cold cache on an entire platform.\nThe release validation caught it; a reviewer had noted the behaviour earlier as\na clean miss, which is true and was too light a reading.\n\nIt now takes the same fast-path and slow-path split the extract cache already\nhad. When the timestamps can be trusted, an exact match or a miss, unchanged.\nWhen they cannot, read the file and compare content hashes against the source\nthe entry already stores, so no cache version moves.\n\nThe invariant the ctime work exists to protect survives, because the fallback\ntrusts bytes rather than metadata: a size-preserving edit with a restored mtime\nstill misses, on every platform. The new tests build a fingerprint without a\nctime directly, so a macOS run proves the Windows path rather than skipping it.\n\nThe graph cache was checked and is unaffected: it keys on content hashes and\ndeliberately avoids ctime, since cp -Rp and CI cache restores preserve mtime\nbut reset it.",
+          "timestamp": "2026-09-09T12:16:58+02:00",
+          "tree_id": "58042834076bade476e9312b54f764a1dd71f3f8",
+          "url": "https://github.com/fallow-rs/fallow/commit/85615b646a1adb45a30bf24a45ffa55dfa088737"
+        },
+        "date": 1788949277852,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 9877086,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 50737,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1184962,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8405,
             "unit": "allocations"
           }
         ]
