@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788958718961,
+  "lastUpdate": 1788962745160,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "28b7be16fd895a1d937922b2ead2a77ad552aab2",
-          "message": "fix(extract): keep MDX prose lines that only look like statements out of the parser\n\n## What was broken\n\nAn MDX file whose prose contains a sentence opening with the word \"import\" or \"export\" lost **every** import of the file. The reproduction from the issue, an Astro page rendering\n\n```mdx\nimport * as NS from '../components/ns'\n\n<NS.Star />\n\nimport the thing and render <NS.Moon /> here.\n```\n\nreported `src/components/ns.ts` as an unused file (and therefore no unused export for its genuinely unused `Unused` sibling). The same shape hits any documentation line that starts with those words, including a paragraph that wraps onto a line beginning with \"export\" and a shell `export FOO=bar` outside a fenced block.\n\n## Root cause\n\n`is_statement_start` in `crates/extract/src/mdx.rs` accepted any trimmed line starting with `import ` / `import{` / `export ` / `export{`, so the prose sentence joined the statement lines. Those lines are concatenated into one buffer and parsed as a single program; oxc aborts on the first fatal error and returns an empty program (`panicked`), so nothing at all was extracted: no imports, no exports, no member accesses from the body.\n\n## The fix\n\nThree layers, all in `crates/extract/src/mdx.rs`.\n\n1. **Classification.** A candidate line is a statement when it carries a shape only a real statement has: a source clause, a brace specifier list (on the line or continued below), a star specifier, a string-literal side-effect import (`import './x'`), or, after `export`, a brace list, a star, or a declaration keyword (`const`, `let`, `var`, `function`, `class`, `async`, `default`, plus the TypeScript heads `type`, `interface`, `enum`, `namespace`, `declare`, `abstract`). The keyword itself still has to be followed by whitespace or `{`, so `important` is not a candidate. A source clause is a `from` bounded by whitespace on the left and followed by its specifier quote on the right, immediately or after whitespace, so `from './x'`, `from'./x'`, `from` + tab, a no-break space and a multi-space run all qualify, while a `from` inside a word (`fromage`, `from_the_api`) or inside a string does not. The TypeScript heads are recognised as statement shapes; the JSX source type the statement body is parsed with rejects them, so they are handled by the fallback below rather than surviving as statements.\n\n2. **Parse probe (false negatives).** The shape list is a fast path, not the definition of the language. A candidate line that opens with the keyword and matches nothing in the list is handed to the parser on its own, and a line that parses is a statement whatever its shape. That keeps heads no specifier pattern names out of prose: `import /* set up styles */ './global.css'`, `export /* keep */ const x = 1`, a top-level dynamic `import ('./x')`. A prose sentence cannot slip through, because a sentence does not parse. The probe costs one parse of one line, and only for a candidate the shape list does not recognise.\n\n3. **Parse fallback (false positives).** The scan collects statement *blocks* (an opening line plus the continuation lines a multi-line specifier list collected) instead of loose lines. When the parser rejects the assembled body, every block the parser also rejects on its own is demoted to prose and the remaining blocks are re-parsed. The retry only ever adds statements back: the rejected body was an empty program to begin with. Demotion is per block, so a multi-line specifier list is never split, and demoted lines are merged back into the prose list in source order.\n\nThe #2355 completeness guard is preserved: a demoted line goes through the prose scan like any other body line, so a namespace or CSS-module binding mentioned on it records a whole-object use and keeps its mark-all crediting instead of narrowing to the tags the scan happened to see.\n\n## Behavior change\n\n- MDX documents with such a line resolve their imports again: their targets leave the unused-file list, the members their bodies render are credited, and their genuinely unused siblings surface as unused exports.\n- The affected document's own exports are read too, so an `export const` nothing consumes now reports as an unused export on the `.mdx` file itself. Measured: a scratch Astro project whose `notes.mdx` carries `export const docsHelper` plus the prose line moves from `unused_files ['src/components/ns.ts']`, `unused_exports []` on the baseline binary to `unused_files []`, `unused_exports [('src/docs/notes.mdx', 'docsHelper')]` on the patched one.\n- A multi-line MDX declaration whose continuation line carries the word `from` inside a string (`summary: 'Written from scratch'`) is collected whole rather than cut one line short, so that declaration parses and its unconsumed export reports as well. Measured on a two-document scratch project: the baseline binary reports `unused_exports [('src/docs/tab.mdx', 'meta')]` and the patched one `[('src/docs/space.mdx', 'spaced'), ('src/docs/tab.mdx', 'meta')]`. The space form of that truncation predates this branch.\n- Duplication reads the same statement body, so clones inside an affected document, and the duplication share of its health score, now surface where the file previously tokenized to nothing. Measured: two MDX documents sharing a 25-key `export const meta` block under the prose line go from 0 clone groups / 0 tokens on the baseline binary to 1 group / 114 tokens / 83.9% on the patched one.\n- A TS-only `import type { X } from './x'` clause, which the JSX source type the MDX statement body is parsed with does not accept, used to take the whole file's imports with it. It now costs only itself. (Parsing MDX statements with a TS-aware source type is a separate question, filed as a follow-up.)\n- A line that parsed cleanly before still parses cleanly: a candidate is only sent to prose when it neither carries a statement shape nor parses as JavaScript on its own, and the block fallback only runs after a rejected parse. Verified over 6800 real `.mdx` files on this machine: the narrowed source clause changes the collected statement lines of zero of them, and the 31 distinct candidate lines the shape list rejects (shell `export VAR=value`, `export = contents;`, `import json, sys`, prose wraps) are all lines the parser rejects too, so all of them stay prose.\n\n## Cache invalidation\n\n- extract `CACHE_VERSION` 276 -> 277: warm caches hold the import-less module for every affected MDX file.\n- `GRAPH_CACHE_VERSION` 39 -> 40: unused-file and unused-export verdicts are read off the persisted graph, and the newly resolved imports are baked into it at graph build, so a warm graph cache would replay the false positive verbatim.\n- `DUPES_CACHE_VERSION` 10 -> 11: the duplication tokenizer reads MDX through `extract_mdx_statements`, so the classification change moves MDX token streams, and the token store is keyed only on `dupes-tokens-v{DUPES_CACHE_VERSION}` plus the file fingerprint.\n\nWarm-cache proof on the issue fixture: the `origin/main` binary (276 / 39) ran cold and wrote `.fallow/` reporting `commented.ts`, `lazy.ts`, `ns.ts` and `rejected.ts` as unused files with no unused exports; the patched binary on that same cache reported the fixed set (no unused files, `ns.ts:Unused`, `commented.mdx:docNote`, `commented.ts:commentedSetup`, `lazy.ts:Lazy`), and a second warm run was stable. The `.fallow/` directory was removed afterwards.\n\nWarm-cache proof for the token store, on a two-document fixture with `minCorpusSizeForTokenCache: 1` where one document carries a tab-separated `export` head: the baseline binary wrote a `dupes-tokens-v10` store and reported 0 clone groups / 114 tokens. Before the bump, the patched binary on that store still reported 0 groups / 114 tokens while a cold run reported 1 group / 171 tokens. After the bump the patched binary reports 1 group / 171 tokens with the v10 store still on disk, writes its own `dupes-tokens-v11`, and repeats that result on a second warm run.\n\n## How it was tested\n\n- **Unit tests** (`crates/extract/src/mdx.rs`): a classification table pinning real statement shapes and prose sentences; a whitespace table for the source clause (tab before and after `from`, a no-break space, a multi-space run, and negative cases where `from` is inside a word); the issue reproduction at module level (import survives, both body tags credited, namespace stays precise); the tab-separated default import resolving to an edge; the parse probe recovering the commented-keyword import, the commented-keyword export declaration and the spaced dynamic import, with every candidate shape a scan of real MDX corpora turns up pinned as prose; a `from` inside a string on a continuation line not ending the block, in both the tab and the space form; the fallback on a rejected single line (both imports survive, the mention on the demoted line keeps its namespace on mark-all, an unmentioned namespace stays precise); a rejected multi-line block demoted whole; a real multi-line import surviving a demoted sibling; the `import type` case; and the file's inline suppressions surviving the fallback re-parse.\n- **Integration fixture** `tests/fixtures/issue-2376-mdx-import-prose` (Astro entry page rendering three MDX documents): `mdx_import_prose_line_keeps_the_files_imports` pins that `ns.ts` is not an unused file, `Star` / `Moon` stay credited and `Unused` reports; `rejected_statement_block_is_demoted_and_keeps_mark_all` pins that the target behind a rejected line is used and that both its exports stay credited through the mark-all guard; `statement_shapes_without_a_specifier_pattern_keep_their_edges` pins that the commented side-effect import and the spaced dynamic import keep their targets off the unused-file list and that the multi-line export with `from` inside a string surfaces.\n- **Mutation matrix**: with the parse probe removed, the four probe tests fail plus the new integration test; with the source clause reverted to the round 1 character class, the string-`from` test fails plus the same integration test; with the fallback disabled, the five fallback tests fail plus `rejected_statement_block_is_demoted_and_keeps_mark_all`; with every non-test source hunk reverted to `origin/main` (main's source spliced in front of this branch's test module), twelve unit tests and all three integration tests fail. Restored tree green and clean each time.\n- **Real-world evidence**, baseline vs patched, `--format json --no-cache`: the in-repo `viz-frontend` and `editors/vscode` are identical on `dead-code`, and the public documentation site of this project (73 MDX files) is identical too, in all three cases down to every field except `analysis_run_id` and `elapsed_ms`. Both reviewer reproductions from round 1 now match the baseline exactly: the commented side-effect import project reports `unused_files []` on both binaries, and the spaced dynamic import project reports `unused_files ['src/components/b.ts']`, `unused_exports [('src/components/a.ts', 'A')]` on both. A state-machine simulation of the line scanner over all 6800 local `.mdx` files finds exactly one file whose collected statement lines change, the new fixture document added by this branch.\n- **Gates**: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace --lib --bins --tests --examples` (with the type-aware sidecar installed), `cargo check --workspace --benches`, `cargo doc` with `-D warnings`, `typos`, hidden-unicode scan, comment-quality check.\n- **Docs**: `docs/reference/extract-internals.md` records the classification rule, the quote-bounded source clause, the parse probe, the parse fallback, and that the fallback covers the dead-code path only, next to the MDX completeness guard.\n\n## Review round 1\n\n- `DUPES_CACHE_VERSION` 10 -> 11, with the live stale-cache divergence reproduced before the bump and the fix proven after it.\n- The source clause is matched on whitespace boundaries instead of the literal strings with a leading space, so a valid `import X from` + tab + `'./x'` keeps its edge instead of becoming a false unused file.\n- `parse_mdx_to_module` no longer clones the parsed suppressions on every MDX file; the fallback path discards the rejected module info, so its suppressions move on to the retry.\n- The CHANGELOG names the two further finding movements above, both measured on the patched binary.\n- The export keyword table and the extraction reference say the TypeScript heads are statement shapes handled by the parse fallback rather than surviving as statements.\n\n## Review round 2\n\n- **The classifier now has a false-negative safety net.** A line whose keyword is followed by a block comment (`import /* set up styles */ './global.css'`, `export /* keep */ const x = 1`) parsed on main and carried none of the recognised shapes, so round 1 sent it to prose and lost its edge or its declaration with no way back: the block fallback only rescues lines the classifier wrongly accepts. A spaced dynamic `import ('./x')` was lost the same way. Both are recovered by the parse probe, and both scratch projects now match the baseline binary exactly.\n- **The source clause requires its specifier quote.** The word `from` inside a string on a continuation line no longer ends a multi-line block one line early and cost the declaration it belongs to. That also removes the space form of the same truncation, which predates this branch.\n- **The stability claim is now accurate.** The \"no change for files that parsed cleanly before\" sentence was false against the commented-keyword shape; it is replaced by the precise rule and backed by the 6800-file corpus scan above.\n- **Test inputs retargeted.** Tightening the source clause moved `import data from the API using X` out of the fallback and into plain classification, which silently cost three fallback tests and the `rejected.mdx` fixture their bite (the fallback mutation dropped from five failures to two). They now use a line carrying a real source clause with prose trailing it, which the classifier still accepts and the parser still rejects.\n\nFixes #2376",
-          "timestamp": "2026-08-23T15:08:31+02:00",
-          "tree_id": "92243c49027c355d7a817eb5e58a6b22a768d998",
-          "url": "https://github.com/fallow-rs/fallow/commit/28b7be16fd895a1d937922b2ead2a77ad552aab2"
-        },
-        "date": 1787490838367,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9745408,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 49232,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1195882,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8442,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8464,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "8b875bdf06105317ab1b94c4493cf639c9e4839b",
+          "message": "chore: release v3.24.0",
+          "timestamp": "2026-09-09T15:58:39+02:00",
+          "tree_id": "634fecbf4bb35acf7ebd8db7434cea2872ccce3b",
+          "url": "https://github.com/fallow-rs/fallow/commit/8b875bdf06105317ab1b94c4493cf639c9e4839b"
+        },
+        "date": 1788962741050,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 9879470,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 50745,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1198134,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8453,
             "unit": "allocations"
           }
         ]
