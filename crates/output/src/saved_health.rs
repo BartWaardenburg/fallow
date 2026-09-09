@@ -296,6 +296,7 @@ impl From<SavedRuntimeCoverageFinding> for RuntimeCoverageFinding {
             evidence: RuntimeCoverageEvidence {
                 static_status: String::new(),
                 test_coverage: String::new(),
+                test_only_reference: None,
                 v8_tracking: String::new(),
                 untracked_reason: None,
                 observation_days: 0,

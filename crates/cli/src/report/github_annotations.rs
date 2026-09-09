@@ -1181,6 +1181,21 @@ fn collect_runtime_coverage(env: &Value, out: &mut Vec<Annotation>) {
                 || s(&evidence, "v8_tracking").to_owned(),
                 |reason| format!("{} ({reason})", s(&evidence, "v8_tracking")),
             );
+        // A statically-unused function whose only remaining references live in
+        // test files is not dead code, so the annotation says so next to the
+        // static verdict rather than leaving a bare "unused".
+        let static_status = if evidence
+            .get("test_only_reference")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        {
+            format!(
+                "{} (referenced only from tests)",
+                s(&evidence, "static_status")
+            )
+        } else {
+            s(&evidence, "static_status").to_owned()
+        };
         let advice = arr(finding, "actions")
             .next()
             .and_then(|action| action.get("description"))
@@ -1193,10 +1208,9 @@ fn collect_runtime_coverage(env: &Value, out: &mut Vec<Annotation>) {
             Anchor::line_only(finding),
             format!("Runtime coverage ({verdict})"),
             format!(
-                "Function '{}' is flagged by runtime coverage.\n\n  \u{2022} Verdict: {verdict}\n  \u{2022} Invocations: {invocations}\n  \u{2022} Confidence: {}\n  \u{2022} Static: {}\n  \u{2022} Tests: {}\n  \u{2022} V8: {tracking}\n\n{advice}",
+                "Function '{}' is flagged by runtime coverage.\n\n  \u{2022} Verdict: {verdict}\n  \u{2022} Invocations: {invocations}\n  \u{2022} Confidence: {}\n  \u{2022} Static: {static_status}\n  \u{2022} Tests: {}\n  \u{2022} V8: {tracking}\n\n{advice}",
                 s(finding, "function"),
                 s(finding, "confidence"),
-                s(&evidence, "static_status"),
                 s(&evidence, "test_coverage"),
             ),
         );

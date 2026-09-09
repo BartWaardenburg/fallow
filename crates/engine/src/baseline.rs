@@ -4260,6 +4260,7 @@ mod tests {
             evidence: fallow_output::RuntimeCoverageEvidence {
                 static_status: "used".to_owned(),
                 test_coverage: "not_covered".to_owned(),
+                test_only_reference: None,
                 v8_tracking: "tracked".to_owned(),
                 untracked_reason: None,
                 observation_days: 1,

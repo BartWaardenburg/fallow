@@ -2095,6 +2095,13 @@
           "type": "string",
           "description": "`covered` when the project's test suite hits this function,\n`not_covered` otherwise."
         },
+        "test_only_reference": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "`true` when the function is unreachable in the production module graph\nbut still referenced from a file that production mode excludes (test,\nspec, story, fixture, or benchmark). Such a function is not dead code:\nremoving it breaks the referencing test. `false` when the production\ngraph was compared against the full tree and no such reference exists.\n`null` when the report was produced without a production filter, or by\na surface that carries no second reachability answer."
+        },
         "v8_tracking": {
           "type": "string",
           "description": "`tracked` when V8 observed the function, `untracked` otherwise."

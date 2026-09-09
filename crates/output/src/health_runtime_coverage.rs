@@ -322,6 +322,16 @@ pub struct RuntimeCoverageEvidence {
     /// `covered` when the project's test suite hits this function,
     /// `not_covered` otherwise.
     pub test_coverage: String,
+    /// `true` when the function is unreachable in the production module graph
+    /// but still referenced from a file that production mode excludes (test,
+    /// spec, story, fixture, or benchmark). Such a function is not dead code:
+    /// removing it breaks the referencing test. `false` when the production
+    /// graph was compared against the full tree and no such reference exists.
+    /// `null` when the report was produced without a production filter, or by
+    /// a surface that carries no second reachability answer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(default))]
+    pub test_only_reference: Option<bool>,
     /// `tracked` when V8 observed the function, `untracked` otherwise.
     pub v8_tracking: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
