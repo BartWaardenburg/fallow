@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788975793564,
+  "lastUpdate": 1788978893752,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "bdab2f6f9dbca0835a6af77c95c37c906c27aefd",
-          "message": "perf(scripts): prune skip dirs while walking the agent surface\n\nThe SessionStart hidden-unicode scan walked target/ and node_modules/ before its skip filter could reject them, costing 10-25s per session start on a built checkout. The agent-surface walk now prunes those directories as it descends; committed mode is unchanged.",
-          "timestamp": "2026-08-25T15:17:08+02:00",
-          "tree_id": "108e172317786c8ab5eab4c2eca90a5e0b1047f9",
-          "url": "https://github.com/fallow-rs/fallow/commit/bdab2f6f9dbca0835a6af77c95c37c906c27aefd"
-        },
-        "date": 1787665221602,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.7,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/0565d3ec6ad58777270553feb504c00af7ce0790"
         },
         "date": 1788975789429,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.5,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "3628395fb2a16a1fd8edf83eb459ac6f45d17723",
+          "message": "ci: stop a third-party apt source failing the cross-compile jobs",
+          "timestamp": "2026-09-09T20:25:31+02:00",
+          "tree_id": "cee49837dca8619aff2c26878e6b9614f934d58a",
+          "url": "https://github.com/fallow-rs/fallow/commit/3628395fb2a16a1fd8edf83eb459ac6f45d17723"
+        },
+        "date": 1788978889536,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
