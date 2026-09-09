@@ -312,8 +312,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reacted to a missing `ctime` by returning nothing rather than by falling back.
   `ctime` is always absent on Windows, so that cache never hit there: a clean
   miss with correct results, and a permanently cold cache on an entire platform.
-  It now takes the same fast-path and slow-path split the extract cache already
-  had, comparing content hashes when the timestamps cannot be trusted. The
+  Metadata is now the fast path rather than the verdict: a match settles a
+  lookup without touching the disk, and a mismatch only means the timestamps
+  cannot settle it, so content decides. That also stops a `touch` or a checkout
+  that rewrites timestamps from re-tokenizing a file whose bytes never moved. The
   invariant the `ctime` work exists to protect survives, because the fallback
   trusts bytes rather than metadata: a size-preserving edit with a restored
   mtime still misses, on every platform. The graph cache was checked and is

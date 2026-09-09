@@ -178,10 +178,16 @@ impl TokenCache {
         if entry.normalization_hash != mode.hash {
             return None;
         }
-        if fingerprint.is_trustworthy_without_content() {
-            if entry.source_fingerprint() != fingerprint {
-                return None;
-            }
+        // Metadata is the fast path, not the verdict. A match settles it without
+        // touching the disk; a mismatch only means the timestamps cannot settle
+        // it, so content decides. Returning `None` on a metadata mismatch would
+        // re-tokenize an untouched file after a `touch` or a checkout that
+        // rewrites timestamps, and on a platform with no ctime (Windows) it
+        // would skip the cache entirely, since the fingerprint is never
+        // trustworthy there. Content is the same authority on every platform,
+        // so a size-preserving edit with a restored mtime still misses.
+        if fingerprint.is_trustworthy_without_content() && entry.source_fingerprint() == fingerprint
+        {
             return Some(entry.to_entry());
         }
         let content = std::fs::read_to_string(path).ok()?;
@@ -589,7 +595,7 @@ mod tests {
     }
 
     #[test]
-    fn token_cache_misses_when_cached_mtime_changes() {
+    fn token_cache_still_hits_when_only_the_timestamps_moved() {
         let dir = tempfile::tempdir().expect("temp dir");
         let file = dir.path().join("src.ts");
         std::fs::write(&file, "const value = 1;\n").expect("write source");
@@ -605,7 +611,35 @@ mod tests {
             .expect("cached token entry");
         cached.mtime_ns = cached.mtime_ns.saturating_add(1);
 
-        assert!(cache.get(&file, &metadata, mode()).is_none());
+        assert!(
+            cache.get(&file, &metadata, mode()).is_some(),
+            "a touch rewrites the timestamp without changing a byte, so the tokens are still good"
+        );
+    }
+
+    #[test]
+    fn token_cache_misses_when_the_timestamps_moved_and_the_content_did_too() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let file = dir.path().join("src.ts");
+        std::fs::write(&file, "const value = 1;\n").expect("write source");
+        let metadata = std::fs::metadata(&file).expect("metadata");
+
+        let mut cache = TokenCache::load(dir.path());
+        let entry = entry("const value = 1;\n");
+        insert_entry(&mut cache, &file, &metadata, mode(), &entry);
+        let cached = cache
+            .store
+            .entries
+            .get_mut(&cache_key(&file))
+            .expect("cached token entry");
+        cached.mtime_ns = cached.mtime_ns.saturating_add(1);
+
+        std::fs::write(&file, "const value = 2;\n").expect("rewrite source");
+
+        assert!(
+            cache.get(&file, &metadata, mode()).is_none(),
+            "content is the authority, so a real edit misses however the timestamps look"
+        );
     }
 
     /// A rewrite that keeps the byte length and restores the mtime is invisible
