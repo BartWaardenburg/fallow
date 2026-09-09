@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788958780883,
+  "lastUpdate": 1788963501423,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "05633a1c9bb636cdaf8db065c80ef416bd5d4ebe",
-          "message": "chore: drop trigger-tree project statusline\n\nRemoves the project-level statusLine override and .claude/tt-statusline.py so the user-level statusline (directory name, branch, budgets) applies. The trigger-tree plugin, CI gate, and project configuration stay in place.",
-          "timestamp": "2026-08-25T11:08:17+02:00",
-          "tree_id": "195a1fc57333f65b16b48d634361e9b723329623",
-          "url": "https://github.com/fallow-rs/fallow/commit/05633a1c9bb636cdaf8db065c80ef416bd5d4ebe"
-        },
-        "date": 1787649377678,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.7,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/4e9a9c39b74edaacd7945addb493ec35f9287d28"
         },
         "date": 1788958777341,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.5,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "8b875bdf06105317ab1b94c4493cf639c9e4839b",
+          "message": "chore: release v3.24.0",
+          "timestamp": "2026-09-09T15:58:39+02:00",
+          "tree_id": "634fecbf4bb35acf7ebd8db7434cea2872ccce3b",
+          "url": "https://github.com/fallow-rs/fallow/commit/8b875bdf06105317ab1b94c4493cf639c9e4839b"
+        },
+        "date": 1788963497848,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
