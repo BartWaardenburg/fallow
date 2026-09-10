@@ -42,6 +42,20 @@ fn create_scope_fixture() -> TempDir {
     tmp
 }
 
+/// Temp project with a clone pair straddling the `src/` / `other/` boundary,
+/// for the 1-in-rest-out filter variant: a group must survive when ANY
+/// instance touches the scope, mirroring the workspace and diff filters.
+fn create_cross_scope_fixture() -> TempDir {
+    let tmp = TempDir::new().expect("failed to create temp dir");
+    let dir = tmp.path();
+    fs::create_dir_all(dir.join("src")).unwrap();
+    fs::create_dir_all(dir.join("other")).unwrap();
+    fs::write(dir.join("package.json"), r#"{"name":"cross-scope-test"}"#).unwrap();
+    fs::write(dir.join("src/a.ts"), DUPLICATED_MODULE).unwrap();
+    fs::write(dir.join("other/c.ts"), DUPLICATED_MODULE).unwrap();
+    tmp
+}
+
 fn git(dir: &std::path::Path, args: &[&str]) {
     let output = Command::new("git")
         .args(args)
@@ -110,6 +124,26 @@ fn dupes_file_scope_reports_touching_groups() {
         has_clone_group_with_files(&json, &["src/a.ts", "src/b.ts"]),
         "file scope should keep groups touching the file. stdout: {}",
         output.stdout
+    );
+}
+
+#[test]
+fn dupes_scope_keeps_groups_touching_scope_from_outside() {
+    let tmp = create_cross_scope_fixture();
+    let from_src = run_fallow_in_root("dupes", tmp.path(), &["--format", "json", "src"]);
+    let json = parse_json(&from_src);
+    assert!(
+        has_clone_group_with_files(&json, &["src/a.ts", "other/c.ts"]),
+        "scope should keep groups with any instance inside it. stdout: {}",
+        from_src.stdout
+    );
+
+    let from_other = run_fallow_in_root("dupes", tmp.path(), &["--format", "json", "other"]);
+    let json = parse_json(&from_other);
+    assert!(
+        has_clone_group_with_files(&json, &["src/a.ts", "other/c.ts"]),
+        "scope should keep the same group from the other side. stdout: {}",
+        from_other.stdout
     );
 }
 
