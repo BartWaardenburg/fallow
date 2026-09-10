@@ -525,7 +525,9 @@ fn normalize_path_prefix(raw: Option<&str>) -> Result<Option<String>, UploadErro
     Ok(Some(trimmed.trim_end_matches('/').to_owned()))
 }
 
-fn extension_supported(path: &Path) -> bool {
+/// Whether the inventory walker can parse this file. Shared with the cloud
+/// analyze path, which walks the same tree to index instrumenter names.
+pub(super) fn extension_supported(path: &Path) -> bool {
     if is_typescript_declaration(path) {
         return false;
     }
@@ -1504,6 +1506,7 @@ mod tests {
             end_line: 50,
             end_column: 2,
             source_hash: "0123456789abcdef".to_owned(),
+            is_callback: false,
         }
     }
 
@@ -1870,6 +1873,7 @@ mod tests {
             end_line: line + 1,
             end_column: 2,
             source_hash: hash.to_owned(),
+            is_callback: false,
         }
     }
 
