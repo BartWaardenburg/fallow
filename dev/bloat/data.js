@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789034686563,
+  "lastUpdate": 1789044511428,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Binary Size": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "969689e6de5675acebfdffd6e0538bc9e56372eb",
-          "message": "fix(extract): record a bare namespace-import reference as a whole-object use\n\n## What was broken\n\nA namespace import that is handed over whole and also read through one dotted access narrowed to that member alone, so every sibling the receiver can still reach was reported as an unused export. The reported shapes:\n\n```tsx\n// src/whole.tsx\nimport * as Icons from './whole-icons';\nexport const Whole = () => (<div><Icons.Star /><Callout icons={Icons} /></div>);\n```\n\n```ts\n// src/arg.ts\nimport * as Icons from './arg-icons';\nexport const useArg = (): number => { Icons.Star(); return register(Icons); };\n```\n\nBoth `Moon` exports reported, plus the same for an alias (`const N = NS`) and a statement initializer (`export const all = NS`).\n\n## Root cause\n\n`narrow_namespace_references` narrows a namespace binding to the members the consumer accessed unless the consumer recorded a whole-object use. The visitor recorded one for an allow-list of positions only: `Object.keys/values/entries/getOwnPropertyNames(NS)`, a spread, `for ... in`, a computed non-string access, a rest destructure, and a few type positions. Every other reference to the local left no trace at all, so a file with one dotted access and one bare pass looked exactly like a file with one dotted access.\n\nAstro and MDX consumers were already covered: since #2360 their whole-file completeness guard turns any mention the structured passes did not classify into a whole-object use. Only `.ts` / `.tsx` / `.js` / `.jsx` consumers were affected.\n\n## The fix\n\nEarliest incorrect layer is extraction. A reference to an `import * as NS` local that the visitor cannot resolve to one member is now a whole-object use (`record_bare_namespace_reference` in `crates/extract/src/visitor/visit_impl.rs`), which puts the binding back on the graph's mark-all path. That is the conservative direction: it over-credits rather than reporting a used export.\n\nThe resolved positions are the exclusions, and they keep narrowing:\n\n- the object of a static access (`NS.member`, `NS?.member`),\n- the object of a string-computed access (`NS['member']`), which the parser resolves exactly even though the Astro and MDX text guards cannot,\n- the root of a JSX member tag, opening and closing (`<NS.Card>` / `</NS.Card>`),\n- the left side of a dotted type name (`NS.Type`),\n- a destructure initializer (`const { Star } = NS`), whose members the visitor records (a rest element keeps its own whole-object use),\n- a re-export specifier local (`export { NS }`), which the graph already credits in full through the rule added by #2373, so the two do not double-count,\n- a placement in an object literal bound to a local (`const api = { NS }`), whose `api.NS.member` path the object-binding resolver follows and which #2372 deliberately keeps off the whole-module closure. A bare reference to that local (`hand(api)`) hands the namespace on in turn and does record the use.\n\nThe locals are pre-registered from the program's top-level statement list before the body walk, because an import declaration is legal after the code that reads it. The local of the binding's own `import * as NS` is a binding identifier, never a reference, so the import declaration needs no exclusion. The rule is scoped to `import * as` locals: named imports, and namespace objects bound by `require` or a dynamic import, keep the allow-list they had.\n\nSide effect worth naming: `whole_object_uses` is now deduplicated at the recording site. Every consumer asks membership, never a count, and the record is persisted, so a name recorded opaquely many times is one entry instead of one per mention.\n\n## Behavior change: fewer findings\n\nThis widens crediting for every TS and TSX consumer that hands a namespace over, so it is a finding-count **decrease** on upgrade, and it lands in regression baselines and `--max-issues` gates. An export credited for the first time also becomes reachable, so member-level detectors can report on it where the unused-export finding used to stand in its place.\n\nMeasured with `dead-code --no-cache --format json`, baseline binary built from `28b7be16f` against the patched binary:\n\n| Project | Baseline | Fixed | Delta |\n|---|---|---|---|\n| in-repo `viz-frontend` | 0 | 0 | none |\n| in-repo `editors/vscode` | 1 | 1 | none |\n| `vuejs/core` v3.5.30 | 206 | 206 | none |\n| `withastro/starlight` (main) | 34 | 32 | 2 fewer |\n\nBoth Starlight changes are true-positive removals on `packages/starlight/integrations/remark-rehype.ts`, `isUnifiedProcessor` and `remarkDirectivesRestoration`. `__tests__/markdown-processor/plugin-registration.test.ts` does `import * as unifiedIntegration from '../../integrations/remark-rehype'` and hands it over whole, both as a bare call argument (`registerDirectivesRestoration(processor, unifiedIntegration)`) and as a positional argument to `applyStarlightMarkdownPlugins`. The callees reach `unified.isUnifiedProcessor(...)` and `unified.remarkDirectivesRestoration`, so both exports are used. Nothing new is reported in any of the four projects.\n\n## Cache invalidation\n\nBoth layers are bumped:\n\n- extract `CACHE_VERSION` 277 -> 278, because extraction output changes (new `whole_object_uses` entries, and the deduplicated record);\n- `GRAPH_CACHE_VERSION` 41 -> 42, because narrowing verdicts are baked into the persisted graph at build time; a warm graph cache would replay the narrowed verdict verbatim.\n\nWarm-cache proof on the fixture:\n\n1. baseline binary (extract 277, graph 41), cold run: reports all seven `*Moon` siblings and writes `.fallow`.\n2. patched binary on that same warm cache: only `DottedMoon` reports, the precision control.\n3. second warm run with the patched binary: identical output.\n\n## How it was tested\n\n- Extract-level tests: every handover position records the whole-object use while the dotted access is kept; every resolved position does not; the JSX member tag stays narrowed while a JSX attribute pass does not; a reference above its own import declaration is still recorded and one name yields one entry; a named import stays out of scope; and the object-literal placement plus the destructure keep narrowing while a rest element does not.\n- Integration test on fixture `issue-2377-whole-object-use`, one consumer per handover shape (JSX attribute value, call argument, alias, array literal element, object literal value, return value), each against its own namespace target so a miscredit cannot be masked, plus the precision control that a dotted-only namespace still narrows and reports its unused sibling.\n- Mutation matrix: with the non-test source hunks reverted, the four positive tests and the integration test fail; the three negative controls (`resolved_namespace_reference_keeps_narrowing`, `resolved_namespace_placement_keeps_narrowing`, `bare_named_import_reference_is_not_a_whole_use`) pass either way by design, since they pin behavior the fix must preserve. Restoring the hunks makes everything green again.\n- CLI run of the issue's exact reproduction: only the one genuinely unused export remains.\n- Real-project runs and warm-cache proof as above.\n- Gates: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace --lib --bins --tests --examples`, `cargo check --workspace --benches`, `RUSTDOCFLAGS=\"-D warnings\" cargo doc --workspace --no-deps --document-private-items`, `typos`, `scripts/scan-hidden-unicode.py --mode committed --staged`, `scripts/check-comment-quality.mjs --staged`, and `scripts/check-knowledge-architecture.mjs` all green.\n\n## Known adjacent gap\n\nA CSS module default import has the same defect shape (`import styles from './x.module.css'` plus one `styles.a` access plus a whole pass narrows to `a`). It is deliberately out of scope here and filed separately.\n\nFixes #2377",
-          "timestamp": "2026-08-23T19:44:03+02:00",
-          "tree_id": "5866bafe3208443f9fe663ea3d0bc54581bbf261",
-          "url": "https://github.com/fallow-rs/fallow/commit/969689e6de5675acebfdffd6e0538bc9e56372eb"
-        },
-        "date": 1787507891752,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Binary Size (fallow)",
-            "value": 515452032,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-lsp)",
-            "value": 20270032,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-mcp)",
-            "value": 25684952,
-            "unit": "bytes"
-          },
-          {
-            "name": "Binary Size (fallow-multicall)",
-            "value": 38969944,
-            "unit": "bytes"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Binary Size (fallow-multicall)",
             "value": 43286760,
+            "unit": "bytes"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "03aad8caad3c563481e2b00b5c0d7c67f2a371d8",
+          "message": "fix(cli): print forward slashes in the check and health human output\n\nThe two human renderers rendered the platform path separator, so a Windows\nuser was told `src\\a.ts` while `dupes`, `list`, `fix`, and every JSON\nsurface said `src/a.ts`. The damage was not only cosmetic: the dimmed-directory\n/ bold-filename split keys on `/`, so a native-separator path also lost its\nemphasis and rendered as one bold blob. Every path the check and health\nrenderers put on screen now goes through the existing display helper, the way\nthe rest of the CLI already did. On-disk path handling is untouched; only the\nrendered text changes, and it is byte-identical on POSIX.\n\n`scope_path_tests` caught this as three Windows-only failures, and its\nnegative assertions were the reason it caught no more: `!contains(\"other/c.ts\")`\npassed vacuously while the file was on screen as `other\\c.ts`. The captured\noutput is now normalised once before every assertion, so a leaked out-of-scope\nfile trips the suite under either separator. Two renderer unit tests pin the\nforward-slash convention itself, since the integration tests no longer can.\n\nCloses #2611",
+          "timestamp": "2026-09-10T14:35:15+02:00",
+          "tree_id": "8c55301281961a9e4bd58b54ef7b236a3b08eb9a",
+          "url": "https://github.com/fallow-rs/fallow/commit/03aad8caad3c563481e2b00b5c0d7c67f2a371d8"
+        },
+        "date": 1789044506837,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Binary Size (fallow)",
+            "value": 570975552,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-lsp)",
+            "value": 21564536,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-mcp)",
+            "value": 28516584,
+            "unit": "bytes"
+          },
+          {
+            "name": "Binary Size (fallow-multicall)",
+            "value": 43276520,
             "unit": "bytes"
           }
         ]
