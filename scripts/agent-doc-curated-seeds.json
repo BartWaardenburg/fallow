@@ -174,7 +174,7 @@
       "section": "commands",
       "row": "fix",
       "column": "Key Flags",
-      "seed": "`--dry-run`, `--yes`, `--no-create-config`"
+      "seed": "`--dry-run`, `--yes`, `--no-create-config`, `path`"
     },
     {
       "section": "commands",
@@ -282,7 +282,7 @@
       "section": "commands",
       "row": "list",
       "column": "Key Flags",
-      "seed": "`--entry-points`, `--files`, `--plugins`, `--boundaries`, `--workspaces`"
+      "seed": "`--entry-points`, `--files`, `--plugins`, `--boundaries`, `--workspaces`, `path`"
     },
     {
       "section": "commands",
@@ -390,7 +390,7 @@
       "section": "commands",
       "row": "security",
       "column": "Key Flags",
-      "seed": "`--runtime-coverage`, `--min-invocations-hot`, `--file`, `--gate`, `--surface`"
+      "seed": "`--runtime-coverage`, `--min-invocations-hot`, `--file`, `--gate`, `--surface`, `path`"
     },
     {
       "section": "commands",
@@ -414,7 +414,7 @@
       "section": "commands",
       "row": "similar-code",
       "column": "Key Flags",
-      "seed": "`--threshold`, `--min-lines`, `--top`, `--file`"
+      "seed": "`--threshold`, `--min-lines`, `--top`, `--file`, `path`"
     },
     {
       "section": "commands",
@@ -642,7 +642,7 @@
       "section": "flags:audit",
       "row": "--show-deprioritized",
       "column": "Description",
-      "seed": "Expand the de-prioritized units in the review brief's weighted focus map (\"show me what you de-prioritized\"). The `deprioritized` escape-hatch list is ALWAYS present in `--format json` regardless; this flag only re-expands the collapse-by-default human focus render. Only consulted on the brief path"
+      "seed": "Expand the de-prioritized units in the review brief's weighted focus map (\"show me what you de-prioritized\"). The `deprioritized` escape-hatch list is ALWAYS present in `--format json` regardless; this flag only re-expands the collapse-by-default human focus render. Only consulted on the `--walkthrough` path"
     },
     {
       "section": "flags:audit",
@@ -1483,6 +1483,12 @@
       "row": "--workspace",
       "column": "Description",
       "seed": "Scope output to selected workspaces. Accepts exact names, glob patterns, and `!`-prefixed negations. Values can be comma-separated or repeated"
+    },
+    {
+      "section": "flags:global",
+      "row": "path",
+      "column": "Description",
+      "seed": "Scope reported findings to this file or directory (default: whole project). The full project graph is still built; only reported items are narrowed"
     },
     {
       "section": "flags:health",

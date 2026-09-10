@@ -483,6 +483,11 @@ pub struct HealthExecutionOptions<'a> {
     pub workspace: Option<&'a [String]>,
     /// Git ref selecting only workspaces with changes since it.
     pub changed_workspaces: Option<&'a str>,
+    /// Positional `[PATH]` scope: root-joined absolute file or directory inside
+    /// the root. Consumed CLI-side as one more workspace root (prefix scope),
+    /// so it composes with `workspace` the way multiple workspace roots
+    /// compose. `None` means whole-project scope.
+    pub scope: Option<PathBuf>,
     /// Baseline file to compare finding counts against.
     pub baseline: Option<&'a Path>,
     /// Path to write the run's finding counts as a new baseline.
@@ -830,6 +835,7 @@ mod tests {
             use_shared_diff_index: false,
             workspace: Some(&workspace),
             changed_workspaces: None,
+            scope: None,
             baseline: Some(Path::new(".fallow/health-baseline.json")),
             save_baseline: None,
             baseline_mode: crate::baseline::HealthBaselineMode::Count,
@@ -935,6 +941,7 @@ mod tests {
                 use_shared_diff_index: false,
                 workspace: None,
                 changed_workspaces: None,
+                scope: None,
                 baseline: None,
                 save_baseline: None,
                 baseline_mode: crate::baseline::HealthBaselineMode::Count,

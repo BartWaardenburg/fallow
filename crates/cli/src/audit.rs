@@ -190,6 +190,11 @@ pub struct AuditOptions<'a> {
     /// regardless; this only re-expands the human render (collapse-by-default).
     /// Only consulted on the brief path.
     pub show_deprioritized: bool,
+    /// Positional `[PATH]` scope: root-joined absolute file or directory inside
+    /// the root. Narrows the changed-file universe before base focus, head
+    /// analyses, attribution, and verdict, so the whole audit reads as the
+    /// scoped slice. `None` means whole-project scope.
+    pub scope: Option<std::path::PathBuf>,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -618,6 +623,12 @@ fn build_base_audit_options<'a>(
         show_cleared: false,
         walkthrough_file: None,
         show_deprioritized: false,
+        // Deliberately unscoped: the base pass runs in another worktree whose
+        // path spelling differs, so a head-root scope would narrow the base
+        // focus to empty and misattribute everything as introduced. The head
+        // pass is already scope-narrowed; a full base snapshot joins correctly
+        // against it.
+        scope: None,
     }
 }
 
@@ -1382,6 +1393,9 @@ pub fn execute_audit_with_type_aware(
     {
         changed_files.remove(&walkthrough_file);
     }
+    if let Some(scope) = opts.scope.as_deref() {
+        changed_files.retain(|file| crate::scope_path::scope_covers(scope, file));
+    }
     let changed_files_count = changed_files.len();
 
     if changed_files.is_empty() {
@@ -1755,6 +1769,7 @@ fn audit_review_benchmark_options<'a>(
         show_cleared: false,
         walkthrough_file: None,
         show_deprioritized: false,
+        scope: None,
     }
 }
 
@@ -2911,6 +2926,9 @@ fn run_audit_check<'a>(
         explain: opts.explain,
         top: None,
         file: &[],
+        // Scope travels with the changed set (already intersected at the
+        // audit prelude); the sub-passes stay unscoped.
+        scope: None,
         include_entry_exports: opts.include_entry_exports,
         summary: false,
         regression_opts: crate::regression::RegressionOpts {
@@ -3021,6 +3039,9 @@ fn build_audit_dupes_options<'a>(
         group_by: opts.group_by,
         performance: false,
         include_fragments: true,
+        // Scope travels with the changed set (already intersected at the
+        // audit prelude); the sub-passes stay unscoped.
+        scope: None,
     }
 }
 
@@ -3129,6 +3150,9 @@ fn build_audit_health_options<'a>(
         analysis_identity: fallow_types::semantic::SemanticAnalysisIdentity::default(),
         complexity_breakdown: false,
         group_by: opts.group_by.map(Into::into),
+        // Scope travels with the changed set (already intersected at the
+        // audit prelude); the sub-passes stay unscoped.
+        scope: None,
     }
 }
 
@@ -3158,6 +3182,7 @@ pub fn run_audit_with_type_aware(
     let resolved_opts = AuditOptions {
         coverage: coverage_resolved.as_deref(),
         runtime_coverage: runtime_coverage_resolved.as_deref(),
+        scope: opts.scope.clone(),
         ..*opts
     };
     match execute_audit_with_type_aware(&resolved_opts, type_aware) {
@@ -3287,6 +3312,7 @@ pub fn run_decision_surface(opts: &AuditOptions<'_>) -> ExitCode {
     // Force brief mode: the decision surface is only computed on the brief path.
     let brief_opts = AuditOptions {
         brief: true,
+        scope: opts.scope.clone(),
         ..*opts
     };
     match execute_audit(&brief_opts) {

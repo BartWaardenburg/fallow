@@ -439,6 +439,7 @@ fn derive_programmatic_health_execution_options<'a>(
         churn_file: None,
         analysis_identity: fallow_types::semantic::SemanticAnalysisIdentity::default(),
         group_by: None,
+        scope: None,
         ownership_emails: run
             .ownership_emails
             .map(crate::ownership_email_mode_to_config),

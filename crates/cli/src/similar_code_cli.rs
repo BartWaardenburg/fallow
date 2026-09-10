@@ -105,6 +105,10 @@ pub struct SimilarCodeCliInput<'a> {
     pub(crate) min_lines: Option<usize>,
     pub(crate) top: Option<usize>,
     pub(crate) files: Vec<PathBuf>,
+    /// Positional `[PATH]` scope. A file scope narrows inference through
+    /// `files`; a directory scope retains reported pairs touching the scope
+    /// (the full corpus is still compared). `None` means whole-project scope.
+    pub(crate) scope: Option<crate::scope_path::ScopePath>,
     pub(crate) subcommand: Option<SimilarCodeSubcommand>,
 }
 
@@ -181,7 +185,11 @@ pub fn run(input: SimilarCodeCliInput<'_>) -> ExitCode {
                 }
             }
             match run_similar_code(&similar_code_options) {
-                Ok(output) => emit_discovery(output, input.output, input.json_style),
+                Ok(output) => emit_discovery(
+                    filter_discovery_to_scope(output, &input),
+                    input.output,
+                    input.json_style,
+                ),
                 Err(error) => programmatic_failure(&error, input.output, input.json_style),
             }
         }
@@ -295,6 +303,12 @@ fn review_file_error(message: impl Into<String>) -> fallow_api::ProgrammaticErro
 }
 
 fn options(input: &SimilarCodeCliInput<'_>) -> SimilarCodeOptions {
+    let mut files = input.files.clone();
+    if let Some(scope) = input.scope.as_ref().filter(|scope| !scope.is_dir)
+        && let Ok(relative) = scope.absolute.strip_prefix(input.root)
+    {
+        files.push(relative.to_path_buf());
+    }
     SimilarCodeOptions {
         analysis: AnalysisOptions {
             root: Some(input.root.to_path_buf()),
@@ -312,9 +326,39 @@ fn options(input: &SimilarCodeCliInput<'_>) -> SimilarCodeOptions {
         threshold: input.threshold,
         min_lines: input.min_lines,
         top: input.top,
-        files: input.files.clone(),
+        files,
         adapter_provider_path: None,
     }
+}
+
+/// Retain only discovery candidates touching a directory scope.
+///
+/// File scopes narrow inference through `files` in [`options`] instead, so
+/// they never reach this filter. The full corpus is still compared; only
+/// reported pairs are narrowed, mirroring every other positional scope.
+fn filter_discovery_to_scope(
+    mut output: SimilarCodeOutput,
+    input: &SimilarCodeCliInput<'_>,
+) -> SimilarCodeOutput {
+    let Some(scope) = input.scope.as_ref().filter(|scope| scope.is_dir) else {
+        return output;
+    };
+    output
+        .candidates
+        .retain(|candidate| candidate_touches_scope(candidate, input.root, &scope.absolute));
+    output
+}
+
+/// True when either side of a candidate lives inside the scope. Candidate
+/// paths are root-relative; the scope is a canonical absolute path.
+fn candidate_touches_scope(
+    candidate: &fallow_output::SimilarCodeCandidate,
+    root: &std::path::Path,
+    scope: &std::path::Path,
+) -> bool {
+    [&candidate.left.path, &candidate.right.path]
+        .iter()
+        .any(|relative| crate::scope_path::scope_covers(scope, &root.join(relative)))
 }
 
 fn run_status(output: OutputFormat, json_style: JsonStyle) -> ExitCode {
@@ -847,9 +891,9 @@ mod tests {
     };
 
     use super::{
-        MAX_CANDIDATE_INPUT_BYTES, inspect_command, read_bounded_candidate_file,
-        read_bounded_verdict_file, render_posix_argument, render_powershell_argument,
-        render_reviewed_candidate, review_summary,
+        MAX_CANDIDATE_INPUT_BYTES, candidate_touches_scope, inspect_command,
+        read_bounded_candidate_file, read_bounded_verdict_file, render_posix_argument,
+        render_powershell_argument, render_reviewed_candidate, review_summary,
     };
 
     fn reviewed_candidate(
@@ -1044,5 +1088,35 @@ mod tests {
             review_summary(2, 1, fallow_output::SimilarCodeCompletionStatus::Partial),
             "\nReviewed: 2 candidates, 1 matched verdict, 1 unmatched candidate\nSource completion: partial\n"
         );
+    }
+
+    #[test]
+    fn scope_matches_candidates_touching_either_side() {
+        let reviewed = reviewed_candidate(
+            None,
+            SimilarCodeVerdictMatch::CandidateId,
+            SimilarCodeDomainOutcome::NeedsHumanReview,
+        );
+        let root = std::path::Path::new("/project");
+        assert!(candidate_touches_scope(
+            &reviewed.candidate,
+            root,
+            &root.join("src")
+        ));
+        assert!(candidate_touches_scope(
+            &reviewed.candidate,
+            root,
+            &root.join("src/left.ts")
+        ));
+        assert!(!candidate_touches_scope(
+            &reviewed.candidate,
+            root,
+            &root.join("other")
+        ));
+        assert!(!candidate_touches_scope(
+            &reviewed.candidate,
+            root,
+            &root.join("src-extra")
+        ));
     }
 }
