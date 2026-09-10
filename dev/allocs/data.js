@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788999427258,
+  "lastUpdate": 1789026964908,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "9532b3fb45443be3ae29053e4df4cbf6cab432a7",
-          "message": "test(config): compare the per-instance dedupe key with a platform-native tail (#2398)",
-          "timestamp": "2026-08-24T08:43:49Z",
-          "tree_id": "8c9cb762e2e4501d578bc6caec727fa26eeff5dc",
-          "url": "https://github.com/fallow-rs/fallow/commit/9532b3fb45443be3ae29053e4df4cbf6cab432a7"
-        },
-        "date": 1787561267815,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9745836,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 49234,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1194668,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8401,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8482,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "69d8d818a9d6b094545dae2f5c476cb0870feaa3",
+          "message": "feat: support positional PATH scope across file commands\n\nAdds an optional positional [PATH] to bare fallow, check, dupes, health, audit, security, fix, list, and similar-code. The scope narrows reported findings to the file or directory while the full project graph is still built, so cross-file facts stay sound.\n\nResolution is root-first for bare relative paths, honors ./ and ../ as current-directory claims, and rejects missing or outside-root paths with an actionable exit-2 error. Scope composes with --workspace as one more workspace root and intersects with --changed-since and --diff-file. Audit narrows its changed-file universe so verdict and base attribution stay coherent; its base pass stays unscoped because it runs in another worktree.",
+          "timestamp": "2026-09-10T09:51:56+02:00",
+          "tree_id": "19d0ed01da89ec323b163b9b7d303bc03dfbc6d9",
+          "url": "https://github.com/fallow-rs/fallow/commit/69d8d818a9d6b094545dae2f5c476cb0870feaa3"
+        },
+        "date": 1789026961042,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 9873902,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 50732,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1197125,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8459,
             "unit": "allocations"
           }
         ]
