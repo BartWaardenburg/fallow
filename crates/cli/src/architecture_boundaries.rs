@@ -919,12 +919,16 @@ fn coverage_inventory_reuses_session_discovery() {
         source.contains("AnalysisSession::from_resolved_config"),
         "coverage upload-inventory must create one AnalysisSession for inventory discovery"
     );
+    // Whitespace-collapsed so the assertion pins the parameter, not the line
+    // wrapping rustfmt happens to choose for the signature.
+    let collapsed = source.split_whitespace().collect::<Vec<_>>().join(" ");
     assert!(
-        source.contains("fn collect_inventory(\n    session: &AnalysisSession"),
+        collapsed.contains("fn collect_inventory( session: &AnalysisSession"),
         "coverage inventory collection must receive the shared AnalysisSession"
     );
     assert!(
-        source.contains("fn collect_caller_edges(\n    session: &AnalysisSession"),
+        collapsed.contains("fn collect_caller_edges(session: &AnalysisSession")
+            || collapsed.contains("fn collect_caller_edges( session: &AnalysisSession"),
         "caller-edge collection must reuse the inventory AnalysisSession"
     );
     assert!(

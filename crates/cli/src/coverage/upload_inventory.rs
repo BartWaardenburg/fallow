@@ -73,7 +73,9 @@ const INVENTORY_BLOB_VERSION_WITH_CALLERS: u8 = 3;
 /// Cap on importer sites recorded per function. Mirrors the server's per-callee
 /// cap so a pathological fan-in (a barrel re-exported everywhere) cannot bloat
 /// the payload or trip the server bound. Truncation is deterministic: sites are
-/// ordered by importer path before the cut.
+/// ordered by importer path before the cut, and the cap travels in the blob
+/// header ([`CallerEdgeLimits`]) so a reader can tell a fan-in of exactly the
+/// cap apart from an untruncated one.
 const MAX_CALLER_SITES_PER_FN: usize = 500;
 
 /// Cap on imported symbol names recorded per importer site. Mirrors the server's
@@ -211,12 +213,14 @@ fn run_inner(
     allow_remote_extends: bool,
 ) -> Result<(), UploadError> {
     let prepared = prepare_inventory_upload(args, root, allow_remote_extends)?;
+    let caller_edge_limits = prepared.caller_edges.limits();
     let payload = InventoryRequest {
         version: prepared.version,
         git_sha: &prepared.git_sha,
         functions: &prepared.functions,
         churn_by_path: prepared.churn_by_path,
-        caller_edges: prepared.caller_edges,
+        caller_edges: prepared.caller_edges.by_callee,
+        caller_edge_limits,
     };
 
     if args.dry_run {
@@ -252,7 +256,7 @@ struct PreparedInventory {
     path_prefix: Option<String>,
     functions: Vec<InventoryFunction>,
     churn_by_path: BTreeMap<String, FileChurnPayload>,
-    caller_edges: BTreeMap<String, Vec<CallerSitePayload>>,
+    caller_edges: CallerEdges,
     version: u8,
 }
 
@@ -298,9 +302,10 @@ fn prepare_inventory_upload(
     let caller_edges = if args.with_callers {
         collect_caller_edges(&session, &functions)
     } else {
-        BTreeMap::new()
+        CallerEdges::default()
     };
-    let version = if caller_edges.is_empty() {
+    warn_on_truncated_caller_edges(&caller_edges);
+    let version = if caller_edges.by_callee.is_empty() {
         INVENTORY_BLOB_VERSION
     } else {
         INVENTORY_BLOB_VERSION_WITH_CALLERS
@@ -639,6 +644,67 @@ struct InventoryRequest<'a> {
     /// unchanged. Context only; never a verdict input.
     #[serde(rename = "callerEdges", skip_serializing_if = "BTreeMap::is_empty")]
     caller_edges: BTreeMap<String, Vec<CallerSitePayload>>,
+    /// Blob header for `callerEdges`: the size guard the producer applied plus
+    /// how many callees it actually cut. Present only when `callerEdges` is,
+    /// so a v1/v2 body keeps its exact wire shape. Without it a reader cannot
+    /// tell a callee that genuinely has `maxSitesPerFunction` importers apart
+    /// from one whose fan-in was truncated, so a consumer that reports fan-in
+    /// reads the cap from here rather than hard-coding the producer's constant.
+    #[serde(rename = "callerEdgeLimits", skip_serializing_if = "Option::is_none")]
+    caller_edge_limits: Option<CallerEdgeLimits>,
+}
+
+/// Wire form of the `callerEdges` size guard. `truncatedFunctions` counts
+/// callees whose importer list hit `maxSitesPerFunction` and lost entries; a
+/// callee with exactly `maxSitesPerFunction` sites is only truncated when that
+/// count is non-zero, which is why the cap alone is not enough to report.
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+struct CallerEdgeLimits {
+    #[serde(rename = "maxSitesPerFunction")]
+    max_sites_per_function: u32,
+    #[serde(rename = "maxSymbolsPerSite")]
+    max_symbols_per_site: u32,
+    #[serde(rename = "truncatedFunctions")]
+    truncated_functions: u32,
+}
+
+/// The attributed importer-edge map plus the bookkeeping the blob header
+/// reports. Kept together so the truncation count can never drift away from the
+/// map it describes.
+#[derive(Debug, Default)]
+struct CallerEdges {
+    /// Importer sites keyed by the callee export's `stable_id`.
+    by_callee: BTreeMap<String, Vec<CallerSitePayload>>,
+    /// Callees whose importer list was cut to [`MAX_CALLER_SITES_PER_FN`].
+    truncated_functions: usize,
+}
+
+impl CallerEdges {
+    /// Blob header for this map, or `None` when there are no edges to describe.
+    fn limits(&self) -> Option<CallerEdgeLimits> {
+        if self.by_callee.is_empty() {
+            return None;
+        }
+        Some(CallerEdgeLimits {
+            max_sites_per_function: u32::try_from(MAX_CALLER_SITES_PER_FN).unwrap_or(u32::MAX),
+            max_symbols_per_site: u32::try_from(MAX_SYMBOLS_PER_CALLER_SITE).unwrap_or(u32::MAX),
+            truncated_functions: u32::try_from(self.truncated_functions).unwrap_or(u32::MAX),
+        })
+    }
+}
+
+/// Tell the user when the size guard actually dropped importer sites, so a
+/// surprisingly small fan-in on the dashboard has a visible cause in the CI log.
+fn warn_on_truncated_caller_edges(edges: &CallerEdges) {
+    if edges.truncated_functions == 0 {
+        return;
+    }
+    eprintln!(
+        "{LOG_PREFIX}: {}: {} function(s) have more than {} importers; the extra importer sites were dropped from the upload.",
+        "warning".yellow().bold(),
+        format_count(edges.truncated_functions),
+        format_count(MAX_CALLER_SITES_PER_FN),
+    );
 }
 
 /// Wire form of one importer edge: a `file` that imports the callee plus the
@@ -665,17 +731,15 @@ struct ImporterEdge {
 
 /// Attribute raw importer edges to callee functions by matching each imported
 /// symbol name to an inventory function of the same name in the callee file,
-/// producing the `callerEdges` map keyed by callee `stable_id`.
+/// producing the `callerEdges` map keyed by callee `stable_id` plus the
+/// truncation bookkeeping the blob header reports.
 ///
 /// Import-edge granularity, best-effort: `default` / `*` / side-effect imports
 /// and any symbol that does not name an inventory function simply contribute
 /// nothing (no false attribution). A name can repeat in a file (overloads,
 /// same-named nested functions), so an edge attributes to every matching
 /// stable_id. Pure: no graph or IO, so it is unit-tested directly.
-fn attribute_caller_edges(
-    functions: &[InventoryFunction],
-    edges: &[ImporterEdge],
-) -> BTreeMap<String, Vec<CallerSitePayload>> {
+fn attribute_caller_edges(functions: &[InventoryFunction], edges: &[ImporterEdge]) -> CallerEdges {
     // (callee repo-relative file, function name) -> stable_ids of functions with
     // that name in that file. identity.file is repo-relative, matching the edge
     // callee_file shape.
@@ -704,7 +768,9 @@ fn attribute_caller_edges(
         }
     }
 
-    acc.into_iter()
+    let mut truncated_functions = 0_usize;
+    let by_callee = acc
+        .into_iter()
         .map(|(stable_id, importers)| {
             let mut sites: Vec<CallerSitePayload> = importers
                 .into_iter()
@@ -719,10 +785,18 @@ fn attribute_caller_edges(
                     CallerSitePayload { file, symbols }
                 })
                 .collect();
-            sites.truncate(MAX_CALLER_SITES_PER_FN);
+            if sites.len() > MAX_CALLER_SITES_PER_FN {
+                truncated_functions += 1;
+                sites.truncate(MAX_CALLER_SITES_PER_FN);
+            }
             (stable_id, sites)
         })
-        .collect()
+        .collect();
+
+    CallerEdges {
+        by_callee,
+        truncated_functions,
+    }
 }
 
 /// Build the importer-edge map for the inventory by running the static analysis
@@ -731,10 +805,7 @@ fn attribute_caller_edges(
 /// Best-effort context: any failure (analysis error, no graph/files retained)
 /// yields an empty map so the upload still ships the inventory. Never a verdict
 /// input on the server side.
-fn collect_caller_edges(
-    session: &AnalysisSession,
-    functions: &[InventoryFunction],
-) -> BTreeMap<String, Vec<CallerSitePayload>> {
+fn collect_caller_edges(session: &AnalysisSession, functions: &[InventoryFunction]) -> CallerEdges {
     let artifacts = match session.analyze_dead_code_retaining_files(false, true) {
         Ok(artifacts) => artifacts,
         Err(err) => {
@@ -742,11 +813,11 @@ fn collect_caller_edges(
                 "{LOG_PREFIX}: {}: import graph build failed, uploading without caller edges ({err})",
                 "warning".yellow().bold(),
             );
-            return BTreeMap::new();
+            return CallerEdges::default();
         }
     };
     let (Some(graph), Some(files)) = (artifacts.graph.as_ref(), artifacts.files.as_ref()) else {
-        return BTreeMap::new();
+        return CallerEdges::default();
     };
     let config = session.config();
 
@@ -1648,6 +1719,7 @@ mod tests {
             functions: &functions,
             churn_by_path,
             caller_edges: BTreeMap::new(),
+            caller_edge_limits: None,
         };
         let json = serde_json::to_value(&request).expect("serialize request");
         assert_eq!(json["version"], 2, "v2 version field present on the wire");
@@ -1681,6 +1753,7 @@ mod tests {
             functions: &functions,
             churn_by_path: BTreeMap::new(),
             caller_edges: BTreeMap::new(),
+            caller_edge_limits: None,
         };
         let json = serde_json::to_value(&request).expect("serialize request");
         assert!(
@@ -1821,7 +1894,9 @@ mod tests {
 
         let map = attribute_caller_edges(&functions, &edges);
 
+        assert_eq!(map.truncated_functions, 0, "no fan-in reached the cap");
         let foo_sites = map
+            .by_callee
             .get(&foo.identity.stable_id)
             .expect("foo has importer edges");
         assert_eq!(
@@ -1833,7 +1908,7 @@ mod tests {
         );
         assert_eq!(foo_sites[0].symbols, vec!["foo".to_owned()]);
         // bar is never imported -> absent (never a placeholder entry).
-        assert!(!map.contains_key(&bar.identity.stable_id));
+        assert!(!map.by_callee.contains_key(&bar.identity.stable_id));
     }
 
     #[test]
@@ -1846,7 +1921,10 @@ mod tests {
             symbol: "foo".to_owned(),
         };
         let map = attribute_caller_edges(std::slice::from_ref(&foo), &[edge.clone(), edge]);
-        let sites = map.get(&foo.identity.stable_id).expect("foo edges");
+        let sites = map
+            .by_callee
+            .get(&foo.identity.stable_id)
+            .expect("foo edges");
         assert_eq!(sites.len(), 1, "same importer+symbol collapses to one site");
         assert_eq!(sites[0].symbols, vec!["foo".to_owned()]);
     }
@@ -1884,11 +1962,200 @@ mod tests {
         let edges = collect_caller_edges(&session, std::slice::from_ref(&function));
 
         let sites = edges
+            .by_callee
             .get(&function.identity.stable_id)
             .expect("caller edge should be resolved from retained graph/files");
         assert_eq!(sites.len(), 1);
         assert_eq!(sites[0].file, "src/index.ts");
         assert_eq!(sites[0].symbols, vec!["boot".to_owned()]);
+    }
+
+    /// Fixture project with a known call graph: `src/math.ts` exports a branchy
+    /// `classify` plus an unimported `unused`, and two modules import
+    /// `classify`. Deliberately small and fully deterministic so the expected
+    /// edge list and complexity numbers can be asserted exactly.
+    fn project_with_known_call_graph() -> TempDir {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("src")).expect("create src");
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"name":"inv","type":"module"}"#,
+        )
+        .expect("write package");
+        // cyclomatic 3 (1 + two `if`), cognitive 2 (two flat `if` statements).
+        std::fs::write(
+            root.join("src/math.ts"),
+            "export function classify(x: number) {\n  if (x > 0) {\n    return 1;\n  }\n  if (x < 0) {\n    return -1;\n  }\n  return 0;\n}\n\nexport function unused() {\n  return 0;\n}\n",
+        )
+        .expect("write callee");
+        std::fs::write(
+            root.join("src/first.ts"),
+            "import { classify } from './math';\nclassify(1);\n",
+        )
+        .expect("write first importer");
+        std::fs::write(
+            root.join("src/second.ts"),
+            "import { classify } from './math';\nclassify(-1);\n",
+        )
+        .expect("write second importer");
+        dir
+    }
+
+    #[test]
+    fn fixture_call_graph_round_trips_through_the_blob() {
+        let project = project_with_known_call_graph();
+        let config = load_resolved_config(project.path()).expect("config loads");
+        let session = AnalysisSession::from_resolved_config(config).expect("session");
+        let include_all = compile_exclude_matcher(&[]).unwrap();
+        let functions = collect_inventory(&session, &include_all, None);
+        let caller_edges = collect_caller_edges(&session, &functions);
+        let caller_edge_limits = caller_edges.limits();
+        let request = InventoryRequest {
+            version: INVENTORY_BLOB_VERSION_WITH_CALLERS,
+            git_sha: "deadbeef",
+            functions: &functions,
+            churn_by_path: BTreeMap::new(),
+            caller_edges: caller_edges.by_callee,
+            caller_edge_limits,
+        };
+        let json = serde_json::to_value(&request).expect("serialize request");
+
+        assert_eq!(json["version"], 3);
+
+        // Complexity travels per function with the exact numbers the health
+        // pass computes for this fixture.
+        let classify = json["functions"]
+            .as_array()
+            .expect("functions array")
+            .iter()
+            .find(|f| f["functionName"] == "classify")
+            .expect("classify present");
+        assert_eq!(classify["cyclomatic"], 3, "1 + two if statements");
+        assert_eq!(classify["cognitive"], 2, "two flat if statements");
+        let classify_stable_id = classify["identity"]["stable_id"]
+            .as_str()
+            .expect("stable_id present")
+            .to_owned();
+
+        // The edge list is keyed by the callee stable_id and lists both
+        // importers, in deterministic path order.
+        let sites = json["callerEdges"][&classify_stable_id]
+            .as_array()
+            .expect("classify has importer edges");
+        let files: Vec<&str> = sites
+            .iter()
+            .map(|site| site["file"].as_str().expect("file"))
+            .collect();
+        assert_eq!(files, vec!["src/first.ts", "src/second.ts"]);
+        assert_eq!(sites[0]["symbols"][0], "classify");
+
+        // An exported-but-unimported function gets no entry at all, never a
+        // placeholder with zero sites.
+        let unused = json["functions"]
+            .as_array()
+            .expect("functions array")
+            .iter()
+            .find(|f| f["functionName"] == "unused")
+            .expect("unused present");
+        let unused_stable_id = unused["identity"]["stable_id"]
+            .as_str()
+            .expect("stable_id present");
+        assert!(json["callerEdges"].get(unused_stable_id).is_none());
+
+        // Blob header carries the size guard so a reader can interpret fan-in.
+        assert_eq!(
+            json["callerEdgeLimits"]["maxSitesPerFunction"],
+            MAX_CALLER_SITES_PER_FN
+        );
+        assert_eq!(
+            json["callerEdgeLimits"]["maxSymbolsPerSite"],
+            MAX_SYMBOLS_PER_CALLER_SITE
+        );
+        assert_eq!(json["callerEdgeLimits"]["truncatedFunctions"], 0);
+    }
+
+    #[test]
+    fn caller_edge_fan_in_is_capped_and_reported_in_the_header() {
+        let callee = InventoryFunction::from_entry(
+            "src/barrel.ts",
+            "src/barrel.ts",
+            entry("widely_used", 1, "h1"),
+            None,
+        );
+        let over_cap = MAX_CALLER_SITES_PER_FN + 7;
+        let edges: Vec<ImporterEdge> = (0..over_cap)
+            .map(|index| ImporterEdge {
+                callee_file: "src/barrel.ts".to_owned(),
+                importer_file: format!("src/importer-{index:04}.ts"),
+                symbol: "widely_used".to_owned(),
+            })
+            .collect();
+
+        let attributed = attribute_caller_edges(std::slice::from_ref(&callee), &edges);
+
+        let sites = attributed
+            .by_callee
+            .get(&callee.identity.stable_id)
+            .expect("callee edges");
+        assert_eq!(sites.len(), MAX_CALLER_SITES_PER_FN, "fan-in is capped");
+        assert_eq!(attributed.truncated_functions, 1);
+        let limits = attributed.limits().expect("limits present with edges");
+        assert_eq!(
+            limits.max_sites_per_function,
+            u32::try_from(MAX_CALLER_SITES_PER_FN).unwrap()
+        );
+        assert_eq!(limits.truncated_functions, 1);
+    }
+
+    #[test]
+    fn caller_edge_fan_in_exactly_at_the_cap_is_not_reported_as_truncated() {
+        let callee = InventoryFunction::from_entry(
+            "src/barrel.ts",
+            "src/barrel.ts",
+            entry("widely_used", 1, "h1"),
+            None,
+        );
+        let edges: Vec<ImporterEdge> = (0..MAX_CALLER_SITES_PER_FN)
+            .map(|index| ImporterEdge {
+                callee_file: "src/barrel.ts".to_owned(),
+                importer_file: format!("src/importer-{index:04}.ts"),
+                symbol: "widely_used".to_owned(),
+            })
+            .collect();
+
+        let attributed = attribute_caller_edges(std::slice::from_ref(&callee), &edges);
+
+        assert_eq!(
+            attributed
+                .by_callee
+                .get(&callee.identity.stable_id)
+                .expect("callee edges")
+                .len(),
+            MAX_CALLER_SITES_PER_FN
+        );
+        assert_eq!(
+            attributed.truncated_functions, 0,
+            "a fan-in that exactly fills the cap lost nothing"
+        );
+    }
+
+    #[test]
+    fn caller_edge_limits_are_absent_without_caller_edges() {
+        // A v1/v2 body (no caller edges) must not grow a header field: an older
+        // server validates the pre-enrichment shape byte for byte.
+        assert!(CallerEdges::default().limits().is_none());
+        let request = InventoryRequest {
+            version: INVENTORY_BLOB_VERSION,
+            git_sha: "abc",
+            functions: &[],
+            churn_by_path: BTreeMap::new(),
+            caller_edges: BTreeMap::new(),
+            caller_edge_limits: CallerEdges::default().limits(),
+        };
+        let json = serde_json::to_value(&request).expect("serialize");
+        assert!(json.get("callerEdgeLimits").is_none());
+        assert!(json.get("callerEdges").is_none());
     }
 
     #[test]
@@ -1899,6 +2166,7 @@ mod tests {
             functions: &[],
             churn_by_path: BTreeMap::new(),
             caller_edges: BTreeMap::new(),
+            caller_edge_limits: None,
         };
         let value = serde_json::to_value(&empty).expect("serialize empty");
         assert!(
@@ -1920,6 +2188,7 @@ mod tests {
             functions: &[],
             churn_by_path: BTreeMap::new(),
             caller_edges,
+            caller_edge_limits: None,
         };
         let value = serde_json::to_value(&populated).expect("serialize populated");
         assert_eq!(value["callerEdges"]["sid1"][0]["file"], "src/a.ts");
