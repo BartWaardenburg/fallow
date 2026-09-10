@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789026964908,
+  "lastUpdate": 1789029418633,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bartwaardenburg@gmail.com",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "cac2a1438c82eec446fe856f54bb9ae3efe77463",
-          "message": "fix(ci): complete provider lifecycle reconciliation",
-          "timestamp": "2026-08-24T12:16:13+02:00",
-          "tree_id": "a5ea7303285fc5ddc225741194979ad5f3e6469c",
-          "url": "https://github.com/fallow-rs/fallow/commit/cac2a1438c82eec446fe856f54bb9ae3efe77463"
-        },
-        "date": 1787566812872,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9742312,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 49231,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1190541,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8445,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8459,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "b7722aff930fdad053d4d811b8e5fb055ff1ef44",
+          "message": "feat(coverage): report the caller-edge size guard in the inventory blob\n\nCloses #2607",
+          "timestamp": "2026-09-10T10:31:42+02:00",
+          "tree_id": "11ef3a131bf22aca2845d8069ed0526ea2b43240",
+          "url": "https://github.com/fallow-rs/fallow/commit/b7722aff930fdad053d4d811b8e5fb055ff1ef44"
+        },
+        "date": 1789029414144,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 9893422,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 50765,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1182029,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8098,
             "unit": "allocations"
           }
         ]
