@@ -5,6 +5,12 @@
   "description": "Codebase analyzer for TypeScript/JavaScript: unused code, circular dependencies, code duplication, complexity hotspots, and architecture boundary violations",
   "global_flags": [
     {
+      "name": "path",
+      "type": "string",
+      "required": false,
+      "description": "Scope reported findings to this file or directory (default: whole project). The full project graph is still built; only reported items are narrowed"
+    },
+    {
       "name": "--root",
       "type": "string",
       "required": false,
@@ -882,6 +888,12 @@
           "type": "string",
           "required": false,
           "description": "Only report issues in the specified file(s). Accepts multiple values. The full project graph is still built, but only issues in matching files are reported. Useful for lint-staged pre-commit hooks"
+        },
+        {
+          "name": "path",
+          "type": "string",
+          "required": false,
+          "description": "Scope reported findings to this file or directory (default: whole project). The full project graph is still built; only reported items are narrowed"
         }
       ]
     },
@@ -938,6 +950,12 @@
           "type": "string",
           "required": false,
           "description": "Report pairs touching one of these project-relative files"
+        },
+        {
+          "name": "path",
+          "type": "string",
+          "required": false,
+          "description": "Scope reported findings to this file or directory (default: whole project). The full project graph is still built; only reported items are narrowed"
         }
       ]
     },
@@ -1068,6 +1086,12 @@
             "true",
             "false"
           ]
+        },
+        {
+          "name": "path",
+          "type": "string",
+          "required": false,
+          "description": "Scope reported findings to this file or directory (default: whole project). The full project graph is still built; only reported items are narrowed. Only fixes touching scoped files are planned and applied"
         }
       ]
     },
@@ -1249,6 +1273,12 @@
             "true",
             "false"
           ]
+        },
+        {
+          "name": "path",
+          "type": "string",
+          "required": false,
+          "description": "Scope reported findings to this file or directory (default: whole project). The full project graph is still built; only reported items are narrowed"
         }
       ]
     },
@@ -1368,6 +1398,12 @@
           "type": "string",
           "required": false,
           "description": "Trace all clones at a specific location (format: `FILE:LINE`)"
+        },
+        {
+          "name": "path",
+          "type": "string",
+          "required": false,
+          "description": "Scope reported findings to this file or directory (default: whole project). The full project graph is still built; only reported items are narrowed"
         }
       ]
     },
@@ -1626,6 +1662,12 @@
           "type": "string",
           "required": false,
           "description": "Fraction of total trace count below which an invoked function is classified as `low_traffic` rather than `active`. Expressed as a decimal (e.g. `0.001` for 0.1%). Omit to use the sidecar's spec default (0.001)"
+        },
+        {
+          "name": "path",
+          "type": "string",
+          "required": false,
+          "description": "Scope reported findings to this file or directory (default: whole project). The full project graph is still built; only reported items are narrowed"
         }
       ]
     },
@@ -1857,11 +1899,17 @@
           "name": "--show-deprioritized",
           "type": "bool",
           "required": false,
-          "description": "Expand the de-prioritized units in the review brief's weighted focus map (\"show me what you de-prioritized\"). The `deprioritized` escape-hatch list is ALWAYS present in `--format json` regardless; this flag only re-expands the collapse-by-default human focus render. Only consulted on the brief path",
+          "description": "Expand the de-prioritized units in the review brief's weighted focus map (\"show me what you de-prioritized\"). The `deprioritized` escape-hatch list is ALWAYS present in `--format json` regardless; this flag only re-expands the collapse-by-default human focus render. Only consulted on the `--walkthrough` path",
           "possible_values": [
             "true",
             "false"
           ]
+        },
+        {
+          "name": "path",
+          "type": "string",
+          "required": false,
+          "description": "Scope reported findings to this file or directory (default: whole project). The full project graph is still built; only reported items are narrowed"
         }
       ]
     },
@@ -1960,6 +2008,12 @@
             "true",
             "false"
           ]
+        },
+        {
+          "name": "path",
+          "type": "string",
+          "required": false,
+          "description": "Scope reported findings to this file or directory (default: whole project). The full project graph is still built; only reported items are narrowed"
         }
       ]
     },

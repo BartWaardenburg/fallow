@@ -121,6 +121,12 @@ pub struct SecurityOptions<'a> {
     pub changed_workspaces: Option<&'a str>,
     /// `--file <PATH>`: scope findings to selected files or trace hops.
     pub file: &'a [PathBuf],
+    /// Positional `[PATH]` scope: root-joined absolute file or directory inside
+    /// the root. Appended to the workspace-roots channel, so it composes with
+    /// `--workspace` the way multiple workspace roots compose (union), and
+    /// intersects with `--changed-since` / `--diff-file` like every other
+    /// scope flag. `None` means whole-project scope.
+    pub scope: Option<PathBuf>,
     /// `--surface`: include the top-level attack-surface inventory in JSON.
     pub surface: bool,
     /// `--gate <mode>`: opt-in regression gate. `new` requires a diff source and
@@ -258,6 +264,7 @@ pub fn benchmark_security_json(root: &Path, threads: usize) -> Result<(usize, us
         changed_workspaces: None,
         file: files,
         surface: false,
+        scope: None,
         gate: None,
         runtime_coverage: None,
         min_invocations_hot: crate::DEFAULT_MIN_INVOCATIONS_HOT,
@@ -305,6 +312,7 @@ pub fn create_security_survivors_benchmark_corpus(
         changed_workspaces: None,
         file: files,
         surface: false,
+        scope: None,
         gate: None,
         runtime_coverage: None,
         min_invocations_hot: crate::DEFAULT_MIN_INVOCATIONS_HOT,
@@ -965,12 +973,15 @@ fn apply_security_scopes(
     opts: &SecurityOptions<'_>,
     analysis: &mut SecurityAnalysisState,
 ) -> Result<(), ExitCode> {
-    let ws_roots = crate::check::filtering::resolve_workspace_scope(
+    let mut ws_roots = crate::check::filtering::resolve_workspace_scope(
         opts.root,
         opts.workspace,
         opts.changed_workspaces,
         opts.output,
     )?;
+    if let Some(scope) = opts.scope.as_ref() {
+        ws_roots.get_or_insert_with(Vec::new).push(scope.clone());
+    }
     if let Some(ref roots) = ws_roots {
         crate::check::filtering::filter_to_workspaces(&mut analysis.results, roots);
     }
@@ -1164,6 +1175,11 @@ fn base_snapshot_security_options<'a>(
         changed_workspaces: None,
         file: &[],
         surface: false,
+        // Deliberately unscoped: the base pass runs in another worktree whose
+        // path spelling differs, so a head-root scope would empty the base
+        // snapshot. The head pass is already scope-narrowed; a full base
+        // snapshot joins correctly against it.
+        scope: None,
         gate: None,
         runtime_coverage: None,
         min_invocations_hot: opts.min_invocations_hot,
@@ -1494,6 +1510,7 @@ fn security_runtime_health_options<'a>(
         analysis_identity: fallow_types::semantic::SemanticAnalysisIdentity::default(),
         complexity_breakdown: false,
         group_by: None,
+        scope: opts.scope.clone(),
     }
 }
 
@@ -4551,6 +4568,7 @@ mod tests {
             changed_workspaces: None,
             file: &[],
             surface: false,
+            scope: None,
             gate: None,
             runtime_coverage: None,
             min_invocations_hot: 100,

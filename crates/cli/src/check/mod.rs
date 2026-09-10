@@ -351,6 +351,12 @@ pub struct CheckOptions<'a> {
     pub top: Option<usize>,
     /// Only report issues in these file(s). Empty means no file filter.
     pub file: &'a [std::path::PathBuf],
+    /// Positional `[PATH]` scope: root-joined absolute file or directory inside
+    /// the root. Appended to the workspace-roots channel, so it composes with
+    /// `--workspace` the way multiple workspace roots compose (union), and
+    /// intersects with `--changed-since` / `--diff-file` like every other
+    /// scope flag. `None` means whole-project scope.
+    pub scope: Option<std::path::PathBuf>,
     /// Report unused exports in entry files instead of auto-marking them as used.
     pub include_entry_exports: bool,
     /// When true, emit a condensed summary instead of full item-level output.
@@ -1000,12 +1006,15 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
     let config = prepare_check_config(opts)?;
     validate_effective_type_aware_output(opts.output, config.type_aware.enabled)?;
 
-    let ws_roots = filtering::resolve_workspace_scope(
+    let mut ws_roots = filtering::resolve_workspace_scope(
         opts.root,
         opts.workspace,
         opts.changed_workspaces,
         opts.output,
     )?;
+    if let Some(scope) = opts.scope.as_ref() {
+        ws_roots.get_or_insert_with(Vec::new).push(scope.clone());
+    }
 
     let changed_files: Option<rustc_hash::FxHashSet<std::path::PathBuf>> = opts
         .changed_since
@@ -1196,6 +1205,7 @@ pub fn benchmark_dead_code_json(
         explain: false,
         top: None,
         file: &[],
+        scope: None,
         include_entry_exports: false,
         summary: false,
         regression_opts: RegressionOpts {

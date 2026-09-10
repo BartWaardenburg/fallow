@@ -166,12 +166,15 @@ fn build_health_scope_inputs<'a>(
         .changed_since
         .and_then(|git_ref| get_changed_files(opts.root, git_ref));
     let diff_index = health_diff_index(opts);
-    let ws_roots = resolve_workspace_scope(
+    let mut ws_roots = resolve_workspace_scope(
         opts.root,
         opts.workspace,
         opts.changed_workspaces,
         opts.output,
     )?;
+    if let Some(scope) = opts.scope.as_ref() {
+        ws_roots.get_or_insert_with(Vec::new).push(scope.clone());
+    }
     let group_resolver = build_health_group_resolver(opts, config)?;
     Ok(HealthScopeInputs {
         changed_files,

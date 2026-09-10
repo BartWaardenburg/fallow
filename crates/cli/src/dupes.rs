@@ -59,6 +59,12 @@ pub struct DupesOptions<'a> {
     /// detection. `None` defers to the config value (which defaults to `true`);
     /// `Some(false)` is the explicit opt-out (`--no-ignore-imports`).
     pub ignore_imports: Option<bool>,
+    /// Positional `[PATH]` scope: root-joined absolute file or directory inside
+    /// the root. Appended to the workspace-roots channel, so it composes with
+    /// `--workspace` the way multiple workspace roots compose (union), and
+    /// intersects with `--changed-since` / `--diff-file` like every other
+    /// scope flag. `None` means whole-project scope.
+    pub scope: Option<std::path::PathBuf>,
     pub top: Option<usize>,
     pub baseline_path: Option<&'a std::path::Path>,
     pub save_baseline_path: Option<&'a std::path::Path>,
@@ -329,13 +335,18 @@ fn filter_dupes_report(
         filter_by_diff(report, diff_index, &config.root);
     }
 
-    if let Some(ws_roots) = resolve_workspace_scope(
+    if let Some(mut ws_roots) = resolve_workspace_scope(
         opts.root,
         opts.workspace,
         opts.changed_workspaces,
         opts.output,
     )? {
+        if let Some(scope) = opts.scope.as_ref() {
+            ws_roots.push(scope.clone());
+        }
         filter_by_workspaces(report, &ws_roots, &config.root);
+    } else if let Some(scope) = opts.scope.as_ref() {
+        filter_by_workspaces(report, std::slice::from_ref(scope), &config.root);
     }
 
     if let Some(n) = opts.top {
@@ -1076,6 +1087,7 @@ mod tests {
             group_by: None,
             performance: false,
             include_fragments: true,
+            scope: None,
         }
     }
 

@@ -21,6 +21,11 @@ pub struct ListOptions<'a> {
     pub workspaces: bool,
     pub production: bool,
     pub allow_remote_extends: bool,
+    /// Positional `[PATH]` scope: root-joined absolute file or directory inside
+    /// the root. Narrows the file and entry-point inventory to the scope;
+    /// plugins, boundaries metadata, and workspaces stay whole-project.
+    /// `None` means whole-project scope.
+    pub scope: Option<std::path::PathBuf>,
 }
 
 /// Owned listing data assembled by [`collect_list_data`] and borrowed by the
@@ -103,6 +108,7 @@ pub fn benchmark_list_json(
         workspaces: false,
         production: false,
         allow_remote_extends: false,
+        scope: None,
     };
     let (data, rendered_bytes) = benchmark_list_data_json(&opts)?;
     let file_count = data.discovered.as_deref().map_or(0, <[_]>::len);
@@ -141,6 +147,7 @@ pub fn benchmark_list_boundaries_json(
         workspaces: false,
         production: false,
         allow_remote_extends: false,
+        scope: None,
     };
     let (data, rendered_bytes) = benchmark_list_data_json(&opts)?;
     let Some(boundary_data) = data.boundary_data else {
@@ -206,7 +213,15 @@ fn collect_list_data(
     } else {
         None
     };
-    let discovered = session.as_ref().map(|session| session.files().to_vec());
+    let mut discovered = session.as_ref().map(|session| session.files().to_vec());
+    if let Some(scope) = opts.scope.as_deref() {
+        discovered = discovered.map(|files| {
+            files
+                .into_iter()
+                .filter(|file| crate::scope_path::scope_covers(scope, &file.path))
+                .collect()
+        });
+    }
     let session_workspaces = session.as_ref().map(|session| session.workspaces());
     let session_workspace_diagnostics = session
         .as_ref()
@@ -775,6 +790,7 @@ mod tests {
             workspaces: false,
             production: false,
             allow_remote_extends: false,
+            scope: None,
         }
     }
 

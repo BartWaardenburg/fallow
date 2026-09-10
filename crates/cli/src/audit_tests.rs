@@ -2781,6 +2781,7 @@ fn audit_base_snapshot_cache_roundtrips_from_disk() {
         show_cleared: false,
         walkthrough_file: None,
         show_deprioritized: false,
+        scope: None,
     };
     let key = AuditBaseSnapshotCacheKey {
         hash: 0xfeed,
@@ -2859,6 +2860,7 @@ fn audit_base_snapshot_cache_rejects_mismatched_key() {
         show_cleared: false,
         walkthrough_file: None,
         show_deprioritized: false,
+        scope: None,
     };
     let key = AuditBaseSnapshotCacheKey {
         hash: 0xbeef,
@@ -2951,6 +2953,7 @@ fn audit_base_snapshot_cache_key_includes_extended_config() {
         show_cleared: false,
         walkthrough_file: None,
         show_deprioritized: false,
+        scope: None,
     };
 
     let first = config_file_fingerprint(&opts).expect("fingerprint should be computed");
@@ -3036,6 +3039,7 @@ fn audit_gate_all_skips_base_snapshot() {
         show_cleared: false,
         walkthrough_file: None,
         show_deprioritized: false,
+        scope: None,
     };
 
     let result = execute_audit(&opts).expect("audit should execute");
@@ -3141,6 +3145,7 @@ fn audit_gate_new_only_skips_base_snapshot_for_docs_only_diff() {
         show_cleared: false,
         walkthrough_file: None,
         show_deprioritized: false,
+        scope: None,
     };
 
     let result = execute_audit(&opts).expect("audit should execute");
@@ -3247,6 +3252,7 @@ fn audit_reuses_dead_code_parse_for_health_when_production_matches() {
         show_cleared: false,
         walkthrough_file: None,
         show_deprioritized: false,
+        scope: None,
     };
 
     let result = execute_audit(&opts).expect("audit should execute");
@@ -3348,6 +3354,7 @@ fn audit_new_only_does_not_gate_reshaped_clone_group_without_added_lines() {
         show_cleared: false,
         walkthrough_file: None,
         show_deprioritized: false,
+        scope: None,
     };
 
     let result = execute_audit(&opts).expect("audit should execute");
@@ -3544,6 +3551,7 @@ fn audit_new_only_still_gates_pasted_clone_as_introduced() {
         show_cleared: false,
         walkthrough_file: None,
         show_deprioritized: false,
+        scope: None,
     };
 
     let result = execute_audit(&opts).expect("audit should execute");
@@ -3664,6 +3672,7 @@ fn audit_dupes_falls_back_to_own_discovery_when_health_off() {
         show_cleared: false,
         walkthrough_file: None,
         show_deprioritized: false,
+        scope: None,
     };
 
     let result = execute_audit(&opts).expect("audit should execute");
@@ -3872,6 +3881,7 @@ fn audit_gate_new_only_inherits_pre_existing_duplicates_in_focused_files() {
         show_cleared: false,
         walkthrough_file: None,
         show_deprioritized: false,
+        scope: None,
     };
 
     let result = execute_audit(&opts).expect("audit should execute");
@@ -4019,6 +4029,7 @@ export function App() {
         show_cleared: false,
         walkthrough_file: None,
         show_deprioritized: false,
+        scope: None,
     };
 
     let result = execute_audit(&opts).expect("audit should execute");
@@ -4173,6 +4184,7 @@ export function App() {
         show_cleared: false,
         walkthrough_file: None,
         show_deprioritized: false,
+        scope: None,
     };
 
     let result = execute_audit(&opts).expect("audit should execute");
@@ -4267,6 +4279,7 @@ fn audit_base_uses_new_explicit_config_without_hard_failure() {
         show_cleared: false,
         walkthrough_file: None,
         show_deprioritized: false,
+        scope: None,
     };
 
     let result = execute_audit(&opts).expect("audit should execute with a new explicit config");
@@ -4356,6 +4369,7 @@ fn audit_base_uses_current_discovered_config_for_attribution() {
         show_cleared: false,
         walkthrough_file: None,
         show_deprioritized: false,
+        scope: None,
     };
 
     let result = execute_audit(&opts).expect("audit should execute");
@@ -4454,6 +4468,7 @@ fn audit_base_current_config_attribution_survives_cache_hit() {
         show_cleared: false,
         walkthrough_file: None,
         show_deprioritized: false,
+        scope: None,
     };
 
     let first = execute_audit(&opts).expect("first audit should execute");
@@ -4572,6 +4587,7 @@ fn audit_dupes_only_materializes_groups_touching_changed_files() {
         show_cleared: false,
         walkthrough_file: None,
         show_deprioritized: false,
+        scope: None,
     };
 
     let result = execute_audit(&opts).expect("audit should execute");

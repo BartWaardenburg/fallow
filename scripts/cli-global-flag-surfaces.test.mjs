@@ -30,12 +30,21 @@ const declaredGlobalFlags = () => {
   const names = [];
   for (const [, attributes, field] of body.matchAll(ARG_FIELD)) {
     const explicit = attributes.match(/\blong\s*=\s*"([^"]+)"/);
-    const name = explicit ? `--${explicit[1]}` : `--${field.replaceAll("_", "-")}`;
-    if (!explicit && !/\blong\b/.test(attributes)) {
+    if (explicit) {
+      const name = `--${explicit[1]}`;
+      if (!SCHEMA_EXCLUDED_FLAGS.has(name)) {
+        names.push(name);
+      }
       continue;
     }
-    if (!SCHEMA_EXCLUDED_FLAGS.has(name)) {
-      names.push(name);
+    if (/\blong\b/.test(attributes)) {
+      names.push(`--${field.replaceAll("_", "-")}`);
+      continue;
+    }
+    // Bare positionals (e.g. `[PATH]`) carry `value_name` instead of `long`
+    // and surface in the manifest under their clap id.
+    if (/\bvalue_name\b/.test(attributes)) {
+      names.push(field);
     }
   }
   assert.ok(names.length > 10, "root flag extraction should find the global flag block");

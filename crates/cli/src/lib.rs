@@ -77,6 +77,7 @@ pub mod report;
 mod rule_pack;
 mod runtime_support;
 mod schema;
+mod scope_path;
 mod security;
 mod security_help;
 mod selector;
@@ -261,6 +262,11 @@ const TOP_LEVEL_AFTER_LONG_HELP: &str = concat!(
 struct Cli {
     #[command(subcommand)]
     command: Option<Command>,
+
+    /// Scope reported findings to this file or directory (default: whole project).
+    /// The full project graph is still built; only reported items are narrowed.
+    #[arg(value_name = "PATH")]
+    path: Option<PathBuf>,
 
     /// Print version.
     /// Accepts `-v`, `-V`, and `--version`; TS/JS tooling (node, npm, pnpm,
@@ -815,6 +821,11 @@ enum Command {
         /// are reported. Useful for lint-staged pre-commit hooks.
         #[arg(long, value_name = "PATH")]
         file: Vec<std::path::PathBuf>,
+
+        /// Scope reported findings to this file or directory (default: whole project).
+        /// The full project graph is still built; only reported items are narrowed.
+        #[arg(value_name = "PATH")]
+        path: Option<std::path::PathBuf>,
     },
 
     /// Watch for changes and re-run analysis
@@ -859,6 +870,11 @@ enum Command {
         /// Report pairs touching one of these project-relative files.
         #[arg(long, value_name = "PATH")]
         file: Vec<PathBuf>,
+
+        /// Scope reported findings to this file or directory (default: whole project).
+        /// The full project graph is still built; only reported items are narrowed.
+        #[arg(value_name = "PATH")]
+        path: Option<PathBuf>,
     },
 
     /// Inspect one file or exported symbol as a bundled evidence query
@@ -994,6 +1010,12 @@ enum Command {
         /// normally.
         #[arg(long)]
         no_create_config: bool,
+
+        /// Scope reported findings to this file or directory (default: whole project).
+        /// The full project graph is still built; only reported items are narrowed.
+        /// Only fixes touching scoped files are planned and applied.
+        #[arg(value_name = "PATH")]
+        path: Option<PathBuf>,
     },
 
     /// Initialize a .fallowrc.json configuration file, AGENTS.md guide, or git
@@ -1137,6 +1159,11 @@ enum Command {
         /// tsconfig references).
         #[arg(long)]
         workspaces: bool,
+
+        /// Scope reported findings to this file or directory (default: whole project).
+        /// The full project graph is still built; only reported items are narrowed.
+        #[arg(value_name = "PATH")]
+        path: Option<PathBuf>,
     },
 
     /// Show monorepo workspaces and any workspace-discovery diagnostics.
@@ -1219,6 +1246,11 @@ enum Command {
         /// Trace all clones at a specific location (format: `FILE:LINE`)
         #[arg(long, value_name = "FILE:LINE")]
         trace: Option<String>,
+
+        /// Scope reported findings to this file or directory (default: whole project).
+        /// The full project graph is still built; only reported items are narrowed.
+        #[arg(value_name = "PATH")]
+        path: Option<PathBuf>,
     },
 
     /// Analyze function complexity (cyclomatic + cognitive)
@@ -1411,6 +1443,11 @@ enum Command {
         /// default (0.001).
         #[arg(long, value_name = "RATIO")]
         low_traffic_threshold: Option<f64>,
+
+        /// Scope reported findings to this file or directory (default: whole project).
+        /// The full project graph is still built; only reported items are narrowed.
+        #[arg(value_name = "PATH")]
+        path: Option<PathBuf>,
     },
 
     /// Detect feature flag patterns in the codebase
@@ -1634,9 +1671,14 @@ enum Command {
         /// focus map ("show me what you de-prioritized"). The `deprioritized`
         /// escape-hatch list is ALWAYS present in `--format json` regardless; this
         /// flag only re-expands the collapse-by-default human focus render. Only
-        /// consulted on the brief path.
+        /// consulted on the `--walkthrough` path.
         #[arg(long)]
         show_deprioritized: bool,
+
+        /// Scope reported findings to this file or directory (default: whole project).
+        /// The full project graph is still built; only reported items are narrowed.
+        #[arg(value_name = "PATH")]
+        path: Option<PathBuf>,
     },
 
     /// Maintain reusable audit base-snapshot caches.
@@ -1753,6 +1795,11 @@ enum Command {
         /// Include the agent-facing attack-surface inventory in JSON output.
         #[arg(long)]
         surface: bool,
+
+        /// Scope reported findings to this file or directory (default: whole project).
+        /// The full project graph is still built; only reported items are narrowed.
+        #[arg(value_name = "PATH")]
+        path: Option<PathBuf>,
     },
 
     /// Render a saved `--format json` results file in another format without
@@ -3083,6 +3130,7 @@ pub fn benchmark_fix_dry_run(root: &Path, threads: usize) -> (ExitCode, usize) {
         type_aware: None,
         type_aware_projects: &[],
         type_aware_require: None,
+        scope: None,
     })
 }
 
@@ -3587,6 +3635,15 @@ fn run_bare_combined(
     let cli = dispatch.cli;
     let (output, quiet, fail_on_issues) =
         (dispatch.output, dispatch.quiet, dispatch.fail_on_issues);
+    let scope = match crate::scope_path::resolve_command_scope(
+        dispatch.root,
+        dispatch.output,
+        cli.path.clone(),
+    ) {
+        Ok(scope) => scope.map(|resolved| resolved.absolute),
+        Err(code) => return code,
+    };
+    let scoped_run = scope.is_some();
     combined::run_combined(&combined::CombinedOptions {
         root: dispatch.root,
         config_path: &cli.config,
@@ -3637,10 +3694,12 @@ fn run_bare_combined(
         coverage: coverage_inputs.coverage.as_deref(),
         coverage_root: coverage_inputs.coverage_root.as_deref(),
         include_entry_exports: cli.include_entry_exports,
+        scope,
         regression_opts: dispatch.regression_opts(
             cli.changed_since.is_some()
                 || cli.workspace.is_some()
-                || cli.changed_workspaces.is_some(),
+                || cli.changed_workspaces.is_some()
+                || scoped_run,
         ),
     })
 }
@@ -3665,26 +3724,38 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
             min_lines,
             top,
             file,
-        } => similar_code_cli::run(similar_code_cli::SimilarCodeCliInput {
-            root,
-            config_path: cli.config.as_deref(),
-            allow_remote_extends: cli.allow_remote_extends,
-            no_cache: cli.no_cache,
-            threads: dispatch.threads,
-            changed_since: cli.changed_since.as_deref(),
-            diff_file: cli.diff_file.as_deref(),
-            workspace: cli.workspace.as_deref(),
-            changed_workspaces: cli.changed_workspaces.as_deref(),
-            explain: cli.explain,
-            quiet,
-            output,
-            json_style: dispatch.json_style,
-            threshold,
-            min_lines,
-            top,
-            files: file,
-            subcommand,
-        }),
+            path,
+        } => {
+            let scope = match crate::scope_path::resolve_command_scope(
+                dispatch.root,
+                dispatch.output,
+                path,
+            ) {
+                Ok(scope) => scope,
+                Err(code) => return code,
+            };
+            similar_code_cli::run(similar_code_cli::SimilarCodeCliInput {
+                root,
+                config_path: cli.config.as_deref(),
+                allow_remote_extends: cli.allow_remote_extends,
+                no_cache: cli.no_cache,
+                threads: dispatch.threads,
+                changed_since: cli.changed_since.as_deref(),
+                diff_file: cli.diff_file.as_deref(),
+                workspace: cli.workspace.as_deref(),
+                changed_workspaces: cli.changed_workspaces.as_deref(),
+                explain: cli.explain,
+                quiet,
+                output,
+                json_style: dispatch.json_style,
+                threshold,
+                min_lines,
+                top,
+                files: file,
+                scope,
+                subcommand,
+            })
+        }
         Command::Inspect {
             file,
             symbol,
@@ -3921,10 +3992,17 @@ fn dispatch_check_command(command: Command, dispatch: &DispatchContext<'_>) -> E
         symbol_impact,
         top,
         file,
+        path,
         ..
     } = command
     else {
         unreachable!("check dispatcher only handles check commands");
+    };
+
+    let scope = match crate::scope_path::resolve_command_scope(dispatch.root, dispatch.output, path)
+    {
+        Ok(scope) => scope.map(|resolved| resolved.absolute),
+        Err(code) => return code,
     };
 
     dispatch_check(
@@ -3945,6 +4023,7 @@ fn dispatch_check_command(command: Command, dispatch: &DispatchContext<'_>) -> E
             type_aware_require: dispatch.cli.type_aware_require,
             top,
             file,
+            scope,
         },
     )
 }
@@ -4199,9 +4278,16 @@ fn dispatch_security_command(command: Command, dispatch: &DispatchContext<'_>) -
         file,
         gate,
         surface,
+        path,
     } = command
     else {
         unreachable!("security dispatcher only handles security commands");
+    };
+
+    let scope = match crate::scope_path::resolve_command_scope(dispatch.root, dispatch.output, path)
+    {
+        Ok(scope) => scope.map(|resolved| resolved.absolute),
+        Err(code) => return code,
     };
 
     let gate = gate.map(security::SecurityGateArg::into_mode);
@@ -4236,6 +4322,7 @@ fn dispatch_security_command(command: Command, dispatch: &DispatchContext<'_>) -
             min_invocations_hot,
             gate,
             surface,
+            scope,
         },
         &derived_flags,
     )
@@ -4250,6 +4337,7 @@ struct SecurityRunInputs<'a> {
     min_invocations_hot: u64,
     gate: Option<security::SecurityGateMode>,
     surface: bool,
+    scope: Option<PathBuf>,
 }
 
 /// Build `SecurityOptions` and run either the blind-spots or default analysis.
@@ -4279,6 +4367,7 @@ fn run_security_blind_spots_or_default(
         changed_workspaces: cli.changed_workspaces.as_deref(),
         file: inputs.scoped_files,
         surface: inputs.surface,
+        scope: inputs.scope.clone(),
         gate: inputs.gate,
         runtime_coverage: inputs.runtime_coverage,
         min_invocations_hot: inputs.min_invocations_hot,
@@ -4430,9 +4519,16 @@ fn dispatch_dupes_command(command: Command, dispatch: &DispatchContext<'_>) -> E
         top,
         no_fragments,
         trace,
+        path,
     } = command
     else {
         unreachable!("dupes dispatcher only handles dupes commands");
+    };
+
+    let scope = match crate::scope_path::resolve_command_scope(dispatch.root, dispatch.output, path)
+    {
+        Ok(scope) => scope.map(|resolved| resolved.absolute),
+        Err(code) => return code,
     };
 
     dispatch_dupes(
@@ -4451,6 +4547,7 @@ fn dispatch_dupes_command(command: Command, dispatch: &DispatchContext<'_>) -> E
             top,
             no_fragments,
             trace,
+            scope,
         },
     )
 }
@@ -4493,40 +4590,63 @@ fn dispatch_fix_command(command: &Command, dispatch: &DispatchContext<'_>) -> Ex
         dry_run,
         yes,
         no_create_config,
+        path,
     } = command
     else {
         unreachable!("fix dispatcher only handles fix commands");
     };
 
+    let scope = match crate::scope_path::resolve_command_scope(
+        dispatch.root,
+        dispatch.output,
+        path.clone(),
+    ) {
+        Ok(scope) => scope.map(|resolved| resolved.absolute),
+        Err(code) => return code,
+    };
+
     dispatch_fix(
         dispatch,
-        FixDispatchArgs {
+        &FixDispatchArgs {
             dry_run: *dry_run,
             yes: *yes,
             no_create_config: *no_create_config,
+            scope,
         },
     )
 }
 
 fn dispatch_list_command(command: &Command, dispatch: &DispatchContext<'_>) -> ExitCode {
     match command {
-        Command::Workspaces => dispatch_list(dispatch, ListDispatchArgs::workspaces()),
+        Command::Workspaces => dispatch_list(dispatch, &ListDispatchArgs::workspaces()),
         Command::List {
             entry_points,
             files,
             plugins,
             boundaries,
             workspaces,
-        } => dispatch_list(
-            dispatch,
-            ListDispatchArgs {
-                entry_points: *entry_points,
-                files: *files,
-                plugins: *plugins,
-                boundaries: *boundaries,
-                workspaces: *workspaces,
-            },
-        ),
+            path,
+        } => {
+            let scope = match crate::scope_path::resolve_command_scope(
+                dispatch.root,
+                dispatch.output,
+                path.clone(),
+            ) {
+                Ok(scope) => scope.map(|resolved| resolved.absolute),
+                Err(code) => return code,
+            };
+            dispatch_list(
+                dispatch,
+                &ListDispatchArgs {
+                    entry_points: *entry_points,
+                    files: *files,
+                    plugins: *plugins,
+                    boundaries: *boundaries,
+                    workspaces: *workspaces,
+                    scope,
+                },
+            )
+        }
         _ => unreachable!("list dispatcher only handles list commands"),
     }
 }
@@ -4614,9 +4734,16 @@ fn dispatch_health_command(command: Command, dispatch: &DispatchContext<'_>) -> 
         min_invocations_hot,
         min_observation_volume,
         low_traffic_threshold,
+        path,
     } = command
     else {
         unreachable!("health dispatcher only handles health commands");
+    };
+
+    let scope = match crate::scope_path::resolve_command_scope(dispatch.root, dispatch.output, path)
+    {
+        Ok(scope) => scope.map(|resolved| resolved.absolute),
+        Err(code) => return code,
     };
 
     let ownership = ownership || ownership_emails.is_some();
@@ -4652,6 +4779,7 @@ fn dispatch_health_command(command: Command, dispatch: &DispatchContext<'_>) -> 
         min_invocations_hot,
         min_observation_volume,
         low_traffic_threshold,
+        scope,
     };
     dispatch_health(dispatch, &args)
 }
@@ -4709,6 +4837,7 @@ fn dispatch_audit_command(command: Command, dispatch: &DispatchContext<'_>) -> E
         mark_viewed,
         show_cleared,
         show_deprioritized,
+        path,
     } = command
     else {
         unreachable!("audit dispatcher only handles audit commands");
@@ -4717,6 +4846,12 @@ fn dispatch_audit_command(command: Command, dispatch: &DispatchContext<'_>) -> E
     // The walkthrough flags imply the brief path (the guide digest + the
     // graph-snapshot pin are brief-path data).
     let brief = brief || walkthrough_guide || walkthrough || walkthrough_file.is_some();
+
+    let scope = match crate::scope_path::resolve_command_scope(dispatch.root, dispatch.output, path)
+    {
+        Ok(scope) => scope.map(|resolved| resolved.absolute),
+        Err(code) => return code,
+    };
 
     dispatch_audit(
         dispatch,
@@ -4745,6 +4880,7 @@ fn dispatch_audit_command(command: Command, dispatch: &DispatchContext<'_>) -> E
             mark_viewed,
             show_cleared,
             show_deprioritized,
+            scope,
         },
     )
 }
@@ -5277,15 +5413,17 @@ struct CheckDispatchArgs {
     type_aware_require: Option<TypeAwareRequireArg>,
     top: Option<usize>,
     file: Vec<std::path::PathBuf>,
+    scope: Option<std::path::PathBuf>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct ListDispatchArgs {
     entry_points: bool,
     files: bool,
     plugins: bool,
     boundaries: bool,
     workspaces: bool,
+    scope: Option<std::path::PathBuf>,
 }
 
 impl ListDispatchArgs {
@@ -5296,6 +5434,7 @@ impl ListDispatchArgs {
             plugins: false,
             boundaries: false,
             workspaces: true,
+            scope: None,
         }
     }
 }
@@ -5350,14 +5489,14 @@ fn dispatch_watch(dispatch: &DispatchContext<'_>, no_clear: bool) -> ExitCode {
     })
 }
 
-#[derive(Clone, Copy)]
 struct FixDispatchArgs {
     dry_run: bool,
     yes: bool,
     no_create_config: bool,
+    scope: Option<std::path::PathBuf>,
 }
 
-fn dispatch_fix(dispatch: &DispatchContext<'_>, args: FixDispatchArgs) -> ExitCode {
+fn dispatch_fix(dispatch: &DispatchContext<'_>, args: &FixDispatchArgs) -> ExitCode {
     let cli = dispatch.cli;
     let production = match dispatch.production_for(fallow_config::ProductionAnalysis::DeadCode) {
         Ok(production) => production,
@@ -5380,10 +5519,11 @@ fn dispatch_fix(dispatch: &DispatchContext<'_>, args: FixDispatchArgs) -> ExitCo
         type_aware: cli.type_aware_override(),
         type_aware_projects: &cli.type_aware_project,
         type_aware_require: cli.type_aware_require.map(Into::into),
+        scope: args.scope.clone(),
     })
 }
 
-fn dispatch_list(dispatch: &DispatchContext<'_>, args: ListDispatchArgs) -> ExitCode {
+fn dispatch_list(dispatch: &DispatchContext<'_>, args: &ListDispatchArgs) -> ExitCode {
     let cli = dispatch.cli;
     let production = match dispatch.production_for(fallow_config::ProductionAnalysis::DeadCode) {
         Ok(production) => production,
@@ -5403,6 +5543,7 @@ fn dispatch_list(dispatch: &DispatchContext<'_>, args: ListDispatchArgs) -> Exit
         workspaces: args.workspaces,
         production,
         allow_remote_extends: cli.allow_remote_extends,
+        scope: args.scope.clone(),
     })
 }
 
@@ -5448,13 +5589,15 @@ fn dispatch_check(dispatch: &DispatchContext<'_>, args: &CheckDispatchArgs) -> E
         explain: cli.explain,
         top: args.top,
         file: &args.file,
+        scope: args.scope.clone(),
         include_entry_exports: cli.include_entry_exports,
         summary: cli.summary,
         regression_opts: dispatch.regression_opts(
             cli.changed_since.is_some()
                 || cli.workspace.is_some()
                 || cli.changed_workspaces.is_some()
-                || !args.file.is_empty(),
+                || !args.file.is_empty()
+                || args.scope.is_some(),
         ),
         retain_modules_for_health: false,
         defer_performance: false,
@@ -5558,6 +5701,7 @@ struct DupesDispatchArgs {
     top: Option<usize>,
     no_fragments: bool,
     trace: Option<String>,
+    scope: Option<std::path::PathBuf>,
 }
 
 fn dispatch_dupes(dispatch: &DispatchContext<'_>, args: &DupesDispatchArgs) -> ExitCode {
@@ -5604,6 +5748,7 @@ fn dispatch_dupes(dispatch: &DispatchContext<'_>, args: &DupesDispatchArgs) -> E
         group_by: cli.group_by,
         performance: cli.performance,
         include_fragments: !args.no_fragments,
+        scope: args.scope.clone(),
     })
 }
 
@@ -5639,6 +5784,7 @@ struct AuditDispatchArgs {
     show_cleared: bool,
     /// Expand the de-prioritized units in the human focus map.
     show_deprioritized: bool,
+    scope: Option<PathBuf>,
 }
 
 struct ResolvedAuditInputs {
@@ -5800,6 +5946,7 @@ fn run_resolved_audit(
             show_cleared: args.show_cleared,
             walkthrough_file: args.walkthrough_file.as_deref(),
             show_deprioritized: args.show_deprioritized,
+            scope: args.scope.clone(),
         },
         args.gate_marker.as_deref(),
         audit::AuditTypeAwareOptions {
@@ -5853,6 +6000,7 @@ fn decision_surface_audit_args(max_decisions: usize) -> AuditDispatchArgs {
         mark_viewed: Vec::new(),
         show_cleared: false,
         show_deprioritized: false,
+        scope: None,
     }
 }
 
@@ -5905,6 +6053,7 @@ fn decision_surface_audit_options<'a>(
         show_cleared: false,
         walkthrough_file: None,
         show_deprioritized: false,
+        scope: None,
     }
 }
 
@@ -5939,6 +6088,7 @@ struct HealthDispatchArgs<'a> {
     min_invocations_hot: u64,
     min_observation_volume: Option<u32>,
     low_traffic_threshold: Option<f64>,
+    scope: Option<std::path::PathBuf>,
 }
 
 type ResolvedHealthCoverageInputs = fallow_api::CoverageInputs;
@@ -6234,6 +6384,7 @@ fn run_health_dispatch(
             analysis_identity: fallow_types::semantic::SemanticAnalysisIdentity::default(),
             complexity_breakdown: args.complexity_breakdown,
             group_by: cli.group_by.map(Into::into),
+            scope: args.scope.clone(),
         },
         dispatch.json_style,
         &health::TypeAwareHealthOptions {

@@ -72,6 +72,10 @@ pub struct CombinedOptions<'a> {
     pub coverage: Option<&'a std::path::Path>,
     pub coverage_root: Option<&'a std::path::Path>,
     pub include_entry_exports: bool,
+    /// Positional `[PATH]` scope from bare `fallow [PATH]`: root-joined
+    /// absolute file or directory inside the root, threaded into the
+    /// check/dupes/health sub-pipelines. `None` means whole-project scope.
+    pub scope: Option<std::path::PathBuf>,
     pub regression_opts: regression::RegressionOpts<'a>,
 }
 
@@ -173,6 +177,7 @@ fn build_combined_check_options<'a>(
         explain: opts.explain,
         top: None,
         file: &[],
+        scope: opts.scope.clone(),
         include_entry_exports: opts.include_entry_exports,
         summary: opts.summary,
         regression_opts: opts.regression_opts,
@@ -515,6 +520,7 @@ fn build_combined_dupes_options<'a>(
         group_by: opts.group_by,
         performance: false,
         include_fragments: true,
+        scope: opts.scope.clone(),
     }
 }
 
@@ -594,6 +600,7 @@ fn build_health_opts<'a>(opts: &'a CombinedOptions<'a>) -> HealthOptions<'a> {
         analysis_identity: fallow_types::semantic::SemanticAnalysisIdentity::default(),
         complexity_breakdown: false,
         group_by: opts.group_by.map(Into::into),
+        scope: opts.scope.clone(),
     }
 }
 
@@ -712,6 +719,7 @@ mod tests {
             coverage: None,
             coverage_root: None,
             include_entry_exports: false,
+            scope: None,
             regression_opts: RegressionOpts {
                 fail_on_regression: false,
                 tolerance: Tolerance::Absolute(0),

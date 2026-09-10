@@ -1808,6 +1808,7 @@ Available on all commands:
 <!-- generated:flags:global:start -->
 | Flag | Type | Default | Description |
 |---|---|---|---|
+| `path` | `string` | - | Scope reported findings to this file or directory (default: whole project). The full project graph is still built; only reported items are narrowed |
 | `-r, --root` | `string` | - | Project root directory |
 | `-c, --config` | `string` | - | Config file path |
 | `--allow-remote-extends` | `bool` | `false` | Allow trusted config files to extend HTTPS URLs |

@@ -129,6 +129,11 @@ pub struct FixOptions<'a> {
     pub type_aware: Option<bool>,
     pub type_aware_projects: &'a [PathBuf],
     pub type_aware_require: Option<fallow_config::TypeAwareRequire>,
+    /// Positional `[PATH]` scope: root-joined absolute file or directory inside
+    /// the root. Only fixes touching scoped files are planned and applied;
+    /// the analysis itself still runs whole-project so fixability stays sound.
+    /// `None` means whole-project scope.
+    pub scope: Option<PathBuf>,
 }
 
 pub fn run_fix(opts: &FixOptions<'_>) -> ExitCode {
@@ -178,6 +183,11 @@ fn run_fix_impl(opts: &FixOptions<'_>, fix_count: &mut usize) -> ExitCode {
         Ok(r) => r,
         Err(code) => return code,
     };
+
+    let mut results = results;
+    if let Some(scope) = opts.scope.as_ref() {
+        fallow_engine::dead_code::filter_to_workspaces(&mut results, std::slice::from_ref(scope));
+    }
 
     if results.total_issues() == 0 {
         return if opts.emit_output {

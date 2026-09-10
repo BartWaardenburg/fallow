@@ -269,6 +269,7 @@ fn local_health_options<'a>(
         analysis_identity: fallow_types::semantic::SemanticAnalysisIdentity::default(),
         complexity_breakdown: false,
         group_by: None,
+        scope: None,
     }
 }
 
