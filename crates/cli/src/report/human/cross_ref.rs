@@ -4,7 +4,8 @@ use std::path::Path;
 use colored::Colorize;
 use fallow_config::OutputFormat;
 
-use super::{plural, relative_path};
+use super::plural;
+use crate::report::format_display_path;
 
 pub(in crate::report) fn print_cross_reference_findings(
     cross_ref: &fallow_engine::cross_reference::CrossReferenceResult,
@@ -64,12 +65,10 @@ fn build_cross_reference_lines(
     lines.push(String::new());
 
     for finding in &cross_ref.combined_findings {
-        let relative = relative_path(&finding.clone_instance.file, root);
+        let relative = format_display_path(&finding.clone_instance.file, root);
         let location = format!(
             "{}:{}-{}",
-            relative.display(),
-            finding.clone_instance.start_line,
-            finding.clone_instance.end_line
+            relative, finding.clone_instance.start_line, finding.clone_instance.end_line
         );
 
         let reason = match &finding.dead_code_kind {

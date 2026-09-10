@@ -2,7 +2,8 @@ use std::path::Path;
 
 use colored::Colorize;
 
-use super::{MAX_FLAT_ITEMS, format_path, health::format_window, relative_path, thousands};
+use super::{MAX_FLAT_ITEMS, format_path, health::format_window, thousands};
+use crate::report::format_display_path;
 
 pub(super) fn render_runtime_coverage(
     lines: &mut Vec<String>,
@@ -82,7 +83,7 @@ fn render_runtime_findings(
 ) {
     let shown_findings = production.findings.len().min(MAX_FLAT_ITEMS);
     for finding in &production.findings[..shown_findings] {
-        let relative = format_path(&relative_path(&finding.path, root).display().to_string());
+        let relative = format_path(&format_display_path(&finding.path, root));
         let invocations = finding.invocations.map_or_else(
             || "untracked".to_owned(),
             |hits| format!("{hits} invocations"),
@@ -111,7 +112,7 @@ fn render_runtime_hot_paths(
     if !production.hot_paths.is_empty() {
         lines.push("  hot paths:".to_owned());
         for entry in production.hot_paths.iter().take(5) {
-            let relative = format_path(&relative_path(&entry.path, root).display().to_string());
+            let relative = format_path(&format_display_path(&entry.path, root));
             lines.push(format!(
                 "    {relative}:{} {} ({} invocations, p{})",
                 entry.line,

@@ -23,7 +23,7 @@ use colored::Colorize;
 use fallow_types::issue_meta::{issue_meta_by_kind, issue_meta_for_contract_token};
 use fallow_types::suppress::{IssueKind, issue_kind_to_kebab};
 
-use super::{Level, plural, relative_path, split_dir_filename};
+use super::{Level, format_display_path, plural, relative_path, split_dir_filename};
 
 /// Maximum items shown per flat section (unused files, deps, etc.).
 pub(super) const MAX_FLAT_ITEMS: usize = 10;
@@ -513,7 +513,7 @@ where
     let mut file_map: rustc_hash::FxHashMap<String, usize> = rustc_hash::FxHashMap::default();
 
     for (i, item) in items.iter().enumerate() {
-        let file_str = relative_path(get_path(item), root).display().to_string();
+        let file_str = format_display_path(get_path(item), root);
         if let Some(&group_idx) = file_map.get(&file_str) {
             file_groups[group_idx].1.push(i);
         } else {

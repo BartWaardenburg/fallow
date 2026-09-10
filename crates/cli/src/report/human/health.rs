@@ -10,12 +10,12 @@ use super::health_hotspots::render_hotspots;
 use super::health_runtime::render_runtime_coverage;
 use super::health_targets::render_refactoring_targets;
 use super::{
-    MAX_FLAT_ITEMS, format_path, plural, print_explain_tip_if_tty, relative_path,
-    split_dir_filename, thousands,
+    MAX_FLAT_ITEMS, format_path, plural, print_explain_tip_if_tty, split_dir_filename, thousands,
 };
 use crate::health::scoring::{
     FileScoreConcern, file_score_concern_axis, file_score_fully_crap_exempt,
 };
+use crate::report::format_display_path;
 
 /// Docs base URL for health explanations.
 const DOCS_HEALTH: &str = "https://docs.fallow.tools/explanations/health";
@@ -1012,7 +1012,7 @@ fn render_coverage_intelligence(
         return;
     }
     for finding in intelligence.findings.iter().take(MAX_FLAT_ITEMS) {
-        let relative = relative_path(&finding.path, root);
+        let relative = format_display_path(&finding.path, root);
         let identity = finding
             .identity
             .as_deref()
@@ -1029,7 +1029,7 @@ fn render_coverage_intelligence(
             .map_or("Review this finding", |action| action.description.as_str());
         lines.push(format!(
             "  {}:{}{} {} [{}]",
-            format_path(&relative.display().to_string()),
+            format_path(&relative),
             finding.line,
             identity,
             finding.verdict,
@@ -1597,7 +1597,7 @@ fn render_large_functions(
 
     let mut last_file = String::new();
     for entry in report.large_functions.iter().take(MAX_FLAT_ITEMS) {
-        let file_str = relative_path(&entry.path, root).display().to_string();
+        let file_str = format_display_path(&entry.path, root);
         if file_str != last_file {
             lines.push(format!("  {}", format_path(&file_str)));
             last_file = file_str;
@@ -2405,7 +2405,7 @@ fn render_file_score_row(
     root: &Path,
     max_crap_threshold: f64,
 ) {
-    let file_str = relative_path(&score.path, root).display().to_string();
+    let file_str = format_display_path(&score.path, root);
     let (dir, filename) = split_dir_filename(&file_str);
     const CONCERN_TAG_COLUMN: usize = 48;
     let pad = CONCERN_TAG_COLUMN
@@ -2614,7 +2614,7 @@ fn push_coverage_gap_files(
     let shown_files = gaps.files.len().min(MAX_FLAT_ITEMS);
     lines.push(format!("  {}", "Files".dimmed()));
     for item in &gaps.files[..shown_files] {
-        let file_str = relative_path(&item.file.path, root).display().to_string();
+        let file_str = format_display_path(&item.file.path, root);
         let (dir, filename) = split_dir_filename(&file_str);
         lines.push(format!("  {}{}", dir.dimmed(), filename));
     }
@@ -2681,7 +2681,7 @@ fn push_coverage_gap_export_rows(
         if shown >= MAX_FLAT_ITEMS {
             break;
         }
-        let file_str = relative_path(file_path, root).display().to_string();
+        let file_str = format_display_path(file_path, root);
         if exports.len() > 10 {
             lines.push(format!(
                 "  {} ({} untested re-exports)",
@@ -4777,6 +4777,41 @@ mod tests {
         assert!(text.contains("3 fan-out"));
         assert!(text.contains("15% dead"));
         assert!(text.contains("0.42 density"));
+    }
+
+    #[test]
+    fn file_score_rows_normalize_backslash_separators() {
+        // A Windows path reaches the renderer with native separators. The human
+        // report is read by people and matched by tooling, so it must show the
+        // same forward-slash form on every platform.
+        let root = PathBuf::from("/project");
+        let mut report = empty_report();
+        report.file_scores = vec![fallow_output::FileHealthScore {
+            path: root.join("src\\utils.ts"),
+            fan_in: 5,
+            fan_out: 3,
+            dead_code_ratio: 0.15,
+            complexity_density: 0.42,
+            maintainability_index: 85.3,
+            total_cyclomatic: 12,
+            total_cognitive: 8,
+            function_count: 4,
+            lines: 200,
+            crap_max: 0.0,
+            crap_above_threshold: 0,
+            crap_exempted: 0,
+            crap_effective_threshold: None,
+        }];
+        let text = plain(&build_health_human_lines(&report, &root));
+
+        assert!(
+            text.contains("src/utils.ts"),
+            "file-score rows must use forward slashes: {text}"
+        );
+        assert!(
+            !text.contains("src\\utils.ts"),
+            "file-score rows must not leak native separators: {text}"
+        );
     }
 
     #[test]

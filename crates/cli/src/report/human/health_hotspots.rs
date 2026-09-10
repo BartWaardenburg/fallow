@@ -2,7 +2,8 @@ use std::path::Path;
 
 use colored::Colorize;
 
-use super::{plural, relative_path, split_dir_filename};
+use super::{plural, split_dir_filename};
+use crate::report::format_display_path;
 
 const DOCS_HEALTH: &str = "https://docs.fallow.tools/explanations/health";
 
@@ -176,7 +177,7 @@ fn push_hotspots_header(lines: &mut Vec<String>, report: &fallow_output::HealthR
 }
 
 fn push_hotspot_row(lines: &mut Vec<String>, entry: &fallow_output::HotspotEntry, root: &Path) {
-    let file_str = relative_path(&entry.path, root).display().to_string();
+    let file_str = format_display_path(&entry.path, root);
     let (dir, filename) = split_dir_filename(&file_str);
     lines.push(format!(
         "  {} {}  {}{}{}",

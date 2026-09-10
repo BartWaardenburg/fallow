@@ -20,7 +20,8 @@ use super::{
 use crate::report::grouping::OwnershipResolver;
 use crate::report::shared::NAMESPACE_BARREL_HINT;
 use crate::report::{
-    Level, elide_common_prefix, plural, relative_path, severity_to_level, split_dir_filename,
+    Level, elide_common_prefix, format_display_path, plural, relative_path, severity_to_level,
+    split_dir_filename,
 };
 
 /// Minimum number of duplicate-export findings before the human section is
@@ -480,13 +481,13 @@ fn format_dep_with_pkg(
     used_in_workspaces: &[PathBuf],
     root: &Path,
 ) -> String {
-    let pkg_label = relative_path(pkg_path, root).display().to_string();
+    let pkg_label = format_display_path(pkg_path, root);
     let workspace_context = if used_in_workspaces.is_empty() {
         String::new()
     } else {
         let workspaces = used_in_workspaces
             .iter()
-            .map(|path| relative_path(path, root).display().to_string())
+            .map(|path| format_display_path(path, root))
             .collect::<Vec<_>>()
             .join(", ");
         format!("; imported in {workspaces}")
@@ -742,9 +743,7 @@ fn push_unused_files_section(input: &mut UnusedCodeSectionInput<'_>) {
                 total_issues: input.total_issues,
             },
             |file| {
-                let path_str = relative_path(&file.file.path, input.root)
-                    .display()
-                    .to_string();
+                let path_str = format_display_path(&file.file.path, input.root);
                 vec![format!(
                     "  {}{}",
                     format_path(&path_str),
@@ -1157,10 +1156,7 @@ fn push_unused_catalog_entries_section(
                 catalog = entry.catalog_name.dimmed(),
                 loc = format!(
                     "{}:{}",
-                    path_display
-                        .strip_prefix(ctx.root)
-                        .unwrap_or(&path_display)
-                        .display(),
+                    format_display_path(&path_display, ctx.root),
                     entry.line
                 )
                 .dimmed(),
@@ -1170,7 +1166,7 @@ fn push_unused_catalog_entries_section(
                 let consumers = entry
                     .hardcoded_consumers
                     .iter()
-                    .map(|p| p.strip_prefix(ctx.root).unwrap_or(p).display().to_string())
+                    .map(|p| format_display_path(p, ctx.root))
                     .collect::<Vec<_>>()
                     .join(", ");
                 row = format!("    {}: {consumers}", "hardcoded in".dimmed());
@@ -1207,10 +1203,7 @@ fn push_empty_catalog_groups_section(
                 catalog = group.catalog_name.bold(),
                 loc = format!(
                     "{}:{}",
-                    path_display
-                        .strip_prefix(ctx.root)
-                        .unwrap_or(&path_display)
-                        .display(),
+                    format_display_path(&path_display, ctx.root),
                     group.line
                 )
                 .dimmed(),
@@ -1266,10 +1259,7 @@ fn format_unresolved_catalog_reference(
         catalog = catalog_label.dimmed(),
         loc = format!(
             "{}:{}",
-            path_display
-                .strip_prefix(root)
-                .unwrap_or(&path_display)
-                .display(),
+            format_display_path(&path_display, root),
             finding.line
         )
         .dimmed(),
@@ -1337,10 +1327,7 @@ fn push_unused_dependency_overrides_section(input: UnusedDependencyOverridesInpu
                 source = finding.source.as_label().dimmed(),
                 loc = format!(
                     "{}:{}",
-                    path_display
-                        .strip_prefix(input.root)
-                        .unwrap_or(&path_display)
-                        .display(),
+                    format_display_path(&path_display, input.root),
                     finding.line
                 )
                 .dimmed(),
@@ -1393,10 +1380,7 @@ fn push_misconfigured_dependency_overrides_section(
                 source = finding.source.as_label().dimmed(),
                 loc = format!(
                     "{}:{}",
-                    path_display
-                        .strip_prefix(root)
-                        .unwrap_or(&path_display)
-                        .display(),
+                    format_display_path(&path_display, root),
                     finding.line
                 )
                 .dimmed(),
@@ -2096,7 +2080,7 @@ fn build_policy_violations_section(
     let shown = items.len().min(MAX_FLAT_ITEMS);
     for entry in &items[..shown] {
         let v = &entry.violation;
-        let path = relative_path(&v.path, root).display().to_string();
+        let path = format_display_path(&v.path, root);
         let detail = match &v.message {
             Some(message) => format!("banned by `{}/{}`: {message}", v.pack, v.rule_id),
             None => format!("banned by `{}/{}`", v.pack, v.rule_id),
@@ -2496,7 +2480,7 @@ fn collect_duplicate_export_pairs<'a>(
         let mut paths: Vec<String> = dup
             .locations
             .iter()
-            .map(|loc| relative_path(&loc.path, root).display().to_string())
+            .map(|loc| format_display_path(&loc.path, root))
             .collect();
         paths.sort();
         paths.dedup();
@@ -2605,7 +2589,7 @@ fn circular_dependency_hub_groups<'a>(
         let hub = cycle
             .files
             .first()
-            .map(|path| relative_path(path, root).display().to_string())
+            .map(|path| format_display_path(path, root))
             .unwrap_or_default();
         if let Some(&idx) = hub_map.get(&hub) {
             hub_groups[idx].1.push(cycle);
@@ -2636,7 +2620,7 @@ fn circular_dependency_cycle_line(
     let rel_paths: Vec<String> = cycle
         .files
         .iter()
-        .map(|path| relative_path(path, root).display().to_string())
+        .map(|path| format_display_path(path, root))
         .collect();
     let mut chain_parts: Vec<String> = rel_paths[1..]
         .iter()
@@ -2699,7 +2683,7 @@ fn build_re_export_cycles_section(
         let first_path = cycle
             .files
             .first()
-            .map(|p| relative_path(p, root).display().to_string())
+            .map(|p| format_display_path(p, root))
             .unwrap_or_default();
         lines.push(format!("  {}", format_path(&first_path)));
         let header_line = match cycle.kind {
@@ -2710,7 +2694,7 @@ fn build_re_export_cycles_section(
         };
         lines.push(format!("    {}", header_line.dimmed()));
         for path in &cycle.files {
-            let rel = relative_path(path, root).display().to_string();
+            let rel = format_display_path(path, root);
             lines.push(format!("      - {}", format_path(&rel)));
         }
         let fix_hint = match cycle.kind {
@@ -2755,8 +2739,8 @@ fn build_boundary_violations_section(
     let shown = items.len().min(MAX_FLAT_ITEMS);
     for entry in &items[..shown] {
         let v = &entry.violation;
-        let from = relative_path(&v.from_path, root).display().to_string();
-        let to = relative_path(&v.to_path, root).display().to_string();
+        let from = format_display_path(&v.from_path, root);
+        let to = format_display_path(&v.to_path, root);
         lines.push(format!(
             "  {}:{} {} {} {} {}",
             from,
@@ -2795,7 +2779,7 @@ fn build_boundary_coverage_violations_section(
     let shown = items.len().min(MAX_FLAT_ITEMS);
     for entry in &items[..shown] {
         let v = &entry.violation;
-        let path = relative_path(&v.path, root).display().to_string();
+        let path = format_display_path(&v.path, root);
         lines.push(format!(
             "  {}:{} {}",
             path,
@@ -2833,7 +2817,7 @@ fn build_boundary_call_violations_section(
     let shown = items.len().min(MAX_FLAT_ITEMS);
     for entry in &items[..shown] {
         let v = &entry.violation;
-        let path = relative_path(&v.path, root).display().to_string();
+        let path = format_display_path(&v.path, root);
         lines.push(format!(
             "  {}:{} {} {}",
             path,
@@ -2876,7 +2860,7 @@ fn build_stale_suppressions_section(
 
     let shown = items.len().min(MAX_FLAT_ITEMS);
     for s in &items[..shown] {
-        let path_str = relative_path(&s.path, root).display().to_string();
+        let path_str = format_display_path(&s.path, root);
         lines.push(format!(
             "  {}:{}:{} {} {}",
             path_str,
@@ -3929,6 +3913,31 @@ mod tests {
         assert!(
             matched.iter().any(|r| r.contains("src")),
             "mixed-barrel path must route through the ownership resolver, got: {matched:?}"
+        );
+    }
+
+    #[test]
+    fn unused_file_lines_normalize_backslash_separators() {
+        // A Windows path reaches the renderer with native separators. The human
+        // report is read by people and matched by tooling, so it must show the
+        // same forward-slash form on every platform.
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: root.join("src\\dead.ts"),
+            }));
+        let rules = RulesConfig::default();
+        let text = super::super::plain(&build_human_lines(&results, &root, &rules, None));
+
+        assert!(
+            text.contains("src/dead.ts"),
+            "unused-file lines must use forward slashes: {text}"
+        );
+        assert!(
+            !text.contains("src\\dead.ts"),
+            "unused-file lines must not leak native separators: {text}"
         );
     }
 
