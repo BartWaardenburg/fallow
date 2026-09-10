@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789029418633,
+  "lastUpdate": 1789034024696,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "edf720b9b43955058fdcbab71089ee589d7f9c4c",
-          "message": "fix: close remaining analysis consistency gaps\n\n* chore: start correctness sweep\n\n* fix(extract): align Convex and MDX statement discovery\n\n* fix(graph): align export crediting across spellings\n\n* fix(trace): align syntactic and type-aware evidence\n\n* fix(workspace): align diagnostics and override analysis\n\n* docs: document correctness sweep contracts\n\n* fix: resolve correctness review findings\n\n* fix(type-aware): remove stale project binding\n\n* style(type-aware): format barrel regressions\n\n* fix: close final review edge cases\n\n* fix(extract): close shadow and mutation gaps\n\n* fix(extract): close wrapped CommonJS mutations\n\n* test(type-aware): satisfy cancellation lint\n\n* fix(extract): preserve scoped namespace owners\n\n* fix(extract): register namespace binding owners",
-          "timestamp": "2026-08-24T12:20:11Z",
-          "tree_id": "526a9cd87dc8684c7beae3ce63f9142890fc9970",
-          "url": "https://github.com/fallow-rs/fallow/commit/edf720b9b43955058fdcbab71089ee589d7f9c4c"
-        },
-        "date": 1787574330495,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9696323,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 49265,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1189489,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8442,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4389,6 +4345,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Total Allocations",
             "value": 50765,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1182029,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8098,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "423ce06892b814c76c22d9e745df44aafa25d732",
+          "message": "fix(coverage): index instrumenter-named callbacks and object members for the cloud join\n\nCloses #2606",
+          "timestamp": "2026-09-10T09:47:57Z",
+          "tree_id": "ca11dae5f453b957d1c02ac10cf747052331515c",
+          "url": "https://github.com/fallow-rs/fallow/commit/423ce06892b814c76c22d9e745df44aafa25d732"
+        },
+        "date": 1789034020492,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 9886174,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 50750,
             "unit": "allocations"
           },
           {
