@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788999765616,
+  "lastUpdate": 1789027300060,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bartwaardenburg@gmail.com",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "80812c0fa5ce43fe950653fe67e9a5dc44f140bf",
-          "message": "Merge pull request #2408 from fallow-rs/feat/semantic-clone-conformance\n\nfeat: add local similar code intelligence",
-          "timestamp": "2026-08-25T17:32:47+02:00",
-          "tree_id": "159932b59cc074669c41d52e5fc239af8286fdde",
-          "url": "https://github.com/fallow-rs/fallow/commit/80812c0fa5ce43fe950653fe67e9a5dc44f140bf"
-        },
-        "date": 1787672537991,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.1,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/4b8d6915926a8e0b3d39b8d21995423a1d6705f2"
         },
         "date": 1788999761448,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.5,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "69d8d818a9d6b094545dae2f5c476cb0870feaa3",
+          "message": "feat: support positional PATH scope across file commands\n\nAdds an optional positional [PATH] to bare fallow, check, dupes, health, audit, security, fix, list, and similar-code. The scope narrows reported findings to the file or directory while the full project graph is still built, so cross-file facts stay sound.\n\nResolution is root-first for bare relative paths, honors ./ and ../ as current-directory claims, and rejects missing or outside-root paths with an actionable exit-2 error. Scope composes with --workspace as one more workspace root and intersects with --changed-since and --diff-file. Audit narrows its changed-file universe so verdict and base attribution stay coherent; its base pass stays unscoped because it runs in another worktree.",
+          "timestamp": "2026-09-10T09:51:56+02:00",
+          "tree_id": "19d0ed01da89ec323b163b9b7d303bc03dfbc6d9",
+          "url": "https://github.com/fallow-rs/fallow/commit/69d8d818a9d6b094545dae2f5c476cb0870feaa3"
+        },
+        "date": 1789027295872,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
