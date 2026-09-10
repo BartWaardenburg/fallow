@@ -1,52 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789034024696,
+  "lastUpdate": 1789044044676,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Allocations": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "77cf2cf659697e89748c49c2a4c421fc0924e129",
-          "message": "perf(trace): omit redundant namespace evidence",
-          "timestamp": "2026-08-24T16:12:29+02:00",
-          "tree_id": "17c89c3de031d78c1fd8693b22dd7ccc20e35d03",
-          "url": "https://github.com/fallow-rs/fallow/commit/77cf2cf659697e89748c49c2a4c421fc0924e129"
-        },
-        "date": 1787581068605,
-        "tool": "customSmallerIsBetter",
-        "benches": [
-          {
-            "name": "Total Bytes Allocated",
-            "value": 9734539,
-            "unit": "bytes"
-          },
-          {
-            "name": "Total Allocations",
-            "value": 49279,
-            "unit": "allocations"
-          },
-          {
-            "name": "Peak Memory",
-            "value": 1179060,
-            "unit": "bytes"
-          },
-          {
-            "name": "Peak Allocations",
-            "value": 8407,
-            "unit": "allocations"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -4399,6 +4355,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "Peak Allocations",
             "value": 8098,
+            "unit": "allocations"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "03aad8caad3c563481e2b00b5c0d7c67f2a371d8",
+          "message": "fix(cli): print forward slashes in the check and health human output\n\nThe two human renderers rendered the platform path separator, so a Windows\nuser was told `src\\a.ts` while `dupes`, `list`, `fix`, and every JSON\nsurface said `src/a.ts`. The damage was not only cosmetic: the dimmed-directory\n/ bold-filename split keys on `/`, so a native-separator path also lost its\nemphasis and rendered as one bold blob. Every path the check and health\nrenderers put on screen now goes through the existing display helper, the way\nthe rest of the CLI already did. On-disk path handling is untouched; only the\nrendered text changes, and it is byte-identical on POSIX.\n\n`scope_path_tests` caught this as three Windows-only failures, and its\nnegative assertions were the reason it caught no more: `!contains(\"other/c.ts\")`\npassed vacuously while the file was on screen as `other\\c.ts`. The captured\noutput is now normalised once before every assertion, so a leaked out-of-scope\nfile trips the suite under either separator. Two renderer unit tests pin the\nforward-slash convention itself, since the integration tests no longer can.\n\nCloses #2611",
+          "timestamp": "2026-09-10T14:35:15+02:00",
+          "tree_id": "8c55301281961a9e4bd58b54ef7b236a3b08eb9a",
+          "url": "https://github.com/fallow-rs/fallow/commit/03aad8caad3c563481e2b00b5c0d7c67f2a371d8"
+        },
+        "date": 1789044040769,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Total Bytes Allocated",
+            "value": 9816612,
+            "unit": "bytes"
+          },
+          {
+            "name": "Total Allocations",
+            "value": 50644,
+            "unit": "allocations"
+          },
+          {
+            "name": "Peak Memory",
+            "value": 1173718,
+            "unit": "bytes"
+          },
+          {
+            "name": "Peak Allocations",
+            "value": 8327,
             "unit": "allocations"
           }
         ]
