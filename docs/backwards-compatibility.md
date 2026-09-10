@@ -324,6 +324,37 @@ The schema-derive ladder ([#384](https://github.com/fallow-rs/fallow/issues/384)
 - **Pre-stable protocols**: development-only protocols before version 6 are
   rejected and are not part of the compatibility guarantee.
 
+### Coverage inventory upload blob
+
+`fallow coverage upload-inventory` posts a versioned JSON body. The `version`
+field is informational: every field added after version 1 is optional and
+omitted when empty, so the shape itself is the compatibility mechanism and a
+reader never branches on the version to parse the body.
+
+- **Version 1**: `gitSha` plus `functions[]`, each carrying `filePath`,
+  `functionName`, `lineNumber`, and the protocol `identity` block. A version 1
+  body stays valid and stays readable; nothing was removed or retyped.
+- **Version 2**: adds optional per-function `cyclomatic` and `cognitive`
+  (`u16`, McCabe and SonarSource respectively, omitted when the walk could not
+  pair a function to a complexity result) and an optional `churnByPath` map
+  keyed by the same `filePath` shape `functions[]` uses.
+- **Version 3**: adds an optional `callerEdges` map keyed by the callee's
+  `identity.stable_id`, each entry listing the importer `file` values and the
+  `symbols` they import. Import-edge granularity, not file:line call sites.
+  Emitted only for `upload-inventory --with-callers`.
+
+Version 3 bodies also carry a `callerEdgeLimits` header alongside `callerEdges`:
+`maxSitesPerFunction` and `maxSymbolsPerSite` name the size guard the producer
+applied, and `truncatedFunctions` counts callees whose importer list was cut. A
+reader needs all three to report a fan-in honestly, because a callee with
+exactly `maxSitesPerFunction` importers is indistinguishable from a truncated
+one without the count. The header is absent whenever `callerEdges` is, so a
+version 1 or version 2 body keeps its exact wire shape.
+
+Complexity, churn, importer edges, and the size-guard header are descriptive
+context. None of them gates a verdict, an actionability decision, or a
+confidence level.
+
 ## What may change in minor/patch versions
 
 These are explicitly **not** covered by the stability guarantee:

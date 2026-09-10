@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`fallow coverage upload-inventory --with-callers` reports its own size
+  guard.** The importer-edge map has always been capped per callee so a
+  pathological fan-in cannot bloat the upload, but the cut was silent: a
+  consumer could not tell a function that genuinely has as many importers as
+  the cap from one whose list was truncated. The version 3 body now carries a
+  `callerEdgeLimits` header next to `callerEdges` with `maxSitesPerFunction`,
+  `maxSymbolsPerSite`, and `truncatedFunctions`, and the command prints a
+  warning naming how many functions lost importer sites. The header is present
+  only when `callerEdges` is, so version 1 and version 2 bodies keep their exact
+  wire shape. The blob contract is documented under
+  [backwards compatibility](docs/backwards-compatibility.md)
+  (Closes [#2607](https://github.com/fallow-rs/fallow/issues/2607)).
+
 ## [3.24.1] - 2026-09-09
 
 ### Fixed
