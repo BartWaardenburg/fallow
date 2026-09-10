@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788991675132,
+  "lastUpdate": 1788999765616,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "bart@waardenburg.dev",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "distinct": true,
-          "id": "ab60f2ca9cc0ea64e74a07f18dfc74caecea21d2",
-          "message": "fix(hooks): keep staged paths from being parsed as rustfmt or typos flags\n\nEvery staged path handed to the commit hook now carries a ./ prefix, so a\nfile name that starts with a dash cannot turn into an option.",
-          "timestamp": "2026-08-25T16:10:41+02:00",
-          "tree_id": "13f86348872ee47f5947c7ece169cc7cd0dc8f08",
-          "url": "https://github.com/fallow-rs/fallow/commit/ab60f2ca9cc0ea64e74a07f18dfc74caecea21d2"
-        },
-        "date": 1787667903720,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.7,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/c2da9fcae5388226a87e986b1812f9c872d288c6"
         },
         "date": 1788991671065,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.5,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "distinct": true,
+          "id": "4b8d6915926a8e0b3d39b8d21995423a1d6705f2",
+          "message": "chore: advance the schema policy baseline to v3.24.1",
+          "timestamp": "2026-09-10T02:13:08+02:00",
+          "tree_id": "afa911f33fc2506ab7b5d0e7fc2d3428c334c970",
+          "url": "https://github.com/fallow-rs/fallow/commit/4b8d6915926a8e0b3d39b8d21995423a1d6705f2"
+        },
+        "date": 1788999761448,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
