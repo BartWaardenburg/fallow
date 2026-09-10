@@ -15,11 +15,15 @@
 //! starts at 0 and increments in pre-order AST traversal each time a function
 //! is entered without a resolvable explicit name. Name resolution precedence:
 //!
-//! 1. Parent-provided `pending_name`: from a `MethodDefinition` /
-//!    `VariableDeclarator` binding, OR from the callee of the call / `new`
-//!    expression a function is passed to as an argument (`arr.map(cb)` ->
-//!    "map", `foo(cb)` -> "foo", `new Promise(cb)` -> "Promise"). The callee
-//!    case matches `oxc-coverage-instrument`'s opt-in `name_callback_arguments`
+//! 1. Parent-provided `pending_name`: from a `MethodDefinition` (accessors
+//!    carry the instrumenter's `get ` / `set ` label), an `ObjectProperty` key
+//!    (shorthand methods, accessors, and function-valued data properties), a
+//!    `VariableDeclarator` binding, a member-assignment target
+//!    (`o.foo = () => {}` -> "foo"), or an anonymous `export default`
+//!    (-> "default"), OR from the callee of the call / `new` expression a
+//!    function is passed to as an argument (`arr.map(cb)` -> "map",
+//!    `foo(cb)` -> "foo", `new Promise(cb)` -> "Promise"). The callee case
+//!    matches `oxc-coverage-instrument`'s opt-in `name_callback_arguments`
 //!    (which the Fallow runtime beacon enables), so a callback's static name
 //!    lines up with its runtime-instrumented name instead of both sides drifting
 //!    to different anonymous placeholders.
@@ -75,6 +79,11 @@ pub struct InventoryEntry {
     /// `ArrowFunctionExpression`. Stable across line moves, so a
     /// moved-but-unedited function keeps the same hash.
     pub source_hash: String,
+    /// Whether the name was taken from the callee of the call this function is
+    /// passed to (`arr.map(cb)` -> `map`) instead of from a declaration, a
+    /// binding, or a property key. Lets a consumer describe the function as a
+    /// callback passed to that callee rather than as a declaration.
+    pub is_callback: bool,
 }
 
 /// Rolling state for [`InventoryVisitor::line_col_utf16`]: the last resolved
@@ -84,6 +93,22 @@ struct ColCache {
     line_idx: usize,
     byte_end: usize,
     utf16_units: usize,
+}
+
+/// A resolved function name plus how it was resolved.
+struct ResolvedName {
+    name: String,
+    /// `true` only when the name came from a call / `new` callee.
+    is_callback: bool,
+}
+
+impl ResolvedName {
+    const fn named(name: String) -> Self {
+        Self {
+            name,
+            is_callback: false,
+        }
+    }
 }
 
 /// Visitor that collects [`InventoryEntry`] values in file traversal order.
@@ -129,22 +154,25 @@ impl<'a> InventoryVisitor<'a> {
     /// Name precedence, matching the instrumenter's `resolve_function_name`:
     /// parent `pending_name` (method key / variable binding) → function's own
     /// `id` → call/`new` callee (`pending_callee_name`) → counter.
-    fn resolve_name(&mut self, explicit: Option<&str>) -> String {
+    fn resolve_name(&mut self, explicit: Option<&str>) -> ResolvedName {
         let n = self.anonymous_counter;
         self.anonymous_counter += 1;
         if let Some(pending) = self.pending_name.take() {
-            return pending;
+            return ResolvedName::named(pending);
         }
         if let Some(name) = explicit {
-            return name.to_owned();
+            return ResolvedName::named(name.to_owned());
         }
         if let Some(callee) = self.pending_callee_name.take() {
-            return callee;
+            return ResolvedName {
+                name: callee,
+                is_callback: true,
+            };
         }
-        format!("(anonymous_{n})")
+        ResolvedName::named(format!("(anonymous_{n})"))
     }
 
-    fn record(&mut self, name: String, span: Span) {
+    fn record(&mut self, resolved: ResolvedName, span: Span) {
         let (line, start_column) = self.line_col_utf16(span.start);
         let (end_line, end_column) = self.line_col_utf16(span.end);
         let source_hash = self
@@ -155,12 +183,13 @@ impl<'a> InventoryVisitor<'a> {
                 |slice| fallow_cov_protocol::source_hash_for(slice.as_bytes()),
             );
         self.entries.push(InventoryEntry {
-            name,
+            name: resolved.name,
             line,
             start_column,
             end_line,
             end_column,
             source_hash,
+            is_callback: resolved.is_callback,
         });
     }
 
@@ -227,20 +256,24 @@ impl<'ast> Visit<'ast> for InventoryVisitor<'_> {
             walk::walk_function(self, func, flags);
             return;
         }
-        let name = self.resolve_name(func.id.as_ref().map(|id| id.name.as_str()));
-        self.record(name, func.span);
+        let resolved = self.resolve_name(func.id.as_ref().map(|id| id.name.as_str()));
+        self.record(resolved, func.span);
         walk::walk_function(self, func, flags);
     }
 
     fn visit_arrow_function_expression(&mut self, arrow: &ArrowFunctionExpression<'ast>) {
-        let name = self.resolve_name(None);
-        self.record(name, arrow.span);
+        let resolved = self.resolve_name(None);
+        self.record(resolved, arrow.span);
         walk::walk_arrow_function_expression(self, arrow);
     }
 
     fn visit_method_definition(&mut self, method: &MethodDefinition<'ast>) {
         if let Some(name) = method.key.static_name() {
-            self.pending_name = Some(name.to_string());
+            self.pending_name = Some(accessor_label(
+                matches!(method.kind, MethodDefinitionKind::Get),
+                matches!(method.kind, MethodDefinitionKind::Set),
+                &name,
+            ));
         }
         walk::walk_method_definition(self, method);
         self.pending_name = None;
@@ -261,9 +294,65 @@ impl<'ast> Visit<'ast> for InventoryVisitor<'_> {
         self.pending_name = None;
     }
 
+    /// Carry an object-literal key into the function it holds, matching the
+    /// instrumenter's `register_object_property`: shorthand methods, accessors
+    /// (prefixed `get ` / `set `), and function-valued data properties inherit
+    /// the key name. A data property holding anything else (a call whose
+    /// argument is a callback, most of all) inherits nothing, so the callback
+    /// still takes its own callee's name.
     fn visit_object_property(&mut self, prop: &ObjectProperty<'ast>) {
-        self.pending_name = None;
+        let is_method_like =
+            prop.method || matches!(prop.kind, PropertyKind::Get | PropertyKind::Set);
+        let is_function_valued = matches!(
+            prop.value,
+            Expression::FunctionExpression(_) | Expression::ArrowFunctionExpression(_)
+        );
+        self.pending_name = if is_method_like || is_function_valued {
+            prop.key.static_name().map(|name| {
+                accessor_label(
+                    matches!(prop.kind, PropertyKind::Get),
+                    matches!(prop.kind, PropertyKind::Set),
+                    &name,
+                )
+            })
+        } else {
+            None
+        };
         walk::walk_object_property(self, prop);
+        self.pending_name = None;
+    }
+
+    /// Carry a member-assignment target into the function assigned to it
+    /// (`client.execute = () => {}` -> "execute"), matching the instrumenter's
+    /// `assignment_target_name`. A plain identifier target takes its name from
+    /// the binding instead, so it is left alone.
+    fn visit_assignment_expression(&mut self, expr: &AssignmentExpression<'ast>) {
+        if matches!(expr.operator, AssignmentOperator::Assign)
+            && matches!(
+                expr.right,
+                Expression::FunctionExpression(_)
+                    | Expression::ArrowFunctionExpression(_)
+                    | Expression::ClassExpression(_)
+            )
+        {
+            self.pending_name = assignment_target_name(&expr.left);
+        }
+        walk::walk_assignment_expression(self, expr);
+        self.pending_name = None;
+    }
+
+    /// Name an anonymous default export "default", matching the instrumenter's
+    /// `name_anonymous_default_export`. A named one keeps its own identifier.
+    fn visit_export_default_declaration(&mut self, decl: &ExportDefaultDeclaration<'ast>) {
+        let anonymous = match &decl.declaration {
+            ExportDefaultDeclarationKind::FunctionDeclaration(func) => func.id.is_none(),
+            ExportDefaultDeclarationKind::ArrowFunctionExpression(_) => true,
+            _ => false,
+        };
+        if anonymous {
+            self.pending_name = Some("default".to_owned());
+        }
+        walk::walk_export_default_declaration(self, decl);
         self.pending_name = None;
     }
 
@@ -294,6 +383,33 @@ impl<'ast> Visit<'ast> for InventoryVisitor<'_> {
             self.visit_argument(argument);
         }
         self.pending_callee_name = None;
+    }
+}
+
+/// Prefix an accessor's name the way `oxc-coverage-instrument` labels one, so
+/// a getter reads `get closed` on both sides of the join. A plain method or
+/// data property keeps its bare key.
+fn accessor_label(is_getter: bool, is_setter: bool, name: &str) -> String {
+    if is_getter {
+        return format!("get {name}");
+    }
+    if is_setter {
+        return format!("set {name}");
+    }
+    name.to_owned()
+}
+
+/// Extract a name from a member-assignment target, matching the instrumenter's
+/// `assignment_target_name`: a static member uses the property, a computed
+/// member uses a string-literal key, and anything else yields no name.
+fn assignment_target_name(target: &AssignmentTarget<'_>) -> Option<String> {
+    match target {
+        AssignmentTarget::StaticMemberExpression(member) => Some(member.property.name.to_string()),
+        AssignmentTarget::ComputedMemberExpression(member) => match &member.expression {
+            Expression::StringLiteral(lit) => Some(lit.value.to_string()),
+            _ => None,
+        },
+        _ => None,
     }
 }
 
@@ -608,10 +724,17 @@ mod tests {
     }
 
     #[test]
-    fn export_default_anonymous_function_uses_counter() {
+    fn export_default_anonymous_function_is_named_default() {
         let entries = walk("export default function() { return 1; }");
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].name, "(anonymous_0)");
+        assert_eq!(entries[0].name, "default");
+    }
+
+    #[test]
+    fn export_default_anonymous_arrow_is_named_default() {
+        let entries = walk("export default () => 1;");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].name, "default");
     }
 
     #[test]
@@ -642,10 +765,109 @@ mod tests {
     }
 
     #[test]
-    fn object_method_shorthand_uses_anonymous_counter() {
+    fn object_method_shorthand_uses_the_key_name() {
         let entries = walk("const obj = { run() { return 1; } };");
         let names: Vec<_> = entries.iter().map(|e| e.name.as_str()).collect();
-        assert_eq!(names, vec!["(anonymous_0)"]);
+        assert_eq!(names, vec!["run"]);
+    }
+
+    #[test]
+    fn object_accessors_carry_the_get_and_set_label() {
+        let entries = walk(
+            r"
+            const obj = {
+              get closed() { return true; },
+              set closed(value) { this.value = value; },
+            };",
+        );
+        let names: Vec<_> = entries.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(names, vec!["get closed", "set closed"]);
+    }
+
+    #[test]
+    fn function_valued_object_property_uses_the_key_name() {
+        let entries = walk("const client = { execute: async (sql) => sql.length };");
+        let names: Vec<_> = entries.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(names, vec!["execute"]);
+    }
+
+    #[test]
+    fn object_property_holding_a_call_leaves_the_callback_to_its_callee() {
+        // The key names only a function-valued property. A property whose value
+        // is a call must not steal the name from that call's callback.
+        let entries = walk("const column = { references: memo(() => other.id) };");
+        let names: Vec<_> = entries.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(names, vec!["memo"]);
+    }
+
+    #[test]
+    fn class_accessors_carry_the_get_and_set_label() {
+        let entries = walk(
+            r"
+            class Client {
+              get closed() { return true; }
+              set closed(value) { this.value = value; }
+            }",
+        );
+        let names: Vec<_> = entries.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(names, vec!["get closed", "set closed"]);
+    }
+
+    #[test]
+    fn member_assignment_target_names_the_assigned_function() {
+        let entries = walk(
+            r#"
+            client.execute = async (sql) => sql;
+            client["rollback"] = function () { return 1; };
+            "#,
+        );
+        let names: Vec<_> = entries.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(names, vec!["execute", "rollback"]);
+    }
+
+    #[test]
+    fn only_callee_named_functions_are_flagged_as_callbacks() {
+        let entries = walk(
+            r"
+            function declared() { return 1; }
+            const bound = () => 2;
+            const obj = { run() { return 3; } };
+            [1].map(() => 4);
+            (function () { return 5; })();
+            ",
+        );
+        let flags: Vec<_> = entries
+            .iter()
+            .map(|e| (e.name.as_str(), e.is_callback))
+            .collect();
+        assert_eq!(
+            flags,
+            vec![
+                ("declared", false),
+                ("bound", false),
+                ("run", false),
+                ("map", true),
+                ("(anonymous_4)", false),
+            ]
+        );
+    }
+
+    #[test]
+    fn drizzle_style_schema_names_every_callback_after_its_callee() {
+        // The shape a Drizzle schema module has: a table callback, a column
+        // reference callback, and an index callback, all anonymous arrows that
+        // the instrumenter names after the function they are passed to.
+        let entries = walk(
+            r#"
+            export const users = sqliteTable("users", {
+              id: text("id").primaryKey(),
+              orgId: text("org_id").references(() => orgs.id),
+            }, (table) => [index("users_org_idx").on(table.orgId)]);
+            "#,
+        );
+        let names: Vec<_> = entries.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(names, vec!["references", "sqliteTable"]);
+        assert!(entries.iter().all(|entry| entry.is_callback));
     }
 
     #[test]

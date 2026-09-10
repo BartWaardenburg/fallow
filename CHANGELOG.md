@@ -22,6 +22,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   [backwards compatibility](docs/backwards-compatibility.md)
   (Closes [#2607](https://github.com/fallow-rs/fallow/issues/2607)).
 
+### Fixed
+
+- **`fallow coverage analyze --cloud` no longer drops callbacks, object
+  members and accessors.** The static index the cloud answer is joined against
+  was built from the health/complexity pass, which enumerates declarations and
+  bindings only. Every other function the runtime instrumenter names, an arrow
+  passed to a call and named after its callee (`rows.map(...)`,
+  `sqliteTable("t", {}, (table) => [...])`, `.references(() => ...)`), an
+  object-literal method, a getter or setter, and a function assigned to a
+  member, was missing from the index, so the cloud row for it had nothing to
+  join against and was counted in `cloud_functions_unmatched` instead of
+  reaching `findings` and `hot_paths`. Those are the highest-traffic functions
+  in a typical service, so the hot-path list was led by whatever declaration
+  happened to be enumerated. The index now also carries every function the
+  instrumenter would name, resolved through the same walker the static
+  inventory upload uses, so the identity matches the `stable_id` the cloud
+  stores. A function known only by the callee it was passed to is flagged as a
+  callback and its verdict copy names the call site ("Callback passed to
+  `map`; ...") instead of pointing at a declaration that does not exist
+  (Closes [#2606](https://github.com/fallow-rs/fallow/issues/2606)).
+- **The static function inventory names object members, accessors and default
+  exports the way the instrumenter does.** The inventory walker left an
+  object-literal method, a function-valued property, a getter or setter, a
+  function assigned to a member expression, and an anonymous `export default`
+  at their `(anonymous_N)` placeholder, while `oxc-coverage-instrument` names
+  them `run`, `execute`, `get closed`, `rollback` and `default`. Both sides now
+  agree, so an uploaded inventory entry and the runtime row for the same
+  function share one identity.
+
 ## [3.24.1] - 2026-09-09
 
 ### Fixed

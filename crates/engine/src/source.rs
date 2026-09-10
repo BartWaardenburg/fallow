@@ -56,6 +56,10 @@ pub mod inventory {
         pub end_column: u32,
         /// Content digest of the function's full-span source slice.
         pub source_hash: String,
+        /// Whether the name came from the callee of the call this function is
+        /// passed to (`arr.map(cb)` -> `map`) rather than from a declaration,
+        /// a binding, or a property key.
+        pub is_callback: bool,
     }
 
     impl From<fallow_extract::inventory::InventoryEntry> for InventoryEntry {
@@ -67,6 +71,7 @@ pub mod inventory {
                 end_line: entry.end_line,
                 end_column: entry.end_column,
                 source_hash: entry.source_hash,
+                is_callback: entry.is_callback,
             }
         }
     }

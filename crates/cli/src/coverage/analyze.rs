@@ -8,7 +8,11 @@ use std::time::Instant;
 use fallow_config::OutputFormat;
 use fallow_cov_protocol::function_identity_id;
 use fallow_engine::changed_files::clear_ambient_git_env;
+use fallow_engine::source::inventory::{
+    InventoryComplexity, InventoryEntry, walk_source_with_complexity,
+};
 use fallow_types::cloud::CLOUD_API_KEY_MISSING_MESSAGE;
+use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::coverage::RunContext;
@@ -17,6 +21,7 @@ use crate::coverage::cloud_client::{
     CloudRuntimeProvenance, CloudRuntimeWarning, CloudTrackingState, fetch_runtime_context,
 };
 use crate::coverage::upload_common::parse_git_remote_to_project_id;
+use crate::coverage::upload_inventory::extension_supported;
 use crate::error::emit_error;
 use crate::health::HealthOptions;
 use fallow_output::{
@@ -434,6 +439,12 @@ struct StaticFunctionInfo {
     /// finding built from this function carries a line-move-immune key for
     /// baseline suppression.
     source_hash: Option<String>,
+    /// Whether `name` is the callee this function was passed to
+    /// (`arr.map(cb)` -> `map`) rather than a declared or bound name. The
+    /// runtime instrumenter names callbacks that way, so the join key reads
+    /// like a declaration while the source has no declaration to point at;
+    /// the verdict copy says "callback passed to X" instead.
+    is_callback: bool,
 }
 
 #[derive(Default)]
@@ -549,6 +560,7 @@ fn build_index_from_analysis(
     };
     let mut out = StaticIndex::default();
     let graph = analysis_output.graph.as_ref();
+    let mut walked = Vec::with_capacity(modules.len());
     for module in modules {
         let Some(path) = file_paths.get(&module.file_id) else {
             continue;
@@ -568,8 +580,116 @@ fn build_index_from_analysis(
             );
             index_static_function(&mut out, &rel, info);
         }
+        walked.push(ModuleIndexContext {
+            path: (*path).clone(),
+            rel,
+            caller_count,
+            owner_count,
+        });
     }
+    index_instrumenter_functions(&mut out, &walked, &reachability);
     out
+}
+
+/// The per-file facts the instrumenter-name pass needs after the complexity
+/// pass has consumed the parsed module.
+struct ModuleIndexContext {
+    /// Absolute path of the file on disk, re-read by the inventory walker.
+    path: PathBuf,
+    /// Repo-relative posix path, the one the identity hash is taken over.
+    rel: String,
+    caller_count: u32,
+    owner_count: Option<u32>,
+}
+
+/// Index every function the runtime instrumenter would name, on top of the
+/// complexity pass.
+///
+/// The health/complexity pass enumerates declarations, so a callback passed to
+/// a call (`sqliteTable("t", {}, (table) => [...])`, `.references(() => ...)`,
+/// `rows.map(...)`), an object-literal method, and an accessor never enter the
+/// index. A cloud row for one of those carries the instrumenter's name, so it
+/// has nothing to join against and the hottest functions in a service are
+/// dropped from `findings` and `hot_paths`. The inventory walker already
+/// reproduces `oxc-coverage-instrument`'s naming for exactly this contract, so
+/// walking the same files with it closes the gap on the identity the cloud
+/// stores. Complexity-pass entries win every collision; only identities the
+/// first pass never produced are added.
+fn index_instrumenter_functions(
+    out: &mut StaticIndex,
+    contexts: &[ModuleIndexContext],
+    reachability: &Reachability<'_>,
+) {
+    let per_file: Vec<Vec<StaticFunctionInfo>> = contexts
+        .par_iter()
+        .map(|context| instrumenter_functions_for_file(context, reachability))
+        .collect();
+    for (context, functions) in contexts.iter().zip(per_file) {
+        for info in functions {
+            if out.by_stable_id.contains_key(&info.stable_id) {
+                continue;
+            }
+            index_static_function(out, &context.rel, info);
+        }
+    }
+}
+
+/// Walk one file with the inventory walker and build static info for every
+/// function it names. A file the walker cannot parse, or cannot read, yields
+/// nothing: the complexity-pass entries for it stay as they are.
+fn instrumenter_functions_for_file(
+    context: &ModuleIndexContext,
+    reachability: &Reachability<'_>,
+) -> Vec<StaticFunctionInfo> {
+    if !extension_supported(&context.path) {
+        return Vec::new();
+    }
+    let Ok(source) = std::fs::read_to_string(&context.path) else {
+        return Vec::new();
+    };
+    let (entries, complexity) = walk_source_with_complexity(&context.path, &source);
+    entries
+        .into_iter()
+        .map(|entry| {
+            // Complexity is paired by `source_hash`, which the walker derives
+            // from the same full-span slice it hashes for the entry, so the
+            // lookup is exact.
+            let metrics = complexity.get(&entry.source_hash).copied();
+            instrumenter_function_info(entry, metrics, context, reachability)
+        })
+        .collect()
+}
+
+/// Build a `StaticFunctionInfo` for one inventory entry.
+fn instrumenter_function_info(
+    entry: InventoryEntry,
+    metrics: Option<InventoryComplexity>,
+    context: &ModuleIndexContext,
+    reachability: &Reachability<'_>,
+) -> StaticFunctionInfo {
+    let static_used =
+        reachability
+            .analysed
+            .function_is_used(&context.path, &entry.name, entry.line);
+    let stable_id = function_identity_id(&context.rel, &entry.name, entry.line);
+    let test_only_reference = reachability
+        .full_tree
+        .map(|full| !static_used && full.function_is_used(&context.path, &entry.name, entry.line));
+    StaticFunctionInfo {
+        path: PathBuf::from(&context.rel),
+        name: entry.name,
+        start_line: entry.line,
+        end_line: entry.end_line,
+        static_used,
+        test_only_reference,
+        test_covered: false,
+        cyclomatic: metrics.map_or(0, |metrics| u32::from(metrics.cyclomatic)),
+        caller_count: context.caller_count,
+        owner_count: context.owner_count,
+        stable_id,
+        source_hash: Some(entry.source_hash),
+        is_callback: entry.is_callback,
+    }
 }
 
 /// Per-file sets of statically-unused files and exports, used to flag whether a
@@ -659,6 +779,9 @@ fn static_function_info(
         owner_count,
         stable_id: function_identity_id(rel, &function.name, function.line),
         source_hash: function.source_hash.clone(),
+        // The complexity pass only enumerates declarations and bindings, so
+        // nothing it produces is a callee-named callback.
+        is_callback: false,
     }
 }
 
@@ -1082,7 +1205,11 @@ fn cloud_finding(
             observation_days,
             deployments_observed: function.deployments_observed,
         },
-        actions: runtime_actions(verdict, local.test_only_reference == Some(true)),
+        actions: runtime_actions(
+            verdict,
+            local.test_only_reference == Some(true),
+            local.is_callback.then_some(local.name.as_str()),
+        ),
         // The cloud-join path (analyze --cloud) does not carry the window
         // trace_count + thresholds here, so it omits the #321 discriminator
         // block; that surface's discriminator contract is #328 territory.
@@ -1503,14 +1630,28 @@ fn normalize_runtime_path(path: &Path) -> String {
 /// review-required advice to the case where the only remaining callers live in
 /// files production mode excluded, because there the reviewer has a concrete
 /// choice to make rather than a general "look at this".
+/// Build the action list for one runtime finding.
+///
+/// `callback_callee` is set when the function has no declared name of its own
+/// and is known only as the callee it was passed to, so the copy can point at
+/// the call site (`callback passed to map`) rather than tell the reader to go
+/// find a declaration that does not exist.
 fn runtime_actions(
     verdict: RuntimeCoverageVerdict,
     test_only_reference: bool,
+    callback_callee: Option<&str>,
 ) -> Vec<RuntimeCoverageAction> {
     match verdict {
         RuntimeCoverageVerdict::SafeToDelete => vec![RuntimeCoverageAction {
             kind: "delete-cold-code".to_owned(),
-            description: "Remove cold code after confirming ownership.".to_owned(),
+            description: callback_callee.map_or_else(
+                || "Remove cold code after confirming ownership.".to_owned(),
+                |callee| {
+                    format!(
+                        "Callback passed to {callee}; remove the cold code after confirming ownership."
+                    )
+                },
+            ),
             auto_fixable: false,
         }],
         RuntimeCoverageVerdict::ReviewRequired if test_only_reference => {
@@ -1523,7 +1664,12 @@ fn runtime_actions(
         }
         RuntimeCoverageVerdict::ReviewRequired => vec![RuntimeCoverageAction {
             kind: "review-runtime".to_owned(),
-            description: "Review runtime-cold code before changing it.".to_owned(),
+            description: callback_callee.map_or_else(
+                || "Review runtime-cold code before changing it.".to_owned(),
+                |callee| {
+                    format!("Callback passed to {callee}; review the runtime-cold code before changing it.")
+                },
+            ),
             auto_fixable: false,
         }],
         RuntimeCoverageVerdict::CoverageUnavailable
@@ -1938,6 +2084,7 @@ mod tests {
             owner_count: None,
             stable_id: function_identity_id("src/a.ts", "oldFlow", 10),
             source_hash: None,
+            is_callback: false,
         };
         index_static_function(&mut static_index, "src/a.ts", info);
         let mut snapshot = cloud_context(1, 0);
@@ -2105,10 +2252,18 @@ export const register = (app: { get: (path: string, handler: () => string) => vo
 ";
 
     fn fixture_static_index(source: &str) -> (tempfile::TempDir, StaticIndex) {
+        fixture_static_index_at("src/db/file-client.ts", source)
+    }
+
+    fn fixture_static_index_at(
+        relative_path: &str,
+        source: &str,
+    ) -> (tempfile::TempDir, StaticIndex) {
         let dir = tempfile::TempDir::new().expect("temp dir should be created");
-        std::fs::create_dir_all(dir.path().join("src/db")).expect("src/db should be created");
-        std::fs::write(dir.path().join("src/db/file-client.ts"), source)
-            .expect("fixture source should be written");
+        let file = dir.path().join(relative_path);
+        std::fs::create_dir_all(file.parent().expect("fixture path should have a parent"))
+            .expect("fixture directory should be created");
+        std::fs::write(&file, source).expect("fixture source should be written");
         std::fs::write(
             dir.path().join("package.json"),
             r#"{"name":"fixture","version":"0.0.0","type":"module"}"#,
@@ -2323,6 +2478,169 @@ export const orphan = () => {
         );
     }
 
+    /// Fixture project carrying the shapes the health/complexity pass does not
+    /// enumerate: a Drizzle-style schema whose table and column callbacks are
+    /// anonymous arrows, an object returned from a factory with methods, a
+    /// getter, and a `.map(...)` chain. Runtime instrumentation names each of
+    /// them after the callee it was passed to or after the property key.
+    const SCHEMA_FIXTURE_SOURCE: &str = r"declare const sqliteTable: (
+  name: string,
+  columns: Record<string, unknown>,
+  extra?: (table: Record<string, unknown>) => unknown[],
+) => Record<string, unknown>;
+declare const text: (name: string) => {
+  primaryKey: () => unknown;
+  references: (target: () => unknown) => unknown;
+};
+declare const index: (name: string) => { on: (column: unknown) => unknown };
+
+export const orgs = sqliteTable('orgs', {
+  id: text('id').primaryKey(),
+});
+
+export const users = sqliteTable(
+  'users',
+  {
+    id: text('id').primaryKey(),
+    orgId: text('org_id').references(() => orgs.id),
+  },
+  (table) => [index('users_org_idx').on(table.orgId)],
+);
+
+export const createStore = (rows: string[]) => {
+  return {
+    execute: async (sql: string) => {
+      return rows.map((row) => row + sql.length);
+    },
+    rollback: () => rows.length,
+    get closed() {
+      return rows.length === 0;
+    },
+  };
+};
+";
+
+    /// A cloud row for `SCHEMA_FIXTURE_SOURCE`, carrying the container-prefixed
+    /// runtime path the service reports and the `stable_id` the cloud hashes
+    /// over the repo-relative path, so the join has to land on the stable-id
+    /// tier rather than on a positional fallback.
+    fn schema_cloud_function(
+        name: &str,
+        start_line: u32,
+        end_line: u32,
+        hits: u64,
+    ) -> CloudRuntimeFunction {
+        let mut function = cloud_function(
+            "/app/src/db/schema.ts",
+            name,
+            Some(start_line),
+            Some(start_line),
+            Some(end_line),
+        );
+        function.stable_id = Some(function_identity_id("src/db/schema.ts", name, start_line));
+        function.tracking_state = CloudTrackingState::Called;
+        function.hit_count = Some(hits);
+        function
+    }
+
+    #[test]
+    fn instrumenter_named_callbacks_and_members_match_on_stable_id() {
+        let (_dir, static_index) =
+            fixture_static_index_at("src/db/schema.ts", SCHEMA_FIXTURE_SOURCE);
+        let functions = vec![
+            schema_cloud_function("references", 20, 20, 27),
+            schema_cloud_function("sqliteTable", 22, 22, 25),
+            schema_cloud_function("createStore", 25, 35, 611),
+            schema_cloud_function("execute", 27, 29, 100_000),
+            schema_cloud_function("map", 28, 28, 21_200_000),
+            schema_cloud_function("rollback", 30, 30, 33),
+            schema_cloud_function("get closed", 31, 33, 36_800_000),
+        ];
+        let identities: Vec<(String, String)> = functions
+            .iter()
+            .map(|function| {
+                (
+                    function.function_name.clone(),
+                    function
+                        .stable_id
+                        .clone()
+                        .expect("the fixture sets a stable id"),
+                )
+            })
+            .collect();
+        let mut snapshot = cloud_context(functions.len(), 0);
+        snapshot.functions = functions;
+
+        let CloudMergeOutput { report, unmatched } =
+            merge_cloud_snapshot(&snapshot, &static_index, 1);
+
+        assert!(
+            unmatched.is_empty(),
+            "every instrumenter-named function has a local counterpart, got {unmatched:?}"
+        );
+        for (name, stable_id) in &identities {
+            let indexed = static_index.by_stable_id.get(stable_id);
+            assert_eq!(
+                indexed.map(|info| info.name.as_str()),
+                Some(name.as_str()),
+                "{name} must join on the stable-id tier, not on a positional fallback"
+            );
+        }
+        let mut hot: Vec<(String, u64)> = report
+            .hot_paths
+            .iter()
+            .map(|path| (path.function.clone(), path.invocations))
+            .collect();
+        hot.sort_by_key(|(_, invocations)| std::cmp::Reverse(*invocations));
+        assert_eq!(
+            hot.first().map(|(name, hits)| (name.as_str(), *hits)),
+            Some(("get closed", 36_800_000)),
+            "the busiest instrumenter-named function must lead the hot paths"
+        );
+        assert!(
+            hot.iter()
+                .any(|(name, hits)| name == "map" && *hits == 21_200_000),
+            "the map callback must reach the hot paths with its invocation count, got {hot:?}"
+        );
+        for hot_path in &report.hot_paths {
+            assert_eq!(hot_path.path, PathBuf::from("src/db/schema.ts"));
+        }
+    }
+
+    #[test]
+    fn cold_callback_verdict_copy_points_at_the_call_site() {
+        let (_dir, static_index) =
+            fixture_static_index_at("src/db/schema.ts", SCHEMA_FIXTURE_SOURCE);
+        let mut cold = schema_cloud_function("references", 20, 20, 0);
+        cold.tracking_state = CloudTrackingState::NeverCalled;
+        cold.never_called_source = CloudNeverCalledSource::RuntimeObserved;
+        let mut snapshot = cloud_context(1, 0);
+        snapshot.summary.trace_count = 100;
+        snapshot.functions = vec![cold];
+
+        let CloudMergeOutput { report, unmatched } =
+            merge_cloud_snapshot(&snapshot, &static_index, 1);
+
+        assert!(
+            unmatched.is_empty(),
+            "the callback must match, got {unmatched:?}"
+        );
+        let finding = report
+            .findings
+            .iter()
+            .find(|finding| finding.function == "references")
+            .expect("the cold callback must produce a finding");
+        let description = finding
+            .actions
+            .first()
+            .map(|action| action.description.clone())
+            .unwrap_or_default();
+        assert!(
+            description.starts_with("Callback passed to references;"),
+            "callback copy must name the call site, got {description:?}"
+        );
+    }
+
     #[test]
     fn cloud_function_without_local_counterpart_stays_unmatched() {
         let (_dir, static_index) = fixture_static_index(CLOUD_FIXTURE_SOURCE);
@@ -2403,7 +2721,7 @@ export const orphan = () => {
 
     #[test]
     fn cloud_never_called_static_used_emits_review_runtime_action() {
-        let actions = runtime_actions(RuntimeCoverageVerdict::ReviewRequired, false);
+        let actions = runtime_actions(RuntimeCoverageVerdict::ReviewRequired, false, None);
         assert_eq!(actions.len(), 1);
         assert_eq!(actions[0].kind, "review-runtime");
     }
@@ -2730,11 +3048,11 @@ export const orphan = () => {
 
     #[test]
     fn runtime_helper_tables_cover_actions_ranks_tracking_and_paths() {
-        let delete_actions = runtime_actions(RuntimeCoverageVerdict::SafeToDelete, false);
+        let delete_actions = runtime_actions(RuntimeCoverageVerdict::SafeToDelete, false, None);
         assert_eq!(delete_actions.len(), 1);
         assert_eq!(delete_actions[0].kind, "delete-cold-code");
-        assert!(runtime_actions(RuntimeCoverageVerdict::Active, false).is_empty());
-        assert!(runtime_actions(RuntimeCoverageVerdict::Unknown, false).is_empty());
+        assert!(runtime_actions(RuntimeCoverageVerdict::Active, false, None).is_empty());
+        assert!(runtime_actions(RuntimeCoverageVerdict::Unknown, false, None).is_empty());
 
         assert!(
             runtime_verdict_rank(RuntimeCoverageVerdict::SafeToDelete)
@@ -2829,6 +3147,7 @@ export const orphan = () => {
             owner_count: None,
             stable_id: function_identity_id(&rel, name, start_line),
             source_hash: None,
+            is_callback: false,
         }
     }
 
