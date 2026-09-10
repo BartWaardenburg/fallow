@@ -94,6 +94,15 @@ fn has_clone_group_with_files(json: &serde_json::Value, expected: &[&str]) -> bo
         })
 }
 
+/// Rendered paths use forward slashes on every platform, but a renderer that
+/// regressed to the native separator would make a `!contains("other/c.ts")`
+/// assertion pass while the file was on screen. Normalising the captured text
+/// once keeps the negative assertions meaningful on Windows: a leaked
+/// `other\c.ts` still trips them.
+fn slashed(text: &str) -> String {
+    text.replace('\\', "/")
+}
+
 #[test]
 fn dupes_dir_scope_reports_only_scoped_clones() {
     let tmp = create_scope_fixture();
@@ -191,15 +200,14 @@ fn dupes_outside_root_path_is_exit_two() {
 fn check_file_scope_narrows_to_the_file() {
     let tmp = create_scope_fixture();
     let output = run_fallow_in_root("check", tmp.path(), &["src/a.ts"]);
+    let stdout = slashed(&output.stdout);
     assert!(
-        output.stdout.contains("src/a.ts"),
-        "scoped check should report the file. stdout: {}",
-        output.stdout
+        stdout.contains("src/a.ts"),
+        "scoped check should report the file. stdout: {stdout}"
     );
     assert!(
-        !output.stdout.contains("src/b.ts") && !output.stdout.contains("other/c.ts"),
-        "scoped check should hide other files. stdout: {}",
-        output.stdout
+        !stdout.contains("src/b.ts") && !stdout.contains("other/c.ts"),
+        "scoped check should hide other files. stdout: {stdout}"
     );
 }
 
@@ -207,15 +215,14 @@ fn check_file_scope_narrows_to_the_file() {
 fn check_dir_scope_narrows_to_the_directory() {
     let tmp = create_scope_fixture();
     let output = run_fallow_in_root("check", tmp.path(), &["src"]);
+    let stdout = slashed(&output.stdout);
     assert!(
-        output.stdout.contains("src/a.ts") || output.stdout.contains("src/b.ts"),
-        "scoped check should report src findings. stdout: {}",
-        output.stdout
+        stdout.contains("src/a.ts") || stdout.contains("src/b.ts"),
+        "scoped check should report src findings. stdout: {stdout}"
     );
     assert!(
-        !output.stdout.contains("other/c.ts"),
-        "scoped check should hide other/ findings. stdout: {}",
-        output.stdout
+        !stdout.contains("other/c.ts"),
+        "scoped check should hide other/ findings. stdout: {stdout}"
     );
 }
 
@@ -231,7 +238,7 @@ fn bare_combined_path_scope_narrows_report() {
         .env("NO_COLOR", "1")
         .output()
         .expect("failed to run fallow binary");
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stdout = slashed(&String::from_utf8_lossy(&output.stdout));
     assert!(
         stdout.contains("src/a.ts") || stdout.contains("src/b.ts"),
         "scoped bare run should report src findings. stdout: {stdout}"
@@ -251,15 +258,14 @@ fn list_files_scope_narrows_inventory() {
         "list should succeed. stderr: {}",
         output.stderr
     );
+    let stdout = slashed(&output.stdout);
     assert!(
-        output.stdout.contains("src/a.ts") && output.stdout.contains("src/b.ts"),
-        "scoped list should show src files. stdout: {}",
-        output.stdout
+        stdout.contains("src/a.ts") && stdout.contains("src/b.ts"),
+        "scoped list should show src files. stdout: {stdout}"
     );
     assert!(
-        !output.stdout.contains("other/c.ts"),
-        "scoped list should hide other/ files. stdout: {}",
-        output.stdout
+        !stdout.contains("other/c.ts"),
+        "scoped list should hide other/ files. stdout: {stdout}"
     );
 }
 
@@ -267,15 +273,14 @@ fn list_files_scope_narrows_inventory() {
 fn health_dir_scope_runs_scoped() {
     let tmp = create_scope_fixture();
     let output = run_fallow_in_root("health", tmp.path(), &["--file-scores", "src"]);
+    let stdout = slashed(&output.stdout);
     assert!(
-        output.stdout.contains("src/"),
-        "scoped health should mention scoped files. stdout: {}",
-        output.stdout
+        stdout.contains("src/"),
+        "scoped health should mention scoped files. stdout: {stdout}"
     );
     assert!(
-        !output.stdout.contains("other/c.ts"),
-        "scoped health should hide other/ files. stdout: {}",
-        output.stdout
+        !stdout.contains("other/c.ts"),
+        "scoped health should hide other/ files. stdout: {stdout}"
     );
 }
 
@@ -356,17 +361,13 @@ fn audit_scope_narrows_changed_universe() {
     .unwrap();
 
     let output = run_fallow_in_root("audit", dir, &["--gate", "all", "src"]);
-    let combined = format!("{}\n{}", output.stdout, output.stderr);
+    let combined = slashed(&format!("{}\n{}", output.stdout, output.stderr));
     assert!(
         combined.contains("src/a.ts"),
-        "scoped audit should report scoped changes. stdout: {} stderr: {}",
-        output.stdout,
-        output.stderr
+        "scoped audit should report scoped changes. output: {combined}"
     );
     assert!(
         !combined.contains("other/c.ts"),
-        "scoped audit should hide out-of-scope changes. stdout: {} stderr: {}",
-        output.stdout,
-        output.stderr
+        "scoped audit should hide out-of-scope changes. output: {combined}"
     );
 }

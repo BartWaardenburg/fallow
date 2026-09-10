@@ -24,6 +24,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`check` and `health` print forward slashes on Windows.** Both human
+  renderers rendered the platform separator, so a Windows user was told
+  `src\a.ts` while `dupes`, `list`, `fix` and the JSON surfaces all said
+  `src/a.ts`. The dimmed-directory / bold-filename split keys on `/`, so the
+  whole path also lost its emphasis. Every path the two renderers put on screen
+  now normalises the same way the rest of the CLI already did; on-disk path
+  handling is untouched. The scope tests that caught this compare normalised
+  output, so their negative assertions now fail on a leaked out-of-scope file
+  under either separator instead of passing vacuously
+  (Closes [#2611](https://github.com/fallow-rs/fallow/issues/2611)).
+
 - **`fallow coverage analyze --cloud` no longer drops callbacks, object
   members and accessors.** The static index the cloud answer is joined against
   was built from the health/complexity pass, which enumerates declarations and
