@@ -1,37 +1,8 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789027300060,
+  "lastUpdate": 1789029647675,
   "repoUrl": "https://github.com/fallow-rs/fallow",
   "entries": {
     "Fallow Coverage": [
-      {
-        "commit": {
-          "author": {
-            "email": "bartwaardenburg@gmail.com",
-            "name": "Bart Waardenburg",
-            "username": "BartWaardenburg"
-          },
-          "committer": {
-            "email": "noreply@github.com",
-            "name": "GitHub",
-            "username": "web-flow"
-          },
-          "distinct": true,
-          "id": "da6a0486f88623d045799b47ad9b13faed04c362",
-          "message": "Merge pull request #2434 from fallow-rs/fix/similar-code-review-findings\n\nfix: harden similar-code evidence and companion verification",
-          "timestamp": "2026-08-26T00:15:40+02:00",
-          "tree_id": "bfcc1155f6e6bf8b0e5beff461f27b9f680d7d9d",
-          "url": "https://github.com/fallow-rs/fallow/commit/da6a0486f88623d045799b47ad9b13faed04c362"
-        },
-        "date": 1787696642854,
-        "tool": "customBiggerIsBetter",
-        "benches": [
-          {
-            "name": "Code Coverage",
-            "value": 92.1,
-            "unit": "%"
-          }
-        ]
-      },
       {
         "commit": {
           "author": {
@@ -2894,6 +2865,35 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/fallow-rs/fallow/commit/69d8d818a9d6b094545dae2f5c476cb0870feaa3"
         },
         "date": 1789027295872,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Code Coverage",
+            "value": 92.5,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "bart@waardenburg.dev",
+            "name": "Bart Waardenburg",
+            "username": "BartWaardenburg"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "b7722aff930fdad053d4d811b8e5fb055ff1ef44",
+          "message": "feat(coverage): report the caller-edge size guard in the inventory blob\n\nCloses #2607",
+          "timestamp": "2026-09-10T10:31:42+02:00",
+          "tree_id": "11ef3a131bf22aca2845d8069ed0526ea2b43240",
+          "url": "https://github.com/fallow-rs/fallow/commit/b7722aff930fdad053d4d811b8e5fb055ff1ef44"
+        },
+        "date": 1789029644463,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
